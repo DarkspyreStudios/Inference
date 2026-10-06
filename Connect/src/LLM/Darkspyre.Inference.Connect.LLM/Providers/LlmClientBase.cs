@@ -4,7 +4,7 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-internal abstract class LlmClientBase(HttpClient http) : ILlmClient
+internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourcePreparationClient
 {
     protected HttpClient Http { get; } = http;
 
@@ -176,7 +176,8 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient
     }
 
     protected virtual bool SupportsResourcePreparation => false;
-    internal bool CanPrepareResources => SupportsResourcePreparation;
+    /// <summary>Reports the adapter's implemented logical-resource preparation lane.</summary>
+    public bool CanPrepareResources => SupportsResourcePreparation;
 
     protected virtual void ValidateAdditionalRequest(LlmConnection connection, LlmChatRequest request) { }
 

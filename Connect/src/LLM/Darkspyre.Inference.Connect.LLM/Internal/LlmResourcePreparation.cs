@@ -8,6 +8,12 @@ using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
+/// <summary>The adapter's implemented logical-resource lane, independent of native file references.</summary>
+internal interface ILlmResourcePreparationClient
+{
+    bool CanPrepareResources { get; }
+}
+
 /// <summary>One admitted resource graph. Caller authority is borrowed; opened handles are owned.</summary>
 internal sealed class LlmResourcePreparation : IAsyncDisposable
 {

@@ -11,6 +11,7 @@ using Amazon.BedrockRuntime.Model;
 using Amazon.Runtime;
 using Amazon.Runtime.EventStreams;
 using Darkspyre.Inference.Connect.LLM.Bedrock;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Microsoft.Extensions.Logging.Abstractions;
 using AgentCore = Amazon.BedrockAgentCore.Model;
 
@@ -18,6 +19,161 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class BedrockSafetyTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task PortableDocumentsReachConverseThroughManagedSessionOpening(bool generatedByTool)
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var generated = new InferenceResourceReference("workspace", "generated-json");
+        var access = new Resources(new("workspace", "session", 4, [generated, reference]),
+            [(reference, "reference.txt", "text/plain", "reference text"u8.ToArray()),
+                (generated, "result.json", "application/json", "{\"answer\":42}"u8.ToArray())]);
+        var context = new LlmAgentContext
+        {
+            Revision = 9,
+            ResourceSelectionVersion = new("workspace", "session", 4),
+            SelectedResources = [generated, reference],
+            Entries = [new("prompt", "turn-1", new("user", "Read the reference")
+                { Attachments = [new LlmResourceAttachment(reference), new LlmResourceAttachment(reference)] }),
+                new("reply", "turn-1", new("assistant", "Created result.json"))]
+        };
+        if (generatedByTool)
+            context = context with
+            {
+                Entries = [context.Entries[0], context.Entries[1] with
+                { Message = context.Entries[1].Message with { ToolCalls = [new LlmToolCall("create-1", "create_json", "{}")] } },
+                    new("tool", "turn-1", new("user", string.Empty)
+                    { ToolResults = [new LlmToolResult("create-1", new() { Parts = [new LlmToolOutputSessionResource(generated)] })] })]
+            };
+        context = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(context, ConnectLlmJson.AgentContext),
+            ConnectLlmJson.AgentContext)!;
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => new StreamControl(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker
+        {
+            Response = StubConverseInvoker.Converse([new() { Text = "answer" }], "end_turn"),
+            Events = [new ContentBlockDeltaEvent { ContentBlockIndex = 0, Delta = new() { Text = "answer" } },
+                new MessageStopEvent { StopReason = new("end_turn") }]
+        };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = ResourceConnection(generatedByTool);
+        var source = new Source(connection);
+        await using var providers = new LlmProviderService(source, [client]);
+        await using var agents = new LlmAgentProviderService(source, [new ManagedBedrockAgentClient(client, providers)]);
+        await using ILlmAgentSession session = await agents.StartSessionAsync("connection", new()
+        {
+            ModelId = Request().ModelId, SessionId = "session", Context = context,
+            UnboundContinuationState = LlmUnboundContinuationState.Omit,
+            CallerServices = new() { Resources = access }
+        });
+        LlmAgentContext imported = await session.CaptureContextAsync();
+        var events = new List<LlmAgentEvent>();
+        await foreach (LlmAgentEvent item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("Compare the files")] }))
+            events.Add(item);
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        List<Message> messages;
+        if (generatedByTool)
+        {
+            messages = Assert.Single(invoker.StreamRequests).Messages;
+            Assert.Empty(invoker.ConverseRequests);
+            Assert.True(invoker.Disposed);
+        }
+        else
+        {
+            messages = Assert.Single(invoker.ConverseRequests).Messages;
+            Assert.Empty(invoker.StreamRequests);
+        }
+        DocumentBlock[] documents = messages.SelectMany(message => message.Content)
+            .SelectMany(block => block.Document is { } document ? new[] { document }
+                : block.ToolResult?.Content.Where(part => part.Document is not null).Select(part => part.Document) ?? []).ToArray();
+        Assert.Equal(["reference text", "reference text", "{\"answer\":42}"],
+            documents.Select(document => System.Text.Encoding.UTF8.GetString(document.Source.Bytes.ToArray())));
+        Assert.All(documents, document => Assert.Equal(DocumentFormat.Txt, document.Format));
+        Assert.Equal(2, access.Reads.Count);
+        Assert.All(access.Reads, stream => Assert.False(stream.CanRead));
+        Assert.Equal(9, imported.Revision);
+        Assert.Equal(context.ResourceSelectionVersion, imported.ResourceSelectionVersion);
+        Assert.Equal([generated, reference], imported.SelectedResources);
+        LlmAgentContext captured = await session.CaptureContextAsync();
+        Assert.Equal(context.ResourceSelectionVersion, captured.ResourceSelectionVersion);
+        Assert.Equal([generated, reference], captured.SelectedResources);
+        Assert.IsType<LlmResourceAttachment>(captured.Entries[0].Message.Attachments[0]);
+        if (generatedByTool)
+            Assert.IsType<LlmToolOutputSessionResource>(Assert.IsType<LlmToolResult>(Assert.Single(captured.Entries[2].Message.ToolResults)).Output.Parts[0]);
+    }
+
+    [Fact]
+    public async Task ResourceBoundAccountingDoesNotIgnoreSelectedFilesOrReadThem()
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var access = new Resources(new("workspace", "session", 1, [reference]),
+            [(reference, "reference.txt", "text/plain", "reference text"u8.ToArray())]);
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => throw new NotSupportedException(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker();
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = ResourceConnection(streaming: true);
+        LlmChatRequest request = Request() with { Resources = access };
+        Assert.Null(client.EstimateInputTokens(connection, request));
+        Assert.Null(client.EstimateInputTokens(connection, request with
+        { Messages = [new("user", "Read the file") { Attachments = [new LlmResourceAttachment(reference)] }] }));
+        await using var providers = new LlmProviderService(new Source(connection), [client]);
+        await Assert.ThrowsAsync<NotSupportedException>(() => providers.CountInputTokensAsync("connection", request));
+        Assert.Empty(access.Reads);
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResourceReaderCleanupRefusalPreventsSuccessAndRemainsVisibleAtRetirement(bool generationFails)
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var cleanup = new IOException("The reader could not be released.");
+        var operation = new IOException("The provider request failed.");
+        var access = new Resources(new("workspace", "session", 1, [reference]),
+            [(reference, "reference.txt", "text/plain", "reference text"u8.ToArray())], cleanup);
+        var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => new StreamControl(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker
+        {
+            Failure = generationFails ? operation : null,
+            Events = [new MessageStopEvent { StopReason = new("end_turn") }]
+        };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        var events = new List<LlmStreamEvent>();
+        Exception? failure = await Record.ExceptionAsync(async () =>
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(ResourceConnection(streaming: true), Request() with { Resources = access }))
+                events.Add(item);
+        });
+        Exception? retirement = await Record.ExceptionAsync(() => factory.DisposeAsync().AsTask());
+        using MemoryStream retained = Assert.Single(access.Reads);
+        Exception? release = failure;
+        if (generationFails)
+        {
+            Exception[] causes = Assert.IsType<AggregateException>(failure).InnerExceptions.ToArray();
+            Assert.Equal(2, causes.Length);
+            Assert.Same(operation, Assert.IsType<InferenceResourceOperationException>(causes[0]).InnerException);
+            release = causes[1];
+        }
+        InferenceResourceOperationException refused = Assert.IsType<InferenceResourceOperationException>(release);
+        Assert.Equal(InferenceResourceOperationPhase.Cleanup, refused.Failure.Phase);
+        Assert.Equal(reference, refused.Failure.Reference);
+        Assert.Same(cleanup, refused.InnerException);
+        Assert.Same(release, retirement);
+        Assert.Same(retirement, await Record.ExceptionAsync(() => factory.DisposeAsync().AsTask()));
+        Assert.DoesNotContain(events, item => item is LlmChatCompletionEvent);
+        Assert.Equal(1, access.ReleaseAttempts);
+        Assert.True(retained.CanRead);
+        Assert.True(invoker.Disposed);
+    }
+
     [Theory]
     [InlineData("instructions", true)]
     [InlineData("system", true)]
@@ -452,10 +608,75 @@ public sealed class BedrockSafetyTests
         Endpoint = "aws://bedrock"
     };
 
+    private static LlmConnection ResourceConnection(bool streaming) => Connection() with
+    {
+        CapabilityOverrides = new() { SupportsStreaming = streaming },
+        Credential = new LlmCredential
+        { Aws = new() { Region = "us-east-1", AccessKeyId = "fixture-key", SecretAccessKey = "fixture-secret" } }.Serialize()
+    };
+
+    private sealed class Source(LlmConnection connection) : ILlmConnectionSource
+    {
+        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<LlmConnection?>(connection);
+        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class Resources(InferenceResourceSelection selection,
+        IReadOnlyList<(InferenceResourceReference Reference, string Name, string MediaType, byte[] Bytes)> files,
+        Exception? releaseFailure = null) : IInferenceResourceAccess
+    {
+        public string WorkspaceId => selection.WorkspaceId;
+        public string SessionId => selection.SessionId;
+        public List<MemoryStream> Reads { get; } = [];
+        public int ReleaseAttempts { get; private set; }
+        public Task<InferenceResourceDescriptor?> GetAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default)
+        {
+            var file = files.Single(item => item.Reference == reference);
+            return Task.FromResult<InferenceResourceDescriptor?>(new(reference, SessionId, file.Name, file.MediaType, file.Bytes.Length));
+        }
+        public async Task<IInferenceResourceReadHandle> OpenReadAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default)
+        {
+            var stream = new MemoryStream(files.Single(item => item.Reference == reference).Bytes, writable: false);
+            Reads.Add(stream);
+            return new Read((await GetAsync(reference, cancellationToken))!, stream, this);
+        }
+        public Task<InferenceResourceSelection> GetSelectionAsync(CancellationToken cancellationToken = default) => Task.FromResult(selection);
+        public Task<IInferenceResourceWriteHandle> OpenWriteAsync(InferenceResourceCreate resource, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<InferenceResourceSelection> SelectAsync(IReadOnlyList<InferenceResourceReference> references, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<InferenceResourceSelection> ReplaceSelectionAsync(IReadOnlyList<InferenceResourceReference> references, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        private Exception? ReleaseFailure => releaseFailure;
+        private sealed class Read(InferenceResourceDescriptor resource, MemoryStream stream, Resources owner) : IInferenceResourceReadHandle
+        {
+            public InferenceResourceDescriptor Resource => resource;
+            public Stream Content => stream;
+            public ValueTask DisposeAsync()
+            {
+                owner.ReleaseAttempts++;
+                return owner.ReleaseFailure is { } failure ? ValueTask.FromException(failure) : stream.DisposeAsync();
+            }
+        }
+    }
+
     private sealed class StreamControl()
         : AmazonBedrockClient(new BasicAWSCredentials("fixture-key", "fixture-secret"), RegionEndpoint.USEast1)
     {
         internal bool Disposed { get; private set; }
+
+        public override Task<ListFoundationModelsResponse> ListFoundationModelsAsync(
+            ListFoundationModelsRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ListFoundationModelsResponse
+            { ModelSummaries = [new() { ModelId = Request().ModelId, ModelName = "Fixture Claude", InferenceTypesSupported = ["ON_DEMAND"] }] });
+
+        public override Task<ListInferenceProfilesResponse> ListInferenceProfilesAsync(
+            ListInferenceProfilesRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new ListInferenceProfilesResponse { InferenceProfileSummaries = [] });
+
+        public override Task<GetFoundationModelAvailabilityResponse> GetFoundationModelAvailabilityAsync(
+            GetFoundationModelAvailabilityRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new GetFoundationModelAvailabilityResponse
+            { AgreementAvailability = new() { Status = AgreementStatus.AVAILABLE }, AuthorizationStatus = AuthorizationStatus.AUTHORIZED });
 
         public override Task<GetFoundationModelResponse> GetFoundationModelAsync(
             GetFoundationModelRequest request, CancellationToken cancellationToken = default) =>

@@ -55,7 +55,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         if (options.CallerServices?.Resources is null && options.Context is { } openingContext
             && (openingContext.ResourceSelectionVersion is not null || openingContext.SelectedResources.Count > 0))
             throw new NotSupportedException("Resource-bearing context requires explicit caller-owned access.");
-        bool supportsResources = estimator is LlmClientBase { CanPrepareResources: true }
+        bool supportsResources = estimator is ILlmResourcePreparationClient { CanPrepareResources: true }
             && capabilities(options.ModelId).SupportsPromptDocuments;
         cancellationToken.ThrowIfCancellationRequested();
         openingFence?.Invoke();

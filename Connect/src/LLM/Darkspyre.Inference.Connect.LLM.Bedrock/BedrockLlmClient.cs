@@ -19,9 +19,11 @@ internal sealed class BedrockLlmClient(
     BedrockClientFactory factory,
     BedrockLoggingGuard loggingGuard,
     IBedrockConverseInvoker invoker,
-    ILogger<BedrockLlmClient> logger) : ILlmClient, ILlmContextEstimator, ILlmCompactionValidator
+    ILogger<BedrockLlmClient> logger) : ILlmClient, ILlmContextEstimator, ILlmCompactionValidator, ILlmResourcePreparationClient
 {
     internal const string RequestIdMetadataKey = "request-id";
+    /// <summary>Converse materializes logical resources through the shared inline owner.</summary>
+    public bool CanPrepareResources => true;
 
     /// <summary>
     /// The output allowance a Claude thinking budget is added to when the request sets none. It matches the
@@ -129,7 +131,10 @@ internal sealed class BedrockLlmClient(
 
     public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
         CancellationToken cancellationToken = default) =>
-        factory.StreamAsync(token => StreamOwnedAsync(connection, request, token), cancellationToken);
+        factory.StreamAsync(token => request.Resources is null
+            ? StreamOwnedAsync(connection, request, token)
+            : LlmResourcePreparation.StreamInlineAsync(request, input => { _ = ValidateRequest(connection, input); },
+                (input, innerToken) => StreamOwnedAsync(connection, input, innerToken), token), cancellationToken);
 
     [SuppressMessage("Design", "CA1031", Justification = "The adapter preserves the operation and each independent owned cleanup failure.")]
     [SuppressMessage("Usage", "CA2219", Justification = "Iterator retirement executes finally; recorded operation and cleanup failures must also surface on early reader disposal.")]
@@ -290,6 +295,7 @@ internal sealed class BedrockLlmClient(
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
         _ = ValidateRequest(connection, request);
+        if (request.Resources is not null) return null;
         int reported = -1;
         for (int index = request.Messages.Count - 1; index >= 0 && reported < 0; index--)
         {
@@ -353,7 +359,7 @@ internal sealed class BedrockLlmClient(
             throw new NotSupportedException(
                 "Nova 2 high reasoning requires temperature, top-p, top-k and maximum output tokens to be unset.");
         }
-        LlmClientBase.ValidatePromptAttachments(request, capabilities);
+        LlmClientBase.ValidatePromptAttachments(request, capabilities, CanPrepareResources);
         LlmClientBase.ValidateToolUse(request, capabilities);
         foreach (LlmChatMessage message in request.Messages.Where(message => message.ContinuationState is not null))
         {
@@ -1112,7 +1118,7 @@ internal sealed class BedrockLlmClient(
             "text/html" => DocumentFormat.Html,
             "text/markdown" => DocumentFormat.Md,
             "application/pdf" => DocumentFormat.Pdf,
-            "text/plain" => DocumentFormat.Txt,
+            _ when LlmAttachments.IsTextMediaType(mediaType) => DocumentFormat.Txt,
             "application/vnd.ms-excel" => DocumentFormat.Xls,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" =>
                 DocumentFormat.Xlsx,
