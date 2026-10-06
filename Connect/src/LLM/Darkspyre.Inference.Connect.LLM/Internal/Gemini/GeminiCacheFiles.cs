@@ -73,6 +73,7 @@ internal static class GeminiCacheFiles
         Exception? failure = null;
         HttpStatusCode? status = null;
         string? requestId = null;
+        TimeSpan? retryAfter = null;
         try
         {
             consumption = SdkHttpConsumption.Enter(http, token); token = consumption.Token;
@@ -80,9 +81,10 @@ internal static class GeminiCacheFiles
             Fence();
             response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
             status = response.StatusCode; requestId = ProviderHttp.ReadRequestId(response);
+            retryAfter = response.Headers.RetryAfter?.Delta;
             Fence();
             if (!response.IsSuccessStatusCode)
-                throw new LlmProviderException("Google rejected cache prefix file staging.", LlmTransport.GoogleGeminiApi, status, requestId: requestId);
+                throw new LlmProviderException("Google rejected cache prefix file staging.", LlmTransport.GoogleGeminiApi, status, requestId: requestId, retryAfter: retryAfter);
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, token).ConfigureAwait(false);
             Fence();
             using JsonDocument document = JsonDocument.Parse(body);
@@ -92,7 +94,7 @@ internal static class GeminiCacheFiles
         catch (Exception error)
         {
             failure = error is OperationCanceledException ? new OperationCanceledException(token)
-                : new LlmProviderException("Google cache prefix file staging failed.", LlmTransport.GoogleGeminiApi, status, requestId: requestId);
+                : new LlmProviderException("Google cache prefix file staging failed.", LlmTransport.GoogleGeminiApi, status, requestId: requestId, retryAfter: retryAfter);
         }
         using var ownedConsumption = consumption;
         if (response is not null)
@@ -101,7 +103,8 @@ internal static class GeminiCacheFiles
             catch (Exception)
             {
                 Exception cleanup = LlmResourcePreparation.AsCleanupFailure(
-                    new LlmProviderException("Google cache prefix file response cleanup failed.", LlmTransport.GoogleGeminiApi), descriptor.Reference, response);
+                    new LlmProviderException("Google cache prefix file response cleanup failed.", LlmTransport.GoogleGeminiApi,
+                        status, requestId: requestId, retryAfter: retryAfter), descriptor.Reference, response);
                 failure = failure is null ? cleanup : new AggregateException(failure, cleanup);
             }
         }
@@ -109,7 +112,8 @@ internal static class GeminiCacheFiles
         catch (Exception)
         {
             Exception cleanup = LlmResourcePreparation.AsCleanupFailure(
-                new LlmProviderException("Google cache prefix file request cleanup failed.", LlmTransport.GoogleGeminiApi), descriptor.Reference, request);
+                new LlmProviderException("Google cache prefix file request cleanup failed.", LlmTransport.GoogleGeminiApi,
+                    status, requestId: requestId, retryAfter: retryAfter), descriptor.Reference, request);
             failure = failure is null ? cleanup : new AggregateException(failure, cleanup);
         }
         if (failure is not null) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failure).Throw();

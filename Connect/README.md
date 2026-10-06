@@ -2220,6 +2220,8 @@ refuse; cancellation drains admitted work. Opened handles and responses are owne
 access, source content and HTTP are borrowed. Derived staging copies follow Google's documented
 expiry without implicit deletion, reupload or retry. Unknown-length multipart acceptance, staging
 expiry versus cache lifetime and real model entitlement remain provider qualification gates.
+Failed Gemini staging preserves observed HTTP status, request ID and `Retry-After` delta in its
+safe provider error. These diagnostics do not expose the response body or authorize a retry.
 
 Vertex's optional typed `LlmVertexCacheStaging` selects a Cloud Storage bucket and object prefix
 under the same acquired Google authorization. It creates no bucket and accepts no separate staging

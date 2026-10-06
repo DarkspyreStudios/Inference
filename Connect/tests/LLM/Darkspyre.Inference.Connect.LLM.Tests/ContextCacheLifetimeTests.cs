@@ -1,12 +1,54 @@
 using System.Net;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ContextCacheLifetimeTests
 {
+    [Fact]
+    public async Task FailedGeminiPrefixUploadPreservesRetryFactsWithoutRetryOrBorrowedStreamDisposal()
+    {
+        int cleanup = 0;
+        var handler = new Boundary((_, _) =>
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+            {
+                Content = new RetiringContent("private provider body", () => cleanup++)
+            };
+            response.Headers.Add("x-request-id", "staging-request");
+            response.Headers.RetryAfter = new(TimeSpan.FromSeconds(17));
+            return Task.FromResult(response);
+        });
+        using var http = new HttpClient(handler);
+        using var source = new MemoryStream([1, 2, 3]);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.GoogleGeminiApi,
+            Endpoint = GeminiApiLlmClient.DefaultEndpoint,
+            Credential = new LlmCredential { ApiKey = "private-test-key" }.Serialize()
+        };
+        var descriptor = new InferenceResourceDescriptor(new("workspace", "reference"),
+            "session", "reference.txt", "text/plain", source.Length);
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            GeminiCacheFiles.UploadAsync(http, connection, descriptor, source, _ => { }, CancellationToken.None));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("staging-request", failure.RequestId);
+        Assert.Equal(TimeSpan.FromSeconds(17), failure.RetryAfter);
+        Assert.DoesNotContain("private provider body", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("private-test-key", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal(1, handler.Sends);
+        Assert.Equal(1, cleanup);
+        Assert.True(source.CanRead);
+        Assert.False(handler.Disposed);
+    }
+
     [Fact]
     public async Task RetirementDrainsAnIgnoringReadAndFencesTheRetainedClientWithoutDisposingBorrowedOwners()
     {
