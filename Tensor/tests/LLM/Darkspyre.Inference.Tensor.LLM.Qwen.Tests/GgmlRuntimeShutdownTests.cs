@@ -9,6 +9,96 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 public sealed class GgmlRuntimeShutdownTests
 {
     [Fact]
+    public async Task CancelledShutdownWaitDoesNotCancelSharedCleanupOrReopenAdmission()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var supplier = new Supplier(null)
+        {
+            OnShutdown = () =>
+            {
+                entered.TrySetResult();
+                release.Task.GetAwaiter().GetResult();
+                return new(true, null);
+            }
+        };
+        var owner = new GgmlRuntimeOwner(new(supplier.Build, supplier.Rid, []), supplier);
+        using var cancellation = new CancellationTokenSource();
+        Task<TensorRuntimeShutdownResult> cancelledWait = owner.ShutdownAsync(cancellation.Token);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Task<TensorRuntimeShutdownResult> sharedWait = owner.ShutdownAsync();
+            Task disposal = owner.DisposeAsync().AsTask();
+
+            cancellation.Cancel();
+            OperationCanceledException cancelled = await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => cancelledWait.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal(cancellation.Token, cancelled.CancellationToken);
+            Assert.False(sharedWait.IsCompleted);
+            Assert.False(disposal.IsCompleted);
+            Assert.Equal(TensorRuntimeState.Stopping, owner.State);
+            Assert.Throws<ObjectDisposedException>(() => owner.EnterExecution());
+
+            release.SetResult();
+            TensorRuntimeShutdownResult result = await sharedWait.WaitAsync(TimeSpan.FromSeconds(5));
+            await disposal.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(TensorRuntimeShutdownState.Completed, result.State);
+            Assert.False(result.NativeStateMayRemain);
+            Assert.Equal(TensorRuntimeState.Stopped, owner.State);
+            Assert.Equal(1, supplier.Shutdowns);
+            Assert.Equal(TensorRuntimeShutdownState.AlreadyStopped, (await owner.ShutdownAsync()).State);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await owner.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
+    public async Task SafeSupplierBusyRetainsExplicitReleaseAccessWithoutReopeningAdmission()
+    {
+        bool externalResourcesReleased = false;
+        var lease = new FailedLease(new InvalidOperationException("unused failure")) { Refuse = false };
+        var supplier = new Supplier(null, () => lease)
+        {
+            OnShutdown = () => new(externalResourcesReleased, null)
+        };
+        var candidate = new TensorRuntimeCandidate(
+            new("managed-test", Path.GetFullPath(supplier.EntryLibraryName), "cpu", supplier.Build, supplier.Rid), TensorBackendKind.GgmlCpu,
+            [new(supplier.EntryLibraryName, 1, new string('a', 64))]);
+        var owner = new GgmlRuntimeOwner(new(supplier.Build, supplier.Rid, [candidate]), supplier);
+        using (await owner.AcquireModelAsync(TensorBackendKind.GgmlCpu, CancellationToken.None))
+        {
+            TensorRuntimeShutdownResult active = await owner.ShutdownAsync();
+            Assert.Equal(TensorRuntimeShutdownState.Busy, active.State);
+            Assert.Equal(1, active.OutstandingLeases);
+            Assert.Equal(0, supplier.Shutdowns);
+            Assert.Equal(TensorRuntimeState.Ready, owner.State);
+        }
+
+        TensorRuntimeShutdownResult busy = await owner.ShutdownAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(TensorRuntimeShutdownState.Busy, busy.State);
+        Assert.Equal(0, busy.OutstandingLeases);
+        Assert.True(busy.NativeStateMayRemain);
+        Assert.Equal("native-resources-active", Assert.Single(busy.Diagnostics).Code);
+        Assert.Throws<ObjectDisposedException>(() => owner.EnterExecution());
+        Assert.Equal(1, lease.Attempts);
+        Assert.Equal(1, supplier.Shutdowns);
+
+        externalResourcesReleased = true;
+        TensorRuntimeShutdownResult released = await owner.ShutdownAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(TensorRuntimeShutdownState.Completed, released.State);
+        Assert.False(released.NativeStateMayRemain);
+        Assert.Equal(TensorRuntimeState.Stopped, owner.State);
+        Assert.Null(owner.Current);
+        Assert.Equal(2, supplier.Shutdowns);
+        await owner.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(2, supplier.Shutdowns);
+    }
+
+    [Fact]
     public async Task FailedSupplierShutdownPreservesItsActualCauseWithoutPublishingOrRetryingIt()
     {
         var original = new InvalidOperationException("private supplier shutdown cause");
@@ -97,6 +187,7 @@ public sealed class GgmlRuntimeShutdownTests
         public string EntryLibraryName => "unused-test-library";
         public GgmlRuntimeState State { get; private set; } = GgmlRuntimeState.Unconfigured;
         public int Shutdowns { get; private set; }
+        public Func<GgmlNativeShutdownResult>? OnShutdown { get; init; }
         public Task<IReadOnlyList<GgmlNativeCandidate>> ResolvePackageCandidatesAsync() => throw new NotSupportedException();
         public GgmlNativeRefusal? Check(GgmlNativeCandidate candidate) => null;
         public void Configure(GgmlRuntimePlan plan) => _plan = plan;
@@ -114,8 +205,9 @@ public sealed class GgmlRuntimeShutdownTests
         {
             Shutdowns++;
             if (failure is not null) throw failure;
-            State = GgmlRuntimeState.Stopped;
-            return new(true, null);
+            GgmlNativeShutdownResult result = OnShutdown?.Invoke() ?? new(true, null);
+            if (result.Released) State = GgmlRuntimeState.Stopped;
+            return result;
         }
     }
 }

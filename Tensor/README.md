@@ -390,6 +390,8 @@ release-only cleanup access; explicit terminal shutdown can finish after they dr
 shutdown/disposal calls share cleanup and failure. A cancelled shutdown wait does not cancel cleanup
 or reopen admission. Supplier refusals without structured safe-Busy proof report FailedRequiresProcessExit;
 no diagnostic text is parsed to invent counts or recoverability.
+Managed owner tests hold supplier cleanup pending to verify cancelled-wait isolation and shared
+completion. They verify explicit safe-Busy retry through the injected supplier without native execution.
 Supplier shutdown exceptions remain private to the owner. Disposal preserves the actual exception
 as its inner cause, and repeated disposal shares that failure without repeating terminal cleanup.
 Structured shutdown observations retain their safe diagnostics and do not serialize that exception.
