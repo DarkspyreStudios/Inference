@@ -163,6 +163,7 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
                 // Native payloads and tokens must not escape via nested exceptions or diagnostics.
                 throw new LlmProviderException("Vertex generation failed. Check the HTTP status, model access and request configuration.",
                     Transport, error is LlmProviderException provider ? provider.StatusCode : null,
+                    retryAfter: error is LlmProviderException failure ? failure.RetryAfter : null,
                     isContextOverflow: error is LlmProviderException { IsContextOverflow: true });
             }
             if (!moved) { yield break; }
@@ -270,7 +271,8 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
 
     internal static Task CheckStatusAsync(HttpResponseMessage response, CancellationToken cancellationToken) =>
         GoogleProviderFailure.ThrowIfUnsuccessfulAsync(response, LlmTransport.GoogleVertexAi,
-            "Vertex rejected the operation. Verify credentials, model access, request configuration and quota.", null, cancellationToken);
+            "Vertex rejected the operation. Verify credentials, model access, request configuration and quota.",
+            response.Headers.RetryAfter?.Delta, cancellationToken);
 
     private static void ValidateVertexRequest(LlmConnection connection, LlmChatRequest request, VertexModelProfile profile, LlmProviderCapabilities capabilities)
     {

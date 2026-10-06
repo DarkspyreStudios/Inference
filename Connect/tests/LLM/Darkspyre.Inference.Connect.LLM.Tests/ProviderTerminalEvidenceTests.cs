@@ -4,11 +4,75 @@ using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Darkspyre.Inference.Connect.LLM.Vertex;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ProviderTerminalEvidenceTests
 {
+    [Theory]
+    [InlineData(LlmTransport.GoogleGeminiApi, true, HttpStatusCode.OK)]
+    [InlineData(LlmTransport.GoogleGeminiApi, false, HttpStatusCode.OK)]
+    [InlineData(LlmTransport.GoogleVertexAi, true, HttpStatusCode.OK)]
+    [InlineData(LlmTransport.GoogleVertexAi, false, HttpStatusCode.OK)]
+    [InlineData(LlmTransport.GoogleVertexAi, true, HttpStatusCode.TooManyRequests)]
+    [InlineData(LlmTransport.GoogleVertexAi, false, HttpStatusCode.TooManyRequests)]
+    public async Task GoogleGenerationErrorsKeepObservedStatusAndRetryWithoutExposingProviderBodies(
+        LlmTransport transport, bool streaming, HttpStatusCode statusCode)
+    {
+        const string overflow = """
+            {"error":{"code":400,"status":"INVALID_ARGUMENT","message":"Input token count exceeds the maximum number of tokens. test-key reflected-value","refresh_token":"unowned-secret"}}
+            """;
+        const string rateLimit = """
+            {"error":{"code":429,"status":"RESOURCE_EXHAUSTED","message":"The quota was reached. test-key reflected-value","refresh_token":"unowned-secret"}}
+            """;
+        string error = statusCode == HttpStatusCode.OK ? overflow : rateLimit;
+        string body = streaming && statusCode == HttpStatusCode.OK
+            ? "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"partial\"}]}}]}\n\n"
+                + "data: " + error + "\n\n"
+            : error;
+        var retryAfter = TimeSpan.FromSeconds(2);
+        var handler = new Handler(transport, streaming, body, statusCode, retryAfter);
+        using var http = new HttpClient(handler);
+        await using var authentication = new VertexAuthentication();
+        ILlmClient client = transport == LlmTransport.GoogleGeminiApi
+            ? new GeminiApiLlmClient(http) : new VertexLlmClient(http, authentication);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = transport,
+            Endpoint = transport == LlmTransport.GoogleGeminiApi ? GeminiApiLlmClient.DefaultEndpoint : VertexEndpoints.BaseEndpoint,
+            Vertex = transport == LlmTransport.GoogleVertexAi ? new() { AuthenticationMode = LlmGoogleAuthenticationMode.ApiKey } : null,
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+        var events = new List<LlmStreamEvent>();
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection, new()
+            {
+                ModelId = transport == LlmTransport.GoogleGeminiApi ? "gemini-3-flash-preview" : "google/gemini-3-flash-preview",
+                Messages = [new("user", "hello")]
+            })) events.Add(item);
+        });
+
+        Assert.Equal(statusCode, failure.StatusCode);
+        Assert.Equal(retryAfter, failure.RetryAfter);
+        Assert.Equal(transport, failure.Transport);
+        Assert.Equal(statusCode == HttpStatusCode.OK, failure.IsContextOverflow);
+        Assert.Null(failure.ProviderCode);
+        Assert.Null(failure.RequestId);
+        Assert.Null(failure.SanitizedResponseBody);
+        Assert.Null(failure.InnerException);
+        Assert.DoesNotContain("test-key", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("reflected-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("unowned-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(events, item => item is LlmChatCompletionEvent);
+        Assert.Equal(streaming && statusCode == HttpStatusCode.OK ? 1 : 0, events.Count);
+        if (events.Count == 1) Assert.Equal("partial", Assert.IsType<LlmTextDeltaEvent>(events[0]).Delta);
+        Assert.Equal(1, handler.Calls);
+    }
+
     [Theory]
     [InlineData(LlmTransport.GoogleGeminiApi)]
     [InlineData(LlmTransport.GoogleVertexAi)]
@@ -182,16 +246,21 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.Null(restored.ContinuationState);
     }
 
-    private sealed class Handler(LlmTransport transport, bool streaming, string? scriptedBody = null) : HttpMessageHandler
+    private sealed class Handler(LlmTransport transport, bool streaming, string? scriptedBody = null,
+        HttpStatusCode statusCode = HttpStatusCode.OK, TimeSpan? retryAfter = null) : HttpMessageHandler
     {
+        internal int Calls { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
+            Calls++;
             Assert.Equal(HttpMethod.Post, request.Method);
             string body = scriptedBody ?? Body(transport, streaming);
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            var response = new HttpResponseMessage(statusCode)
             {
-                Content = new StringContent(body, Encoding.UTF8, streaming ? "text/event-stream" : "application/json")
-            });
+                Content = new StringContent(body, Encoding.UTF8, streaming && statusCode == HttpStatusCode.OK ? "text/event-stream" : "application/json")
+            };
+            if (retryAfter is { } delay) response.Headers.RetryAfter = new(delay);
+            return Task.FromResult(response);
         }
     }
 

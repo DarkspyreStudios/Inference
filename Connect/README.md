@@ -373,6 +373,14 @@ shapes; Vertex retains its narrower schema keyword allowlist. Provider options g
 [Gemini API design](docs/gemini-api-tech-design.md) for model discovery, capabilities and limits. Live
 qualification remains.
 
+Gemini API and Vertex Gemini generation errors retain observed HTTP status and retry intervals,
+including provider error objects inside successful HTTP responses. Their diagnostics keep fixed
+messages and omit raw provider bodies, provider codes, request IDs and nested payloads.
+Context-overflow classification and already-delivered partial text remain intact; no retry or
+successful completion is produced for an error response. Focused managed regressions exercise
+the real adapters with scripted HTTP, including Vertex express API-key authentication.
+These regressions do not qualify live provider endpoints or OAuth.
+
 ### Contract migration
 
 Continuation state is now Common's opaque `LlmContinuationState`, carried by both portable and

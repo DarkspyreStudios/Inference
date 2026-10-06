@@ -51,7 +51,8 @@ internal static class GeminiStream
             JsonElement root = document.RootElement;
             if (root.TryGetProperty("error", out _))
             {
-                throw new LlmProviderException($"{route.Name} returned a stream error.", route.Transport,
+                throw new LlmProviderException($"{route.Name} returned a stream error.", route.Transport, response.StatusCode,
+                    retryAfter: response.Headers.RetryAfter?.Delta,
                     isContextOverflow: LlmContextOverflow.Google(root));
             }
             responseId = LlmJson.GetString(root, "responseId") ?? responseId;
