@@ -2848,6 +2848,10 @@ codes or reasons raise `LlmProviderException.IsContextOverflow` before completio
 The named incomplete limits remain `Incomplete` when no recognized overflow code is present.
 Encrypted context stays opaque; diagnostics redact its named values and
 reflections, and malformed JSON does not retain a parser exception containing provider text.
+The owning terminal-evidence tests exercise OAuth Grok streaming and nonstreaming through an HTTP
+stand-in. Unknown results retain actual text, model, usage and tool calls without continuation. An
+empty terminal output discards provisional streamed calls and text from the result and has no
+continuation. These checks do not establish live OAuth entitlement or provider qualification.
 
 The internal `XaiResponsesLlmClient` sends OAuth-only streaming or genuine non-streaming requests
 to the typed region's fixed endpoint. It rejects mixed static secret headers before dispatch and retains

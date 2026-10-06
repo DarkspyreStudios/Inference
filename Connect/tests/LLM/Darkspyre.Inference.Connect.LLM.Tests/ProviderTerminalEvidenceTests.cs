@@ -64,6 +64,8 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData(LlmTransport.GoogleVertexAi, true)]
     [InlineData(LlmTransport.GoogleVertexAi, false)]
     [InlineData(LlmTransport.OpenAiCodex, true)]
+    [InlineData(LlmTransport.XaiResponses, true)]
+    [InlineData(LlmTransport.XaiResponses, false)]
     public async Task UnknownTerminalToolCallsRemainEvidenceNotSuccessfulContinuation(LlmTransport transport, bool streaming)
     {
         using var http = new HttpClient(new Handler(transport, streaming));
@@ -71,11 +73,13 @@ public sealed class ProviderTerminalEvidenceTests
         {
             Version = "1",
             Transport = transport,
-            Endpoint = "https://provider.example.test/v1",
+            Endpoint = transport == LlmTransport.XaiResponses ? "https://api.x.ai/v1" : "https://provider.example.test/v1",
+            Xai = transport == LlmTransport.XaiResponses ? new() : null,
             Credential = new LlmCredential
             {
-                ApiKey = transport == LlmTransport.OpenAiCodex ? null : "test-key",
-                OAuth = transport == LlmTransport.OpenAiCodex ? new() { AccessToken = "test-token", AccountId = "test-account" } : null
+                ApiKey = transport is LlmTransport.OpenAiCodex or LlmTransport.XaiResponses ? null : "test-key",
+                OAuth = transport is LlmTransport.OpenAiCodex or LlmTransport.XaiResponses
+                    ? new() { AccessToken = "test-token", AccountId = "test-account" } : null
             }.Serialize(),
             ResolvedContinuationScope = transport is LlmTransport.GoogleGeminiApi or LlmTransport.GoogleVertexAi ? "test-scope" : null,
             CapabilityOverrides = new() { SupportsStreaming = streaming }
@@ -102,6 +106,7 @@ public sealed class ProviderTerminalEvidenceTests
             {
                 LlmTransport.OpenAiResponses => new OpenAiResponsesLlmClient(http),
                 LlmTransport.OpenAiCodex => new OpenAiCodexLlmClient(http),
+                LlmTransport.XaiResponses => new XaiResponsesLlmClient(http),
                 LlmTransport.OpenAiCompatibleChat => new OpenAiCompatibleChatLlmClient(http),
                 LlmTransport.AnthropicMessages => new AnthropicMessagesLlmClient(http),
                 _ => throw new InvalidOperationException("Unexpected test route.")
@@ -127,6 +132,54 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.Equal("{}", call.ArgumentsJson);
         Assert.Equal(call.Id, Assert.Single(events.OfType<LlmToolCallStartedEvent>()).ToolCallId);
         Assert.Equal(call.Id, Assert.Single(events.OfType<LlmToolCallCompletedEvent>()).ToolCall.Id);
+    }
+
+    [Fact]
+    public async Task GrokEmptyTerminalOutputDoesNotResurrectProvisionalCallsOrText()
+    {
+        const string body = """
+            data: {"type":"response.output_item.added","output_index":0,"item":{"type":"function_call","id":"fc-1","call_id":"call-1","name":"echo","arguments":""}}
+
+            data: {"type":"response.function_call_arguments.delta","output_index":0,"delta":"{}"}
+
+            data: {"type":"response.output_text.delta","delta":"provisional"}
+
+            data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc-1","call_id":"call-1","name":"echo","arguments":"{}"}}
+
+            data: {"type":"response.completed","response":{"id":"response-1","model":"reported-model","status":"completed","output":[],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}
+            """;
+        using var http = new HttpClient(new Handler(LlmTransport.XaiResponses, streaming: true, body + "\n\n"));
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token", AccountId = "test-account" } }.Serialize()
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = "selected-model",
+            Messages = [new("user", "hello")],
+            Tools = [new LlmToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("{\"type\":\"object\",\"additionalProperties\":false}") }]
+        };
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+
+        Assert.Equal("call-1", Assert.Single(events.OfType<LlmToolCallStartedEvent>()).ToolCallId);
+        Assert.Single(events.OfType<LlmToolCallArgumentsDeltaEvent>());
+        Assert.Single(events.OfType<LlmTextDeltaEvent>());
+        Assert.Empty(events.OfType<LlmToolCallCompletedEvent>());
+        LlmChatResult terminal = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
+        LlmChatResult restored = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(terminal, ConnectLlmJson.ChatResult), ConnectLlmJson.ChatResult)!;
+        Assert.Equal(LlmCompletionStatus.Completed, restored.Status);
+        Assert.Equal("reported-model", restored.ModelId);
+        Assert.Equal(new LlmUsage(5, 2, 7), restored.Usage);
+        Assert.Empty(restored.Text);
+        Assert.Empty(restored.ToolCalls);
+        Assert.Null(restored.ContinuationState);
     }
 
     private sealed class Handler(LlmTransport transport, bool streaming, string? scriptedBody = null) : HttpMessageHandler
@@ -158,7 +211,7 @@ public sealed class ProviderTerminalEvidenceTests
             """;
         if (!streaming) return transport switch
         {
-            LlmTransport.OpenAiResponses => responses,
+            LlmTransport.OpenAiResponses or LlmTransport.XaiResponses => responses,
             LlmTransport.OpenAiCompatibleChat => chat,
             LlmTransport.AnthropicMessages => anthropic,
             LlmTransport.GoogleGeminiApi or LlmTransport.GoogleVertexAi => gemini,
@@ -166,7 +219,7 @@ public sealed class ProviderTerminalEvidenceTests
         };
         return transport switch
         {
-            LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex =>
+            LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.XaiResponses =>
                 "data: {\"type\":\"response.completed\",\"response\":" + responses + "}\n\n",
             LlmTransport.GoogleGeminiApi or LlmTransport.GoogleVertexAi => "data: " + gemini + "\n\n",
             LlmTransport.OpenAiCompatibleChat => """
