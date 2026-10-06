@@ -19,6 +19,81 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 public sealed class BedrockSafetyTests
 {
     [Theory]
+    [InlineData("instructions", true)]
+    [InlineData("system", true)]
+    [InlineData("developer", true)]
+    [InlineData("removed-system", true)]
+    [InlineData("appended-system", true)]
+    [InlineData("unsigned-tail", false)]
+    [InlineData("unsigned-context", false)]
+    public async Task SignedCompactionPreservesTheCanonicalSystemPrompt(string change, bool rejected)
+    {
+        var control = new StreamControl();
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => control, _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker
+        {
+            Response = StubConverseInvoker.Converse(
+            [
+                new() { ReasoningContent = new() { ReasoningText = new() { Text = "reasoning", Signature = "signature" } } },
+                new() { Text = "answer" }
+            ], "end_turn")
+        };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = Connection() with
+        {
+            ResolvedContinuationScope = "fixture-scope",
+            CapabilityOverrides = new() { SupportsStreaming = false },
+            Credential = new LlmCredential
+            {
+                Aws = new() { Region = "us-east-1", AccessKeyId = "fixture-key", SecretAccessKey = "fixture-secret" }
+            }.Serialize()
+        };
+        LlmChatRequest initial = Request("instructions",
+        [
+            new("system", "system guidance"),
+            new("developer", "developer guidance"),
+            new("user", "hello")
+        ]);
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, initial)) events.Add(item);
+        LlmChatResult result = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
+        Assert.NotNull(result.ContinuationState);
+        LlmChatRequest before = initial with
+        {
+            Messages = [.. initial.Messages, new("assistant", result.Text) { ContinuationState = result.ContinuationState }, new("user", "next question")]
+        };
+        LlmChatMessage[] messages = before.Messages.ToArray();
+        LlmChatRequest after = change switch
+        {
+            "instructions" => before with { Instructions = "changed instructions" },
+            "system" => before with { Messages = [new("system", "changed guidance"), .. messages.Skip(1)] },
+            "developer" => before with { Messages = [messages[0], new("developer", "changed guidance"), .. messages.Skip(2)] },
+            "removed-system" => before with { Messages = messages.Skip(1).ToArray() },
+            "appended-system" => before with { Messages = [.. messages, new("system", "new global guidance")] },
+            "unsigned-tail" => before with { Messages = messages.Take(messages.Length - 1).ToArray() },
+            "unsigned-context" => initial with { Instructions = "new instructions", Messages = [new("user", "new question")] },
+            _ => throw new ArgumentOutOfRangeException(nameof(change))
+        };
+        if (change == "unsigned-context") before = initial;
+
+        ConverseRequest projected = BedrockLlmClient.BuildRequest(connection, before, before.ModelId);
+        Assert.Collection(projected.System,
+            block => Assert.Equal("instructions", block.Text),
+            block => Assert.Equal("system guidance", block.Text),
+            block => Assert.Equal("developer guidance", block.Text));
+        if (change != "unsigned-context") Assert.Equal("signature", projected.Messages[1].Content[0].ReasoningContent.ReasoningText.Signature);
+        client.ValidateCompaction(connection, before, before);
+        Exception? error = Record.Exception(() => client.ValidateCompaction(connection, before, after));
+
+        if (rejected) Assert.Contains("Start a fresh context", Assert.IsType<NotSupportedException>(error).Message);
+        else Assert.Null(error);
+        Assert.Single(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+    }
+
+    [Theory]
     [InlineData("guardrail_intervened", true)]
     [InlineData("content_filtered", true)]
     [InlineData("end_turn", false)]

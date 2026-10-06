@@ -625,9 +625,13 @@ internal sealed class BedrockLlmClient(
         try
         {
             LlmChatRequest prefix = before with { Messages = before.Messages.Take(lastSigned + 1).ToArray() };
-            List<Message> original = BuildMessages(connection, prefix, before.ModelId, [], streams);
-            List<Message> replacement = BuildMessages(connection, after, after.ModelId, [], streams, original.Count);
-            if (original.Count != replacement.Count
+            List<SystemContentBlock> originalSystem = BuildSystem(before);
+            List<SystemContentBlock> replacementSystem = BuildSystem(after);
+            List<Message> original = BuildMessages(connection, prefix, before.ModelId, streams);
+            List<Message> replacement = BuildMessages(connection, after, after.ModelId, streams, original.Count);
+            if (originalSystem.Count != replacementSystem.Count
+                || originalSystem.Where((block, index) => block.Text != replacementSystem[index].Text).Any()
+                || original.Count != replacement.Count
                 || original.Where((message, index) => !SameMessage(message, replacement[index])).Any())
             {
                 throw new NotSupportedException("Compaction cannot change the prior messages of signed Bedrock history. Start a fresh context explicitly instead.");
@@ -693,8 +697,27 @@ internal sealed class BedrockLlmClient(
         return stream;
     }
 
+    private static List<SystemContentBlock> BuildSystem(LlmChatRequest request)
+    {
+        var system = new List<SystemContentBlock>();
+        if (!string.IsNullOrWhiteSpace(request.Instructions))
+        {
+            system.Add(new SystemContentBlock { Text = request.Instructions });
+        }
+        foreach (LlmChatMessage message in request.Messages)
+        {
+            if (message.Role is "system" or "developer"
+                && (!string.IsNullOrEmpty(message.Content) || message.ToolCalls.Count > 0
+                    || message.ToolResults.Count > 0 || message.Attachments.Count > 0))
+            {
+                system.Add(new SystemContentBlock { Text = message.Content });
+            }
+        }
+        return system;
+    }
+
     private static List<Message> BuildMessages(LlmConnection connection, LlmChatRequest request, string modelId,
-        List<SystemContentBlock> system, List<MemoryStream>? temporaryStreams = null, int? messageLimit = null)
+        List<MemoryStream>? temporaryStreams = null, int? messageLimit = null)
     {
         var messages = new List<Message>();
         foreach (LlmChatMessage message in request.Messages)
@@ -718,7 +741,7 @@ internal sealed class BedrockLlmClient(
 
             if (message.Role is "system" or "developer")
             {
-                system.Add(new SystemContentBlock { Text = message.Content });
+                continue;
             }
             else
             {
@@ -781,12 +804,8 @@ internal sealed class BedrockLlmClient(
         LlmChatRequest request,
         string modelId)
     {
-        var system = new List<SystemContentBlock>();
-        if (!string.IsNullOrWhiteSpace(request.Instructions))
-        {
-            system.Add(new SystemContentBlock { Text = request.Instructions });
-        }
-        List<Message> messages = BuildMessages(connection, request, modelId, system);
+        List<SystemContentBlock> system = BuildSystem(request);
+        List<Message> messages = BuildMessages(connection, request, modelId);
         if (messages.Count == 0)
         {
             throw new InvalidOperationException(

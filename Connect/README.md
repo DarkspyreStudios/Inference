@@ -3327,9 +3327,12 @@ Converse modes. Non-streaming mapping rejects it before publishing response even
 input remains valid, and provider-reported malformed stop reasons keep their `Failed` result.
 
 Managed Converse compaction rejects a change to the provider-visible message prefix through the last
-signed assistant before resource callbacks or context replacement. It compares the shared Converse
-projection, not context entry IDs or count metadata. Unsigned and counts-only histories retain their
-existing compaction behavior. Tool-result reductions after that signed prefix remain permitted.
+signed assistant or to the top-level system prompt before resource callbacks or context replacement.
+Generation and compaction share the system projection: request instructions followed by all
+system/developer messages in order, including those after the signed assistant. The validator compares
+the shared Converse projection, not context entry IDs or count metadata. Unsigned and counts-only
+histories retain their existing compaction behavior. Tool-result reductions after that signed prefix
+remain permitted.
 An explicit idle `ReplaceContextAsync` can start a fresh context without the old provider state.
 
 Converse model listing returns the models the account can call, each under an identifier it can
