@@ -7,6 +7,7 @@ namespace Darkspyre.Inference.Tensor.Ggml;
 /// <summary>
 /// One generation-owned GGML selection and terminal lifetime. Every Tensor engine that runs on GGML borrows it: a model
 /// holds a lease while it is loaded and enters the owner for each call, so one native runtime serves them all.
+/// Direct MLX borrowers share the same admission fence and terminal cleanup without using a GGML native identity.
 /// </summary>
 public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
 {
@@ -29,6 +30,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
     private readonly List<ModelLease> _failedRollbackLeases = [];
     private bool _fenced;
     private bool _nativeMayRemain;
+    private Action? _mlxShutdown;
 
     public static GgmlRuntimeOwner GetOrCreate(TensorRuntimePlan? plan = null)
     {
@@ -162,6 +164,22 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
     }
 
     internal IDisposable EnterExecution() => Enter();
+
+    internal IDisposable EnterMlx(Action shutdown)
+    {
+        ArgumentNullException.ThrowIfNull(shutdown);
+        lock (_gate)
+        {
+            if (_mlxShutdown is not null && _mlxShutdown != shutdown)
+                throw new InvalidOperationException("The generation already owns a different MLX terminal action.");
+            IDisposable lease = Enter();
+            _mlxShutdown = shutdown;
+            _nativeMayRemain = true;
+            return lease;
+        }
+    }
+
+    internal ModelLease AcquireMlxModel(Action shutdown) => new(TensorBackendKind.Mlx, EnterMlx(shutdown), null);
 
     private OperationLease Enter()
     {
@@ -327,7 +345,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
                 return new(TensorBackendAvailabilityState.RequiresProcessRestart, "GGML initialization requires a fresh process.",
                     null, presence.ToArray(), diagnostics.ToArray());
             }
-            lock (_gate) _nativeMayRemain = false;
+            lock (_gate) _nativeMayRemain = _mlxShutdown is not null;
             if (observed.State == GgmlInitializationState.Unsupported)
                 return new(TensorBackendAvailabilityState.Unsupported, "The supplier does not support this GGML plan.",
                     null, presence.ToArray(), diagnostics.ToArray());
@@ -431,6 +449,15 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
             safeBusy = !released && readyBefore && supplier.State == GgmlRuntimeState.Ready;
         }
         catch (Exception error) when (error is not OutOfMemoryException) { released = false; shutdownError = error; }
+        if (!safeBusy && _mlxShutdown is { } mlxShutdown)
+        {
+            try { mlxShutdown(); }
+            catch (Exception error) when (error is not OutOfMemoryException)
+            {
+                released = false;
+                shutdownError = shutdownError is null ? error : new AggregateException(shutdownError, error);
+            }
+        }
         lock (_gate)
         {
             if (safeBusy)
@@ -447,6 +474,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
             _catalogResolution = null;
             _initialization = null;
             _initializationError = null;
+            _mlxShutdown = null;
             _candidates = Plan.Candidates;
             return new(ShutdownResult(released ? TensorRuntimeShutdownState.Completed : TensorRuntimeShutdownState.FailedRequiresProcessExit,
                 0, !released), shutdownError);
@@ -477,7 +505,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         ShutdownOutcome outcome = await ShutdownWithCauseAsync().ConfigureAwait(false);
         if (outcome.Result.State is not (TensorRuntimeShutdownState.Completed or TensorRuntimeShutdownState.AlreadyStopped))
         {
-            const string message = "The GGML runtime did not retire safely. Drain instances and retry terminal shutdown explicitly.";
+            const string message = "The Tensor runtime did not retire safely. Drain instances and retry terminal shutdown explicitly.";
             throw outcome.Error is null
                 ? new InferenceException(InferenceFailureCode.BackendUnavailable, message)
                 : new InferenceException(InferenceFailureCode.BackendUnavailable, message, outcome.Error);
@@ -492,7 +520,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         public void Dispose() => Interlocked.Exchange(ref _owner, null)?.Release();
     }
 
-    internal sealed class ModelLease(TensorBackendKind backend, IDisposable operation, IDisposable native) : IDisposable
+    internal sealed class ModelLease(TensorBackendKind backend, IDisposable operation, IDisposable? native) : IDisposable
     {
         public TensorBackendKind Backend { get; } = backend;
         private readonly object _gate = new();
@@ -502,8 +530,8 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         {
             lock (_gate)
             {
-                if (_native is null) return;
-                _native.Dispose();
+                if (_operation is null) return;
+                _native?.Dispose();
                 _operation!.Dispose();
                 _native = null;
                 _operation = null;

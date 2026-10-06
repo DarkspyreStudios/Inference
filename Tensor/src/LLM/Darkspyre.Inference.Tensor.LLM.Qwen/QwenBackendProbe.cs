@@ -17,8 +17,13 @@ internal sealed class QwenBackendProbe(GgmlRuntimeOwner? runtimeOwner = null) : 
             return Task.FromResult(invalid);
         if (GgmlRuntimeOwner.IsGgml(request.RequestedBackend))
             return (runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate()).CheckAsync(request, cancellationToken);
-        return Task.Run(() => Check(request, IsBackendAvailable,
-            static error => NativeRuntimeQuarantine.TryGetFailure(error, out _), cancellationToken), cancellationToken);
+        return Task.Run(() =>
+        {
+            using IDisposable? admission = request.RequestedBackend == TensorBackendKind.Mlx
+                ? (runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate()).EnterMlx(MlxBackend.Shutdown) : null;
+            return Check(request, IsBackendAvailable,
+                static error => NativeRuntimeQuarantine.TryGetFailure(error, out _), cancellationToken);
+        }, cancellationToken);
     }
 
     internal static TensorBackendAvailability Check(TensorBackendProbeRequest request,

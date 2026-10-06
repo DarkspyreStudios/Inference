@@ -10,6 +10,7 @@ using Darkspyre.Inference.Tensor.LLM;
 using TensorSharp.Runtime;
 using TensorSharp.Runtime.Grammar;
 using TensorSharp.Server;
+using TensorSharp.MLX;
 using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
@@ -360,7 +361,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         }
         ThrowIfReleaseRequired();
 
-        IDisposable? admission = GgmlRuntimeOwner.IsGgml(_requestedBackend) ? _runtimeOwner.EnterExecution() : null;
+        IDisposable? admission = EnterRuntimeAdmission();
         try
         {
             lock (_stopGate)
@@ -387,7 +388,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         ThrowIfReleaseRequired();
         ArgumentNullException.ThrowIfNull(model);
         cancellationToken.ThrowIfCancellationRequested();
-        IDisposable? admission = GgmlRuntimeOwner.IsGgml(_requestedBackend) ? _runtimeOwner.EnterExecution() : null;
+        IDisposable? admission = EnterRuntimeAdmission();
         try
         {
             await AdmitLoadAsync(model, admission, cancellationToken).ConfigureAwait(false);
@@ -443,6 +444,10 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         await accepted.ConfigureAwait(false);
     }
 
+    private IDisposable? EnterRuntimeAdmission() => _requestedBackend == TensorBackendKind.Mlx
+        ? _runtimeOwner.EnterMlx(MlxBackend.Shutdown)
+        : GgmlRuntimeOwner.IsGgml(_requestedBackend) ? _runtimeOwner.EnterExecution() : null;
+
     private async Task<TensorEngineStatus> LoadCoreAsync(
         TensorModelPackDefinition definition, TensorBackendKind backend, CancellationToken cancellationToken)
     {
@@ -450,7 +455,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         ThrowIfReleaseRequired();
         if (_modelLease is not null || _runtimeModelLease is not null)
             throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The previous model ownership must be released before loading another model.");
-        if (GgmlRuntimeOwner.IsGgml(backend)) _runtimeOwner.ThrowIfOperationCanceled(cancellationToken);
+        if (GgmlRuntimeOwner.IsGgml(backend) || backend == TensorBackendKind.Mlx) _runtimeOwner.ThrowIfOperationCanceled(cancellationToken);
         TensorModelPackLease lease;
         try
         {
@@ -471,6 +476,10 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
                 backend = runtimeLease.Backend;
                 if (!definition.SupportedBackends.Contains(backend))
                     throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The initialized backend is incompatible with this model pack.");
+            }
+            else if (backend == TensorBackendKind.Mlx)
+            {
+                runtimeLease = _runtimeOwner.AcquireMlxModel(MlxBackend.Shutdown);
             }
             _modelLease = lease;
             _runtimeModelLease = runtimeLease;

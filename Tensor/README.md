@@ -130,6 +130,13 @@ Failed enumeration cleanup fences further inference and retains the refused iter
 ownership. Teardown reports the original operation and each independent cleanup error once.
 Repeated disposal preserves that outcome without replaying failed stream cleanup.
 
+Direct MLX Qwen models and default probes borrow the same runtime owner's admission fence.
+Concurrent models keep separate leases. Unload and Stop release the instance's lease and leave
+the shared worker reusable. Explicit runtime shutdown refuses live model/probe/execution leases.
+After drain, terminal cleanup clears checked MLX caches and retires the worker through
+`MlxBackend.Shutdown`. The owner's Plan and Current remain GGML-specific; they do not describe
+an MLX native ABI. Common and Connect contracts stay unchanged.
+
 Laya owns an acquired pack lease and each returned model before checking load cancellation.
 Failed load cleanup preserves the load error and the cleanup error. The engine retains resources
 whose release fails and refuses replacement loads until explicit Unload releases them. The pack

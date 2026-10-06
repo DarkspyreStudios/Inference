@@ -8,6 +8,101 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
 public sealed class GgmlRuntimeShutdownTests
 {
+    [Fact]
+    public async Task MlxModelsAndProbesKeepTheGenerationReusableUntilExplicitShutdown()
+    {
+        int retirements = 0;
+        Action retire = () => retirements++;
+        var supplier = new Supplier(null);
+        await using var owner = new GgmlRuntimeOwner(new(supplier.Build, supplier.Rid, []), supplier);
+        using (GgmlRuntimeOwner.ModelLease first = owner.AcquireMlxModel(retire))
+        using (GgmlRuntimeOwner.ModelLease second = owner.AcquireMlxModel(retire))
+        using (IDisposable probe = owner.EnterMlx(retire))
+        {
+            TensorRuntimeShutdownResult busy = await owner.ShutdownAsync();
+            Assert.Equal(TensorRuntimeShutdownState.Busy, busy.State);
+            Assert.Equal(3, busy.OutstandingLeases);
+            Assert.Equal(TensorBackendKind.Mlx, first.Backend);
+            Assert.Equal(0, retirements);
+            first.Dispose();
+            first.Dispose();
+            using GgmlRuntimeOwner.ModelLease replacement = owner.AcquireMlxModel(retire);
+            Assert.Equal(3, (await owner.ShutdownAsync()).OutstandingLeases);
+            Assert.Null(owner.Current);
+            Assert.Equal(supplier.Build, owner.Plan.Build);
+        }
+        Assert.Equal(0, supplier.Shutdowns);
+        Assert.Equal(0, retirements);
+        TensorRuntimeShutdownResult stopped = await owner.ShutdownAsync();
+        Assert.Equal(TensorRuntimeShutdownState.Completed, stopped.State);
+        Assert.False(stopped.NativeStateMayRemain);
+        Assert.Throws<ObjectDisposedException>(() => owner.EnterMlx(retire));
+        Assert.Equal(TensorRuntimeShutdownState.AlreadyStopped, (await owner.ShutdownAsync()).State);
+        Assert.Equal(1, retirements);
+    }
+
+    [Fact]
+    public async Task CancelledMlxShutdownWaitKeepsSharedCleanupAndAdmissionFence()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        int retirements = 0;
+        Action retire = () =>
+        {
+            Interlocked.Increment(ref retirements);
+            entered.TrySetResult();
+            release.Task.GetAwaiter().GetResult();
+        };
+        var supplier = new Supplier(null);
+        var owner = new GgmlRuntimeOwner(new(supplier.Build, supplier.Rid, []), supplier);
+        owner.AcquireMlxModel(retire).Dispose();
+        using var cancellation = new CancellationTokenSource();
+        Task<TensorRuntimeShutdownResult> canceledWait = owner.ShutdownAsync(cancellation.Token);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Task<TensorRuntimeShutdownResult> sharedWait = owner.ShutdownAsync();
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceledWait);
+            Assert.False(sharedWait.IsCompleted);
+            Assert.Throws<ObjectDisposedException>(() => owner.AcquireMlxModel(retire));
+            release.TrySetResult();
+            Assert.Equal(TensorRuntimeShutdownState.Completed, (await sharedWait.WaitAsync(TimeSpan.FromSeconds(5))).State);
+            Assert.Equal(1, retirements);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await owner.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
+    public async Task IndependentGgmlAndMlxShutdownFailuresRemainSharedWithoutReplay()
+    {
+        var ggmlFailure = new IOException("private GGML terminal cause");
+        var mlxFailure = new IOException("private MLX terminal cause");
+        int retirements = 0;
+        var supplier = new Supplier(ggmlFailure);
+        var owner = new GgmlRuntimeOwner(new(supplier.Build, supplier.Rid, []), supplier);
+        owner.AcquireMlxModel(() => { retirements++; throw mlxFailure; }).Dispose();
+
+        TensorRuntimeShutdownResult failed = await owner.ShutdownAsync();
+        Assert.Equal(TensorRuntimeShutdownState.FailedRequiresProcessExit, failed.State);
+        Assert.True(failed.NativeStateMayRemain);
+        Assert.Same(failed, await owner.ShutdownAsync());
+        InferenceException disposal = await Assert.ThrowsAsync<InferenceException>(() => owner.DisposeAsync().AsTask());
+        AggregateException errors = Assert.IsType<AggregateException>(disposal.InnerException);
+        Assert.Same(ggmlFailure, errors.InnerExceptions[0]);
+        Assert.Same(mlxFailure, errors.InnerExceptions[1]);
+        Assert.Same(disposal, await Record.ExceptionAsync(() => owner.DisposeAsync().AsTask()));
+        string json = JsonSerializer.Serialize(failed, TensorJson.TensorRuntimeShutdownResult);
+        Assert.DoesNotContain(ggmlFailure.Message, json, StringComparison.Ordinal);
+        Assert.DoesNotContain(mlxFailure.Message, json, StringComparison.Ordinal);
+        Assert.Equal(1, retirements);
+        Assert.Equal(1, supplier.Shutdowns);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -237,7 +332,7 @@ public sealed class GgmlRuntimeShutdownTests
         }
     }
 
-    private sealed class Supplier(Exception? failure, Func<IDisposable>? acquire = null) : IGgmlRuntime
+    internal sealed class Supplier(Exception? failure, Func<IDisposable>? acquire = null) : IGgmlRuntime
     {
         private GgmlRuntimePlan? _plan;
         public TensorSharpBuildIdentity Build => new("test-managed", "test-abi", "test-commit");
