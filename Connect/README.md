@@ -3334,8 +3334,10 @@ models are all not callable. A callable model that supports `ON_DEMAND` is liste
 callable model that supports only `INFERENCE_PROFILE` is not listed by its model ID; it appears
 through the region's system inference profiles that include it, such as `us.` and `global.` profiles.
 The connection's credentials need `bedrock:GetFoundationModelAvailability`. When any availability
-request fails, for example with `AccessDenied`, listing logs one warning and fails with that request's
-error.
+request fails, for example with `AccessDenied`, listing stops admitting more checks and waits for
+the checks already in flight. Each failed request logs one warning. A single failure stays a single
+provider exception; multiple failures remain together in an aggregate. A failed logging sink does
+not skip another request's failure or diagnostic attempt.
 
 Bedrock's catalog requests report no model sizes. Each listed model carries the context window and
 maximum output of its base model from `BedrockModelLimits`, a table of the limits Anthropic publishes for

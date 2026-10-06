@@ -161,7 +161,7 @@ internal sealed class BedrockModelResolver
 
     /// <summary>
     /// Returns, per foundation model ID, whether the account holds an available agreement and authorization
-    /// for it. A failed availability request is logged once and thrown.
+    /// for it. Each failed availability request is logged once and preserved in the listing failure.
     /// </summary>
     private static async Task<Dictionary<string, bool>> CheckAvailabilityAsync(
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
@@ -171,13 +171,13 @@ internal sealed class BedrockModelResolver
         CancellationToken cancellationToken)
     {
         var callable = new ConcurrentDictionary<string, bool>(StringComparer.Ordinal);
-        AmazonBedrockException? failure = null;
+        var errors = new ConcurrentQueue<AmazonBedrockException>();
         await Parallel.ForEachAsync(
             foundations.Select(model => model.ModelId).Distinct(StringComparer.Ordinal),
             new ParallelOptions { MaxDegreeOfParallelism = AvailabilityConcurrency, CancellationToken = cancellationToken },
             async (modelId, token) =>
             {
-                if (Volatile.Read(ref failure) is not null)
+                if (!errors.IsEmpty)
                 {
                     return;
                 }
@@ -194,13 +194,20 @@ internal sealed class BedrockModelResolver
                 }
                 catch (AmazonBedrockException error)
                 {
-                    Interlocked.CompareExchange(ref failure, error, null);
+                    errors.Enqueue(error);
                 }
             });
         control.ThrowIfCanceled();
-        if (failure is not null)
+        if (!errors.IsEmpty)
         {
-            throw Warn(logger, credential, "GetFoundationModelAvailability", failure);
+            var failures = new List<Exception>();
+            foreach (AmazonBedrockException error in errors)
+            {
+                try { failures.Add(Warn(logger, credential, "GetFoundationModelAvailability", error)); }
+                catch (AggregateException diagnosticFailure) { failures.AddRange(diagnosticFailure.InnerExceptions); }
+            }
+            if (failures.Count == 1) throw failures[0];
+            throw new AggregateException("Bedrock model availability checks failed.", failures);
         }
 
         return new Dictionary<string, bool>(callable, StringComparer.Ordinal);

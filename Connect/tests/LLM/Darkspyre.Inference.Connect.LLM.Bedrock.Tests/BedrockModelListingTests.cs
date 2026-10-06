@@ -53,6 +53,56 @@ public sealed class BedrockModelListingTests
         Assert.Equal(new[] { "global." + Sonnet, "us." + Sonnet }, await ListAsync(control));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ConcurrentAvailabilityFailuresRemainVisibleWhenDiagnosticLoggingAlsoFails(bool loggingFails)
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var loggingFailure = new InvalidOperationException("The diagnostic sink failed.");
+        var logger = new Logger { NextWarningFailure = loggingFails ? loggingFailure : null };
+        int requests = 0;
+        var control = new Control([Model(Sonnet, "ON_DEMAND"), Model(Opus, "ON_DEMAND")], [], _ => Subscribed())
+        {
+            CheckAvailability = async id =>
+            {
+                if (Interlocked.Increment(ref requests) == 2) entered.TrySetResult();
+                await release.Task;
+                throw new AmazonBedrockException("Private provider diagnostics.", ErrorType.Sender,
+                    "AccessDeniedException", "request-" + id, HttpStatusCode.Forbidden);
+            }
+        };
+        Task<IReadOnlyList<LlmModel>> listing = ListModelsAsync(control, logger);
+        Exception? failure;
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            release.SetResult();
+            failure = await Record.ExceptionAsync(() => listing.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+        finally
+        {
+            release.TrySetResult();
+            _ = await Record.ExceptionAsync(() => listing.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+
+        var causes = Assert.IsType<AggregateException>(failure).Flatten().InnerExceptions;
+        LlmProviderException[] providerFailures = [.. causes.OfType<LlmProviderException>()];
+        Assert.Equal(2, providerFailures.Length);
+        Assert.Equal(new[] { "request-" + Opus, "request-" + Sonnet },
+            providerFailures.Select(error => error.RequestId).Order(StringComparer.Ordinal));
+        Assert.All(providerFailures, error =>
+        {
+            Assert.Equal(HttpStatusCode.Forbidden, error.StatusCode);
+            Assert.Equal("AccessDeniedException", error.ProviderCode);
+            Assert.DoesNotContain("Private provider diagnostics", error.ToString(), StringComparison.Ordinal);
+        });
+        Assert.Equal(loggingFails ? 3 : 2, causes.Count);
+        Assert.Equal(2, logger.Levels.Count(level => level == LogLevel.Warning));
+        Assert.Equal(2, requests);
+    }
+
     private static async Task<string[]> ListAsync(Control control, Logger? logger = null) =>
         [.. (await ListModelsAsync(control, logger)).Select(model => model.Id)];
 
@@ -106,6 +156,8 @@ public sealed class BedrockModelListingTests
         List<InferenceProfileSummary>? secondProfilePage = null)
         : AmazonBedrockClient(new BasicAWSCredentials("fixture-key", "fixture-secret"), RegionEndpoint.USEast1)
     {
+        internal Func<string, Task<GetFoundationModelAvailabilityResponse>>? CheckAvailability { get; init; }
+
         public override Task<ListFoundationModelsResponse> ListFoundationModelsAsync(
             ListFoundationModelsRequest request, CancellationToken cancellationToken = default) =>
             Task.FromResult(new ListFoundationModelsResponse { ModelSummaries = models });
@@ -126,12 +178,13 @@ public sealed class BedrockModelListingTests
 
         public override Task<GetFoundationModelAvailabilityResponse> GetFoundationModelAvailabilityAsync(
             GetFoundationModelAvailabilityRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(availability(request.ModelId));
+            CheckAvailability?.Invoke(request.ModelId) ?? Task.FromResult(availability(request.ModelId));
     }
 
     private sealed class Logger : ILogger<BedrockLlmClient>
     {
         internal List<LogLevel> Levels { get; } = [];
+        internal Exception? NextWarningFailure { get; set; }
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
 
@@ -140,7 +193,15 @@ public sealed class BedrockModelListingTests
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
-            lock (Levels) Levels.Add(logLevel);
+            lock (Levels)
+            {
+                Levels.Add(logLevel);
+                if (logLevel == LogLevel.Warning && NextWarningFailure is { } failure)
+                {
+                    NextWarningFailure = null;
+                    throw failure;
+                }
+            }
         }
     }
 }
