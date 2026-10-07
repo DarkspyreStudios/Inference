@@ -4399,6 +4399,11 @@ The `agent` command accepts `--max-model-iterations` as a positive integer. It p
 the existing managed execution policy. Omission keeps the library defaults. Other commands reject
 the option, and native sessions reject managed execution options. A model iteration includes a
 tool request or the model's answer after a tool result; the cap is not a count of all HTTP requests.
+The `prompt` command accepts `--non-streaming` to select the provider's complete-response request.
+Grok connection commands accept `--xai-region Global|UnitedStates`; the typed choice derives the fixed endpoint
+and retains the same tester credential key. Route and streaming controls apply only to the selected
+connection and participate in its version. These controls do not save or copy app settings.
+`setup` rejects the region option because it renders a separate unsaved settings draft.
 The managed tester persists captured contexts through `ConnectLlmJson.AgentContext` metadata.
 Its round-trip retains document bytes, tool identities and resource-selection facts without
 default reflection serialization.

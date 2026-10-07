@@ -4,11 +4,59 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.ConsoleTester;
 using Darkspyre.Inference.Connect.LLM;
+using Darkspyre.Inference.Connect.LLM.Providers;
+using SecureStore;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class ConsoleAgentDiagnosticsTests
 {
+    [Theory]
+    [InlineData(XaiRegion.Global, "https://api.x.ai/v1")]
+    [InlineData(XaiRegion.UnitedStates, "https://us.api.x.ai/v1")]
+    public async Task TesterRegionAndNonstreamingControlsUseTheSelectedConnectionAndItsExistingCredentialKey(
+        XaiRegion region, string endpoint)
+    {
+        using var http = new HttpClient();
+        var providers = new ConsoleTesterProviders([new XaiResponsesLlmClient(http), new OpenAiResponsesLlmClient(http)]);
+        ConsoleInvocation invocation = ConsoleInvocation.Parse(
+            ["prompt", "--provider", "grok-subscription", "--xai-region", region.ToString(), "--non-streaming"], providers);
+        var store = new TesterCredentials();
+        var source = new SecureConnectionSource(store, providers, invocation);
+
+        LlmConnection selected = Assert.IsType<LlmConnection>(await source.GetConnectionAsync(invocation.Provider.ConnectionId));
+
+        Assert.Equal(endpoint, selected.Endpoint);
+        XaiConnectionOptions xai = Assert.IsType<XaiConnectionOptions>(selected.Xai);
+        Assert.Equal(region, xai.Region);
+        Assert.Equal(XaiServiceTier.Default, xai.ServiceTier);
+        Assert.False(selected.CapabilityOverrides!.SupportsStreaming);
+        Assert.Equal(TesterCredentials.Value, selected.Credential);
+        LlmConnection original = Assert.IsType<LlmConnection>(
+            await new SecureConnectionSource(store, providers).GetConnectionAsync(invocation.Provider.ConnectionId));
+        Assert.NotEqual(original.Version, selected.Version);
+        Assert.Null(original.CapabilityOverrides);
+
+        LlmConnection other = Assert.IsType<LlmConnection>(
+            await source.GetConnectionAsync(providers.Resolve("openai-api-key").ConnectionId));
+        Assert.Equal("https://api.openai.com/v1", other.Endpoint);
+        Assert.Null(other.Xai);
+        Assert.Null(other.CapabilityOverrides);
+    }
+
+    [Fact]
+    public void TesterRouteControlsRefuseWrongProviderAndCommand()
+    {
+        using var http = new HttpClient();
+        var providers = new ConsoleTesterProviders([new XaiResponsesLlmClient(http), new OpenAiResponsesLlmClient(http)]);
+        Assert.Throws<ArgumentException>(() => ConsoleInvocation.Parse(
+            ["prompt", "--provider", "openai-api-key", "--xai-region", "UnitedStates"], providers));
+        Assert.Throws<ArgumentException>(() => ConsoleInvocation.Parse(
+            ["agent", "--provider", "grok-subscription", "--non-streaming"], providers));
+        Assert.Throws<ArgumentException>(() => ConsoleInvocation.Parse(
+            ["setup", "--provider", "grok-subscription", "--xai-region", "UnitedStates"], providers));
+    }
+
     [Fact]
     public void AgentIterationLimitBuildsTheExistingManagedPolicyAndPreservesOmittedDefaults()
     {
@@ -183,6 +231,17 @@ public sealed class ConsoleAgentDiagnosticsTests
         Assert.Contains("status=Failed", output, StringComparison.Ordinal);
         Assert.Contains("reason=ProviderFailure", output, StringComparison.Ordinal);
         Assert.Contains("[error] The selected model requires an inference profile.", output, StringComparison.Ordinal);
+    }
+
+    private sealed class TesterCredentials : ICredentialStore
+    {
+        public const string Value = "test-only-credential";
+        public ValueTask<string?> GetAsync(string name, CancellationToken cancellationToken = default) =>
+            ValueTask.FromResult<string?>(name == "provider-credential-grok-subscription" ? Value : null);
+        public ValueTask SetAsync(string name, string secret, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public ValueTask DeleteAsync(string name, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
     }
 
     private sealed class ProbeConnections(LlmTransport transport) : ILlmConnectionSource

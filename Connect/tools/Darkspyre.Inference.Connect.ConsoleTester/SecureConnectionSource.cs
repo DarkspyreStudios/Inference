@@ -115,14 +115,17 @@ internal sealed class SecureConnectionSource(
         ConsoleTesterProvider provider,
         string? credential)
     {
-        string endpoint = invocation is not null
-            && invocation.Provider.ConnectionId == provider.ConnectionId
-            && invocation.EndpointOverride is not null
-                ? invocation.EndpointOverride
-                : provider.Endpoint;
+        ConsoleInvocation? selected = invocation?.Provider.ConnectionId == provider.ConnectionId ? invocation : null;
+        string endpoint = selected?.Xai?.GetEndpoint() ?? selected?.EndpointOverride ?? provider.Endpoint;
         return provider.CreateConnection(
-            ComputeVersion(provider, endpoint + invocation?.Vertex?.ProjectId + "/" + invocation?.Vertex?.Location + "/" + invocation?.Vertex?.AuthenticationMode, credential), credential) with
-        { Endpoint = endpoint, Vertex = invocation?.Vertex };
+            ComputeVersion(provider, endpoint + selected?.Vertex?.ProjectId + "/" + selected?.Vertex?.Location + "/" + selected?.Vertex?.AuthenticationMode
+                + (selected?.NonStreaming == true ? "/non-streaming" : string.Empty), credential), credential) with
+        {
+            Endpoint = endpoint,
+            Vertex = selected?.Vertex,
+            Xai = selected?.Xai,
+            CapabilityOverrides = selected?.NonStreaming == true ? new() { SupportsStreaming = false } : null
+        };
     }
 
     private static string ComputeVersion(
