@@ -59,6 +59,13 @@ internal static class BedrockPromptCache
         else if (model.StartsWith("anthropic.", StringComparison.Ordinal) && result.ToolConfig?.Tools is { Count: > 0 } tools)
             tools.Add(new Tool { CachePoint = point });
         if (hint.Scope == LlmPromptCacheScope.Conversation && result.Messages.Count > 0)
-            result.Messages[^1].Content.Add(new ContentBlock { CachePoint = point });
+        {
+            Message? message = result.Messages[^1];
+            // Nova rejects cache points alongside tool blocks. Keep the preceding ordinary prefix.
+            if (model.StartsWith("amazon.nova-", StringComparison.Ordinal))
+                message = result.Messages.FindLast(candidate =>
+                    candidate.Content.All(block => block.ToolUse is null && block.ToolResult is null));
+            message?.Content.Add(new ContentBlock { CachePoint = point });
+        }
     }
 }

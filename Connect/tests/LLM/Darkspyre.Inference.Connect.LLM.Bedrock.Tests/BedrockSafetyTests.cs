@@ -44,6 +44,47 @@ public sealed class BedrockSafetyTests
     }
 
     [Theory]
+    [InlineData("amazon.nova-micro-v1:0", 0)]
+    [InlineData("us.amazon.nova-micro-v1:0", 0)]
+    [InlineData("amazon.nova-lite-v1:0", 0)]
+    [InlineData("amazon.nova-pro-v1:0", 0)]
+    [InlineData("amazon.nova-2-lite-v1:0", 0)]
+    [InlineData("anthropic.claude-sonnet-4-6", 2)]
+    public void ConversationCachePreservesToolMessagesAndUsesAnEligibleCheckpointInBothConverseModes(
+        string modelId, int checkpointMessage)
+    {
+        ConverseRequest request = BedrockLlmClient.BuildRequest(Connection(), Request(messages:
+        [
+            new("user", "Echo this text"),
+            new("assistant", "Calling echo") { ToolCalls = [new LlmToolCall("echo-1", "echo", "{}")] },
+            new("user", string.Empty)
+            {
+                ToolResults = [new LlmToolResult("echo-1", new() { Parts = [new LlmToolOutputText("echoed text")] })]
+            }
+        ]) with
+        {
+            ModelId = modelId,
+            PromptCache = new() { Scope = LlmPromptCacheScope.Conversation },
+            Tools = [new LlmToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("""{"type":"object"}""") }]
+        }, modelId);
+        ConverseStreamRequest stream = BedrockLlmClient.ToStreamRequest(request);
+        foreach (List<Message> messages in new[] { request.Messages, stream.Messages })
+        {
+            Assert.Equal(3, messages.Count);
+            Assert.Equal("Echo this text", messages[0].Content[0].Text);
+            Assert.Equal("Calling echo", messages[1].Content[0].Text);
+            Assert.Equal("echo-1", messages[1].Content[1].ToolUse.ToolUseId);
+            ToolResultBlock result = messages[2].Content[0].ToolResult;
+            Assert.Equal("echo-1", result.ToolUseId);
+            Assert.Equal("echoed text", Assert.Single(result.Content).Text);
+            Assert.Equal(ToolResultStatus.Success, result.Status);
+            Assert.Equal(CachePointType.Default, messages[checkpointMessage].Content[^1].CachePoint?.Type);
+            Assert.Single(messages.SelectMany(message => message.Content), block => block.CachePoint is not null);
+        }
+        Assert.Equal("echo", Assert.Single(request.ToolConfig.Tools, tool => tool.ToolSpec is not null).ToolSpec.Name);
+    }
+
+    [Theory]
     [InlineData("openai.gpt-oss-20b-1:0", LlmReasoningLevel.Low, "low")]
     [InlineData("openai.gpt-oss-20b-1:0", LlmReasoningLevel.Medium, "medium")]
     [InlineData("openai.gpt-oss-20b-1:0", LlmReasoningLevel.High, "high")]

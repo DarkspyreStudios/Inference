@@ -2752,6 +2752,9 @@ raw `cache_control` options.
 Bedrock Converse and ConverseStream share one exact model-ID cache fact lookup after the existing
 geographic-prefix removal. Only documented Claude and Nova IDs receive markers or cache support.
 Claude supports system, tool and message points; Nova supports system and message points only.
+Nova's conversation checkpoint follows the latest message without tool-use or tool-result blocks.
+Tool exchanges remain unchanged. If every message contains tool blocks, Nova receives no message
+checkpoint; an existing system checkpoint remains available.
 Default omits `ttl` and uses the provider's five-minute behavior. Supplying `ttl`, even `5m`,
 activates extended-TTL handling and causes Nova requests to fail. Extended supplies `1h` only for
 documented supporting Claude IDs and otherwise retains the default behavior. Supported Claude and
