@@ -207,7 +207,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         }
         if (processResult.ExitCode != 0 || processResult.StandardInputError is not null)
         {
-            throw CreateExitException(processResult);
+            throw CreateExitException(processResult, response?.Error);
         }
         if (parseException is not null)
         {
@@ -412,8 +412,10 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                     : string.Empty;
             if (!status.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase))
             {
+                string? error = AntigravityProtocol.ReadError(root);
                 throw new LlmProviderException(
-                    "Antigravity CLI reported an account-usage error. Run agy in a terminal to verify sign-in.",
+                    "Antigravity CLI reported an account-usage error. Run agy in a terminal to verify sign-in."
+                        + (error is null ? string.Empty : $" CLI detail: {error}"),
                     Transport,
                     providerCode: "antigravity_cli_usage_error");
             }
@@ -768,7 +770,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         return models;
     }
 
-    private static LlmProviderException CreateExitException(AntigravityCliProcessResult result)
+    private static LlmProviderException CreateExitException(AntigravityCliProcessResult result, string? terminalError = null)
     {
         bool authenticationFailure = result.StandardError.Contains("auth", StringComparison.OrdinalIgnoreCase)
             || result.StandardError.Contains("login", StringComparison.OrdinalIgnoreCase)
@@ -779,10 +781,11 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         string guidance = authenticationFailure
             ? " Run agy in a terminal and complete sign-in."
             : string.Empty;
-        string diagnostic = authenticationFailure ? string.Empty : BuildProcessDiagnostic(result);
+        string diagnostic = terminalError ?? ReadExitError(result.StandardOutput)
+            ?? (authenticationFailure ? string.Empty : BuildProcessDiagnostic(result));
         string inputFailure = result.StandardInputError is null
             ? string.Empty
-            : $" {result.StandardInputError}";
+            : $" {AntigravityProtocol.SanitizeDiagnostic(result.StandardInputError)}";
         string diagnosticSuffix = diagnostic.Length == 0
             ? string.Empty
             : $" CLI detail: {diagnostic}";
@@ -794,6 +797,22 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             LlmTransport.GoogleAntigravityCli,
             providerCode: providerCode,
             sanitizedResponseBody: diagnostic.Length == 0 ? null : diagnostic);
+    }
+
+    private static string? ReadExitError(string output)
+    {
+        if (!output.TrimStart().StartsWith('{')) return null;
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(output);
+            JsonElement root = document.RootElement;
+            return root.ValueKind == JsonValueKind.Object
+                ? AntigravityProtocol.ReadError(LlmJson.GetObject(root, "result") ?? root) : null;
+        }
+        catch (JsonException)
+        {
+            return "CLI exit output could not be read as a result envelope.";
+        }
     }
 
     private static string BuildProcessDiagnostic(AntigravityCliProcessResult result)

@@ -181,9 +181,12 @@ internal static class AntigravityProtocol
             String(result, "response") ?? string.Empty,
             structured,
             ParseUsage(result),
-            String(result, "error") is { } error && !string.IsNullOrWhiteSpace(error)
-                ? SanitizeDiagnostic(error) : null);
+            ReadError(result));
     }
+
+    internal static string? ReadError(JsonElement result) =>
+        String(result, "error") is { } error && !string.IsNullOrWhiteSpace(error)
+            ? SanitizeDiagnostic(error) : null;
 
     /// <summary>The existing bounded CLI diagnostic policy, shared by stderr and terminal errors.</summary>
     internal static string SanitizeDiagnostic(string source)

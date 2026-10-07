@@ -14,6 +14,27 @@ public sealed class AntigravityCliLlmClientTests
 {
     private const string ErrorDetail = """{"access_token":"diagnostic-secret","detail":"The selected model is unavailable in this region."}""";
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public async Task AccountUsageFailureKeepsTheSafeTerminalDetailWithoutExposingNestedSecrets(int exitCode)
+    {
+        const string detail = """{"access_token":"usage-secret","detail":"Quota report is unavailable for this account."}""";
+        var runner = new RecordingRunner(new(exitCode,
+            new JsonObject { ["status"] = "ERROR", ["response"] = string.Empty, ["error"] = detail }.ToJsonString(), string.Empty));
+        var client = new AntigravityCliLlmClient(runner);
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => client.GetAccountUsageAsync(Connection()));
+
+        Assert.Equal(exitCode == 0 ? "antigravity_cli_usage_error" : "antigravity_cli_exit_1", failure.ProviderCode);
+        Assert.Contains("Quota report is unavailable for this account.", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("usage-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("usage-secret", failure.SanitizedResponseBody ?? string.Empty, StringComparison.Ordinal);
+        AntigravityCliInvocation invocation = Assert.Single(runner.Invocations);
+        Assert.Contains("--print=/usage", invocation.Arguments);
+    }
+
     [Fact]
     public async Task AccountUsagePreservesCliTablePercentagesAndResetTimes()
     {

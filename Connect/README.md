@@ -4055,6 +4055,10 @@ returned when present; the sanitized CLI report is also retained in `Summary` be
 documents the slash-command response as human-readable text rather than a versioned JSON schema.
 The quota parser recognizes the CLI's tab-separated weekly remaining-limit rows. It preserves each
 model-group label, reported remaining percentage and reset timestamp in the normalized quota window.
+Account-usage and process-exit failures use the same bounded terminal-error projection as chat and
+native sessions. A JSON diagnostic inside the native error string is redacted before composition.
+The actual usage or exit error code remains unchanged. Raw terminal envelopes are not used in place
+of an available safe terminal error.
 
 ## Apple Foundation Models on device
 
