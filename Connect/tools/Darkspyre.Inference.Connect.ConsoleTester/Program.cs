@@ -79,7 +79,9 @@ internal static class Program
                 "usage" => await RunUsageAsync(llms, invocation, cancellation.Token),
                 "prompt" => await RunPromptAsync(llms, invocation, cancellation.Token),
                 "agy-probe" when invocation.Provider.Transport == LlmTransport.GoogleAntigravityCli =>
-                    await AntigravityProbe.RunAsync(llms, agent, invocation, cancellation.Token),
+                    await NativeCliProbe.RunAsync(llms, agent, invocation, cancellation.Token),
+                "claude-probe" when invocation.Provider.Transport == LlmTransport.AnthropicClaudeCli =>
+                    await NativeCliProbe.RunAsync(llms, agent, invocation, cancellation.Token),
                 "codex-probe" when invocation.Provider.Transport == LlmTransport.OpenAiCodex =>
                     await CodexProtocolProbe.RunAsync(llms, invocation.Provider.ConnectionId,
                         ParsePromptOptions(invocation.CommandArguments).Model, cancellation.Token),
@@ -805,6 +807,7 @@ internal static class Program
               darkspyre-inference-connect-tester models --provider <codex|antigravity|bedrock>
               darkspyre-inference-connect-tester usage  --provider <codex|claude|antigravity>
               darkspyre-inference-connect-tester agy-probe --provider antigravity [--model <id>] [--case all|text|structured|native-tools|session|resume|controls|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
+              darkspyre-inference-connect-tester claude-probe --provider claude [--model <id>] [--case all|resume|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
               darkspyre-inference-connect-tester codex-probe --provider codex --model <model-id>
               darkspyre-inference-connect-tester managed-probe --provider codex --model <model-id>
               darkspyre-inference-connect-tester prompt --provider <codex|claude|antigravity|bedrock|agentcore> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>]

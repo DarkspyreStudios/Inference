@@ -7,11 +7,11 @@ using Darkspyre.Inference.Connect.LLM;
 namespace Darkspyre.Inference.Connect.ConsoleTester;
 
 /// <summary>
-/// Explicit qualification of Antigravity native sessions through the public agent contract. Each case runs in
-/// a temporary workspace holding one fixture. No configuration is edited and no case is retried.
+/// Explicit qualification of retained CLI native sessions through the public agent contract. Each case runs in
+/// an isolated temporary workspace. No configuration is edited and no case is retried.
 /// </summary>
-internal sealed class AntigravityProbe(LlmAgentProviderService agents, string connectionId, string model, string workspace,
-    LlmProviderCapabilities capabilities)
+internal sealed class NativeCliProbe(LlmAgentProviderService agents, string connectionId, string model, string workspace,
+    LlmProviderCapabilities capabilities, LlmTransport transport)
 {
     private static readonly JsonElement Schema = JsonElement.Parse("""
         {"type":"object","properties":{"word":{"type":"string"}},"required":["word"]}
@@ -22,7 +22,9 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
 
     public int Turns => _turns;
 
-    public IReadOnlyList<ProbeCase> Cases =>
+    public IReadOnlyList<ProbeCase> Cases => transport == LlmTransport.AnthropicClaudeCli
+        ? [new("resume", ResumeAsync), new("cancel", CancelAsync)]
+        :
     [
         new("text", TextAsync), new("structured", StructuredAsync), new("native-tools", NativeToolsAsync),
         new("session", SessionAsync), new("resume", ResumeAsync), new("controls", ControlsAsync), new("cancel", CancelAsync)
@@ -41,15 +43,17 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
         {
             ready = false;
         }
-        Console.WriteLine($"Antigravity probe: CLI {await CliVersionAsync(token)}; explicit subscription turns; no automatic retries.");
-        string workspace = Directory.CreateTempSubdirectory("darkspyre-agy-probe").FullName;
+        bool claude = invocation.Provider.Transport == LlmTransport.AnthropicClaudeCli;
+        Console.WriteLine($"{(claude ? "Claude" : "Antigravity")} probe: CLI {await CliVersionAsync(claude ? "claude" : "agy", token)}; explicit subscription turns; no automatic retries.");
+        string workspace = Directory.CreateTempSubdirectory("darkspyre-native-cli-probe").FullName;
         try
         {
             LlmProviderCapabilities capabilities = ready
                 ? await llms.GetModelCapabilitiesAsync(invocation.Provider.ConnectionId, options.Model, token)
                 : new();
-            var probe = new AntigravityProbe(agents, invocation.Provider.ConnectionId, options.Model, workspace, capabilities);
-            await File.WriteAllTextAsync(Path.Combine(workspace, "fixture.txt"), probe._marker, token);
+            var probe = new NativeCliProbe(agents, invocation.Provider.ConnectionId, options.Model, workspace, capabilities,
+                invocation.Provider.Transport);
+            if (!claude) await File.WriteAllTextAsync(Path.Combine(workspace, "fixture.txt"), probe._marker, token);
             int exitCode = await ProbeRunner.RunAsync(probe.Cases, options, ready, Console.Out, token);
             Console.WriteLine($"Turn attempts: {probe.Turns}");
             return exitCode;
@@ -170,7 +174,10 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
         Interlocked.Increment(ref _turns);
         try
         {
-            await foreach (LlmAgentEvent item in session.RunTurnAsync(Turn("Write a long story about a lighthouse. Use no tools."), cancel.Token))
+            string prompt = transport == LlmTransport.AnthropicClaudeCli
+                ? "Write a 200-word description of a lighthouse. Use no tools."
+                : "Write a long story about a lighthouse. Use no tools.";
+            await foreach (LlmAgentEvent item in session.RunTurnAsync(Turn(prompt), cancel.Token))
             {
                 if (item is LlmAgentTextDeltaEvent)
                 {
@@ -184,6 +191,8 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
         }
         token.ThrowIfCancellationRequested();
         Require(cancelled, "The turn did not observe cancellation after a text delta.");
+        if (transport == LlmTransport.AnthropicClaudeCli)
+            return "caller cancellation observed after a text delta; owned session disposal completed";
         await RequireRejectedAsync(() => Drain(session.RunTurnAsync(Turn("Reply with OK."), token)));
         return "cancellation settled the local process; the session refuses further turns";
     }
@@ -191,7 +200,13 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
     private Task<ILlmAgentSession> StartAsync(CancellationToken token) =>
         agents.StartSessionAsync(connectionId, new LlmAgentSessionOptions { ModelId = model, Runtime = Runtime() }, token);
 
-    private LlmAgentNativeRuntimeOptions Runtime() => new() { WorkingDirectory = workspace, Policy = new LlmAgentProviderRuntimePolicy() };
+    private LlmAgentNativeRuntimeOptions Runtime() => new()
+    {
+        WorkingDirectory = workspace,
+        Policy = transport == LlmTransport.AnthropicClaudeCli
+            ? new LlmAgentHostRuntimePolicy { Sandbox = LlmAgentSandboxMode.ReadOnly, ApprovalPolicy = LlmAgentApprovalPolicy.Never }
+            : new LlmAgentProviderRuntimePolicy()
+    };
 
     private static LlmAgentTurnRequest Turn(string text) => new() { Input = [new LlmAgentTextContent(text)] };
 
@@ -252,11 +267,11 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
         throw new ProbeFailure("An unsupported operation was accepted.");
     }
 
-    private static async Task<string> CliVersionAsync(CancellationToken token)
+    private static async Task<string> CliVersionAsync(string executable, CancellationToken token)
     {
         try
         {
-            using var process = Process.Start(new ProcessStartInfo("agy", "--version")
+            using var process = Process.Start(new ProcessStartInfo(executable, "--version")
             {
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,

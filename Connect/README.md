@@ -4415,6 +4415,20 @@ tester creates an `AnthropicClaudeCli` connection with `Credential = null`; Dark
 or store the CLI credential. Enter `sonnet`, `opus`, another alias, or an exact model ID manually
 because the tester does not configure the optional HTTP catalog credential.
 
+`claude-probe` uses the shared native CLI probe for `resume` and `cancel`. Resume disposes the
+first session and requires a completed second turn in the same conversation with exact marker
+recall. Cancellation stops after the first text delta and requires caller cancellation plus
+successful owned-session disposal. It does not claim remote work termination or an unusable
+session after interruption. Both cases use Claude's read-only host runtime policy and no host tools.
+
+```bash
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- claude-probe --provider claude --model sonnet --case resume --repeat 1 --timeout-seconds 90
+```
+
+```bash
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- claude-probe --provider claude --model sonnet --case cancel --repeat 1 --timeout-seconds 90
+```
+
 Antigravity uses `--provider antigravity` (or `agy`). Run `agy` interactively once to sign in; the
 tester does not request or store a Google authorization code. `agy-probe` runs explicit live cases
 through the native session: `text`, `structured`, `native-tools`, `session`, `resume`, `controls` and

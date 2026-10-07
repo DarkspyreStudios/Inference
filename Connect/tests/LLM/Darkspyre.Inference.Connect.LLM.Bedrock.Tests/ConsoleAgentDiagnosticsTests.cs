@@ -55,13 +55,15 @@ public sealed class ConsoleAgentDiagnosticsTests
     }
 
     [Theory]
-    [InlineData(LlmAgentCompletionReason.Completed, 0)]
-    [InlineData(LlmAgentCompletionReason.ProviderFailure, 1)]
+    [InlineData(LlmTransport.GoogleAntigravityCli, LlmAgentCompletionReason.Completed, 0)]
+    [InlineData(LlmTransport.GoogleAntigravityCli, LlmAgentCompletionReason.ProviderFailure, 1)]
+    [InlineData(LlmTransport.AnthropicClaudeCli, LlmAgentCompletionReason.Completed, 0)]
+    [InlineData(LlmTransport.AnthropicClaudeCli, LlmAgentCompletionReason.ProviderFailure, 1)]
     public async Task ResumeProbeRequiresSuccessfulTerminalAfterMatchingText(
-        LlmAgentCompletionReason reason, int expectedExitCode)
+        LlmTransport transport, LlmAgentCompletionReason reason, int expectedExitCode)
     {
-        await using var agents = new LlmAgentProviderService(new ProbeConnections(), [new ResumeClient(reason)]);
-        var probe = new AntigravityProbe(agents, "probe-connection", "probe-model", Environment.CurrentDirectory, new());
+        await using var agents = new LlmAgentProviderService(new ProbeConnections(transport), [new ResumeClient(reason, transport)]);
+        var probe = new NativeCliProbe(agents, "probe-connection", "probe-model", Environment.CurrentDirectory, new(), transport);
         using var report = new StringWriter();
 
         int exitCode = await ProbeRunner.RunAsync(probe.Cases,
@@ -163,24 +165,24 @@ public sealed class ConsoleAgentDiagnosticsTests
         Assert.Contains("[error] The selected model requires an inference profile.", output, StringComparison.Ordinal);
     }
 
-    private sealed class ProbeConnections : ILlmConnectionSource
+    private sealed class ProbeConnections(LlmTransport transport) : ILlmConnectionSource
     {
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) =>
             Task.FromResult<LlmConnection?>(new()
             {
                 Version = "1",
-                Transport = LlmTransport.GoogleAntigravityCli,
-                Endpoint = "agy"
+                Transport = transport,
+                Endpoint = transport == LlmTransport.AnthropicClaudeCli ? "claude" : "agy"
             });
 
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
-    private sealed class ResumeClient(LlmAgentCompletionReason resumedReason) : ILlmAgentResumeClient
+    private sealed class ResumeClient(LlmAgentCompletionReason resumedReason, LlmTransport transport) : ILlmAgentResumeClient
     {
         private string? _remembered;
-        public LlmTransport Transport => LlmTransport.GoogleAntigravityCli;
+        public LlmTransport Transport => transport;
 
         public Task<ILlmAgentSession> StartSessionAsync(string connectionId, LlmConnection connection,
             LlmAgentSessionOptions options, CancellationToken cancellationToken = default) =>
