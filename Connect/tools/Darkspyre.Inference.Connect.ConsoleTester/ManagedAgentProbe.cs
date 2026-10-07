@@ -37,7 +37,7 @@ internal static class ManagedAgentProbe
         var omitted = await session.CaptureContextAsync(cancellationToken: cancellationToken);
         if (!omitted.Entries.Any(entry => entry.Message.OmittedAttachments.Count > 0))
         { throw new InvalidOperationException("Default capture must describe omitted attachments."); }
-        var persisted = JsonSerializer.Deserialize<LlmAgentContext>(JsonSerializer.Serialize(full))!;
+        var persisted = RoundTripContext(full);
         await using var reopened = await agents.StartSessionAsync(connectionId, options with
         { Context = persisted, ThreadId = session.ThreadId, SessionId = session.SessionId }, cancellationToken);
         result = await ReadAsync(reopened.RunTurnAsync(new()
@@ -97,6 +97,10 @@ internal static class ManagedAgentProbe
         Console.WriteLine("PASS: prospective budget, host compaction, same-run continuation, retained override, no duplicate prompt.");
         return 0;
     }
+
+    internal static LlmAgentContext RoundTripContext(LlmAgentContext context) =>
+        JsonSerializer.Deserialize(JsonSerializer.Serialize(context, ConnectLlmJson.AgentContext),
+            ConnectLlmJson.AgentContext)!;
 
     private static async Task<List<LlmAgentEvent>> ReadAsync(IAsyncEnumerable<LlmAgentEvent> stream)
     {

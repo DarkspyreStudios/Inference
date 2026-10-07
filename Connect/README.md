@@ -4118,6 +4118,9 @@ dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- managed-
 
 The first checks direct tools, attachments and state replay. The second checks the managed loop,
 JSON capture/reopen, fork and low-cap host compaction. Use a model returned by `models`.
+The managed tester persists captured contexts through `ConnectLlmJson.AgentContext` metadata.
+Its round-trip retains document bytes, tool identities and resource-selection facts without
+default reflection serialization.
 [Recorded results](docs/managed-agent-verification.md) distinguish live proof from deterministic tests.
 
 Pass `--attach-image path`, `--attach-document path`, `--effort <level>` (a reasoning level name such as `high` or `ExtraHigh`), or
