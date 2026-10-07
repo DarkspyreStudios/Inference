@@ -15,6 +15,29 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
+    [Fact]
+    public async Task ReadOnlySessionsAllowRegisteredHostToolsWithoutEnteringPlanMode()
+    {
+        var factory = new Factory(new ManualProcess());
+        await using ILlmAgentSession session = await new ClaudeAgentClient(factory).StartSessionAsync("connection", Connection(), new()
+        {
+            ModelId = "claude-test",
+            Runtime = new()
+            {
+                WorkingDirectory = _directory,
+                Policy = new LlmAgentHostRuntimePolicy { Sandbox = LlmAgentSandboxMode.ReadOnly, ApprovalPolicy = LlmAgentApprovalPolicy.Never }
+            },
+            Tools = [new LlmAgentToolDefinition { Name = "echo", InputSchema = Json(new { type = "object" }) }],
+            ToolHandler = (_, _) => Task.FromResult(LlmToolOutput.FromText("echo"))
+        });
+        IReadOnlyList<string> arguments = Assert.IsType<ClaudeCliSessionInvocation>(factory.Invocation).Arguments;
+        Assert.Equal("dontAsk", arguments[arguments.ToList().IndexOf("--permission-mode") + 1]);
+        Assert.Equal("Read", arguments[arguments.ToList().IndexOf("--tools") + 1]);
+        Assert.Equal("mcp__darkspyre-inference-connect__echo,Read", arguments[arguments.ToList().IndexOf("--allowedTools") + 1]);
+        Assert.Contains("--restricted", arguments);
+        Assert.DoesNotContain("--dangerously-skip-permissions", arguments);
+    }
+
     [Theory]
     [InlineData("result.json", false)]
     [InlineData("result.json", true)]

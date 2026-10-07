@@ -369,7 +369,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
     private static string PermissionMode(LlmAgentSandboxMode sandbox) => sandbox switch
     {
-        LlmAgentSandboxMode.ReadOnly => "plan",
+        LlmAgentSandboxMode.ReadOnly => "dontAsk",
         LlmAgentSandboxMode.WorkspaceWrite => "dontAsk",
         LlmAgentSandboxMode.DangerFullAccess => "bypassPermissions",
         _ => throw new ArgumentOutOfRangeException(nameof(sandbox))

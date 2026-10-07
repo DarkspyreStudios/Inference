@@ -3450,6 +3450,11 @@ Claude uses restricted mode and `--add-dir` for read-only/workspace sessions. A 
 with `NetworkAllowed = false` is rejected because the CLI cannot independently constrain Bash
 network access. AgentCore permits remote Harness-managed tools only with `DangerFullAccess`;
 local workspace restrictions cannot constrain remote tools.
+Read-only Claude sessions use `dontAsk`, not planning mode. The built-in tool set remains `Read`;
+the exact registered host MCP tools are pre-approved, and permission prompts remain disabled.
+The caller's handler owns the effects of its registered tools. This mode does not enable native
+file edits or shell commands. Claude's [permission contract](https://code.claude.com/docs/en/agent-sdk/permissions)
+separates explicit tool approval from planning mode's write restrictions.
 Claude start, resume and fork retire an unsuccessfully initialized session before returning.
 Successful cleanup preserves the original opening error. Failed cleanup returns an aggregate
 containing the original opening error followed by the cleanup error, without retrying cleanup.
