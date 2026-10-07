@@ -133,6 +133,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         IAsyncEnumerator<LlmStreamEvent>? iterator = null;
         Exception? failure = null;
         LlmChatCompletionEvent? terminal = null;
+        Exception PreserveGenerated(Exception error) => hostedPreparation is null ? error
+            : LlmResourcePreparation.WithGeneratedResources(error, hostedPreparation.GeneratedResources);
         try
         {
             try
@@ -168,7 +170,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             }
             catch (Exception error)
             {
-                failure = resources is null ? error : LlmResourcePreparation.AsResourceFailure(error, cancellationToken);
+                failure = PreserveGenerated(resources is null ? error : LlmResourcePreparation.AsResourceFailure(error, cancellationToken));
                 ExceptionDispatchInfo.Capture(failure).Throw();
                 throw;
             }
@@ -178,7 +180,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 try { moved = await iterator.MoveNextAsync().ConfigureAwait(false); Fence(); }
                 catch (Exception error)
                 {
-                    failure = resources is null ? error : LlmResourcePreparation.AsResourceFailure(error, cancellationToken);
+                    failure = PreserveGenerated(resources is null ? error : LlmResourcePreparation.AsResourceFailure(error, cancellationToken));
                     ExceptionDispatchInfo.Capture(failure).Throw();
                     throw;
                 }
@@ -200,13 +202,13 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             if (cleanup.Count > 0)
             {
                 if (failure is not null) cleanup.Insert(0, failure);
-                if (cleanup.Count == 1) ExceptionDispatchInfo.Capture(cleanup[0]).Throw();
-                ExceptionDispatchInfo.Capture(new AggregateException(cleanup)).Throw();
+                if (cleanup.Count == 1) ExceptionDispatchInfo.Capture(PreserveGenerated(cleanup[0])).Throw();
+                ExceptionDispatchInfo.Capture(PreserveGenerated(new AggregateException(cleanup))).Throw();
             }
         }
         try { Fence(); }
         catch (Exception error) when (resourceAdmitted)
-        { ExceptionDispatchInfo.Capture(LlmResourcePreparation.AsResourceFailure(error, cancellationToken)).Throw(); throw; }
+        { ExceptionDispatchInfo.Capture(PreserveGenerated(LlmResourcePreparation.AsResourceFailure(error, cancellationToken))).Throw(); throw; }
         if (terminal is not null) yield return terminal;
     }
 

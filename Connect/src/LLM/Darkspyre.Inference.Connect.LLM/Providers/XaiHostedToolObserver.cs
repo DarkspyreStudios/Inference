@@ -12,7 +12,6 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
     private readonly HashSet<string> _started = new(StringComparer.Ordinal);
     private readonly HashSet<string> _citationKeys = new(StringComparer.Ordinal);
     private readonly List<LlmCitation> _citations = [];
-    private readonly List<InferenceResourceCommitResult> _generated = [];
     private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
     private static readonly byte[] JpegSignature = [255, 216, 255];
     private bool _completed;
@@ -115,7 +114,7 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
     internal override LlmChatResult Decorate(LlmChatResult result) => result with
     {
         Citations = _citations.ToArray(),
-        GeneratedResources = _generated.ToArray()
+        GeneratedResources = preparation.GeneratedResources.ToArray()
     };
 
     private (LlmHostedToolKind Kind, string Name)? Identify(JsonElement item)
@@ -224,7 +223,7 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
         InferenceResourceSelectionVersion scope = preparation.Selection ?? throw malformed();
         SpeechResourceWriter.Writer? writer = null;
         Exception? failure = null;
-        _generated.EnsureCapacity(_generated.Count + 1);
+        preparation.GeneratedResources.EnsureCapacity(preparation.GeneratedResources.Count + 1);
         try
         {
             preparation.Fence();
@@ -233,7 +232,7 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
             await writer.WriteAsync(bytes, token).ConfigureAwait(false);
             InferenceResourceDescriptor descriptor = await writer.CommitAsync(token).ConfigureAwait(false);
             InferenceResourceCommitResult receipt = writer.ObservedCommit ?? throw malformed();
-            _generated.Add(receipt);
+            preparation.GeneratedResources.Add(receipt);
             output = output with { Resources = new[] { descriptor } };
         }
         catch (Exception error) { failure = error; }

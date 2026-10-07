@@ -465,7 +465,11 @@ Generated images decode bare base64 and identify JPEG/PNG from bytes. Without Re
 copied bytes. With Resources they use the existing admitted scope and staged resource writer,
 atomically commit-and-select, and release the owned write handle before hosted completion. The
 final result carries actual ordered commit receipts. Cleanup errors preserve original failures and
-uncertain mutation facts. Operation-local MCP secrets reach existing HTTP, SSE, protocol, model and
+uncertain mutation facts. The admitted hosted preparation frame retains the same receipt list through
+terminal parsing, publication and owned cleanup. A later malformed output or failed publication
+preserves earlier committed images in the existing resource failure carrier; it does not roll them
+back or publish a successful chat result. Borrowed authority detachment does not erase commit facts.
+Operation-local MCP secrets reach existing HTTP, SSE, protocol, model and
 terminal diagnostic sanitization; retained opaque terminal output is not rewritten.
 Managed sessions snapshot hosted data, borrow authorization and preserve actual streamed hosted
 and citation observations under the invocation RequestId; they never route hosted observations to

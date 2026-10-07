@@ -32,6 +32,8 @@ internal sealed class XaiHostedToolPreparation : IDisposable
     internal IReadOnlyList<string> Secrets => _authorization?.Secrets ?? [];
     internal IInferenceResourceAccess? Resources => _resources;
     internal InferenceResourceSelectionVersion? Selection { get; }
+    // Commit facts outlive borrowed authority detachment so late failures can retain them.
+    internal List<InferenceResourceCommitResult> GeneratedResources { get; } = [];
 
     internal void RecordCleanup(Exception error) => _recordCleanup?.Invoke(error);
 

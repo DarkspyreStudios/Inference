@@ -13,6 +13,69 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ResourcePreparationTests
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task HostedImageFailureRetainsTheEarlierCommittedResource(bool streaming, bool cancelAfterHosted)
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var handler = new HostedImages(streaming, cancelAfterHosted);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        LlmConnection connection = ResourceResults.Connection() with
+        { CapabilityOverrides = new() { SupportsStreaming = streaming } };
+        GeneratedWrite? write = null;
+        var workspace = new Resources(new("workspace", "session", 3, []), [])
+        {
+            WriteFactory = create => write = new GeneratedWrite("workspace", create, () => { })
+        };
+        await using var provider = new LlmProviderService(new Source(connection), [client]);
+        var events = new List<LlmStreamEvent>();
+        var request = new LlmChatRequest
+        {
+            ModelId = "grok-4.7",
+            Messages = [new("user", "Create images")],
+            HostedTools = [new LlmImageGenerationTool()],
+            Resources = workspace
+        };
+        IAsyncEnumerable<LlmStreamEvent> stream = cancelAfterHosted
+            ? client.StreamAsync(connection, request, cancellation.Token)
+            : provider.StreamAsync("connection", request, cancellation.Token);
+
+        Exception? failure = await Record.ExceptionAsync(async () =>
+        {
+            await foreach (LlmStreamEvent item in stream)
+            {
+                events.Add(item);
+                if (cancelAfterHosted && item is LlmHostedToolCallCompletedEvent) cancellation.Cancel();
+            }
+        });
+
+        Assert.Equal(HostedImages.Png, write!.CommittedBytes);
+        Assert.True(write.Disposed);
+        Assert.DoesNotContain(events, item => item is LlmChatCompletionEvent);
+        InferenceResourceOperationFailure facts;
+        if (cancelAfterHosted)
+        {
+            var canceled = Assert.IsType<InferenceResourceOperationCanceledException>(failure);
+            Assert.True(canceled.CancellationToken.IsCancellationRequested);
+            Assert.Single(events.OfType<LlmHostedToolCallCompletedEvent>());
+            facts = canceled.Failure;
+        }
+        else facts = Assert.IsType<InferenceResourceOperationException>(failure).Failure;
+        InferenceResourceOperationFailure restored = JsonSerializer.Deserialize(
+            JsonSerializer.SerializeToUtf8Bytes(facts, InferenceJson.InferenceResourceOperationFailure),
+            InferenceJson.InferenceResourceOperationFailure)!;
+        InferenceResourceCommitResult committed = Assert.Single(restored.GeneratedResources);
+        Assert.Equal(write.Reference, committed.Resource.Reference);
+        Assert.Equal("image/png", committed.Resource.ContentType);
+        Assert.Equal(4, committed.Selection!.Revision);
+        Assert.Equal([write.Reference], committed.Selection.SelectedResources);
+        Assert.Equal(1, handler.Requests);
+    }
+
     [Fact]
     public async Task DeferredChatUsesTheSharedStrictFunctionRootAdmissionBeforeDispatch()
     {
@@ -754,6 +817,47 @@ public sealed class ResourcePreparationTests
                     + "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
                     System.Text.Encoding.UTF8, "text/event-stream")
             };
+        }
+    }
+
+    private sealed class HostedImages(bool streaming, bool singleImage) : HttpMessageHandler
+    {
+        private const string Image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=";
+        public static byte[] Png => Convert.FromBase64String(Image);
+        public int Requests { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (request.Method == HttpMethod.Get)
+            {
+                string path = request.RequestUri!.AbsolutePath;
+                Assert.True(path is "/v1/models" or "/v1/language-models", path);
+                string array = path == "/v1/models" ? "data" : "models";
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                { Content = new StringContent($"{{\"{array}\":[{{\"id\":\"grok-4.7\"}}]}}") });
+            }
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal(new Uri("https://api.x.ai/v1/responses"), request.RequestUri);
+            Requests++;
+            var output = new JsonArray(new JsonObject
+            { ["type"] = "image_generation_call", ["id"] = "image-1", ["status"] = "completed", ["result"] = Image });
+            if (!singleImage) output.Add(item: new JsonObject
+            { ["type"] = "image_generation_call", ["id"] = "image-2", ["status"] = "completed", ["result"] = "invalid base64!" });
+            var response = new JsonObject
+            {
+                ["id"] = "response-1",
+                ["model"] = "grok-4.7",
+                ["status"] = "completed",
+                ["output"] = output
+            };
+            string body = streaming
+                ? "data: " + new JsonObject { ["type"] = "response.completed", ["response"] = response }.ToJsonString() + "\n\n"
+                : response.ToJsonString();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, streaming ? "text/event-stream" : "application/json")
+            });
         }
     }
 
