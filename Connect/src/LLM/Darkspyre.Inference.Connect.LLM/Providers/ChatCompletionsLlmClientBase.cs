@@ -575,7 +575,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         };
         if (content is not null) { item["reasoning_content"] = content; }
         if (details is not null) { item["reasoning_details"] = details; }
-        return Codec.Encode(connection, modelId, [item]);
+        return Codec.Encode(connection, modelId, new JsonArray(item));
     }
 
     protected virtual JsonObject BuildPayload(
