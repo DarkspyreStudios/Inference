@@ -189,6 +189,7 @@ internal static class XaiSchemaLimits
         string pattern = value.GetString()!;
         SchemaDisposition disposition = SchemaDisposition.Guaranteed;
         bool characterClass = false;
+        int groupDepth = 0;
         for (int index = 0; index < pattern.Length; index++)
         {
             char atom = pattern[index];
@@ -209,15 +210,25 @@ internal static class XaiSchemaLimits
             else if (atom == ']') characterClass = false;
             else if (!characterClass && atom == '.')
                 disposition = Merge(disposition, SchemaDisposition.OutsideGuarantee);
-            else if (!characterClass && atom == '(' && index + 2 < pattern.Length && pattern[index + 1] == '?')
+            else if (!characterClass && atom == '(')
             {
-                char introducer = pattern[index + 2];
-                bool lookbehind = introducer == '<' && index + 3 < pattern.Length && pattern[index + 3] is '=' or '!';
-                if (introducer is '=' or '!' or 'i' or 'm' or 's' or '-' || lookbehind)
-                    disposition = Merge(disposition, SchemaDisposition.ProviderRejected);
-                else if (introducer != ':') disposition = Merge(disposition, SchemaDisposition.OutsideGuarantee);
+                groupDepth++;
+                if (index + 2 < pattern.Length && pattern[index + 1] == '?')
+                {
+                    char introducer = pattern[index + 2];
+                    bool lookbehind = introducer == '<' && index + 3 < pattern.Length && pattern[index + 3] is '=' or '!';
+                    if (introducer is '=' or '!' or 'i' or 'm' or 's' or '-' || lookbehind)
+                        disposition = Merge(disposition, SchemaDisposition.ProviderRejected);
+                    else if (introducer != ':') disposition = Merge(disposition, SchemaDisposition.OutsideGuarantee);
+                }
+            }
+            else if (!characterClass && atom == ')')
+            {
+                if (groupDepth == 0) return SchemaDisposition.InvalidSchema;
+                groupDepth--;
             }
         }
+        if (groupDepth != 0) return SchemaDisposition.InvalidSchema;
         return characterClass ? Merge(disposition, SchemaDisposition.OutsideGuarantee) : disposition;
     }
 

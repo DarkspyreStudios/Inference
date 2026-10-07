@@ -35,6 +35,8 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData("{\"$schema\":\"https://schemas.example.test/custom-dialect\",\"type\":\"object\",\"properties\":17}", false)]
     [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"\\p{L}"}}}""", false)]
     [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"(?i:a)"}}}""", false)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"(?:x"}}}""", true)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"x)"}}}""", true)]
     public async Task GrokSchemaAdmissionDistinguishesMalformedValuesFromNativeRejections(string schema, bool malformed)
     {
         const string body = """
@@ -103,6 +105,8 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"^x[.]?$"}}}""", true)]
     [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"^x\\.?$"}}}""", true)]
     [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"^[(?=]?x$"}}}""", true)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"^(?:x)$"}}}""", true)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"^[()]?x\\)?$"}}}""", true)]
     public async Task GrokSchemaAdmissionPreservesBooleanClosureAndLiteralPayloads(string schema, bool validOutput)
     {
         await CheckReferenceAdmission(JsonElement.Parse(schema), guaranteed: true, validOutput);

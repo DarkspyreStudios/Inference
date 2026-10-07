@@ -3042,7 +3042,9 @@ have no native admission. Unescaped dot outside a class remains outside guarante
 [xAI dot-all matching](https://docs.x.ai/developers/model-capabilities/text/structured-outputs#regex-support-pattern)
 can accept a newline rejected by the original schema. Literal escaped dots and class dots keep their
 admission. Other alphanumeric escapes and unlisted group introducers remain unproven, not invented
-provider rejections. Unterminated escapes and classes also remain unproven. No provider regex-length
+provider rejections. Unmatched active group delimiters fail before dispatch, including with explicit
+local fallback. Escaped parentheses and character-class literals do not alter group balance.
+Unterminated escapes and classes also remain unproven. No provider regex-length
 or repetition cutoff is added. This support scan is
 not complete regex syntax validation or proof of full Unicode/dialect matching equivalence.
 Response schemas outside native admission retain explicit original-schema local fallback; non-strict
