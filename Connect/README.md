@@ -991,6 +991,9 @@ the registered authenticator. A changed credential is saved through `SaveCredent
 resolved expected version. A rejected save fails the operation without retry or fallback. Adapters
 that ignore stored credentials retain that policy. Non-OAuth credentials remain unchanged.
 
+`LlmAuthorizationSession` and `LlmRedirectResult` diagnostic strings omit URLs, authorization
+codes, state and PKCE verifiers. Their members retain the actual values for authentication.
+
 `AddLlmConnect` registers one scoped access owner shared by chat and embeddings. A facade built by
 hand without an injected access owner creates and retires its own. An injected owner must use the
 same connection source and remains borrowed. Retiring a facade cancels its credential operations

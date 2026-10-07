@@ -21,10 +21,16 @@ public sealed record LlmAuthorizationSession
     public required string CodeVerifier { get; init; }
 
     public required string RedirectUri { get; init; }
+
+    /// <summary>Returns a diagnostic string without authorization secrets.</summary>
+    public override string ToString() => "LlmAuthorizationSession { Redacted }";
 }
 
 public sealed record LlmRedirectResult(string Code, string State)
 {
+    /// <summary>Returns a diagnostic string without authorization secrets.</summary>
+    public override string ToString() => "LlmRedirectResult { Redacted }";
+
     public static LlmRedirectResult ParsePastedCode(string pasted)
     {
         string value = (pasted ?? string.Empty).Trim();

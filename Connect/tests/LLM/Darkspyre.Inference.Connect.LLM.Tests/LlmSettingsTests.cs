@@ -10,6 +10,34 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class LlmSettingsTests
 {
     [Fact]
+    public void AuthorizationGrantDiagnosticsDoNotExposeCodesOrVerifiers()
+    {
+        var session = new LlmAuthorizationSession
+        {
+            AuthorizeUrl = "https://example.test/authorize?state=private-state",
+            State = "private-state",
+            CodeVerifier = "private-pkce-verifier",
+            RedirectUri = "http://localhost/callback"
+        };
+        LlmRedirectResult redirect = LlmRedirectResult.ParsePastedCode("private-code#private-state");
+
+        string sessionDiagnostic = session.ToString();
+        string redirectDiagnostic = redirect.ToString();
+
+        Assert.DoesNotContain(session.CodeVerifier, sessionDiagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain(session.State, sessionDiagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain(redirect.Code, redirectDiagnostic, StringComparison.Ordinal);
+        Assert.DoesNotContain(redirect.State, redirectDiagnostic, StringComparison.Ordinal);
+        Assert.Contains(nameof(LlmAuthorizationSession), sessionDiagnostic, StringComparison.Ordinal);
+        Assert.Contains(nameof(LlmRedirectResult), redirectDiagnostic, StringComparison.Ordinal);
+        Assert.Equal("private-pkce-verifier", session.CodeVerifier);
+        Assert.Equal("private-state", session.State);
+        Assert.Equal("https://example.test/authorize?state=private-state", session.AuthorizeUrl);
+        Assert.Equal("http://localhost/callback", session.RedirectUri);
+        Assert.Equal(new LlmRedirectResult("private-code", "private-state"), redirect);
+    }
+
+    [Fact]
     public void AntigravitySetupCatalogNamesTheCliWithoutChangingProviderIdentity()
     {
         var catalog = new LlmProviderCatalog([ProviderDefinitions.GeminiSubscription]);
