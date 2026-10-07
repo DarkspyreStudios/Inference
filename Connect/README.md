@@ -3995,6 +3995,8 @@ their credential-store identities. Credential entry/sign-in commands retain the 
 flows described below; listing another adapter does not provision its credentials.
 Codex uses host-owned device OAuth stored in `Darkspyre.SecureStore`; Claude and Antigravity keep
 CLI-owned credentials. The tester also stores host-owned AWS profile/region configuration.
+Agent completion diagnostics include both status and the actual completion reason. The tester
+prints an existing completion error separately; it does not replace it with a generic status.
 
 ### Apple console harness
 

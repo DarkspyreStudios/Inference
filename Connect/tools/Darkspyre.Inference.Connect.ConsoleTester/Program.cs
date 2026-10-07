@@ -610,9 +610,15 @@ internal static class Program
                 break;
             case LlmAgentTurnCompletedEvent completed:
                 Console.WriteLine();
-                Console.Error.WriteLine($"[completed] status={completed.Status}");
+                WriteAgentCompletion(completed, Console.Error);
                 break;
         }
+    }
+
+    internal static void WriteAgentCompletion(LlmAgentTurnCompletedEvent completed, TextWriter diagnostics)
+    {
+        diagnostics.WriteLine($"[completed] status={completed.Status} reason={completed.Reason}");
+        if (completed.Error is { Length: > 0 } error) diagnostics.WriteLine($"[error] {error}");
     }
 
     private static PromptOptions ParsePromptOptions(string[] args, string? defaultModel = null)
