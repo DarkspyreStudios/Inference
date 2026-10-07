@@ -134,7 +134,7 @@ public static class InferenceJson
 
     private sealed class HostedTypeInfoResolver : IJsonTypeInfoResolver
     {
-        private readonly HostedImageDataJsonConverter imageData = new((JsonConverter<ReadOnlyMemory<byte>>)InferenceJsonContext.Default.Options.GetConverter(typeof(ReadOnlyMemory<byte>)));
+        private readonly HostedImageDataJsonConverter imageData = new((JsonConverter<ReadOnlyMemory<byte>>)InferenceJsonContext.Default.Options.GetTypeInfo<ReadOnlyMemory<byte>>().Converter);
         private readonly RealtimeNullableAudioJsonConverter observedAudio;
         public HostedTypeInfoResolver() => observedAudio = new(imageData);
 

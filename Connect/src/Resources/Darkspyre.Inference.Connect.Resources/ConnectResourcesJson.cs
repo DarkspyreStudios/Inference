@@ -56,7 +56,7 @@ public static class ConnectResourcesJson
         foreach (Type type in new[] { typeof(LlmAgentCallerServices), typeof(ILlmAgentPermissionSelector),
             typeof(ILlmAgentTextFileReader), typeof(ILlmAgentTextFileWriter), typeof(ILlmAgentTerminalFactory),
             typeof(ILlmAgentTerminal), typeof(ILlmAgentShellExecutor) })
-            options.Converters.Add(ConnectLlmJson.ChatRequest.Options.GetConverter(type));
+            options.Converters.Add(ConnectLlmJson.ChatRequest.Options.GetTypeInfo(type).Converter);
         options.MakeReadOnly();
         return options;
     }
