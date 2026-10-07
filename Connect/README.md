@@ -2985,6 +2985,10 @@ One short prompt on the selected `grok-4.20-0309-non-reasoning` model returns `G
 `Completed` with finish reason `completed`, and usage of 194 input and 7 output tokens.
 These checks use the public facade without retries or app credential access. They do not qualify
 the UnitedStates route, token refresh, other models, tools, structured output or media.
+On that same selected model and route, one managed turn with a three-iteration cap completes
+the existing echo callback and replays its successful text result. The turn completes after two
+model steps with final answer `GROK-121-ECHO-OK`. No retry, other tool, upload or media operation
+occurs. This qualifies ordinary client-tool replay, not strict functions or hosted tools.
 
 `XaiErrorClassifier` supplies one sanitized HTTP failure policy. It maps 401 and the specified
 token-validation 403 message to `AuthenticationRequired`, and 402 or a blocked account to the named
