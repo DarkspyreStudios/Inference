@@ -22,7 +22,7 @@ internal sealed class GeminiArgumentStream
         if (_part is null)
         {
             string? name = (string?)function["name"];
-            if (string.IsNullOrWhiteSpace(name) || (bool?)function["willContinue"] != true && !function.ContainsKey("partialArgs")) { throw Failure(); }
+            if (string.IsNullOrWhiteSpace(name)) { throw Failure(); }
             string id = (string?)function["id"] ?? createId();
             if (string.IsNullOrWhiteSpace(id)) { throw Failure(); }
             var whole = new JsonObject { ["name"] = name };

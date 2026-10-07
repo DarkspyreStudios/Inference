@@ -1471,6 +1471,11 @@ Vertex typed function-argument streams accept dot names and single- or double-qu
 names in their JSONPath property selectors. Both quoted forms preserve the exact decoded property
 name and share indexed-array reconstruction. Returned calls, portable results and retained
 thought-signature continuations carry the same reconstructed arguments.
+An initial named no-argument call also completes when `willContinue` is explicitly false and
+`partialArgs` is absent. The [Vertex function-call contract](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/Content#FunctionCall)
+defines false and omitted `willContinue` as final. Both forms retain the actual call identity and
+thought signature, expose empty portable arguments and produce a replayable continuation after a
+recognized successful tool stop. An unnamed initial fragment still refuses.
 
 Responses reports `Unknown` for an unrecognized native status and does not publish continuation
 state from that outcome. Tool calls alone do not establish successful completion. Direct Codex
