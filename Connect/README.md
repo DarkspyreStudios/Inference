@@ -1765,9 +1765,10 @@ and switches, cannot exceed [8191 characters](https://learn.microsoft.com/en-us/
 resolved Node arguments. An AGY prompt still has its separate platform argument-size bound and
 process-list exposure; a batch launch can hit the smaller command-line bound first.
 
-Launcher tests exercise planning with filesystem fixtures and actual managed argument round trips.
-Windows batch execution, cancellation and installed-Node round trips are conditional tests. A
-non-Windows run reports them as skipped; it does not qualify Windows invocation.
+The POSIX launcher test checks inherited-PATH precedence, skipped non-executable files,
+user-local CLI lookup and explicit paths with real filesystem entries. A shell fixture verifies
+literal arguments without shell expansion. The test skips on Windows and does not qualify
+Windows batch or Node invocation.
 
 ## Document search contracts
 
