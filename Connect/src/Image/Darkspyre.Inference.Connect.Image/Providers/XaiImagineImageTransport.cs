@@ -328,13 +328,14 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
         ImageConnection captured = connection with
         { AdditionalHeaders = new ReadOnlyDictionary<string, string>(connection.AdditionalHeaders.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase)) };
         XaiFamilyBinding? bound = null;
+        LlmConnection? snapshot = null;
         T? result = default;
         try
         {
             bound = await xai!.AcquireBoundAsync(selected => ValidateSelected(captured, selected),
                 () => Fence(operation.Token), operation.Token).ConfigureAwait(false);
             void Check() => Fence(operation.Token, bound);
-            LlmConnection snapshot = await bound.AcquireAsync(operation.Token).ConfigureAwait(false);
+            snapshot = await bound.AcquireAsync(operation.Token).ConfigureAwait(false);
             Check();
             result = await action(captured, bound, snapshot, Check, operation.Token).ConfigureAwait(false);
             Check();
@@ -345,7 +346,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
             if (result is ImagePreparedReference reference)
                 error = LlmResourcePreparation.WithGeneratedResources(error, PreparedResources(reference).ToArray());
             RecordCleanup(error);
-            Exception safe = SafeFailure(error);
+            Exception safe = SafeFailure(error, snapshot, captured.AdditionalHeaders.Values.ToArray());
             ExceptionDispatchInfo.Throw(safe);
             throw;
         }
@@ -381,7 +382,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
             fence();
             result = XaiImageProtocol.Parse(text, value => value != SecretRedactor.Sanitize(value, credential, secrets), fence);
         }
-        catch (Exception error) { errors.Add(SafeFailure(error)); }
+        catch (Exception error) { errors.Add(SafeFailure(error, snapshot, connection.AdditionalHeaders.Values.ToArray())); }
         finally
         {
             if (response is not null)
@@ -560,25 +561,30 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
                 "The image resource materialization failed.", facts, error);
     }
 
-    internal static Exception SafeFailure(Exception error) => error switch
-    {
-        ImageEvidence => error,
-        AggregateException aggregate => new AggregateException("The image operation failed.", aggregate.InnerExceptions.Select(SafeFailure)),
-        InferenceResourceOperationException resource => RetainResource(resource, new InferenceResourceOperationException(resource.Code,
-            "The image resource operation failed.", resource.Failure,
-            new ImageEvidence(resource, resource.InnerException is { } cause ? SafeFailure(cause) : null))),
-        InferenceResourceOperationCanceledException resource => RetainResource(resource, new InferenceResourceOperationCanceledException(resource.Failure,
-            resource.CancellationToken, new ImageEvidence(resource, resource.InnerException is { } cause ? SafeFailure(cause) : null))),
-        OperationCanceledException canceled => new OperationCanceledException("The image operation was interrupted.", new ImageEvidence(canceled), canceled.CancellationToken),
-        InferenceException { InnerException: LlmProviderException provider } inference => new InferenceException(inference.Code,
-            "Image authorization or access failed.", SafeFailure(provider)),
-        LlmProviderException provider => new LlmProviderException("The image provider request failed.", LlmTransport.XaiResponses,
-            provider.StatusCode, provider.ProviderCode is "xai_authentication_required" or "xai_entitlement_required" ? provider.ProviderCode : null,
-            requestId: provider.RequestId, retryAfter: provider.RetryAfter, innerException: new ImageEvidence(provider), isContextOverflow: provider.IsContextOverflow),
-        InferenceException inference => new InferenceException(inference.Code, "The image operation failed.", new ImageEvidence(inference)),
-        _ => new InferenceException(error is JsonException ? InferenceFailureCode.ProtocolFailure : InferenceFailureCode.ExecutionFailed,
-            "The image operation failed.", new ImageEvidence(error))
-    };
+    internal static Exception SafeFailure(Exception error, LlmConnection? snapshot = null,
+        IReadOnlyList<string>? additionalSecrets = null) => error switch
+        {
+            ImageEvidence => error,
+            AggregateException aggregate => new AggregateException("The image operation failed.",
+                aggregate.InnerExceptions.Select(item => SafeFailure(item, snapshot, additionalSecrets))),
+            InferenceResourceOperationException resource => RetainResource(resource, new InferenceResourceOperationException(resource.Code,
+                "The image resource operation failed.", resource.Failure,
+                new ImageEvidence(resource, resource.InnerException is { } cause ? SafeFailure(cause, snapshot, additionalSecrets) : null))),
+            InferenceResourceOperationCanceledException resource => RetainResource(resource, new InferenceResourceOperationCanceledException(resource.Failure,
+                resource.CancellationToken, new ImageEvidence(resource, resource.InnerException is { } cause ? SafeFailure(cause, snapshot, additionalSecrets) : null))),
+            OperationCanceledException canceled => new OperationCanceledException("The image operation was interrupted.", new ImageEvidence(canceled), canceled.CancellationToken),
+            InferenceException { InnerException: LlmProviderException provider } inference => new InferenceException(inference.Code,
+                "Image authorization or access failed.", SafeFailure(provider, snapshot, additionalSecrets)),
+            LlmProviderException provider => new LlmProviderException("The image provider request failed.", LlmTransport.XaiResponses,
+                provider.StatusCode, provider.ProviderCode is { } code && (snapshot is not null || provider.InnerException is ImageEvidence
+                    || code is "xai_authentication_required" or "xai_entitlement_required")
+                    ? SecretRedactor.Sanitize(code, LlmCredential.Parse(snapshot?.Credential),
+                        (snapshot?.AdditionalHeaders.Values ?? []).Concat(additionalSecrets ?? [])) : null,
+                requestId: provider.RequestId, retryAfter: provider.RetryAfter, innerException: new ImageEvidence(provider), isContextOverflow: provider.IsContextOverflow),
+            InferenceException inference => new InferenceException(inference.Code, "The image operation failed.", new ImageEvidence(inference)),
+            _ => new InferenceException(error is JsonException ? InferenceFailureCode.ProtocolFailure : InferenceFailureCode.ExecutionFailed,
+                "The image operation failed.", new ImageEvidence(error))
+        };
 
     private static Exception RetainResource(Exception original, Exception safe) => LlmResourcePreparation.IsCleanupFailure(original)
         ? LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: original) : safe;

@@ -50,11 +50,16 @@ public sealed class XaiImagineImageTransportTests
             transport.SubmitAsync(connection, prepared, binding));
 
         Assert.Equal("image-request-[REDACTED]", failure.RequestId);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]", failure.ProviderCode);
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
         Assert.Equal(TimeSpan.FromSeconds(17), failure.RetryAfter);
         Assert.DoesNotContain(token, failure.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("private generated prompt", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("provider-secret", failure.ToString(), StringComparison.Ordinal);
         Assert.Null(failure.SanitizedResponseBody);
+        LlmProviderException projected = Assert.IsType<LlmProviderException>(XaiImagineImageTransport.SafeFailure(failure));
+        Assert.Equal(failure.ProviderCode, projected.ProviderCode);
+        Assert.Equal(failure.RequestId, projected.RequestId);
         Assert.Equal(1, handler.Sends);
     }
 
@@ -90,7 +95,8 @@ public sealed class XaiImagineImageTransportTests
             Assert.Equal("/v1/images/generations", request.RequestUri!.AbsolutePath);
             var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
             {
-                Content = new StringContent("""{"error":{"message":"private generated prompt and image"}}""")
+                Content = new StringContent("{\"error\":{\"code\":\"rate_limit_" + token
+                    + "_provider-secret\",\"message\":\"private generated prompt and image\",\"refresh_token\":\"provider-secret\"}}")
             };
             response.Headers.Add("x-request-id", "image-request-" + token);
             response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(17));
