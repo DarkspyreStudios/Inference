@@ -648,6 +648,52 @@ public sealed class BedrockSafetyTests
     }
 
     [Fact]
+    public void DocumentNamesAreUniqueAcrossPromptAndToolMessagesInBothConverseModes()
+    {
+        var attachment = new LlmAttachment
+        {
+            Kind = LlmBinaryKind.Document,
+            FileName = "reference.txt",
+            MediaType = "text/plain",
+            Data = "reference"u8.ToArray()
+        };
+        LlmToolOutput output = new()
+        {
+            Parts = [new LlmToolOutputBinary(LlmBinaryKind.Document,
+                "text/plain", "tool document"u8.ToArray(), "reference.txt")]
+        };
+        ConverseRequest request = BedrockLlmClient.BuildRequest(Connection(), Request(messages:
+        [
+            new("user", "Read both references") { Attachments = [attachment, attachment] },
+            new("assistant", string.Empty)
+            {
+                ToolCalls = [new LlmToolCall("first", "read", "{}"), new LlmToolCall("second", "read", "{}")]
+            },
+            new("user", string.Empty)
+            {
+                ToolResults = [new LlmToolResult("first", output), new LlmToolResult("second", output)]
+            },
+            new("assistant", string.Empty) { ToolCalls = [new LlmToolCall("third", "read", "{}")] },
+            new("user", string.Empty) { ToolResults = [new LlmToolResult("third", output)] }
+        ]), "us.amazon.nova-lite-v1:0");
+        foreach (List<Message> messages in new[] { request.Messages, BedrockLlmClient.ToStreamRequest(request).Messages })
+        {
+            DocumentBlock[] documents = messages.SelectMany(message => message.Content)
+                .SelectMany(block => block.Document is { } document ? new[] { document }
+                    : block.ToolResult?.Content.Where(part => part.Document is not null).Select(part => part.Document) ?? [])
+                .ToArray();
+            Assert.Equal(["reference", "reference", "tool document", "tool document", "tool document"],
+                documents.Select(document => System.Text.Encoding.UTF8.GetString(document.Source.Bytes.ToArray())));
+            Assert.Equal(documents.Length, documents.Select(document => document.Name).Distinct(StringComparer.Ordinal).Count());
+            Assert.All(documents, document =>
+            {
+                Assert.Equal(DocumentFormat.Txt, document.Format);
+                Assert.Matches("^(prompt|tool-result)-document-[1-9][0-9]*$", document.Name);
+            });
+        }
+    }
+
+    [Fact]
     public void BuildRequestMapsToolDefinitionsCallsAndResults()
     {
         using JsonDocument schema = JsonDocument.Parse(

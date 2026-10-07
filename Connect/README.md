@@ -1219,8 +1219,10 @@ Both native streaming and nonstreaming use this same path. This does not enable 
 Bedrock's existing factory lifetime covers inline preparation and native Converse execution. The shared
 materializer retains logical context and ordered selected references; both Converse response modes
 use the existing binary document and tool-output builders. Bedrock carries UTF-8 text, JSON and XML
-bytes as native `txt` documents without changing stored MIME types. Converse uses neutral document
-names because its name field excludes filename punctuation
+bytes as native `txt` documents without changing stored MIME types. Converse assigns neutral document
+names from one request-scoped ordinal across prompt attachments and every tool-result message.
+Repeated filenames and repeated tool calls retain their bytes without duplicate native names.
+The name field excludes filename punctuation
 ([native document contract](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_DocumentBlock.html)).
 Reader cleanup precedes terminal publication, and its actual failure remains visible at factory retirement.
 Claude CLI streaming chat sends materialized prompt and tool files through its existing Anthropic
@@ -2496,7 +2498,9 @@ An override never raises a carriage.
 Every route omits other binary content. `PreservesOrder` reports each route's ordering. Claude CLI
 streaming chat appends native tool files after the flattened text history, so it reports false.
 Direct Codex and the Claude CLI
-agent rows are measured; the other rows follow each provider's protocol and are not live-verified.
+agent rows are measured. Bedrock managed tool-result text documents are live-qualified on Nova Lite,
+including two document callbacks followed by a completed response. The remaining Bedrock carriages
+and the other rows follow each provider's protocol and are not live-verified.
 
 The text renderings are fixed. A resource link becomes `[Resource link: name] uri`. An embedded text
 resource becomes `[Resource: uri]` followed by its text. A text document becomes `[File: name]`

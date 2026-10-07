@@ -737,6 +737,7 @@ internal sealed class BedrockLlmClient(
         List<MemoryStream>? temporaryStreams = null, int? messageLimit = null)
     {
         var messages = new List<Message>();
+        int documents = 0;
         foreach (LlmChatMessage message in request.Messages)
         {
             if (messageLimit is int limit && messages.Count >= limit) break;
@@ -776,7 +777,7 @@ internal sealed class BedrockLlmClient(
                             Content = BuildToolResultContent(ToolOutputProjector.Project(
                                 toolResult.Output,
                                 RichContentRoutes.BedrockConverse.For(connection, null),
-                                RichContentRoutes.BedrockConverse.For(connection, modelId)), temporaryStreams)
+                                RichContentRoutes.BedrockConverse.For(connection, modelId)), ref documents, temporaryStreams)
                         }
                     });
                 }
@@ -788,7 +789,7 @@ internal sealed class BedrockLlmClient(
 
                 foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
                 {
-                    content.Add(BuildPromptAttachment(attachment, temporaryStreams));
+                    content.Add(BuildPromptAttachment(attachment, ref documents, temporaryStreams));
                 }
 
                 foreach (LlmToolCall call in ClientTools.Functions(message.ToolCalls))
@@ -1029,7 +1030,8 @@ internal sealed class BedrockLlmClient(
         return content;
     }
 
-    private static ContentBlock BuildPromptAttachment(LlmAttachment attachment, List<MemoryStream>? temporaryStreams = null)
+    private static ContentBlock BuildPromptAttachment(LlmAttachment attachment, ref int documents,
+        List<MemoryStream>? temporaryStreams = null)
     {
         string mediaType = LlmAttachments.ResolveMediaType(attachment);
         return attachment.Kind switch
@@ -1050,7 +1052,7 @@ internal sealed class BedrockLlmClient(
                 Document = new DocumentBlock
                 {
                     Format = BedrockDocumentFormat(mediaType),
-                    Name = "prompt-document",
+                    Name = $"prompt-document-{++documents}",
                     Source = new DocumentSource
                     {
                         Bytes = ContentStream(attachment.Data.ToArray(), temporaryStreams)
@@ -1062,11 +1064,10 @@ internal sealed class BedrockLlmClient(
     }
 
     /// <summary>The ordered Converse blocks; an empty result still sends one empty text block.</summary>
-    private static List<ToolResultContentBlock> BuildToolResultContent(ProjectedToolOutput projected,
+    private static List<ToolResultContentBlock> BuildToolResultContent(ProjectedToolOutput projected, ref int documents,
         List<MemoryStream>? temporaryStreams = null)
     {
         var content = new List<ToolResultContentBlock>();
-        int documents = 0;
         foreach (SentToolPart part in projected.Parts)
         {
             content.Add(part switch
