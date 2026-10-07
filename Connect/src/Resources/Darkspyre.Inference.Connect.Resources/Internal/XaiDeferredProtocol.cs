@@ -70,11 +70,13 @@ internal sealed class XaiDeferredProtocol(HttpClient http, LlmConnection connect
         foreach (var file in decoded.OutputFiles)
         {
             fence();
-            var writer = new XaiGeneratedFileWriter(resources, scope, file.Name, fence, observation);
-            InferenceResourceCommitResult receipt = await writer.MaterializeAsync(files, connection, file.Id, token).ConfigureAwait(false);
-            receipts.Add(receipt);
-            result = decoded.Result with { GeneratedResources = receipts };
-            observation.ObservedDeferredResult = new LlmDeferredCompleted(result);
+            var writer = new XaiGeneratedFileWriter(resources, scope, file.Name, fence, observation, receipt =>
+            {
+                receipts.Add(receipt);
+                result = decoded.Result with { GeneratedResources = receipts };
+                observation.ObservedDeferredResult = new LlmDeferredCompleted(result);
+            });
+            await writer.MaterializeAsync(files, connection, file.Id, token).ConfigureAwait(false);
             fence();
         }
         fence();

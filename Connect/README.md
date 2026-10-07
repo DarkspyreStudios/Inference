@@ -158,6 +158,9 @@ successful publication. `GeneratedResources` contains the exact ordered commit r
 access is legal for artifact-free results; observed artifacts require access before any download or
 write, while failure still reports the preceding consume-once dispatch and response. Earlier committed
 outputs survive a later transfer, commit, cleanup or publication failure without deletion or retry.
+The writer's commit callback updates the recovered chat's `GeneratedResources` before cancellation
+and cleanup fences. A canceled retrieval therefore retains each valid committed file in both the
+recovered chat and the operation's commit observations.
 Incremental batch requests and creation from requests share one ordered snapshot and the canonical
 Responses, image and video body builders. Every row is validated before credential refresh or input
 transfers. Chat selections are frozen once per prompt; media reads only its named sources. One batch
@@ -201,6 +204,8 @@ returned text, reported model, terminal status and usage. Its batch case checks 
 by one result-page request, the native `chat_get_completion` envelope, ordered row outcomes and the
 returned cursor without automatic paging. These managed cases do not establish provider access,
 media materialization or independent transport/cleanup fault qualification.
+The cancellation-after-commit case uses a memory-backed write handle and checks the portable recovered
+chat and its exact selection receipt. It does not qualify remote Files delivery or cleanup refusal.
 
 This assembly activates no global provider registration and makes no OAuth or endpoint-qualification claim.
 Caller workspace storage remains caller-owned. Constructing or serializing a receipt performs no
