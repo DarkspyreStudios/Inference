@@ -4092,6 +4092,10 @@ dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- models -
 dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- usage --provider codex
 ```
 
+The `usage` command formats the existing account snapshot through Connect-owned JSON metadata.
+It preserves readable indentation, named quota states and null measurements without default
+reflection serialization.
+
 Stream a prompt through Darkspyre.Inference.Connect.LLM. Interactive use reads one line; redirected input can contain the complete prompt:
 
 ```bash

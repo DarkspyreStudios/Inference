@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Setup;
@@ -17,11 +18,7 @@ internal static class Program
 {
     // Preserve the original LlmConnect service name so existing SecureStore credentials remain accessible.
     private const string CredentialServiceName = "com.darkspyrestudios.llmconnect.console-tester";
-    private static readonly JsonSerializerOptions UsageJsonOptions = new()
-    {
-        WriteIndented = true,
-        Converters = { new JsonStringEnumConverter() }
-    };
+    private static readonly JsonTypeInfo<LlmAccountUsageSnapshot> UsageJsonInfo = UsageMetadata();
 
     public static async Task<int> Main(string[] args)
     {
@@ -307,8 +304,18 @@ internal static class Program
         LlmAccountUsageSnapshot usage = await llms.GetAccountUsageAsync(
             invocation.Provider.ConnectionId,
             cancellationToken);
-        Console.WriteLine(JsonSerializer.Serialize(usage, UsageJsonOptions));
+        WriteUsage(usage, Console.Out);
         return 0;
+    }
+
+    internal static void WriteUsage(LlmAccountUsageSnapshot usage, TextWriter output) =>
+        output.WriteLine(JsonSerializer.Serialize(usage, UsageJsonInfo));
+
+    private static JsonTypeInfo<LlmAccountUsageSnapshot> UsageMetadata()
+    {
+        var options = new JsonSerializerOptions(ConnectLlmJson.AccountUsageSnapshot.Options) { WriteIndented = true };
+        options.Converters.Add(new JsonStringEnumConverter<LlmQuotaState>());
+        return options.GetTypeInfo<LlmAccountUsageSnapshot>();
     }
 
     private static async Task<int> RunPromptAsync(
