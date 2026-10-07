@@ -3286,6 +3286,10 @@ transport; other custom headers retain their existing policy. The reviewed upstr
 `max_context_window` only when the former is absent or null. Positive reported limits are physical
 context limits, not an invented usable-context or compaction budget. Unknown limits remain null.
 Matching the version does not establish full CLI tooling or endpoint parity.
+The focused direct-Codex regression verifies the same pin on catalog, generation and account-usage
+requests through the public facade. Selected catalog reasoning, summary and input-modality facts
+reach model capabilities; admitted reasoning controls reach generation. Its synthetic HTTP responses do not
+establish live subscription entitlement or endpoint acceptance.
 
 Upstream defines the release number in `codex-rs/Cargo.toml` under `[workspace.package]`.
 The [main-branch source](https://github.com/openai/codex/blob/2635431edbd43279a4da9c1199456758fbbc8ad3/codex-rs/Cargo.toml#L161-L162)

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -10,6 +11,85 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class DirectCodexTests
 {
+    [Fact]
+    public async Task CatalogAndGenerationUseTheSameCompatibilityPinAndSelectedModelFacts()
+    {
+        var paths = new HashSet<string>(StringComparer.Ordinal);
+        int generations = 0;
+        using var handler = new Handler(request =>
+        {
+            Assert.Equal("0.159.3", Assert.Single(request.Headers.GetValues("version")));
+            Assert.Equal("Darkspyre.Inference.Connect.LLM/0.159.3", request.Headers.UserAgent.ToString());
+            Assert.Equal("account", Assert.Single(request.Headers.GetValues("ChatGPT-Account-ID")));
+            Assert.Equal("darkspyre-inference-connect", Assert.Single(request.Headers.GetValues("originator")));
+            Assert.Equal("Bearer", request.Headers.Authorization!.Scheme);
+            Assert.Equal("token", request.Headers.Authorization.Parameter);
+            string path = request.RequestUri!.AbsolutePath;
+            paths.Add(path);
+            if (path == "/backend-api/codex/models")
+            {
+                Assert.Equal(HttpMethod.Get, request.Method);
+                Assert.Equal("?client_version=0.159.3", request.RequestUri.Query);
+                return Json("""
+                    {"models":[
+                        {"slug":"model","display_name":"Selected model","context_window":null,"max_context_window":65536,
+                         "supported_reasoning_levels":[{"effort":"low"}],"supports_reasoning_summary_parameter":false,"input_modalities":["text"]},
+                        {"slug":"hidden","visibility":"hide","context_window":100000}
+                    ]}
+                    """);
+            }
+            if (path == "/backend-api/wham/usage")
+            {
+                Assert.Equal(HttpMethod.Get, request.Method);
+                Assert.Equal(string.Empty, request.RequestUri.Query);
+                return Json("""
+                    {"plan_type":"plus","rate_limit":{"allowed":true,"limit_reached":false,
+                     "primary_window":{"used_percent":25,"limit_window_seconds":18000,"reset_at":2000000000}}}
+                    """);
+            }
+            Assert.Equal("/backend-api/codex/responses", path);
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("conversation", Assert.Single(request.Headers.GetValues("session-id")));
+            Assert.Equal("text/event-stream", request.Headers.Accept.ToString());
+            generations++;
+            return Sse(Completed);
+        });
+        using var http = new HttpClient(handler);
+        var client = new OpenAiCodexLlmClient(http);
+        await using var providers = new LlmProviderService(new Source(Connection()), [client]);
+
+        LlmModel model = Assert.Single(await providers.ListModelsAsync("codex"));
+        Assert.Equal("model", model.Id);
+        Assert.Equal("Selected model", model.DisplayName);
+        Assert.Equal(65536, model.MaxContextTokens);
+        LlmProviderCapabilities capabilities = await providers.GetModelCapabilitiesAsync("codex", model.Id);
+        Assert.Equal(LlmReasoningLevel.Low, Assert.Single(capabilities.ReasoningLevels));
+        Assert.False(capabilities.SupportsReasoningText);
+        Assert.False(capabilities.SupportsPromptImages);
+
+        LlmChatRequest prompt = Request() with { ReasoningLevel = LlmReasoningLevel.Low, ConversationKey = "conversation" };
+        LlmChatResult result = await providers.CompleteAsync("codex", prompt);
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("Hello", result.Text);
+        using (JsonDocument sent = JsonDocument.Parse(handler.Body!))
+        {
+            Assert.Equal("model", sent.RootElement.GetProperty("model").GetString());
+            Assert.False(sent.RootElement.GetProperty("store").GetBoolean());
+            Assert.Equal("low", sent.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+            Assert.False(sent.RootElement.GetProperty("reasoning").TryGetProperty("summary", out _));
+        }
+        Assert.Equal(1, generations);
+        InferenceException unsupported = await Assert.ThrowsAsync<InferenceException>(() =>
+            providers.CompleteAsync("codex", prompt with { ReasoningLevel = LlmReasoningLevel.High }));
+        Assert.Equal(InferenceFailureCode.InvalidRequest, unsupported.Code);
+        Assert.Equal(1, generations);
+
+        LlmAccountUsageSnapshot usage = await providers.GetAccountUsageAsync("codex");
+        Assert.Equal("plus", usage.Plan);
+        Assert.Equal(0.25, Assert.Single(usage.Quotas).UsedFraction);
+        Assert.Equal(3, paths.Count);
+    }
+
     private const string Completed = """
         data: {"type":"response.output_text.delta","delta":"Hello"}
 
