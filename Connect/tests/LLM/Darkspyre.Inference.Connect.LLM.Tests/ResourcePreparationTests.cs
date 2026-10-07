@@ -14,6 +14,27 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ResourcePreparationTests
 {
     [Fact]
+    public async Task DeferredChatUsesTheSharedStrictFunctionRootAdmissionBeforeDispatch()
+    {
+        var handler = new ResourceResults();
+        using var http = new HttpClient(handler);
+        var source = new Source(ResourceResults.Connection());
+        ILlmClient[] clients = [new XaiResponsesLlmClient(http)];
+        await using var access = new LlmConnectionAccess(source, [], clients);
+        await using var core = new LlmProviderService(source, clients, [], connectionAccess: access);
+        await using var resources = new LlmResourceProviderService(access, core);
+        var request = new LlmChatRequest
+        {
+            ModelId = "selected-model",
+            Messages = [new("user", "hello")],
+            Tools = [new LlmToolDefinition { Name = "echo", Strict = true, InputSchema = JsonElement.Parse("{\"type\":\"string\"}") }]
+        };
+
+        await Assert.ThrowsAsync<NotSupportedException>(() => resources.SubmitDeferredAsync("selected-connection", request));
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
     public async Task ImportedDeferredReceiptConsumesOnceAndReturnsTheActualChatResult()
     {
         var handler = new ResourceResults();

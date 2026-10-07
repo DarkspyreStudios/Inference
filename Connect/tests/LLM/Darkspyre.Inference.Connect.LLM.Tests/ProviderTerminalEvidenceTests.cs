@@ -12,6 +12,86 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ProviderTerminalEvidenceTests
 {
+    [Theory]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"enum\":[]}}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"anyOf\":[]}}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":true}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":false}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"array\",\"minContains\":1}}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"array\",\"maxContains\":1}}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":17}}}", true)]
+    [InlineData("{\"type\":\"object\",\"required\":[\"value\",\"value\"]}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"enum\":17}}}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"minimum\":\"one\"}}}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"minLength\":1e-100}}}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"maxItems\":1.0000000000000000000000000001}}}", true)]
+    public async Task GrokSchemaAdmissionDistinguishesMalformedValuesFromNativeRejections(string schema, bool malformed)
+    {
+        const string body = """
+            {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"value\":\"x\"}"}]}]}
+            """;
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = false, SupportsJsonSchema = true }
+        };
+        var output = new LlmStructuredOutputRequest { Name = "answer", Schema = JsonElement.Parse(schema) };
+        var tool = new LlmToolDefinition { Name = "echo", Strict = true, InputSchema = output.Schema };
+        var request = new LlmChatRequest { ModelId = "selected-model", Messages = [new("user", "hello")] };
+        await Assert.ThrowsAsync(malformed ? typeof(ArgumentException) : typeof(NotSupportedException), async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with { StructuredOutput = output })) { }
+        });
+        await Assert.ThrowsAsync(malformed ? typeof(ArgumentException) : typeof(NotSupportedException), async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with { Tools = [tool] })) { }
+        });
+        if (malformed)
+            await Assert.ThrowsAsync<ArgumentException>(async () =>
+            {
+                await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with
+                {
+                    StructuredOutput = output with { Fallback = LlmStructuredOutputFallback.LocalValidation }
+                })) { }
+            });
+        Assert.Equal(0, handler.Calls);
+        bool localBoolean = !malformed && output.Schema.GetProperty("properties").GetProperty("value").ValueKind is JsonValueKind.True or JsonValueKind.False;
+        if (localBoolean)
+        {
+            var events = new List<LlmStreamEvent>();
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection, request with
+            {
+                StructuredOutput = output with { Fallback = LlmStructuredOutputFallback.LocalValidation }
+            })) events.Add(item);
+            LlmStructuredOutputValidation validation = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.StructuredOutput!;
+            Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, validation.Enforcement);
+            Assert.Equal(output.Schema.GetProperty("properties").GetProperty("value").GetBoolean(), validation.IsValid);
+            using var local = JsonDocument.Parse(handler.RequestBody!);
+            Assert.False(local.RootElement.TryGetProperty("text", out _));
+        }
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with { Tools = [tool with { Strict = false }] })) { }
+        using var sent = JsonDocument.Parse(handler.RequestBody!);
+        JsonElement sentTool = Assert.Single(sent.RootElement.GetProperty("tools").EnumerateArray());
+        Assert.False(sentTool.GetProperty("strict").GetBoolean());
+        Assert.Equal(schema, sentTool.GetProperty("parameters").GetRawText());
+        Assert.Equal(localBoolean ? 2 : 1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"additionalProperties\":false}")]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":[\"string\",\"null\"],\"enum\":[\"x\",null],\"const\":\"x\"}},\"default\":{\"type\":17,\"anyOf\":[]},\"examples\":[{\"minContains\":\"one\"}]}")]
+    public async Task GrokSchemaAdmissionPreservesBooleanClosureAndLiteralPayloads(string schema)
+    {
+        await CheckReferenceAdmission(JsonElement.Parse(schema), guaranteed: true);
+    }
+
     [Fact]
     public void OriginalSchemaValidationKeepsRepeatedIdsRequestLocal()
     {
@@ -127,6 +207,7 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData("{\"type\":\"object\",\"$defs\":{\"node\":{\"$id\":\"nested\",\"$ref\":\"#\"}},\"properties\":{\"value\":{\"$ref\":\"#/$defs/node\"}}}")]
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"$ref\":\"https://schemas.other.test/external\"}}}")]
     [InlineData("{\"type\":\"object\",\"$defs\":{\"item\":{\"type\":\"string\",\"maxLength\":1}},\"properties\":{\"value\":{\"$ref\":\"https://json-schema.invalid/root#/$defs/item\"}}}")]
+    [InlineData("{\"type\":\"object\",\"additionalProperties\":true,\"properties\":{\"value\":{\"$ref\":\"#/additionalProperties\"}}}")]
     public async Task GrokReferenceGuaranteeRefusesLiteralTargetsCyclesAndUnresolvedResources(string schema)
     {
         await CheckReferenceAdmission(JsonElement.Parse(schema), guaranteed: false);

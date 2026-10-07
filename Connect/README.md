@@ -2991,7 +2991,19 @@ Image prompts require catalog image support and cannot exceed 20 MiB. Temperatur
 the model profile; top-k, seed, penalties and string stops are unsupported on this Responses route.
 The schema preflight follows schema positions and local references, not literal data. Bounds
 above 2048 string characters, 256 array items or 64 properties require explicitly authorized local
-validation against the original schema. Its operation-local index resolves pointers against the
+validation against the original schema. The same private admission owner distinguishes guaranteed,
+outside-guarantee, provider-rejected and invalid basic keyword values. Empty enum/anyOf variants,
+boolean property schemas, min/maxContains and Draft-07 tuple items have no native admission.
+Explicit boolean `additionalProperties` remains supported. A reference to that boolean from another
+position does not inherit its position-specific guarantee. Invalid basic type, enum, required,
+numeric and schema-container shapes fail before effects, including with local fallback selected.
+Count-keyword admission compares the original number exactly with its integral decimal candidate.
+Fractional counts cannot round into admitted integers. Counts outside decimal representation remain
+outside native guarantees; admission invents no rejection cutoff for those values.
+Response schemas outside native admission retain explicit original-schema local fallback; non-strict
+functions stay unchanged. The deferred/batch Chat codec uses this same strict-function entry and
+response enforcement owner; its separate wire builder and decoder remain separate.
+Its operation-local index resolves pointers against the
 selected schema resource, honors embedded `$id` bases and Draft 2020-12 `$anchor` names, and admits
 only indexed schema targets. Definition containers are inspected without applying unused constraints
 to the emitted instance. Shared targets are not cycles. Unknown dialects, unresolved resources,

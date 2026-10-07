@@ -88,8 +88,7 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
         foreach (LlmToolDefinition tool in ClientTools.Functions(request.Tools))
         {
             if (tool.Name == "web_search") throw new ArgumentException("A Grok client function cannot be named web_search.", nameof(request));
-            if (tool.Strict && !XaiSchemaLimits.Fits(tool.InputSchema))
-                throw new NotSupportedException("A strict Grok tool schema exceeds the published numeric guarantees.");
+            if (tool.Strict) XaiSchemaLimits.ValidateStrictTool(tool.InputSchema);
         }
         foreach (LlmFileReference file in request.Messages.SelectMany(message => message.Attachments).OfType<LlmFileReference>())
             _ = XaiFileRequestData.Identity(file.File.FileId);

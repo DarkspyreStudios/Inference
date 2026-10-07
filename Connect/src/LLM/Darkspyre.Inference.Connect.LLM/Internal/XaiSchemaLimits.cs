@@ -1,5 +1,7 @@
+using System.Globalization;
 using System.Text.Json;
 using Json.Pointer;
+using Json.Schema;
 using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
@@ -8,26 +10,43 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 internal static class XaiSchemaLimits
 {
     internal static LlmStructuredOutputEnforcement? ResolveEnforcement(LlmStructuredOutputRequest? output,
-        LlmProviderCapabilities capabilities) => output is null ? null : StructuredOutput.ResolveEnforcement(output,
-        Fits(output.Schema) ? capabilities : capabilities with { SupportsJsonSchema = false, SupportsJsonObject = false });
+        LlmProviderCapabilities capabilities)
+    {
+        if (output is null) return null;
+        SchemaDisposition disposition = Analyze(output.Schema, requireObjectRoot: false);
+        RefuseInvalid(disposition);
+        return StructuredOutput.ResolveEnforcement(output, disposition == SchemaDisposition.Guaranteed
+            ? capabilities : capabilities with { SupportsJsonSchema = false, SupportsJsonObject = false });
+    }
 
     internal static void ValidateStrictTool(JsonElement schema)
     {
-        if (!Fits(schema, requireObjectRoot: true))
+        SchemaDisposition disposition = Analyze(schema, requireObjectRoot: true);
+        RefuseInvalid(disposition);
+        if (disposition != SchemaDisposition.Guaranteed)
             throw new NotSupportedException("A strict Grok tool schema is outside the supported native guarantees. The schema is not weakened or sent as non-strict.");
     }
 
-    internal static bool Fits(JsonElement root) => Fits(root, requireObjectRoot: false);
+    private enum SchemaDisposition { Guaranteed, OutsideGuarantee, ProviderRejected, InvalidSchema }
 
-    private static bool Fits(JsonElement root, bool requireObjectRoot)
+    private static void RefuseInvalid(SchemaDisposition disposition)
+    {
+        if (disposition == SchemaDisposition.InvalidSchema)
+            throw new ArgumentException("The Grok schema contains an invalid JSON Schema keyword value.");
+    }
+
+    private static SchemaDisposition Merge(SchemaDisposition left, SchemaDisposition right) => left > right ? left : right;
+
+    private static SchemaDisposition Analyze(JsonElement root, bool requireObjectRoot)
     {
         var index = new SchemaIndex();
-        if (!index.Build(root)) return false;
-        var pending = new Stack<(JsonElement Schema, bool Exit)>();
+        if (!index.Build(root)) return index.Failure;
+        SchemaDisposition disposition = SchemaDisposition.Guaranteed;
+        var pending = new Stack<(JsonElement Schema, bool Exit, bool AllowsBoolean)>();
         var active = new HashSet<JsonElement>();
         var done = new HashSet<JsonElement>();
         Dictionary<JsonElement, bool>? objectRoots = requireObjectRoot ? [] : null;
-        pending.Push((root, false));
+        pending.Push((root, false, false));
         while (pending.TryPop(out var next))
         {
             JsonElement schema = next.Schema;
@@ -38,56 +57,106 @@ internal static class XaiSchemaLimits
                 done.Add(schema);
                 continue;
             }
-            if (done.Contains(schema) || schema.ValueKind is JsonValueKind.True or JsonValueKind.False) continue;
-            if (!active.Add(schema)) return false;
-            if (schema.ValueKind != JsonValueKind.Object) return false;
+            if (done.Contains(schema)) continue;
             SchemaLocation location = index.Locations[schema];
-            if (location.Draft == SchemaDraft.Unknown) return false;
-            pending.Push((schema, true));
+            if (schema.ValueKind is JsonValueKind.True or JsonValueKind.False)
+            {
+                if (!next.AllowsBoolean) disposition = Merge(disposition, SchemaDisposition.OutsideGuarantee);
+                continue;
+            }
+            if (!active.Add(schema)) { disposition = Merge(disposition, SchemaDisposition.OutsideGuarantee); continue; }
+            if (location.Draft == SchemaDraft.Unknown) { disposition = Merge(disposition, SchemaDisposition.OutsideGuarantee); active.Remove(schema); continue; }
+            pending.Push((schema, true, false));
             if (schema.TryGetProperty("$ref", out JsonElement reference))
             {
-                if (!index.Resolve(location, reference, out JsonElement target)) return false;
-                pending.Push((target, false));
+                if (!index.Resolve(location, reference, out JsonElement target)) disposition = Merge(disposition, SchemaDisposition.OutsideGuarantee);
+                else pending.Push((target, false, false));
                 if (location.Draft == SchemaDraft.Draft7) continue;
             }
             foreach (JsonProperty property in schema.EnumerateObject())
-            {
-                JsonElement value = property.Value;
-                switch (property.Name)
-                {
-                    case "minLength":
-                    case "maxLength":
-                        if (!Within(value, 2048)) return false;
-                        break;
-                    case "minItems":
-                    case "maxItems":
-                        if (!Within(value, 256)) return false;
-                        break;
-                    case "minProperties":
-                    case "maxProperties":
-                        if (!Within(value, 64)) return false;
-                        break;
-                    case "allOf":
-                        if (value.ValueKind != JsonValueKind.Array || value.GetArrayLength() != 1) return false;
-                        break;
-                    case "oneOf":
-                        if (!DisjointTypes(value)) return false;
-                        break;
-                    case "items":
-                        if (value.ValueKind == JsonValueKind.Array) return false;
-                        break;
-                    case "$dynamicRef":
-                    case "$recursiveRef":
-                    case "not":
-                    case "if":
-                    case "then":
-                    case "else":
-                        return false;
-                }
-            }
-            foreach (JsonElement child in location.AppliedChildren) pending.Push((child, false));
+                disposition = Merge(disposition, ClassifyKeyword(property, location.Draft));
+            foreach (JsonElement child in location.AppliedChildren) pending.Push((child, false, index.Locations[child].AllowsBoolean));
         }
-        return objectRoots is null || objectRoots.TryGetValue(root, out bool objectRoot) && objectRoot;
+        if (objectRoots is not null && (!objectRoots.TryGetValue(root, out bool objectRoot) || !objectRoot))
+            disposition = Merge(disposition, SchemaDisposition.OutsideGuarantee);
+        return disposition;
+    }
+
+    private static SchemaDisposition ClassifyKeyword(JsonProperty property, SchemaDraft draft)
+    {
+        JsonElement value = property.Value;
+        switch (property.Name)
+        {
+            case "type":
+                if (value.ValueKind == JsonValueKind.String) return Shape(TypeMask(value) != 0);
+                return Shape(UniqueStrings(value, candidate => TypeMask(candidate) != 0) && value.GetArrayLength() > 0);
+            case "enum":
+                return value.ValueKind != JsonValueKind.Array ? SchemaDisposition.InvalidSchema
+                    : value.GetArrayLength() == 0 ? SchemaDisposition.ProviderRejected : SchemaDisposition.Guaranteed;
+            case "required":
+                return Shape(UniqueStrings(value));
+            case "minimum":
+            case "maximum":
+            case "exclusiveMinimum":
+            case "exclusiveMaximum":
+                return Shape(value.ValueKind == JsonValueKind.Number);
+            case "minLength":
+            case "maxLength":
+                return Count(value, 2048);
+            case "minItems":
+            case "maxItems":
+                return Count(value, 256);
+            case "minProperties":
+            case "maxProperties":
+                return Count(value, 64);
+            case "minContains":
+            case "maxContains":
+                return draft == SchemaDraft.Draft7 ? SchemaDisposition.ProviderRejected
+                    : Count(value, int.MaxValue) == SchemaDisposition.InvalidSchema ? SchemaDisposition.InvalidSchema : SchemaDisposition.ProviderRejected;
+            case "properties":
+                return value.EnumerateObject().Any(child => child.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                    ? SchemaDisposition.ProviderRejected : SchemaDisposition.Guaranteed;
+            case "anyOf":
+                return value.GetArrayLength() == 0 ? SchemaDisposition.ProviderRejected : SchemaDisposition.Guaranteed;
+            case "allOf":
+                return value.GetArrayLength() == 0 ? SchemaDisposition.InvalidSchema
+                    : value.GetArrayLength() == 1 ? SchemaDisposition.Guaranteed : SchemaDisposition.OutsideGuarantee;
+            case "oneOf":
+                return value.GetArrayLength() == 0 ? SchemaDisposition.InvalidSchema
+                    : DisjointTypes(value) ? SchemaDisposition.Guaranteed : SchemaDisposition.OutsideGuarantee;
+            case "items":
+                return value.ValueKind == JsonValueKind.Array ? SchemaDisposition.ProviderRejected : SchemaDisposition.Guaranteed;
+            case "$dynamicRef":
+            case "$recursiveRef":
+            case "not":
+            case "if":
+            case "then":
+            case "else":
+                return SchemaDisposition.OutsideGuarantee;
+            default:
+                return SchemaDisposition.Guaranteed;
+        }
+
+        static SchemaDisposition Shape(bool valid) => valid ? SchemaDisposition.Guaranteed : SchemaDisposition.InvalidSchema;
+    }
+
+    private static SchemaDisposition Count(JsonElement value, int maximum)
+    {
+        if (value.ValueKind != JsonValueKind.Number) return SchemaDisposition.InvalidSchema;
+        if (!value.TryGetDecimal(out decimal number)) return SchemaDisposition.OutsideGuarantee;
+        if (number < 0 || number != decimal.Truncate(number)) return SchemaDisposition.InvalidSchema;
+        JsonElement parsed = JsonElement.Parse(number.ToString(CultureInfo.InvariantCulture));
+        if (JsonMath.NumberCompare(value, parsed) != 0) return SchemaDisposition.InvalidSchema;
+        return number <= maximum ? SchemaDisposition.Guaranteed : SchemaDisposition.OutsideGuarantee;
+    }
+
+    private static bool UniqueStrings(JsonElement array, Func<JsonElement, bool>? supported = null)
+    {
+        if (array.ValueKind != JsonValueKind.Array) return false;
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (JsonElement value in array.EnumerateArray())
+            if (value.ValueKind != JsonValueKind.String || supported is not null && !supported(value) || !seen.Add(value.GetString()!)) return false;
+        return true;
     }
 
     private static bool ProvesObject(JsonElement schema, SchemaIndex index, Dictionary<JsonElement, bool> proofs)
@@ -113,13 +182,14 @@ internal static class XaiSchemaLimits
     private enum SchemaDraft { Draft7, RetainSiblings, Unknown }
     private enum ResourceOrigin { Implicit, Relative, Absolute }
 
-    private sealed record SchemaLocation(Uri BaseUri, SchemaDraft Draft, IReadOnlyList<JsonElement> AppliedChildren);
+    private sealed record SchemaLocation(Uri BaseUri, SchemaDraft Draft, IReadOnlyList<JsonElement> AppliedChildren, bool AllowsBoolean = false);
     private sealed record SchemaResource(JsonElement Schema, ResourceOrigin Origin);
 
     // This index describes this request's schema graph. It never fetches or registers a resource.
     private sealed class SchemaIndex
     {
         internal Dictionary<JsonElement, SchemaLocation> Locations { get; } = [];
+        internal SchemaDisposition Failure { get; private set; } = SchemaDisposition.OutsideGuarantee;
         private readonly Dictionary<string, SchemaResource> _resources = new(StringComparer.Ordinal);
         private readonly Dictionary<string, JsonElement> _anchors = new(StringComparer.Ordinal);
 
@@ -127,21 +197,21 @@ internal static class XaiSchemaLimits
         {
             var initialBase = new Uri("https://json-schema.invalid/root");
             _resources.Add(initialBase.AbsoluteUri, new(root, ResourceOrigin.Implicit));
-            var pending = new Stack<(JsonElement Schema, Uri BaseUri, SchemaDraft Draft, ResourceOrigin Origin)>();
-            pending.Push((root, initialBase, SchemaDraft.RetainSiblings, ResourceOrigin.Implicit));
+            var pending = new Stack<(JsonElement Schema, Uri BaseUri, SchemaDraft Draft, ResourceOrigin Origin, bool AllowsBoolean)>();
+            pending.Push((root, initialBase, SchemaDraft.RetainSiblings, ResourceOrigin.Implicit, false));
             while (pending.TryPop(out var next))
             {
                 JsonElement schema = next.Schema;
                 if (schema.ValueKind is JsonValueKind.True or JsonValueKind.False)
                 {
-                    Locations.Add(schema, new(next.BaseUri, next.Draft, []));
+                    Locations.Add(schema, new(next.BaseUri, next.Draft, [], next.AllowsBoolean));
                     continue;
                 }
-                if (schema.ValueKind != JsonValueKind.Object) return false;
+                if (schema.ValueKind != JsonValueKind.Object) return Reject(SchemaDisposition.InvalidSchema);
                 SchemaDraft draft = next.Draft;
                 if (schema.TryGetProperty("$schema", out JsonElement declaration))
                 {
-                    if (declaration.ValueKind != JsonValueKind.String) return false;
+                    if (declaration.ValueKind != JsonValueKind.String) return Reject(SchemaDisposition.InvalidSchema);
                     draft = declaration.GetString() switch
                     {
                         "http://json-schema.org/draft-07/schema" or "http://json-schema.org/draft-07/schema#" => SchemaDraft.Draft7,
@@ -173,6 +243,7 @@ internal static class XaiSchemaLimits
                 foreach (JsonProperty property in schema.EnumerateObject())
                 {
                     JsonElement value = property.Value;
+                    if (ignoresSiblings && property.Name is not ("$defs" or "definitions")) continue;
                     switch (property.Name)
                     {
                         case "$defs":
@@ -180,10 +251,10 @@ internal static class XaiSchemaLimits
                         case "properties":
                         case "patternProperties":
                         case "dependentSchemas":
-                            if (value.ValueKind != JsonValueKind.Object) return false;
+                            if (value.ValueKind != JsonValueKind.Object) return Reject(SchemaDisposition.InvalidSchema);
                             foreach (JsonProperty child in value.EnumerateObject())
                             {
-                                pending.Push((child.Value, baseUri, draft, origin));
+                                pending.Push((child.Value, baseUri, draft, origin, false));
                                 if (property.Name is not ("$defs" or "definitions")) applied.Add(child.Value);
                             }
                             break;
@@ -191,7 +262,7 @@ internal static class XaiSchemaLimits
                         case "anyOf":
                         case "oneOf":
                         case "prefixItems":
-                            if (value.ValueKind != JsonValueKind.Array) return false;
+                            if (value.ValueKind != JsonValueKind.Array) return Reject(SchemaDisposition.InvalidSchema);
                             foreach (JsonElement child in value.EnumerateArray()) Add(child);
                             break;
                         case "items" when draft == SchemaDraft.Draft7 && value.ValueKind == JsonValueKind.Array:
@@ -208,19 +279,27 @@ internal static class XaiSchemaLimits
                         case "propertyNames":
                         case "unevaluatedItems":
                         case "unevaluatedProperties":
-                            Add(value);
+                            Add(value, property.Name == "additionalProperties");
                             break;
                     }
+                    if (!ignoresSiblings && draft != SchemaDraft.Unknown
+                        && ClassifyKeyword(property, draft) == SchemaDisposition.InvalidSchema) return Reject(SchemaDisposition.InvalidSchema);
                 }
                 Locations.Add(schema, new(baseUri, draft, applied));
 
-                void Add(JsonElement child)
+                void Add(JsonElement child, bool allowsBoolean = false)
                 {
-                    pending.Push((child, baseUri, draft, origin));
+                    pending.Push((child, baseUri, draft, origin, allowsBoolean));
                     applied.Add(child);
                 }
             }
             return true;
+        }
+
+        private bool Reject(SchemaDisposition failure)
+        {
+            Failure = failure;
+            return false;
         }
 
         internal bool Resolve(SchemaLocation location, JsonElement reference, out JsonElement target)
@@ -283,7 +362,4 @@ internal static class XaiSchemaLimits
         "number" => 32 | 64,
         _ => 0
     };
-
-    private static bool Within(JsonElement value, int maximum) => value.ValueKind == JsonValueKind.Number
-        && value.TryGetDecimal(out decimal number) && number == decimal.Truncate(number) && number >= 0 && number <= maximum;
 }
