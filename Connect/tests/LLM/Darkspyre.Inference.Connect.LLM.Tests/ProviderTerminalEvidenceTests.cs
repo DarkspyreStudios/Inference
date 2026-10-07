@@ -12,6 +12,114 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ProviderTerminalEvidenceTests
 {
+    [Fact]
+    public void OriginalSchemaValidationKeepsRepeatedIdsRequestLocal()
+    {
+        var first = new LlmStructuredOutputRequest
+        {
+            Name = "answer",
+            Schema = JsonElement.Parse("""
+                {"$id":"https://schemas.example.test/repeated-validation","type":"string","maxLength":1}
+                """)
+        };
+        var second = first with
+        {
+            Schema = JsonElement.Parse("""
+                {"$id":"https://schemas.example.test/repeated-validation","type":"string","maxLength":2}
+                """)
+        };
+        const LlmStructuredOutputEnforcement mode = LlmStructuredOutputEnforcement.LocalValidationOnly;
+        Assert.False(StructuredOutput.Validate("\"xx\"", first, mode).IsValid);
+        Assert.True(StructuredOutput.Validate("\"xx\"", second, mode).IsValid);
+        Assert.False(StructuredOutput.Validate("\"xx\"", first, mode).IsValid);
+    }
+
+    [Theory]
+    [InlineData(4096, 1, false)]
+    [InlineData(1, 4096, true)]
+    public async Task GrokReferenceGuaranteeUsesTheEmbeddedResourceNotTheOuterPointer(int innerBound, int outerBound, bool guaranteed)
+    {
+        JsonNode schema = JsonNode.Parse("""
+            {"$id":"https://schemas.example.test/root","type":"object","$defs":{"item":{"type":"string"},"nested":{"$id":"nested","$defs":{"item":{"type":"string"}},"$ref":"#/$defs/item"}},"properties":{"value":{"$ref":"#/$defs/nested"}}}
+            """)!;
+        schema["$defs"]!["item"]!["maxLength"] = outerBound;
+        schema["$defs"]!["nested"]!["$defs"]!["item"]!["maxLength"] = innerBound;
+        await CheckReferenceAdmission(JsonElement.Parse(schema.ToJsonString()), guaranteed);
+    }
+
+    [Fact]
+    public async Task GrokReferenceGuaranteeResolvesDeclaredAnchorsAndSharesTheSameTarget()
+    {
+        JsonElement schema = JsonElement.Parse("""
+            {"$id":"https://schemas.example.test/root","type":"object","$defs":{"item":{"$anchor":"content","type":"string","maxLength":1}},"properties":{"value":{"$ref":"#content"},"other":{"$ref":"https://schemas.example.test/root#/$defs/item"}}}
+            """);
+        await CheckReferenceAdmission(schema, guaranteed: true);
+    }
+
+    [Theory]
+    [InlineData("http://json-schema.org/draft-07/schema#", true)]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", false)]
+    public async Task GrokReferenceGuaranteeUsesTheDeclaredDraftSiblingRules(string dialect, bool guaranteed)
+    {
+        JsonNode schema = JsonNode.Parse("""
+            {"$ref":"#/definitions/object","maxProperties":4096,"definitions":{"object":{"type":"object","properties":{"value":{"type":"string"}}}}}
+            """)!;
+        schema["$schema"] = dialect;
+        await CheckReferenceAdmission(JsonElement.Parse(schema.ToJsonString()), guaranteed);
+    }
+
+    [Theory]
+    [InlineData("{\"type\":\"object\",\"default\":{\"type\":\"string\",\"maxLength\":1},\"properties\":{\"value\":{\"$ref\":\"#/default\"}}}")]
+    [InlineData("{\"type\":\"object\",\"$defs\":{\"node\":{\"$id\":\"nested\",\"$ref\":\"#\"}},\"properties\":{\"value\":{\"$ref\":\"#/$defs/node\"}}}")]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"$ref\":\"https://schemas.other.test/external\"}}}")]
+    [InlineData("{\"type\":\"object\",\"$defs\":{\"item\":{\"type\":\"string\",\"maxLength\":1}},\"properties\":{\"value\":{\"$ref\":\"https://json-schema.invalid/root#/$defs/item\"}}}")]
+    public async Task GrokReferenceGuaranteeRefusesLiteralTargetsCyclesAndUnresolvedResources(string schema)
+    {
+        await CheckReferenceAdmission(JsonElement.Parse(schema), guaranteed: false);
+    }
+
+    private static async Task CheckReferenceAdmission(JsonElement schema, bool guaranteed)
+    {
+        const string body = """
+            {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"value\":\"x\"}"}]}]}
+            """;
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = false, SupportsJsonSchema = true }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = "selected-model",
+            Messages = [new("user", "hello")],
+            StructuredOutput = new() { Name = "answer", Schema = schema }
+        };
+        if (!guaranteed)
+        {
+            await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            {
+                await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+            });
+            Assert.Equal(0, handler.Calls);
+            return;
+        }
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+        LlmStructuredOutputValidation validation = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.StructuredOutput!;
+        Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, validation.Enforcement);
+        Assert.True(validation.IsValid);
+        using var sent = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(schema.GetRawText(), sent.RootElement.GetProperty("text").GetProperty("format").GetProperty("schema").GetRawText());
+        Assert.Equal(1, handler.Calls);
+    }
+
     [Theory]
     [InlineData("{\"oneOf\":[{\"type\":\"number\"},{\"type\":\"integer\"}]}")]
     [InlineData("{\"allOf\":[{\"minimum\":2},{\"maximum\":4}]}")]

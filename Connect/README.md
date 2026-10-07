@@ -2991,15 +2991,29 @@ Image prompts require catalog image support and cannot exceed 20 MiB. Temperatur
 the model profile; top-k, seed, penalties and string stops are unsupported on this Responses route.
 The schema preflight follows schema positions and local references, not literal data. Bounds
 above 2048 string characters, 256 array items or 64 properties require explicitly authorized local
-validation against the original schema. The same admission owner treats `not`, conditionals and
+validation against the original schema. Its operation-local index resolves pointers against the
+selected schema resource, honors embedded `$id` bases and Draft 2020-12 `$anchor` names, and admits
+only indexed schema targets. Definition containers are inspected without applying unused constraints
+to the emitted instance. Shared targets are not cycles. Unknown dialects, unresolved resources,
+literal targets, cycles, dynamic references and unproven nonempty `$id` fragments remain outside
+guarantees. An absolute reference requires an actual declared absolute identity; the internal
+resolution base supplies no caller-visible identity. The index never fetches a resource or
+registers a schema globally. Draft-07 references ignore sibling assertions. Draft 2020-12 and
+undeclared default-profile references retain them.
+The same admission owner treats `not`, conditionals and
 multi-branch `allOf` as outside native guarantees. xAI gives `oneOf` the same meaning as `anyOf`;
 native admission requires pairwise-disjoint explicit simple types on non-reference branches,
 including nullable type arrays. A `$ref` sibling type is not proof of exclusivity in Draft-07.
 `number` overlaps `integer`. Unproven exclusivity requires explicit local validation for responses
 and refuses explicitly strict tools before effects. Non-strict tools retain their original schema
 and strictness. Local validation uses the original schema and reports invalid output without
-rewriting it or retrying. This check does not implement the complete schema/dialect/reference
-classification or original-dialect ECMA regex evaluator.
+rewriting it or retrying. This check does not implement the complete keyword/vocabulary, legacy
+fragment-ID and regex classification or original-dialect ECMA regex evaluator.
+The shared `StructuredOutput` validator builds the unchanged original schema in a fresh local
+registry for each validation. Repeated `$id` values across requests do not collide or retain request
+graphs in the global registry. Existing supplier default dialect, vocabulary and dialect registries,
+format evaluation and global lookup fallback remain unchanged. The pinned supplier's default
+dialect is V1, not an implicit Draft 2020-12 selection.
 The client does not interpret unqualified xAI headers as OpenAI account-usage evidence. Its usage
 header names and units require separate provider qualification; no quota snapshot is fabricated.
 

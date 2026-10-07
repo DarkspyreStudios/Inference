@@ -49,7 +49,13 @@ internal static class StructuredOutput
         try
         {
             using JsonDocument instanceDocument = JsonDocument.Parse(text);
-            JsonSchema schema = JsonSchema.FromText(request.Schema.GetRawText());
+            JsonSchema schema = JsonSchema.FromText(request.Schema.GetRawText(), new BuildOptions
+            {
+                SchemaRegistry = new SchemaRegistry(),
+                Dialect = BuildOptions.Default.Dialect,
+                DialectRegistry = BuildOptions.Default.DialectRegistry,
+                VocabularyRegistry = BuildOptions.Default.VocabularyRegistry
+            });
             EvaluationResults results = schema.Evaluate(instanceDocument.RootElement);
             return results.IsValid
                 ? new LlmStructuredOutputValidation(enforcement, true, true, [])
