@@ -61,9 +61,11 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         };
         return capabilities with
         {
-            ReasoningLevels = pinnedEffort is { } pinned
-                ? LlmReasoningEffort.Levels(capabilities.ReasoningLevels.Where(level => level == pinned).ToArray())
-                : capabilities.ReasoningLevels,
+            ReasoningLevels = modelId is "claude-sonnet-4-6" or "claude-opus-4-6-thinking"
+                ? LlmReasoningEffort.Levels()
+                : pinnedEffort is { } pinned
+                    ? LlmReasoningEffort.Levels(capabilities.ReasoningLevels.Where(level => level == pinned).ToArray())
+                    : capabilities.ReasoningLevels,
             SupportsJsonObject = false,
             SupportsTemperature = false,
             SupportsTopP = false,

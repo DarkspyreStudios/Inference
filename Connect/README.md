@@ -3884,6 +3884,8 @@ The shared Antigravity capability resolver restricts the published fixed-effort 
 Flash, Gemini 3.1 Pro and GPT-OSS 120B slugs to their pinned level. Discovery, chat and native turn
 admission use that resolver. Overrides cannot widen a pinned level. A conflicting effort fails before
 CLI invocation or native conversation reopening; the adapter never changes the selected model slug.
+The verified `claude-sonnet-4-6` and `claude-opus-4-6-thinking` slugs expose no selectable effort because
+the CLI rejects that flag. Omitted effort preserves their native default. Overrides cannot enable it.
 Other model IDs retain their existing controls. Google documents
 [pinned model slugs and effort selection](https://www.antigravity.google/docs/cli/headless/).
 
@@ -3937,8 +3939,8 @@ The ConsoleTester `agy-probe` command runs bounded live qualification cases; see
 [Subscription and AWS smoke tests](#subscription-and-aws-smoke-tests).
 The resume case requires a completed resumed turn as well as the retained conversation ID and recalled
 marker. Matching answer text on a failed or interrupted turn does not qualify resume.
-The control case uses an offered effort and checks local conflict refusal for a fixed-effort model
-before proving that the same session still completes its subsequent turns.
+The control case uses an offered effort, or omits effort when the model has no control. It checks local
+refusal of an unsupported effort before proving that the same session still completes subsequent turns.
 
 `IsAuthenticatedAsync` performs the non-consuming `agy models` check, so an installed but signed-out executable is not reported as authenticated. Run `agy` interactively to sign in or refresh the CLI session. Antigravity owns its credential and session storage in the operating system's native keyring; Darkspyre.Inference.Connect.LLM does not inspect it.
 

@@ -128,12 +128,12 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
     {
         await using ILlmAgentSession session = await StartAsync(token);
         string threadId = session.ThreadId;
-        Require(capabilities.ReasoningLevels.Count > 0, "The selected model offers no reasoning control.");
-        LlmReasoningLevel effort = capabilities.ReasoningLevels.Order().First();
-        if (capabilities.ReasoningLevels.Count == 1)
+        LlmReasoningLevel? effort = capabilities.ReasoningLevels.Count == 0
+            ? null : capabilities.ReasoningLevels.Order().First();
+        if (capabilities.ReasoningLevels.Count <= 1)
         {
             LlmReasoningLevel conflict = new[] { LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High }
-                .First(level => level != effort);
+                .First(level => !capabilities.ReasoningLevels.Contains(level));
             bool rejected = false;
             try
             {
@@ -143,7 +143,7 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
             {
                 rejected = true;
             }
-            Require(rejected, "A conflicting fixed-model effort was not rejected locally.");
+            Require(rejected, "An unsupported selected-model effort was not rejected locally.");
         }
         TurnSummary selected = await RunAsync(session, Turn("Reply with OK only. Use no tools.") with { ReasoningLevel = effort }, token);
         TurnSummary schema = await RunAsync(session, Turn("Return word set to sample. Use no tools.") with { OutputSchema = Schema }, token);
@@ -159,7 +159,7 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
             ModelId = model,
             Runtime = new() { WorkingDirectory = workspace, Policy = new LlmAgentHostRuntimePolicy() }
         }, token));
-        return "selected effort, schema and schema removal retained the conversation; unsupported controls, input and host policy rejected";
+        return "supported controls, schema and schema removal retained the conversation; unsupported controls, input and host policy rejected";
     }
 
     private async Task<string> CancelAsync(CancellationToken token)

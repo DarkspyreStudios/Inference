@@ -11,6 +11,44 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class AntigravityCliLlmClientTests
 {
+    [Theory]
+    [InlineData("claude-sonnet-4-6")]
+    [InlineData("claude-opus-4-6-thinking")]
+    public async Task ClaudeModelRejectsEffortBeforeInvocationButAllowsDefault(string model)
+    {
+        var runner = new RecordingRunner(new(0,
+            """{"event":"result","result":{"status":"SUCCESS","response":"OK"}}""", string.Empty));
+        var client = new AntigravityCliLlmClient(runner);
+        LlmConnection connection = Connection() with
+        {
+            CapabilityOverrides = new()
+            {
+                ReasoningLevels = LlmReasoningEffort.Levels(LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High)
+            }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = model,
+            Messages = [new("user", "Reply with OK.")],
+            ReasoningLevel = LlmReasoningLevel.Medium
+        };
+
+        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() =>
+            ReadAllAsync(client.StreamAsync(connection, request)));
+        Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
+        Assert.Empty(runner.Invocations);
+        Assert.Empty(client.GetCapabilities(connection, model).ReasoningLevels);
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection,
+            request with { ReasoningLevel = null }));
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("OK", result.Text);
+        AntigravityCliInvocation invocation = Assert.Single(runner.Invocations);
+        Assert.Equal(model, invocation.Arguments[invocation.Arguments.ToList().IndexOf("--model") + 1]);
+        Assert.DoesNotContain("--effort", invocation.Arguments);
+    }
+
     [Fact]
     public async Task TerminalResultFencesTrailingTextAndStillRequiresSuccessfulProcessExit()
     {
