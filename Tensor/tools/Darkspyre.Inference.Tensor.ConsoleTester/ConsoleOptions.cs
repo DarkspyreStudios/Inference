@@ -21,7 +21,7 @@ internal sealed record ConsoleOptions
 
     public static ConsoleOptions Parse(string[] args)
     {
-        if (args[0] != "qwen") { throw new ArgumentException($"Unknown family '{args[0]}'. Supported: qwen, registry."); }
+        if (args[0] != "qwen") { throw new ArgumentException($"Unknown family '{args[0]}'. Supported: qwen, embedding, registry."); }
         var options = new ConsoleOptions();
         for (int index = 1; index < args.Length; index++)
         {
@@ -72,6 +72,7 @@ internal sealed record ConsoleOptions
                            --store <dir> [--install] [--backend <kind>] [--suite all|chat,think,tools,json,selfhost]
                            [--prompt <text>] [--max-tokens <n>] [--trace-exceptions]
                tensor registry --store <dir>
+               tensor embedding --store <embedding-pack-dir> [--backend Auto|Cpu|GgmlCpu|GgmlMetal]
 
         Resolves the GGUF from its headers, installs it into the pack store when --install is passed, loads
         the engine and runs the test calls. A repeat run reuses the installed pack. --store names the pack
@@ -81,6 +82,10 @@ internal sealed record ConsoleOptions
         registry lists every engine AddTensorEngines registers: identity, tasks, model store key, offered
         models and the setup actions its provider opens over <dir>/<store key>. It reads metadata only; it
         installs, loads and saves nothing, writes no file and makes no network call.
+
+        embedding loads the installed pinned Qwen3-Embedding-0.6B pack without downloading anything.
+        It checks document/query vectors, owned result JSON and runtime shutdown with a live model,
+        then disposes the model and runtime. --store names the Embedding pack store, not its parent.
 
         Example:
           tensor qwen --repo ukisai/Swift-1.5-Qwen3.8-27B-GGUF --file Swift-1.5-Qwen3.8-27B-Q4_K_M.gguf \

@@ -80,6 +80,13 @@ Setup Examples and Tensor ConsoleTester declare that reference alongside their
 engine and registry references. A transitive implementation reference does not
 supply the constructor's compile-time type in this source build.
 
+The existing Tensor ConsoleTester runs `tensor embedding --store <embedding-pack-dir> --backend GgmlMetal`
+against the installed pinned Qwen3-Embedding-0.6B pack. It downloads nothing. The command checks ordered
+document/query vectors at 512 dimensions, unit length, matching-document ranking, actual fingerprint
+and provenance, and a result round-trip through `InferenceJson.EmbeddingResult`. A loaded GGML model
+must report Busy on runtime shutdown. The command disposes the model before terminal runtime cleanup.
+This qualification does not exercise over-limit inputs, truncation, native failures or other models.
+
 Supra's publisher supplies the DiT as a PyTorch ZIP state dictionary rather than safetensors. The
 Darkspyre TensorSharp fork reads that file as data through a whitelist-only checkpoint reader. It
 accepts only the tensor rebuild, storage, and container forms required by the pinned checkpoint and

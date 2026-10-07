@@ -34,7 +34,7 @@ internal static class Program
         }
 
         ConsoleOptions options;
-        try { options = ConsoleOptions.Parse(args); }
+        try { options = args[0] == "embedding" ? EmbeddingSuite.Parse(args) : ConsoleOptions.Parse(args); }
         catch (ArgumentException exception)
         {
             Console.Error.WriteLine($"Error: {exception.Message}");
@@ -56,6 +56,8 @@ internal static class Program
         Console.CancelKeyPress += (_, eventArgs) => { eventArgs.Cancel = true; cancellation.Cancel(); };
         try
         {
+            if (args[0] == "embedding")
+                return await EmbeddingSuite.RunAsync(options, cancellation.Token);
             return await RunQwenAsync(options, cancellation.Token);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -187,7 +189,7 @@ internal static class Program
     }
 
     /// <summary>Starts a lifecycle request and waits for the engine to report the target state.</summary>
-    private static async Task AwaitStateAsync(QwenLlmInference engine, Func<Task> accept, TensorEngineState target)
+    internal static async Task AwaitStateAsync(ITensorModelInstance engine, Func<Task> accept, TensorEngineState target)
     {
         var outcome = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnStatus(object? sender, TensorEngineStatus status)
