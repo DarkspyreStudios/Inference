@@ -930,6 +930,10 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
                 "CANCELED" or "INTERRUPTED" => (LlmAgentCompletionReason.Interruption, "Antigravity CLI reported the turn as interrupted."),
                 _ => (LlmAgentCompletionReason.Unknown, $"Antigravity CLI returned terminal status '{result.Status}'.")
             };
+            if (reason != LlmAgentCompletionReason.Completed && result.Error is not null)
+            {
+                error += $" CLI detail: {result.Error}";
+            }
 
             if (reason == LlmAgentCompletionReason.Completed && schema is not null)
             {

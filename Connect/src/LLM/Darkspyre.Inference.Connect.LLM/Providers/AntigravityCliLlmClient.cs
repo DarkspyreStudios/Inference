@@ -308,7 +308,8 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             || string.Equals(response.Status, "INTERRUPTED", StringComparison.OrdinalIgnoreCase))
         {
             throw new LlmProviderException(
-                "Antigravity CLI reported a provider error.",
+                "Antigravity CLI reported a provider error."
+                    + (response.Error is null ? string.Empty : $" CLI detail: {response.Error}"),
                 Transport,
                 providerCode: "antigravity_cli_error");
         }
@@ -728,7 +729,8 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         preferStructuredOutput && result.StructuredOutput is { } structured ? structured.GetRawText() : result.Response,
         result.Status,
         result.ConversationId,
-        AntigravityStepLedger.Normalize(result.Usage));
+        AntigravityStepLedger.Normalize(result.Usage),
+        result.Error);
 
     private static List<LlmModel> ParseModels(string output, LlmConnection? connection = null)
     {
@@ -799,13 +801,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         string source = string.IsNullOrWhiteSpace(result.StandardError)
             ? result.StandardOutput
             : result.StandardError;
-        string sanitized = SecretRedactor.Sanitize(source, credential: null)
-            .ReplaceLineEndings(" ")
-            .Trim();
-        const int maximumDiagnosticLength = 512;
-        return sanitized.Length <= maximumDiagnosticLength
-            ? sanitized
-            : $"{sanitized[..maximumDiagnosticLength]}...";
+        return AntigravityProtocol.SanitizeDiagnostic(source);
     }
 
     internal static string ResolveExecutable(string endpoint) => CliInfrastructure.ResolveExecutable(
@@ -837,7 +833,8 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         string Text,
         string Status,
         string? ConversationId,
-        LlmUsage? Usage);
+        LlmUsage? Usage,
+        string? Error);
 
     private sealed record ParsedStreamLine(
         string? TextDelta,

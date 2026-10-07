@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -35,7 +36,8 @@ internal sealed record AntigravityResult(
     string Status,
     string Response,
     JsonElement? StructuredOutput,
-    AntigravityUsage? Usage) : AntigravityEvent;
+    AntigravityUsage? Usage,
+    string? Error) : AntigravityEvent;
 
 /// <summary>An event name this adapter does not interpret.</summary>
 internal sealed record AntigravityUnrecognizedEvent : AntigravityEvent;
@@ -178,7 +180,21 @@ internal static class AntigravityProtocol
             String(result, "status") ?? string.Empty,
             String(result, "response") ?? string.Empty,
             structured,
-            ParseUsage(result));
+            ParseUsage(result),
+            String(result, "error") is { } error && !string.IsNullOrWhiteSpace(error)
+                ? SanitizeDiagnostic(error) : null);
+    }
+
+    /// <summary>The existing bounded CLI diagnostic policy, shared by stderr and terminal errors.</summary>
+    internal static string SanitizeDiagnostic(string source)
+    {
+        string sanitized = SecretRedactor.Sanitize(source, credential: null)
+            .ReplaceLineEndings(" ")
+            .Trim();
+        const int maximumDiagnosticLength = 512;
+        return sanitized.Length <= maximumDiagnosticLength
+            ? sanitized
+            : $"{sanitized[..maximumDiagnosticLength]}...";
     }
 
     private static AntigravityUsage? ParseUsage(JsonElement owner)

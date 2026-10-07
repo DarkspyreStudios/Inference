@@ -1,6 +1,7 @@
 using Darkspyre.Inference.Connect.LLM.Internal;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Threading.Channels;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
@@ -11,6 +12,46 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class AntigravityCliLlmClientTests
 {
+    private const string ErrorDetail = """{"access_token":"diagnostic-secret","detail":"The selected model is unavailable in this region."}""";
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task TerminalFailurePreservesSanitizedProviderDetail(bool streaming)
+    {
+        var payload = new JsonObject { ["status"] = "ERROR", ["response"] = string.Empty, ["error"] = ErrorDetail };
+        string output = streaming
+            ? new JsonObject { ["event"] = "result", ["result"] = payload }.ToJsonString()
+            : payload.ToJsonString();
+        var client = new AntigravityCliLlmClient(new RecordingRunner(new(0, output, string.Empty)));
+        LlmConnection connection = Connection() with { CapabilityOverrides = new() { SupportsStreaming = streaming } };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => ReadAllAsync(
+            client.StreamAsync(connection, new() { ModelId = "auto", Messages = [new("user", "test")] })));
+
+        Assert.Equal("antigravity_cli_error", failure.ProviderCode);
+        Assert.Contains("The selected model is unavailable in this region.", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("diagnostic-secret", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task NativeTerminalFailurePreservesSanitizedProviderDetail()
+    {
+        var process = new TerminalProcess();
+        await using ILlmAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
+            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), CancellationToken.None);
+
+        IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(
+            new() { Input = [new LlmAgentTextContent("test")] }));
+        LlmAgentTurnCompletedEvent completed = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+
+        Assert.Equal(LlmAgentCompletionReason.ProviderFailure, completed.Reason);
+        Assert.Contains("The selected model is unavailable in this region.", completed.Error!, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", completed.Error!, StringComparison.Ordinal);
+        Assert.DoesNotContain("diagnostic-secret", completed.Error!, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData("claude-sonnet-4-6")]
     [InlineData("claude-opus-4-6-thinking")]
@@ -178,6 +219,54 @@ public sealed class AntigravityCliLlmClientTests
                 SchemaContent = File.ReadAllText(invocation.Arguments[schemaIndex + 1]);
             }
             return Task.FromResult(result);
+        }
+    }
+
+    private sealed class TerminalProcess : IAntigravityCliSessionProcessFactory, IAntigravityCliSessionProcess
+    {
+        private readonly Channel<string> _lines = Channel.CreateUnbounded<string>();
+
+        public IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory)
+        {
+            _lines.Writer.TryWrite("""{"event":"init","conversation_id":"conversation-1"}""");
+            return this;
+        }
+
+        public ValueTask WriteAsync(string text, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _lines.Writer.TryWrite(new JsonObject
+            {
+                ["event"] = "result",
+                ["result"] = new JsonObject
+                {
+                    ["conversation_id"] = "conversation-1",
+                    ["status"] = "ERROR",
+                    ["response"] = string.Empty,
+                    ["error"] = ErrorDetail
+                }
+            }.ToJsonString());
+            return ValueTask.CompletedTask;
+        }
+
+        public async ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken = default) =>
+            await _lines.Reader.WaitToReadAsync(cancellationToken) ? await _lines.Reader.ReadAsync(cancellationToken) : null;
+
+        public void CloseInput() => _lines.Writer.TryComplete();
+
+        public Task<(int ExitCode, string StandardError)> WaitForExitAsync(CancellationToken cancellationToken = default) =>
+            Task.FromResult((0, string.Empty));
+
+        public Task KillAsync()
+        {
+            CloseInput();
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            CloseInput();
+            return ValueTask.CompletedTask;
         }
     }
 

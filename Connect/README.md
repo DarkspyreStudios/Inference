@@ -3874,6 +3874,11 @@ Antigravity chat reports `Unknown` for an unrecognized or missing terminal statu
 actual response text, usage, conversation ID and observed status. It does not validate that result
 as successful structured output. Recognized success and error/interruption handling remain distinct.
 Native Unknown diagnostics retain the observed status.
+The shared protocol parser retains terminal error detail under the same redacted, single-line policy
+as process stderr. Its bound retains a 512-character prefix and appends an ellipsis when truncated.
+Chat failures and native failed/interrupted turn completion expose detail through their existing error
+contracts. Failures without detail keep their existing generic message. The adapter does not synthesize
+success or retry.
 After the native terminal result, chat drains the process without projecting trailing text, activity
 or usage. The terminal answer stays authoritative. A failed process exit still fails the operation;
 the native result does not turn unsuccessful process cleanup into success.
