@@ -194,6 +194,44 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GrokSearchAndEmbeddingFailuresKeepSafeProviderCodes(bool embedding)
+    {
+        var retryAfter = TimeSpan.FromSeconds(17);
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            "{\"error\":{\"code\":\"rate_limit_test-token_header-value_provider-secret\",\"refresh_token\":\"provider-secret\"}}",
+            HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-header-value-1");
+        using var http = new HttpClient(handler);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" },
+            Catalog = []
+        };
+
+        LlmProviderException failure = embedding
+            ? await Assert.ThrowsAsync<LlmProviderException>(() => new XaiEmbeddingClient(http).EmbedAsync(connection,
+                new() { ModelId = "requested-model", Inputs = ["reference"] }))
+            : await Assert.ThrowsAsync<LlmProviderException>(() => XaiDocumentSearch.SearchAsync(http, connection,
+                new("reference", ["collection-1"]), () => { }, CancellationToken.None));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        Assert.Equal(retryAfter, failure.RetryAfter);
+        Assert.Null(failure.SanitizedResponseBody);
+        Assert.DoesNotContain("test-token", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("header-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("provider-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
     [InlineData(LlmTransport.GoogleGeminiApi, true, HttpStatusCode.OK)]
     [InlineData(LlmTransport.GoogleGeminiApi, false, HttpStatusCode.OK)]
     [InlineData(LlmTransport.GoogleVertexAi, true, HttpStatusCode.OK)]

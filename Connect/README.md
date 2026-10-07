@@ -1337,7 +1337,8 @@ model and numeric facts. A model string containing a known credential or protect
 confidentiality refusal after the response; it is not provider rejection or remote rollback proof.
 Input text is not a secret-replacement authority, and numeric JSON is not text-redacted.
 HTTP request/response cleanup preserves independent failures and
-retains actual refused owners behind safe diagnostics. The adapter is not registered. Subscription
+retains actual refused owners behind safe diagnostics. Provider failures retain the redacted code,
+request ID, status and retry delay without exposing the response body. The adapter is not registered. Subscription
 OAuth, model entitlement, preview format and the published input-schema/example disagreement remain
 unqualified; no default embedding model or working xAI availability is advertised.
 
@@ -1826,6 +1827,7 @@ not resolve or refresh credentials or register an adapter. Chat
 `ProviderOptions` are not copied into search JSON. Explicit non-default service tiers refuse
 before HTTP because the search route has no mapped tier control. Requests and responses have
 one cleanup owner; independent failures retain fixed-safe diagnostics and actual refused owners.
+Provider failures retain the redacted code, request ID, status and retry delay without exposing the response body.
 The facade applies the same connection validation before refresh and before saving refreshed
 credentials. It drains admitted search and retains actual cleanup refusals in its shared retirement
 result. Subscription OAuth acceptance and collection entitlement remain unqualified.

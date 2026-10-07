@@ -258,7 +258,7 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
     private static LlmProviderException SafeProviderFailure(LlmProviderException error, Exception original,
         LlmCredential? credential, string[] secrets) => new(
         "Grok embedding request failed.", LlmTransport.XaiResponses, error.StatusCode,
-        error.ProviderCode is "xai_authentication_required" or "xai_entitlement_required" ? error.ProviderCode : null,
+        error.ProviderCode is { } code ? SecretRedactor.Sanitize(code, credential, secrets) : null,
         error.RequestId is null ? null : SecretRedactor.Sanitize(error.RequestId, credential, secrets), error.RetryAfter,
         innerException: new FailureEvidence(original), isContextOverflow: error.IsContextOverflow);
 
