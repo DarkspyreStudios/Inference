@@ -104,7 +104,7 @@ internal static class GeminiStream
                     if (part["functionCall"] is JsonObject function)
                     {
                         if (finish is "MALFORMED_FUNCTION_CALL" or "UNEXPECTED_TOOL_CALL" or "TOO_MANY_TOOL_CALLS") { continue; }
-                        if (argumentStream.IsOpen || function.ContainsKey("partialArgs") || function.ContainsKey("willContinue") || function.Count == 0)
+                        if (argumentStream.IsOpen || function.ContainsKey("partialArgs") || (bool?)function["willContinue"] == true || function.Count == 0)
                         {
                             if (!streamedArguments || part.Any(field => field.Key is not ("functionCall" or "thoughtSignature")))
                             { throw Failure($"{route.Name} returned unexpected streamed function arguments."); }
@@ -130,6 +130,7 @@ internal static class GeminiStream
                         if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(name) || !callIds.Add(id))
                         { throw Failure($"{route.Name} returned an invalid or duplicate function identity."); }
                         part["connectCallId"] = id;
+                        function.Remove("willContinue");
                         calls.Add(new(id, name, arguments.ToJsonString()));
                         yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallStartedEvent(id, name, calls.Count - 1));
                     }

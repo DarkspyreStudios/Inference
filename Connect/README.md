@@ -1491,6 +1491,10 @@ An initial named no-argument call also completes when `willContinue` is explicit
 defines false and omitted `willContinue` as final. Both forms retain the actual call identity and
 thought signature, expose empty portable arguments and produce a replayable continuation after a
 recognized successful tool stop. An unnamed initial fragment still refuses.
+Complete calls with `args` and `willContinue:false` use the ordinary call parser in streaming and
+nonstreaming responses. The parser consumes the final control without dropping arguments, call
+identity or thought signatures from portable results and canonical continuations. An open fragment
+stream still uses its existing completion checks.
 
 Responses reports `Unknown` for an unrecognized native status and does not publish continuation
 state from that outcome. Tool calls alone do not establish successful completion. Direct Codex

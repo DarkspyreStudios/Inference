@@ -77,13 +77,16 @@ public sealed class GeminiArgumentStreamTests
     }
 
     [Theory]
-    [InlineData("{\"id\":\"call-1\",\"name\":\"no_arguments\",\"willContinue\":false}")]
-    [InlineData("{\"id\":\"call-1\",\"name\":\"no_arguments\"}")]
-    public async Task FinalNoArgumentCallPreservesIdentityAndPortableContinuation(string function)
+    [InlineData("{\"id\":\"call-1\",\"name\":\"no_arguments\",\"willContinue\":false}", "{}", true)]
+    [InlineData("{\"id\":\"call-1\",\"name\":\"no_arguments\"}", "{}", true)]
+    [InlineData("{\"id\":\"call-1\",\"name\":\"no_arguments\",\"args\":{\"enabled\":true},\"willContinue\":false}", "{\"enabled\":true}", true)]
+    [InlineData("{\"id\":\"call-1\",\"name\":\"no_arguments\",\"args\":{\"enabled\":true},\"willContinue\":false}", "{\"enabled\":true}", false)]
+    public async Task FinalCallsPreserveArgumentsIdentityAndPortableContinuation(string function, string expectedArguments, bool stream)
     {
-        string body = $$$"""
-            data: {"modelVersion":"gemini-3-pro-reported","candidates":[{"finishReason":"STOP","content":{"parts":[{"thoughtSignature":"opaque-signature","functionCall":{{{function}}}}]}}]}
+        string response = $$$"""
+            {"modelVersion":"gemini-3-pro-reported","candidates":[{"finishReason":"STOP","content":{"parts":[{"thoughtSignature":"opaque-signature","functionCall":{{{function}}}}]}}]}
             """;
+        string body = stream ? $"data: {response}\n\n" : response;
         using var http = new HttpClient(new Handler(body));
         var codec = new GeminiContinuationCodec("test-vertex", "Vertex");
         var route = new GeminiRoute(LlmTransport.GoogleVertexAi, "Vertex", "vertex_",
@@ -104,12 +107,12 @@ public sealed class GeminiArgumentStreamTests
         var events = new List<LlmStreamEvent>();
         await foreach (LlmStreamEvent item in GeminiStream.ReadAsync(http,
             new(HttpMethod.Post, "https://vertex.example.test/generate"), route, connection, request,
-            null, stream: true, usageDeltas: false, reasoningText: false, CancellationToken.None)) events.Add(item);
+            null, stream, usageDeltas: false, reasoningText: false, CancellationToken.None)) events.Add(item);
 
         Assert.Equal(3, events.Count);
         Assert.Equal("call-1", Assert.IsType<LlmToolCallStartedEvent>(events[0]).ToolCallId);
         LlmToolCall completed = Assert.IsType<LlmToolCall>(Assert.IsType<LlmToolCallCompletedEvent>(events[1]).ToolCall);
-        Assert.Equal("{}", completed.ArgumentsJson);
+        Assert.Equal(expectedArguments, completed.ArgumentsJson);
         LlmChatResult result = Assert.IsType<LlmChatCompletionEvent>(events[2]).Result;
         LlmChatResult restored = JsonSerializer.Deserialize(JsonSerializer.Serialize(result, ConnectLlmJson.ChatResult), ConnectLlmJson.ChatResult)!;
         Assert.Equal(LlmCompletionStatus.RequiresAction, restored.Status);
@@ -123,7 +126,7 @@ public sealed class GeminiArgumentStreamTests
         Assert.Equal("opaque-signature", part!["thoughtSignature"]!.GetValue<string>());
         Assert.Equal("call-1", part["functionCall"]!["id"]!.GetValue<string>());
         Assert.Equal("no_arguments", part["functionCall"]!["name"]!.GetValue<string>());
-        Assert.Empty(GeminiContinuation.EffectiveArguments(part["functionCall"]!.AsObject())!);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(expectedArguments), GeminiContinuation.EffectiveArguments(part["functionCall"]!.AsObject())));
     }
 
     private sealed class Handler(string body) : HttpMessageHandler
