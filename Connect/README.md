@@ -3507,7 +3507,10 @@ The existing SDK marshaller is verified for both request modes. Live gpt-oss 20B
 ConverseStream calls in `us-east-1` return text that fails the original schema's JSON validation.
 The result retains `IsValid = false`; provider-reported completion is not a validated structured
 answer. Native structured-output qualification remains open on DSA-109. Sonnet and real nonstreaming
-structured output are unqualified. The cause of the live mismatch is not verified.
+structured output through Connect are unqualified. A direct AWS CLI 2.37.2 Converse call on 20B Low
+also returns malformed JSON with the same schema in `us-east-1`, without Connect or its stream parser.
+That proves a provider-facing nonstreaming failure for that request. It does not establish the cause
+of every streaming failure or qualify a native schema guarantee. Responses are not rewritten.
 
 Converse sends a reasoning level through `additionalModelRequestFields` for Claude, Nova 2 and the
 qualified gpt-oss models, classified from the model or inference-profile id:
@@ -3717,6 +3720,13 @@ line by line and treats the terminal `result` event as authoritative, including 
 an intermediate refusal on a fallback model. `IsAuthenticatedAsync` checks only `claude auth status
 --json` for a signed-in first-party account; it does not inspect or require a stored credential.
 
+Without optional catalog OAuth, model discovery reads the official CLI's `initialize` control
+response. It preserves each model's native `value`, `displayName` and complete cloned catalog entry.
+It sends no generation prompt and does not read or copy CLI credentials. With optional catalog OAuth,
+discovery uses the Anthropic Models API; that credential never selects the generation transport.
+The installed CLI 2.1.289 discovery path is qualified through the public Connect facade with 12 native
+choices. Other versions, refresh, generation and target-platform paths remain separate qualifications.
+
 Claude subscription account usage runs the CLI-owned `/usage` command separately and normalizes its
 quota windows plus approximate local request/session activity. It only needs the CLI login, not the
 separate model-catalog OAuth credential. API-key connections do not advertise account usage because
@@ -3920,6 +3930,9 @@ new LlmConnection
 bare CLI names also resolve from `~/.local/bin` when a desktop app's inherited PATH omits it.
 An installation elsewhere requires its directory on PATH or an explicit executable path.
 Model discovery calls `agy models`; model `auto` omits the command-line model override and uses the CLI default.
+The installed CLI 1.3.1 discovery path is qualified through the public Connect facade with 14 provider
+models plus `auto`. Discovery uses the CLI's existing sign-in without copying its credentials.
+That qualification covers listing, not generation on every returned model or every target platform.
 
 Each request runs in an empty temporary workspace with terminal sandboxing and slash-command expansion disabled. A streamed request sends its prompt as BOM-free UTF-8 through standard input. A request with `SupportsStreaming = false` is the exception: the CLI's only non-streaming form, `agy -p "<prompt>" --output-format json`, takes the prompt as a process argument, because stream-json input requires stream-json output. That prompt is visible in the local process list. It must fit in one argument: at most 131,071 UTF-8 bytes on macOS and Linux, and at most 30,000 characters on Windows, where a `.cmd` or `.bat` launcher cannot carry it at all because the prompt contains line breaks. A prompt that does not fit fails with `NotSupportedException` before the CLI starts. Native JSON Schema and the `Low`, `Medium` and `High` reasoning levels are supported. Only `agent_response` step deltas stream as answer text. A schema-backed request streams no provisional text: it returns the terminal event's canonical `structured_output` value, validated locally. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
 
