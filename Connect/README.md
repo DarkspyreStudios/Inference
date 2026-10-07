@@ -4420,6 +4420,11 @@ first session and requires a completed second turn in the same conversation with
 recall. Cancellation stops after the first text delta and requires caller cancellation plus
 successful owned-session disposal. It does not claim remote work termination or an unusable
 session after interruption. Both cases use Claude's read-only host runtime policy and no host tools.
+Native qualification passes on installed Claude CLI 2.1.289 with the selected `sonnet` alias.
+Resume completes both turns across the process replacement with exact conversation identity and marker
+recall. Cancellation reaches the first text delta, surfaces caller cancellation and completes owned
+session disposal. These three turn attempts qualify the named cases, not credential refresh, remote
+work termination, every model or other CLI platforms.
 
 ```bash
 dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- claude-probe --provider claude --model sonnet --case resume --repeat 1 --timeout-seconds 90
