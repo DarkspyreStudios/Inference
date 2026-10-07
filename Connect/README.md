@@ -3000,6 +3000,13 @@ numeric and schema-container shapes fail before effects, including with local fa
 Count-keyword admission compares the original number exactly with its integral decimal candidate.
 Fractional counts cannot round into admitted integers. Counts outside decimal representation remain
 outside native guarantees; admission invents no rejection cutoff for those values.
+The [documented formats](https://docs.x.ai/developers/model-capabilities/text/structured-outputs)
+`date`, `time`, `date-time`, `email`, `uuid`, `ipv4`, `ipv6` and `uri` retain native admission.
+Other formats, unlisted assertions and declared vocabularies remain outside
+native guarantees, not invented provider rejections. Known standard annotations retain their literal
+values. Invalid keyword shapes refuse before dispatch. The default case does not grant unknown
+keywords a native guarantee. Original-schema format evaluation keeps the selected supplier dialect
+and vocabulary policy; native admission does not turn invalid output into valid output.
 Response schemas outside native admission retain explicit original-schema local fallback; non-strict
 functions stay unchanged. The deferred/batch Chat codec uses this same strict-function entry and
 response enforcement owner; its separate wire builder and decoder remain separate.
@@ -3024,8 +3031,8 @@ intersections and object-only unions. Scalar, nullable/mixed and untyped roots d
 object proof merely because the schema document is a JSON object or contains `properties`.
 Draft-07 `$ref` siblings cannot supply that proof. This is not a general satisfiability analysis.
 Local validation uses the original schema and reports invalid output without
-rewriting it or retrying. This check does not implement the complete keyword/vocabulary, legacy
-fragment-ID and regex classification or original-dialect ECMA regex evaluator.
+rewriting it or retrying. Legacy fragment-ID resolution, complete dialect-specific keyword shapes
+and regex classification or original-dialect ECMA regex evaluation remain incomplete.
 The shared `StructuredOutput` validator builds the unchanged original schema in a fresh local
 registry for each validation. Repeated `$id` values across requests do not collide or retain request
 graphs in the global registry. Existing supplier default dialect, vocabulary and dialect registries,

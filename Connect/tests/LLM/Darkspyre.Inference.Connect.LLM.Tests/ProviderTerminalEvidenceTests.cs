@@ -25,6 +25,10 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"minimum\":\"one\"}}}", true)]
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"minLength\":1e-100}}}", true)]
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"maxItems\":1.0000000000000000000000000001}}}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"format\":17}}}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"multipleOf\":0}}}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"uniqueItems\":17}}}", true)]
+    [InlineData("{\"type\":\"object\",\"$vocabulary\":{\"https://schemas.example.test/custom\":17}}", true)]
     public async Task GrokSchemaAdmissionDistinguishesMalformedValuesFromNativeRejections(string schema, bool malformed)
     {
         const string body = """
@@ -85,11 +89,12 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Theory]
-    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"additionalProperties\":false}")]
-    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":[\"string\",\"null\"],\"enum\":[\"x\",null],\"const\":\"x\"}},\"default\":{\"type\":17,\"anyOf\":[]},\"examples\":[{\"minContains\":\"one\"}]}")]
-    public async Task GrokSchemaAdmissionPreservesBooleanClosureAndLiteralPayloads(string schema)
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"additionalProperties\":false}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":[\"string\",\"null\"],\"enum\":[\"x\",null],\"const\":\"x\"}},\"default\":{\"type\":17,\"anyOf\":[]},\"examples\":[{\"minContains\":\"one\"}]}", true)]
+    [InlineData("{\"type\":\"object\",\"title\":\"Answer\",\"description\":\"A value\",\"$comment\":\"Annotation\",\"readOnly\":true,\"writeOnly\":false,\"deprecated\":false,\"properties\":{\"value\":{\"type\":\"string\",\"format\":\"email\"}}}", false)]
+    public async Task GrokSchemaAdmissionPreservesBooleanClosureAndLiteralPayloads(string schema, bool validOutput)
     {
-        await CheckReferenceAdmission(JsonElement.Parse(schema), guaranteed: true);
+        await CheckReferenceAdmission(JsonElement.Parse(schema), guaranteed: true, validOutput);
     }
 
     [Fact]
@@ -213,7 +218,7 @@ public sealed class ProviderTerminalEvidenceTests
         await CheckReferenceAdmission(JsonElement.Parse(schema), guaranteed: false);
     }
 
-    private static async Task CheckReferenceAdmission(JsonElement schema, bool guaranteed)
+    private static async Task CheckReferenceAdmission(JsonElement schema, bool guaranteed, bool validOutput = true)
     {
         const string body = """
             {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"value\":\"x\"}"}]}]}
@@ -249,18 +254,23 @@ public sealed class ProviderTerminalEvidenceTests
         await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
         LlmStructuredOutputValidation validation = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.StructuredOutput!;
         Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, validation.Enforcement);
-        Assert.True(validation.IsValid);
+        Assert.Equal(validOutput, validation.IsValid);
         using var sent = JsonDocument.Parse(handler.RequestBody!);
         Assert.Equal(schema.GetRawText(), sent.RootElement.GetProperty("text").GetProperty("format").GetProperty("schema").GetRawText());
         Assert.Equal(1, handler.Calls);
     }
 
     [Theory]
-    [InlineData("{\"oneOf\":[{\"type\":\"number\"},{\"type\":\"integer\"}]}")]
-    [InlineData("{\"allOf\":[{\"minimum\":2},{\"maximum\":4}]}")]
-    [InlineData("{\"not\":{\"const\":1}}")]
-    [InlineData("{\"if\":{\"const\":1},\"then\":{\"const\":2}}")]
-    public async Task GrokBestEffortCompositionRequiresExplicitOriginalSchemaValidation(string constraint)
+    [InlineData("{\"oneOf\":[{\"type\":\"number\"},{\"type\":\"integer\"}]}", false)]
+    [InlineData("{\"allOf\":[{\"minimum\":2},{\"maximum\":4}]}", false)]
+    [InlineData("{\"not\":{\"const\":1}}", false)]
+    [InlineData("{\"if\":{\"const\":1},\"then\":{\"const\":2}}", false)]
+    [InlineData("{\"format\":\"custom-format\"}", true)]
+    [InlineData("{\"multipleOf\":2}", false)]
+    [InlineData("{\"uniqueItems\":true}", true)]
+    [InlineData("{\"customAssertion\":false}", true)]
+    [InlineData("{\"$vocabulary\":{\"https://schemas.example.test/custom\":false}}", true)]
+    public async Task GrokUnprovenGuaranteesRequireExplicitOriginalSchemaValidation(string constraint, bool validOutput)
     {
         JsonElement schema = JsonElement.Parse("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"value\":" + constraint + "}}");
         const string body = """
@@ -299,7 +309,7 @@ public sealed class ProviderTerminalEvidenceTests
         })) events.Add(item);
         LlmStructuredOutputValidation validation = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.StructuredOutput!;
         Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, validation.Enforcement);
-        Assert.False(validation.IsValid);
+        Assert.Equal(validOutput, validation.IsValid);
         Assert.Equal(schema.GetRawText(), output.Schema.GetRawText());
         using (var sent = JsonDocument.Parse(handler.RequestBody!)) Assert.False(sent.RootElement.TryGetProperty("text", out _));
         Assert.Equal(1, handler.Calls);

@@ -95,6 +95,24 @@ internal static class XaiSchemaLimits
                     : value.GetArrayLength() == 0 ? SchemaDisposition.ProviderRejected : SchemaDisposition.Guaranteed;
             case "required":
                 return Shape(UniqueStrings(value));
+            case "format":
+                return value.ValueKind != JsonValueKind.String ? SchemaDisposition.InvalidSchema
+                    : value.GetString() is "date" or "time" or "date-time" or "email" or "uuid" or "ipv4" or "ipv6" or "uri"
+                        ? SchemaDisposition.Guaranteed : SchemaDisposition.OutsideGuarantee;
+            case "multipleOf":
+                return value.ValueKind == JsonValueKind.Number && JsonMath.NumberCompare(value, JsonElement.Parse("0")) > 0
+                    ? SchemaDisposition.OutsideGuarantee : SchemaDisposition.InvalidSchema;
+            case "uniqueItems":
+                return value.ValueKind is JsonValueKind.True or JsonValueKind.False
+                    ? SchemaDisposition.OutsideGuarantee : SchemaDisposition.InvalidSchema;
+            case "dependentRequired":
+                return draft == SchemaDraft.Draft7 ? SchemaDisposition.OutsideGuarantee
+                    : value.ValueKind == JsonValueKind.Object && value.EnumerateObject().All(dependency => UniqueStrings(dependency.Value))
+                        ? SchemaDisposition.OutsideGuarantee : SchemaDisposition.InvalidSchema;
+            case "$vocabulary":
+                return draft == SchemaDraft.Draft7 ? SchemaDisposition.OutsideGuarantee
+                    : value.ValueKind == JsonValueKind.Object && value.EnumerateObject().All(vocabulary => vocabulary.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                        ? SchemaDisposition.OutsideGuarantee : SchemaDisposition.InvalidSchema;
             case "minimum":
             case "maximum":
             case "exclusiveMinimum":
@@ -126,6 +144,30 @@ internal static class XaiSchemaLimits
                     : DisjointTypes(value) ? SchemaDisposition.Guaranteed : SchemaDisposition.OutsideGuarantee;
             case "items":
                 return value.ValueKind == JsonValueKind.Array ? SchemaDisposition.ProviderRejected : SchemaDisposition.Guaranteed;
+            case "$schema":
+            case "$id":
+            case "$anchor":
+            case "$ref":
+            case "$comment":
+            case "title":
+            case "description":
+            case "contentEncoding":
+            case "contentMediaType":
+            case "pattern":
+                return Shape(value.ValueKind == JsonValueKind.String);
+            case "readOnly":
+            case "writeOnly":
+            case "deprecated":
+                return Shape(value.ValueKind is JsonValueKind.True or JsonValueKind.False);
+            case "examples":
+                return Shape(value.ValueKind == JsonValueKind.Array);
+            case "const":
+            case "default":
+            case "$defs":
+            case "definitions":
+            case "additionalProperties":
+            case "prefixItems":
+                return SchemaDisposition.Guaranteed;
             case "$dynamicRef":
             case "$recursiveRef":
             case "not":
@@ -134,7 +176,7 @@ internal static class XaiSchemaLimits
             case "else":
                 return SchemaDisposition.OutsideGuarantee;
             default:
-                return SchemaDisposition.Guaranteed;
+                return SchemaDisposition.OutsideGuarantee;
         }
 
         static SchemaDisposition Shape(bool valid) => valid ? SchemaDisposition.Guaranteed : SchemaDisposition.InvalidSchema;
