@@ -188,6 +188,46 @@ public sealed class ClaudeCliExitTests
         Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Error);
     });
 
+    [UnixFact]
+    public Task ExitedParentWithChildHoldingStderrReportsADrainFailure() => Bounded(async () =>
+    {
+        using var scratch = new Scratch();
+        var logger = new RecordingLogger();
+        var exits = new ClaudeCliExits(logger) { Limit = TimeSpan.FromMilliseconds(250) };
+        var factory = new ClaudeCliSessionProcessFactory(exits);
+        IClaudeCliSessionProcess process = await factory.StartAsync(new("/bin/sh",
+            ["-c", "/bin/sh -c 'echo \"$$\"; exec /bin/sleep 30' & exit 0"], scratch.Directory));
+        Process? child = null;
+        try
+        {
+            string? line = await process.ReadLineAsync();
+            Assert.NotNull(line);
+            child = Process.GetProcessById(int.Parse(line, CultureInfo.InvariantCulture));
+            Assert.False(child.HasExited);
+            await process.DisposeAsync();
+
+            CliProcessDrainException failure = await Assert.ThrowsAsync<CliProcessDrainException>(() => exits.DisposeAsync().AsTask());
+            Assert.Contains("standard-error pipe did not drain", failure.Message, StringComparison.Ordinal);
+            Assert.Same(failure, await Assert.ThrowsAsync<CliProcessDrainException>(() => exits.DisposeAsync().AsTask()));
+            Assert.False(child.HasExited);
+            Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Error);
+            Assert.DoesNotContain(logger.Entries, entry => entry.Level == LogLevel.Warning);
+        }
+        finally
+        {
+            // The already-exited parent's group ID is not a safe cleanup target.
+            if (child is not null)
+            {
+                if (!child.HasExited) child.Kill();
+                await child.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+                child.Dispose();
+            }
+            await process.DisposeAsync();
+            try { await exits.DisposeAsync(); }
+            catch (CliProcessDrainException) { }
+        }
+    });
+
     private static Task Bounded(Func<Task> scenario) => Task.Run(scenario).WaitAsync(TimeSpan.FromSeconds(20));
 
     private sealed class Scratch : IDisposable

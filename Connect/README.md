@@ -1681,7 +1681,9 @@ still permits actual process termination and remains visible on repeated disposa
 A failed background task and refused error log preserve both exception identities
 without repeating logging during disposal. An actual stderr capture above the 16 MiB
 limit interrupts the read and preserves the same failure through background retirement.
-These cases do
+An exited shell parent with a child holding stderr open reports the bounded drain
+failure on repeated retirement. That child is not signalled through the parent's
+retired process-group ID. These cases do
 not exercise an installed provider CLI, its OAuth refresh or Windows containment.
 
 After a kill, Connect waits at most 5 seconds for the runtime to report the exit. When the bound
