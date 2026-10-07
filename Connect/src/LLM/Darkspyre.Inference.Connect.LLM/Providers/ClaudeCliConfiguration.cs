@@ -1,9 +1,26 @@
+using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal static class ClaudeCliConfiguration
 {
+    internal static string ErrorDetail(JsonElement result, LlmCredential? credential)
+    {
+        var details = new List<string>();
+        if (result.TryGetProperty("errors", out JsonElement errors) && errors.ValueKind == JsonValueKind.Array)
+        {
+            foreach (JsonElement error in errors.EnumerateArray())
+                if (error.ValueKind == JsonValueKind.String && error.GetString() is { } text && !string.IsNullOrWhiteSpace(text))
+                    details.Add(SecretRedactor.Sanitize(text, credential));
+        }
+        if (details.Count == 0 && LlmJson.GetString(result, "result") is { } fallback && !string.IsNullOrWhiteSpace(fallback))
+            details.Add(SecretRedactor.Sanitize(fallback, credential));
+        // Individual details can contain JSON secrets. Composition uses the same redactor's display bound.
+        return details.Count == 0 ? string.Empty
+            : " " + SecretRedactor.Sanitize("CLI detail: " + string.Join(" ", details), credential).ReplaceLineEndings(" ").Trim();
+    }
+
     public static LlmCredential? ValidateConnection(LlmConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);

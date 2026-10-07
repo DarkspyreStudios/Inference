@@ -12,6 +12,61 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ClaudeCliLlmClientTests
 {
+    [Theory]
+    [InlineData(true, 0)]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    [InlineData(false, 1)]
+    public async Task FailedTerminalPreservesSanitizedErrorsAndActualExitCode(bool streaming, int exitCode)
+    {
+        const string detail = """{"access_token":"diagnostic-secret","detail":"The selected model is unavailable."}""";
+        string output = new JsonObject
+        {
+            ["type"] = "result",
+            ["subtype"] = "error_during_execution",
+            ["is_error"] = true,
+            ["errors"] = new JsonArray(JsonValue.Create(detail), JsonValue.Create("Quota exceeded. catalog-secret"))
+        }.ToJsonString();
+        var runner = new RecordingRunner(new(exitCode, output, string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        LlmConnection connection = CliConnection() with
+        {
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "catalog-secret" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => ReadAllAsync(
+            client.StreamAsync(connection, new() { ModelId = "claude-test", Messages = [new("user", "test")] })));
+
+        Assert.Equal(exitCode == 0 ? "claude_cli_error" : "claude_cli_exit_1", failure.ProviderCode);
+        Assert.Contains("The selected model is unavailable.", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("Quota exceeded.", failure.Message, StringComparison.Ordinal);
+        Assert.True(failure.Message.IndexOf("The selected model", StringComparison.Ordinal)
+            < failure.Message.IndexOf("Quota exceeded", StringComparison.Ordinal));
+        Assert.Contains("[REDACTED]", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("diagnostic-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("catalog-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Single(runner.Invocations);
+    }
+
+    [Fact]
+    public async Task AccountUsageFailurePreservesSanitizedResultDetail()
+    {
+        const string detail = """{"refresh_token":"usage-secret","detail":"Account usage is unavailable for this organization."}""";
+        var runner = new RecordingRunner(new(0,
+            new JsonObject { ["type"] = "result", ["is_error"] = true, ["result"] = detail }.ToJsonString(), string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => client.GetAccountUsageAsync(CliConnection()));
+
+        Assert.Equal("claude_cli_usage_error", failure.ProviderCode);
+        Assert.Contains("Account usage is unavailable for this organization.", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("usage-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Single(runner.Invocations);
+    }
+
     [Fact]
     public async Task ModelDiscoveryWithoutCatalogOAuthPreservesCliChoicesAndRetiresItsProcess()
     {

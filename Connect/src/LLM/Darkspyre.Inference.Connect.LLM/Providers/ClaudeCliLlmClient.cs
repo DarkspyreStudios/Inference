@@ -141,9 +141,10 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         (LlmProviderCapabilities capabilities, LlmStructuredOutputEnforcement? enforcement) = ValidateChatRequest(connection, request);
         string prompt = BuildClaudePrompt(connection, request);
         string executable = ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint);
+        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         if (!capabilities.SupportsStreaming)
         {
-            LlmChatResult completeResult = await CompleteAsync(executable, prompt, request, enforcement, cancellationToken);
+            LlmChatResult completeResult = await CompleteAsync(executable, prompt, request, enforcement, credential, cancellationToken);
             foreach (LlmStreamEvent completeEvent in CompleteResponseEvents.From(completeResult, []))
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -166,7 +167,6 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
         ClaudeTerminalResult? terminal = null;
         string? observedModel = null;
-        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         ClaudeCliProcessResult? processResult = null;
         LlmProviderException? parseException = null;
         bool emittedText = false;
@@ -203,7 +203,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 observation = usage.Observe(document.RootElement);
                 parsed = ParseClaudeLine(
                     document.RootElement,
-                    preferStructuredOutput: enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema);
+                    enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema,
+                    credential);
             }
             catch (JsonException exception)
             {
@@ -244,7 +245,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         }
         if (processResult.ExitCode != 0 || processResult.StandardInputError is not null)
         {
-            throw CreateClaudeExitException(processResult);
+            throw CreateClaudeExitException(processResult, credential, terminal);
         }
         if (parseException is not null)
         {
@@ -270,6 +271,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         string prompt,
         LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement,
+        LlmCredential? credential,
         CancellationToken cancellationToken)
     {
         var arguments = new List<string> { "-p", "--output-format", "json" };
@@ -286,7 +288,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
         if (processResult.ExitCode != 0 || processResult.StandardInputError is not null)
         {
-            throw CreateClaudeExitException(processResult);
+            throw CreateClaudeExitException(processResult, credential);
         }
 
         ParsedClaudeLine parsed;
@@ -294,7 +296,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         {
             parsed = ParseClaudeLine(
                 processResult.StandardOutput,
-                preferStructuredOutput: enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema);
+                enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema,
+                credential);
         }
         catch (JsonException exception)
         {
@@ -350,7 +353,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         if (terminal.IsError)
         {
             throw new LlmProviderException(
-                "Claude CLI reported a provider error. Run claude in a terminal to verify sign-in and model access.",
+                "Claude CLI reported a provider error. Run claude in a terminal to verify sign-in and model access."
+                    + terminal.ErrorDetail,
                 Transport,
                 providerCode: "claude_cli_error");
         }
@@ -466,7 +470,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
         if (result.ExitCode != 0 || result.StandardInputError is not null)
         {
-            throw CreateClaudeExitException(result);
+            throw CreateClaudeExitException(result, credential);
         }
 
         try
@@ -477,7 +481,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 && error.ValueKind == JsonValueKind.True)
             {
                 throw new LlmProviderException(
-                    "Claude CLI reported an account-usage error. Run claude in a terminal to verify sign-in.",
+                    "Claude CLI reported an account-usage error. Run claude in a terminal to verify sign-in."
+                        + ClaudeCliConfiguration.ErrorDetail(root, credential),
                     Transport,
                     providerCode: "claude_cli_usage_error");
             }
@@ -682,13 +687,13 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             ? ObservedModel.Read(observed, "model", Transport, connection, credential, null) : null;
     }
 
-    private static ParsedClaudeLine ParseClaudeLine(string line, bool preferStructuredOutput)
+    private static ParsedClaudeLine ParseClaudeLine(string line, bool preferStructuredOutput, LlmCredential? credential)
     {
         using JsonDocument document = JsonDocument.Parse(line);
-        return ParseClaudeLine(document.RootElement, preferStructuredOutput);
+        return ParseClaudeLine(document.RootElement, preferStructuredOutput, credential);
     }
 
-    private static ParsedClaudeLine ParseClaudeLine(JsonElement root, bool preferStructuredOutput)
+    private static ParsedClaudeLine ParseClaudeLine(JsonElement root, bool preferStructuredOutput, LlmCredential? credential)
     {
         string type = LlmJson.GetString(root, "type") ?? string.Empty;
         if (string.Equals(type, "system", StringComparison.Ordinal))
@@ -737,7 +742,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 LlmJson.GetString(root, "stop_reason"),
                 LlmJson.GetString(root, "terminal_reason"),
                 LlmJson.GetString(root, "session_id"),
-                usage),
+                usage,
+                isError ? ClaudeCliConfiguration.ErrorDetail(root, credential) : string.Empty),
             "Claude CLI response received; validating output…");
     }
 
@@ -834,8 +840,25 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     private static bool HasCatalogCredential(LlmCredential? credential) =>
         !string.IsNullOrWhiteSpace(credential?.OAuth?.AccessToken);
 
-    private static LlmProviderException CreateClaudeExitException(ClaudeCliProcessResult result)
+    private static LlmProviderException CreateClaudeExitException(ClaudeCliProcessResult result, LlmCredential? credential,
+        ClaudeTerminalResult? terminal = null)
     {
+        string detail = terminal?.IsError == true ? terminal.ErrorDetail : string.Empty;
+        if (terminal is null && !string.IsNullOrWhiteSpace(result.StandardOutput))
+        {
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(result.StandardOutput);
+                JsonElement root = document.RootElement;
+                if (root.ValueKind == JsonValueKind.Object && root.TryGetProperty("is_error", out JsonElement error)
+                    && error.ValueKind == JsonValueKind.True)
+                    detail = ClaudeCliConfiguration.ErrorDetail(root, credential);
+            }
+            catch (JsonException)
+            {
+                detail = " CLI exit output could not be read as a result envelope.";
+            }
+        }
         string combined = $"{result.StandardError}\n{result.StandardOutput}";
         bool authenticationFailure = combined.Contains("auth", StringComparison.OrdinalIgnoreCase)
             || combined.Contains("login", StringComparison.OrdinalIgnoreCase)
@@ -845,12 +868,13 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             : string.Empty;
         string inputFailure = result.StandardInputError is null
             ? string.Empty
-            : $" {result.StandardInputError}";
+            : $" {SecretRedactor.Sanitize(result.StandardInputError, credential)}";
         string providerCode = result.StandardInputError is null
             ? $"claude_cli_exit_{result.ExitCode}"
             : "claude_cli_input_closed";
         return new LlmProviderException(
-            $"Claude CLI exited with code {result.ExitCode}.{inputFailure}{guidance}",
+            $"Claude CLI exited with code {result.ExitCode}.{inputFailure}{guidance}"
+                + detail,
             LlmTransport.AnthropicClaudeCli,
             providerCode: providerCode);
     }
@@ -862,7 +886,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         string? StopReason,
         string? TerminalReason,
         string? SessionId,
-        LlmUsage? Usage);
+        LlmUsage? Usage,
+        string ErrorDetail);
 
     private sealed record ParsedClaudeLine(
         string? TextDelta,

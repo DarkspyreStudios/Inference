@@ -16,6 +16,43 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
     [Fact]
+    public async Task FailedNativeTerminalKeepsSafeErrorsWithoutPublishingDiagnosticTextAsAnAnswer()
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        {
+            ModelId = "claude-test",
+            Runtime = new() { WorkingDirectory = _directory }
+        });
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(
+            new() { Input = [new LlmAgentTextContent("test")] }, limit.Token).GetAsyncEnumerator(limit.Token);
+        Assert.True(await feed.MoveNextAsync());
+        Assert.IsType<LlmAgentTurnStartedEvent>(feed.Current);
+        string turnId = await process.WaitForUserMessage(limit.Token);
+        process.Push(new { type = "user", uuid = turnId, isReplay = true });
+        string[] errors = ["""{"access_token":"native-secret","detail":"The selected model is unavailable."}""", "Quota exceeded."];
+        process.Push(new
+        {
+            type = "result",
+            subtype = "error_during_execution",
+            is_error = true,
+            result = """{"refresh_token":"result-secret","detail":"Failed diagnostic, not an answer."}""",
+            errors
+        });
+
+        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+        LlmAgentTurnCompletedEvent terminal = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal(LlmAgentCompletionReason.ProviderFailure, terminal.Reason);
+        Assert.Contains("The selected model is unavailable.", terminal.Error!, StringComparison.Ordinal);
+        Assert.Contains("Quota exceeded.", terminal.Error!, StringComparison.Ordinal);
+        Assert.DoesNotContain("native-secret", terminal.Error!, StringComparison.Ordinal);
+        Assert.DoesNotContain("result-secret", terminal.Error!, StringComparison.Ordinal);
+        Assert.Empty(events.OfType<LlmAgentMessageCompletedEvent>());
+        Assert.Empty(events.OfType<LlmAgentTextDeltaEvent>());
+    }
+
+    [Fact]
     public async Task ReadOnlySessionsAllowRegisteredHostToolsWithoutEnteringPlanMode()
     {
         var factory = new Factory(new ManualProcess());

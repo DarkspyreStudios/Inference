@@ -3860,6 +3860,11 @@ termination, reports `Unknown`. Refusal and token/context-window truncation keep
 classification. Native unknown diagnostics retain the observed subtype and stop reason. Existing
 process errors and interruptions retain their precedence; intermediate fallback attempts do not
 classify the completed operation.
+Claude CLI chat, native turns and account-usage failures retain the ordered terminal `errors`
+details, or the terminal `result` diagnostic when no error list is supplied. The shared Claude
+projection uses the existing secret redactor and display bound. Process-exit failures retain their
+actual exit code and any observed terminal error detail. A failed native terminal result is failure
+evidence, not an ordinary completed answer. Successful result text remains unchanged.
 
 ### Structured output
 

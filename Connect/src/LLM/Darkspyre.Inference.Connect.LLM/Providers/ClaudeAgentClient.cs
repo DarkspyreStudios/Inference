@@ -1666,12 +1666,12 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             target.Usage.Finish();
             LlmUsage? usage = ClaudeStreamUsage.ReadFinal(root);
             Emit(new LlmAgentUsageEvent(ThreadId, target.Id, $"usage-{target.Id}", usage, usage));
+            bool isError = OptionalBoolean(root, "is_error") == true;
             string text = OptionalString(root, "result") ?? string.Empty;
-            if (text.Length > 0 && target.Completed.Count == 0)
+            if (!isError && text.Length > 0 && target.Completed.Count == 0)
             {
                 Emit(new LlmAgentMessageCompletedEvent(ThreadId, target.Id, $"result-{target.Id}", text));
             }
-            bool isError = OptionalBoolean(root, "is_error") == true;
             string subtype = OptionalString(root, "subtype") ?? string.Empty;
             string? stopReason = OptionalString(root, "stop_reason") ?? OptionalString(root, "terminal_reason");
             LlmAgentCompletionReason reason = subtype.Contains("interrupt", StringComparison.OrdinalIgnoreCase)
@@ -1682,6 +1682,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 : subtype == "success" && stopReason is null or "end_turn" or "stop_sequence"
                     ? LlmAgentCompletionReason.Completed : LlmAgentCompletionReason.Unknown;
             string? error = isError ? "Claude CLI reported a turn error."
+                + ClaudeCliConfiguration.ErrorDetail(root, LlmCredential.Parse(_connection.Credential))
                 : reason == LlmAgentCompletionReason.Unknown
                     ? $"Claude CLI returned result subtype '{subtype}' with stop reason '{stopReason}'." : null;
             Emit(new LlmAgentTurnCompletedEvent(ThreadId, target.Id, reason, error));
