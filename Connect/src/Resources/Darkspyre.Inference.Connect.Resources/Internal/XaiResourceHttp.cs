@@ -134,7 +134,8 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
     private static LlmProviderException SafeProvider(LlmProviderException provider, Exception original, Observation observation) => new(
         "The resource request failed.", LlmTransport.XaiResponses, provider.StatusCode,
         provider.ProviderCode is "xai_authentication_required" or "xai_entitlement_required" ? provider.ProviderCode : null,
-        retryAfter: provider.RetryAfter, innerException: new FailureEvidence(original, observation: observation), isContextOverflow: provider.IsContextOverflow);
+        requestId: observation.RequestId, retryAfter: provider.RetryAfter,
+        innerException: new FailureEvidence(original, observation: observation), isContextOverflow: provider.IsContextOverflow);
 
     private static bool IsOwnedSafe(Exception? error) => error is FailureEvidence
         || error is OperationCanceledException { InnerException: FailureEvidence };

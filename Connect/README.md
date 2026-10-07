@@ -113,6 +113,8 @@ retrieval; they do not prove remote success or authorize retry. Response status 
 an observed response. Upload receipts require dispatch, file and image receipts are exclusive, and
 operation-created JSONL belongs only to creation from requests. Collections copy their data, including
 result bytes and opaque JSON. The owned codec rejects contradictory facts and undefined operations.
+Provider failures retain the current response's sanitized request ID in both the operation observation
+and the nested provider exception. HTTP status and retry delay remain available without response bodies.
 `LlmResourceOperationException` and `LlmResourceOperationCanceledException` expose a copied observation
 with fixed diagnostic text. Cancellation preserves its actual cause and token. Their constructors do
 not sanitize caller-supplied inner exceptions. Exceptions remain runtime objects, not JSON roots.

@@ -5,11 +5,51 @@ using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using Darkspyre.Inference.Connect.LLM.Vertex;
+using Darkspyre.Inference.Connect.Resources;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ProviderTerminalEvidenceTests
 {
+    [Fact]
+    public async Task GrokBatchFailureKeepsSafeRequestIdInTheProviderErrorAndOperationReceipt()
+    {
+        var retryAfter = TimeSpan.FromSeconds(17);
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            "{\"error\":{\"message\":\"Rate limit test-token\",\"refresh_token\":\"provider-secret\"}}",
+            HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-1");
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var source = new ResourcePreparationTests.Source(new()
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize()
+        });
+        await using var access = new LlmConnectionAccess(source, [], [client]);
+        await using var core = new LlmProviderService(source, [client], [], connectionAccess: access);
+        await using var batches = new LlmResourceProviderService(access, core);
+
+        LlmResourceOperationException operation = await Assert.ThrowsAsync<LlmResourceOperationException>(() =>
+            batches.CreateAsync("connection", "batch"));
+        LlmProviderException failure = Assert.IsType<LlmProviderException>(operation.InnerException);
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-1", failure.RequestId);
+        Assert.Equal(retryAfter, failure.RetryAfter);
+        Assert.Equal(failure.RequestId, operation.Observation.RequestId);
+        Assert.Equal(429, operation.Observation.HttpStatusCode);
+        Assert.True(operation.Observation.BatchMutationDispatched);
+        Assert.True(operation.Observation.ResponseObserved);
+        Assert.Null(operation.Observation.ObservedBatch);
+        Assert.Null(failure.SanitizedResponseBody);
+        Assert.DoesNotContain("test-token", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("provider-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal(1, handler.Calls);
+    }
+
     [Fact]
     public async Task GrokFileFailureKeepsSafeRequestAndRetryFactsWithoutRetryingOrDisposingBorrowedContent()
     {
