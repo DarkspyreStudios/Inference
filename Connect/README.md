@@ -1740,6 +1740,9 @@ that rejects decoded lines above 16 MiB characters during receipt. It preserves 
 CR/LF/CRLF delimiters and an unterminated final line at EOF. Caller cancellation retains received
 partial text for the next read. An oversized line faults the reader; later reads report the same
 failure without truncating or resynchronizing its content.
+The reader returns a complete interactive line while stdin remains open. It does not wait for
+another input, process exit or another byte-buffer refill. The existing launcher fixture verifies
+that behavior through Antigravity's actual pipe wrapper and a detached shell process.
 
 Native-session disposal allows up to 2 seconds for graceful exit after closing stdin, then signals an
 owned process that remains alive. The process exit and stderr EOF share a subsequent 5-second bound.

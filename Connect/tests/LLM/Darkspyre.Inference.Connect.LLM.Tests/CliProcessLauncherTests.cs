@@ -6,6 +6,32 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class CliProcessLauncherTests
 {
     [UnixFact]
+    public async Task InteractiveAntigravityPipeDeliversCompleteLineBeforeInputOrExit()
+    {
+        if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        // Native init lines span the stream reader's byte buffer while the CLI awaits input.
+        string line = new('x', 1500);
+        var process = new Process
+        {
+            StartInfo = CliProcessLauncher.CreateStartInfo("/bin/bash",
+                ["-c", "printf '%s\\n' \"$1\"; IFS= read -r value || :", "interactive-init", line],
+                Environment.CurrentDirectory)
+        };
+        try { Assert.True(process.Start()); }
+        catch { process.Dispose(); throw; }
+        await using var session = new AntigravityCliSessionProcess(process);
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(line, await session.ReadLineAsync(deadline.Token));
+        Assert.False(process.HasExited);
+
+        session.CloseInput();
+        var result = await session.WaitForExitAsync(deadline.Token);
+        Assert.Equal(0, result.ExitCode);
+        Assert.Empty(result.StandardError);
+    }
+
+    [UnixFact]
     public async Task UnixLookupUsesPathThenUserLocalBinAndPreservesExplicitPathsAndArguments()
     {
         if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
