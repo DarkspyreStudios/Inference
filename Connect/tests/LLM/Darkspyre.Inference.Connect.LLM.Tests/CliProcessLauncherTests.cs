@@ -9,7 +9,7 @@ public sealed class CliProcessLauncherTests
     public async Task InteractiveAntigravityPipeDeliversCompleteLineBeforeInputOrExit()
     {
         if (OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
-        // Native init lines span the stream reader's byte buffer while the CLI awaits input.
+        // Native init arrives while the CLI awaits input; receipt must not wait for EOF.
         string line = new('x', 1500);
         var process = new Process
         {
