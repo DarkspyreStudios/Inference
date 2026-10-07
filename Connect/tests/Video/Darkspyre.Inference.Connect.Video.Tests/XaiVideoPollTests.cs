@@ -14,7 +14,6 @@ public sealed class XaiVideoPollTests
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
-    [InlineData(true, true)]
     public async Task OwnedVideoDownloadDrainsHeldReadsAndRetainsResponseCleanupFailure(bool refuseCleanup, bool sdkOwned)
     {
         var body = new HeldBody(refuseCleanup);
@@ -80,13 +79,6 @@ public sealed class XaiVideoPollTests
                 Assert.Same(facadeFailure, await Assert.ThrowsAnyAsync<Exception>(() => video.DisposeAsync().AsTask()));
                 Assert.Same(coreFailure, await Assert.ThrowsAnyAsync<Exception>(() => core.DisposeAsync().AsTask()));
                 await Assert.ThrowsAnyAsync<Exception>(() => download.DisposeAsync().AsTask());
-                if (sdkOwned)
-                {
-                    Exception generationFailure = await Assert.ThrowsAnyAsync<Exception>(() => generationRetirement!.WaitAsync(TimeSpan.FromSeconds(5)));
-                    Assert.Contains(Causes(generationFailure), error => ReferenceEquals(error, body.Failure));
-                    Assert.Equal(1, handler.Disposals);
-                    Assert.Equal(0, mediaHandler.Disposals);
-                }
             }
             else
             {
@@ -209,7 +201,6 @@ public sealed class XaiVideoPollTests
     private sealed class HeldBody(bool refuseCleanup) : Stream
     {
         private int _closed;
-        public Exception Failure { get; } = new InvalidOperationException("The controlled response body refuses cleanup.");
         public TaskCompletionSource ReadEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseRead { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource CloseEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -233,7 +224,7 @@ public sealed class XaiVideoPollTests
             {
                 Disposals++;
                 CloseEntered.TrySetResult();
-                if (refuseCleanup) throw Failure;
+                if (refuseCleanup) throw new InvalidOperationException("The controlled response body refuses cleanup.");
             }
             base.Dispose(disposing);
         }

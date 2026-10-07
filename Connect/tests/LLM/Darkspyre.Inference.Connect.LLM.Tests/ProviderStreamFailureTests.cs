@@ -4,11 +4,128 @@ using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ProviderStreamFailureTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RegisteredHttpGenerationDrainsHeldBodyBeforeHandlerReleaseAndRemembersCleanupFailure(bool refuseCleanup)
+    {
+        using var body = new HeldBody(refuseCleanup);
+        using var handler = new ResponseHandler(body);
+        var services = new ServiceCollection();
+        services.AddLlmConnect();
+        services.AddHttpClient("XaiMediaDownloadClient").ConfigurePrimaryHttpMessageHandler(() => handler);
+        ServiceProvider container = services.BuildServiceProvider();
+        SdkHttpGenerationPool pool = container.GetRequiredService<SdkHttpGenerationPool>();
+        using HttpClient client = pool.CreateClient("XaiMediaDownloadClient");
+        Assert.NotSame(pool, container.GetRequiredService<IHttpClientFactory>());
+        using HttpResponseMessage response = await client.GetAsync("https://media.example.test/video", HttpCompletionOption.ResponseHeadersRead);
+        try
+        {
+            Stream stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content);
+            Task<int> read = stream.ReadAsync(new byte[1]).AsTask();
+            await body.ReadEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Task retirement = pool.DisposeAsync().AsTask();
+            Task repeated = pool.DisposeAsync().AsTask();
+            Assert.False(retirement.IsCompleted);
+            Assert.False(repeated.IsCompleted);
+            Assert.Throws<ObjectDisposedException>(() => pool.CreateClient("XaiMediaDownloadClient"));
+            Assert.Equal(0, handler.Disposals);
+            Exception? responseCleanup = Record.Exception(response.Dispose);
+            if (refuseCleanup) Assert.Same(body.Failure, responseCleanup);
+            else Assert.Null(responseCleanup);
+            Assert.Equal(1, body.Disposals);
+            Assert.False(retirement.IsCompleted);
+            Assert.Equal(0, handler.Disposals);
+            body.ReleaseRead.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read.WaitAsync(TimeSpan.FromSeconds(5)));
+            if (refuseCleanup)
+            {
+                Assert.Same(body.Failure, await Assert.ThrowsAsync<InvalidOperationException>(() => retirement.WaitAsync(TimeSpan.FromSeconds(5))));
+                Assert.Same(body.Failure, await Assert.ThrowsAsync<InvalidOperationException>(() => repeated.WaitAsync(TimeSpan.FromSeconds(5))));
+                Assert.Same(body.Failure, await Assert.ThrowsAsync<InvalidOperationException>(() => pool.DisposeAsync().AsTask()));
+                Assert.Equal(0, handler.Disposals);
+            }
+            else
+            {
+                await retirement.WaitAsync(TimeSpan.FromSeconds(5));
+                await repeated.WaitAsync(TimeSpan.FromSeconds(5));
+                await pool.DisposeAsync();
+                Assert.Equal(1, handler.Disposals);
+            }
+            Assert.Equal(1, body.Disposals);
+        }
+        finally
+        {
+            body.ReleaseRead.TrySetResult();
+            _ = Record.Exception(response.Dispose);
+            Exception? poolCleanup = await Record.ExceptionAsync(() => pool.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+            Exception? containerCleanup = await Record.ExceptionAsync(() => container.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+            if (refuseCleanup)
+            {
+                Assert.Same(body.Failure, poolCleanup);
+                Assert.Same(body.Failure, containerCleanup);
+            }
+            else
+            {
+                Assert.Null(poolCleanup);
+                Assert.Null(containerCleanup);
+            }
+        }
+    }
+
+    private sealed class ResponseHandler(Stream body) : HttpMessageHandler
+    {
+        public int Disposals { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StreamContent(body) });
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) Disposals++;
+            base.Dispose(disposing);
+        }
+    }
+
+    private sealed class HeldBody(bool refuseCleanup) : Stream
+    {
+        private int _closed;
+        public TaskCompletionSource ReadEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseRead { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Exception Failure { get; } = new InvalidOperationException("The controlled HTTP body refuses cleanup.");
+        public int Disposals { get; private set; }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            ReadEntered.TrySetResult();
+            await ReleaseRead.Task;
+            buffer.Span[0] = 42;
+            return 1;
+        }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing && Interlocked.Exchange(ref _closed, 1) == 0)
+            {
+                Disposals++;
+                if (refuseCleanup) throw Failure;
+            }
+            base.Dispose(disposing);
+        }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
     [Theory]
     [InlineData(HttpStatusCode.Unauthorized, InferenceFailureCode.AuthenticationRequired)]
     [InlineData(HttpStatusCode.Forbidden, InferenceFailureCode.AccessDenied)]

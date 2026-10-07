@@ -28,6 +28,11 @@ keep it alive; weak client registrations do not retain dropped typed consumers. 
 10-second cleanup timer reconciles collected wrappers while expired entries remain pending. Root
 retirement stops and drains that timer, closes live wrappers and awaits owned chain cleanup. Cleanup
 failures remain owned and are returned to all repeated disposers; borrowed host resources are untouched.
+The registered pool regression verifies held body-read drain, handler release and remembered cleanup
+refusal through the actual owned pipeline. Framework container disposal remains a separate lifetime:
+the current dependency stops disposal at the first failing service. A transport cleanup refusal can
+therefore prevent container disposal from reaching the pool. Pool retirement does not establish
+successful disposal of that container, and the SDK does not replace the framework disposal algorithm.
 
 All SDK-owned response consumption and result/event publication use one internal helper. It fences
 cached strings/bytes/copies and buffered streams as well as unbuffered reads, without changing HTTP
@@ -2024,8 +2029,11 @@ its caller releases them after closure and read drain. Video uses this opening p
 streams. Response closure starts before read drain; leases and creator fences release only after both
 settle. Actual cleanup failures remain visible to the transport and facade as well as the core owner.
 The focused Video regression enters this path through the registered transport, selected binding and
-public facade. A controlled HTTP body verifies held-read drain, response-only closure and repeated
-cleanup failure reporting. The HTTP stand-in does not establish live provider entitlement or wire acceptance.
+public facade in both owned and borrowed HTTP modes. A controlled HTTP body verifies held-read drain,
+response-only closure and repeated cleanup failure reporting. Successful container retirement releases
+the owned handlers after drain. A transport cleanup failure remains visible from the container, but
+the framework's stopped disposal does not prove pool retirement. The HTTP stand-in does not establish
+live provider entitlement or wire acceptance.
 
 ## Host-executed tools
 
