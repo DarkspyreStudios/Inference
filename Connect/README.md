@@ -3503,6 +3503,11 @@ See [AWS structured output](https://docs.aws.amazon.com/bedrock/latest/userguide
 [gpt-oss 20B](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-oss-20b.html),
 [gpt-oss 120B](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-oss-120b.html)
 and [Sonnet 4.6](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-4-6.html).
+The existing SDK marshaller is verified for both request modes. Live gpt-oss 20B and 120B Low
+ConverseStream calls in `us-east-1` return text that fails the original schema's JSON validation.
+The result retains `IsValid = false`; provider-reported completion is not a validated structured
+answer. Native structured-output qualification remains open on DSA-109. Sonnet and real nonstreaming
+structured output are unqualified. The cause of the live mismatch is not verified.
 
 Converse sends a reasoning level through `additionalModelRequestFields` for Claude, Nova 2 and the
 qualified gpt-oss models, classified from the model or inference-profile id:

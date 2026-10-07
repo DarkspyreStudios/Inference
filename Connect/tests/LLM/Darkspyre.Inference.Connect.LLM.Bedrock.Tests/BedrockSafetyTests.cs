@@ -8,6 +8,7 @@ using Amazon.Bedrock.Model;
 using Amazon.BedrockAgentCore;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
+using Amazon.BedrockRuntime.Model.Internal.MarshallTransformations;
 using Amazon.Runtime;
 using Amazon.Runtime.EventStreams;
 using Darkspyre.Inference.Connect.LLM.Bedrock;
@@ -62,6 +63,10 @@ public sealed class BedrockSafetyTests
         OutputConfig? config = streaming
             ? Assert.Single(invoker.StreamRequests).OutputConfig
             : Assert.Single(invoker.ConverseRequests).OutputConfig;
+        using Stream body = streaming
+            ? ConverseStreamRequestMarshaller.Instance.Marshall(invoker.StreamRequests[0]).ContentStream
+            : ConverseRequestMarshaller.Instance.Marshall(invoker.ConverseRequests[0]).ContentStream;
+        using JsonDocument sent = JsonDocument.Parse(body);
         if (nativeSchema)
         {
             Assert.NotNull(config);
@@ -70,8 +75,18 @@ public sealed class BedrockSafetyTests
             Assert.Equal(request.StructuredOutput!.Name, schema.Name);
             Assert.Equal(request.StructuredOutput.Description, schema.Description);
             Assert.Equal(request.StructuredOutput.Schema.GetRawText(), schema.Schema);
+            JsonElement format = sent.RootElement.GetProperty("outputConfig").GetProperty("textFormat");
+            Assert.Equal("json_schema", format.GetProperty("type").GetString());
+            JsonElement wireSchema = format.GetProperty("structure").GetProperty("jsonSchema");
+            Assert.Equal(schema.Name, wireSchema.GetProperty("name").GetString());
+            Assert.Equal(schema.Description, wireSchema.GetProperty("description").GetString());
+            Assert.Equal(schema.Schema, wireSchema.GetProperty("schema").GetString());
         }
-        else Assert.Null(config);
+        else
+        {
+            Assert.Null(config);
+            Assert.False(sent.RootElement.TryGetProperty("outputConfig", out _));
+        }
         LlmChatResult terminal = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
         LlmChatResult restored = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(terminal,
             ConnectLlmJson.ChatResult), ConnectLlmJson.ChatResult)!;
