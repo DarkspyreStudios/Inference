@@ -2799,6 +2799,10 @@ atomically compare that version over configuration and credentials. Authenticati
 `ILlmConnectionSource`; neither device completion nor catalog OAuth replaces saved credentials
 before commit. Normal runtime credential refresh still uses the existing host seam unchanged.
 CLI-owned authentication remains external; optional Claude catalog OAuth does not establish CLI login.
+Claude and Antigravity executable fields accept blank values. Checks, discovery and Save resolve a
+blank executable to the provider's default through the same draft connection projection. The editor
+keeps the entered value unchanged. Executable inputs containing carriage returns, newlines or null
+characters remain invalid.
 
 Settings objects never expose saved secrets. API-key fields support Keep/Replace/Clear; provider options,
 capability overrides and additional headers already on a connection are retained when editing.

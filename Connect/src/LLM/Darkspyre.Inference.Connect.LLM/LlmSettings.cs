@@ -175,7 +175,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         var fields = new List<SetupField>();
         if (UsesCli || UsesApple)
         {
-            fields.Add(new SetupExecutableField(new("executable", UsesApple ? "Apple helper executable or absolute path" : "CLI executable or absolute path") { IsRequired = true },
+            fields.Add(new SetupExecutableField(new("executable", UsesApple ? "Apple helper executable or absolute path" : "CLI executable or absolute path") { IsRequired = !UsesCli },
                 new(_draft.Endpoint), new(_definition.DefaultEndpoint), value => Edit(() => _draft = _draft with { Endpoint = value.Value })));
         }
         else if (UsesSelfHost)
@@ -641,7 +641,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         }
         else if (UsesCli)
         {
-            if (string.IsNullOrWhiteSpace(_draft.Endpoint) || _draft.Endpoint.IndexOfAny(['\r', '\n', '\0']) >= 0)
+            if (_draft.Endpoint.IndexOfAny(['\r', '\n', '\0']) >= 0)
             { issues.Add(new("executable-invalid", "Enter an executable name or path, not a shell command.", "executable")); }
         }
         else if (UsesSelfHost)
@@ -688,7 +688,11 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     internal LlmConnection CurrentConnection()
     {
         LlmConnection current = _draft with
-        { Version = DraftVersion, Vertex = UsesVertex ? Vertex with { CacheStaging = CacheStaging() } : _draft.Vertex };
+        {
+            Version = DraftVersion,
+            Endpoint = UsesCli && string.IsNullOrWhiteSpace(_draft.Endpoint) ? _definition.DefaultEndpoint : _draft.Endpoint,
+            Vertex = UsesVertex ? Vertex with { CacheStaging = CacheStaging() } : _draft.Vertex
+        };
         return !UsesAzure ? current : current with
         { Azure = _azure!.Configuration(_model), Credential = _azure.ComposeCredential().Serialize() };
     }

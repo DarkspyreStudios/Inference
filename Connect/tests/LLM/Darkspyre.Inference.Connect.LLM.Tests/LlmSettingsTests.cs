@@ -9,6 +9,33 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class LlmSettingsTests
 {
+    [Theory]
+    [InlineData(LlmTransport.AnthropicClaudeCli)]
+    [InlineData(LlmTransport.GoogleAntigravityCli)]
+    public async Task BlankCliExecutableUsesProviderDefaultForChecksAndSave(LlmTransport transport)
+    {
+        LlmProviderDefinition definition = transport == LlmTransport.AnthropicClaudeCli
+            ? ProviderDefinitions.ClaudeSubscription : ProviderDefinitions.GeminiSubscription;
+        using var provider = new LlmProviderService(new UnusedSource(), [new Client(definition)]);
+        var target = new Target();
+        var (manager, settings) = await OpenAsync(provider, transport,
+            new(SetupChangeIntent.Create, "id", null), target, modelId: "model");
+        using (manager)
+        {
+            SetupExecutableField executable = Assert.IsType<SetupExecutableField>(Fields(settings)
+                .Single(field => field.Description.Id == "executable"));
+            Assert.Equal(SetupEditState.Applied, executable.SetValue(new(string.Empty)).State);
+
+            Assert.True(settings.Validate().IsValid);
+            Assert.True(settings.CanSave);
+            Assert.Empty(Assert.IsType<SetupExecutableField>(Fields(settings)
+                .Single(field => field.Description.Id == "executable")).Value.Value);
+            Assert.Equal(definition.DefaultEndpoint, settings.CurrentConnection().Endpoint);
+            Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
+            Assert.Equal(definition.DefaultEndpoint, target.Changes!.Configuration.Connection.Endpoint);
+        }
+    }
+
     [Fact]
     public async Task DirectCodexHasNoEndpointFieldAndReplacesAFormerEndpointOnSave()
     {
