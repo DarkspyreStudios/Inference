@@ -29,6 +29,10 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"multipleOf\":0}}}", true)]
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"uniqueItems\":17}}}", true)]
     [InlineData("{\"type\":\"object\",\"$vocabulary\":{\"https://schemas.example.test/custom\":17}}", true)]
+    [InlineData("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"dependencies\":17}", true)]
+    [InlineData("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"dependencies\":{\"value\":{\"type\":17}}}", true)]
+    [InlineData("{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\",\"additionalItems\":17}", false)]
+    [InlineData("{\"$schema\":\"https://schemas.example.test/custom-dialect\",\"type\":\"object\",\"properties\":17}", false)]
     public async Task GrokSchemaAdmissionDistinguishesMalformedValuesFromNativeRejections(string schema, bool malformed)
     {
         const string body = """
@@ -66,7 +70,9 @@ public sealed class ProviderTerminalEvidenceTests
                 })) { }
             });
         Assert.Equal(0, handler.Calls);
-        bool localBoolean = !malformed && output.Schema.GetProperty("properties").GetProperty("value").ValueKind is JsonValueKind.True or JsonValueKind.False;
+        bool localBoolean = !malformed && output.Schema.TryGetProperty("properties", out JsonElement properties)
+            && properties.ValueKind == JsonValueKind.Object && properties.TryGetProperty("value", out JsonElement value)
+            && value.ValueKind is JsonValueKind.True or JsonValueKind.False;
         if (localBoolean)
         {
             var events = new List<LlmStreamEvent>();
@@ -270,6 +276,11 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData("{\"uniqueItems\":true}", true)]
     [InlineData("{\"customAssertion\":false}", true)]
     [InlineData("{\"$vocabulary\":{\"https://schemas.example.test/custom\":false}}", true)]
+    [InlineData("{\"prefixItems\":17}", true)]
+    [InlineData("{\"dependentSchemas\":17}", true)]
+    [InlineData("{\"unevaluatedProperties\":17}", true)]
+    [InlineData("{\"$anchor\":17}", true)]
+    [InlineData("{\"dependencies\":{\"requiredForValue\":[\"missing\"],\"value\":{\"multipleOf\":2}}}", true)]
     public async Task GrokUnprovenGuaranteesRequireExplicitOriginalSchemaValidation(string constraint, bool validOutput)
     {
         JsonElement schema = JsonElement.Parse("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"value\":" + constraint + "}}");

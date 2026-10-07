@@ -3007,6 +3007,14 @@ native guarantees, not invented provider rejections. Known standard annotations 
 values. Invalid keyword shapes refuse before dispatch. The default case does not grant unknown
 keywords a native guarantee. Original-schema format evaluation keeps the selected supplier dialect
 and vocabulary policy; native admission does not turn invalid output into valid output.
+Explicit Draft-07 admission does not interpret newer applicators, anchor declarations, vocabulary
+declarations or `deprecated` payloads as that draft's keyword shapes. Explicit Draft 2020-12 does
+not interpret retired `additionalItems` or `dependencies` payloads as active keywords. These names
+remain outside native guarantees, and their literal payloads are not traversed as schemas.
+Draft-07 `dependencies` validates property-dependency arrays and indexes schema dependencies through
+the same position-aware worklist. Dependencies remain outside native guarantees. Unknown declared
+dialects remain unproven without applying a known dialect's keyword-container shapes. This boundary
+does not select a new dialect for original-schema evaluation or for undeclared default-profile schemas.
 Response schemas outside native admission retain explicit original-schema local fallback; non-strict
 functions stay unchanged. The deferred/batch Chat codec uses this same strict-function entry and
 response enforcement owner; its separate wire builder and decoder remain separate.

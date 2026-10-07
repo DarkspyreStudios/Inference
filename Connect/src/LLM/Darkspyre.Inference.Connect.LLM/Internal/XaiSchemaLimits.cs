@@ -84,6 +84,7 @@ internal static class XaiSchemaLimits
 
     private static SchemaDisposition ClassifyKeyword(JsonProperty property, SchemaDraft draft)
     {
+        if (InactiveKeyword(property.Name, draft)) return SchemaDisposition.OutsideGuarantee;
         JsonElement value = property.Value;
         switch (property.Name)
         {
@@ -106,12 +107,10 @@ internal static class XaiSchemaLimits
                 return value.ValueKind is JsonValueKind.True or JsonValueKind.False
                     ? SchemaDisposition.OutsideGuarantee : SchemaDisposition.InvalidSchema;
             case "dependentRequired":
-                return draft == SchemaDraft.Draft7 ? SchemaDisposition.OutsideGuarantee
-                    : value.ValueKind == JsonValueKind.Object && value.EnumerateObject().All(dependency => UniqueStrings(dependency.Value))
+                return value.ValueKind == JsonValueKind.Object && value.EnumerateObject().All(dependency => UniqueStrings(dependency.Value))
                         ? SchemaDisposition.OutsideGuarantee : SchemaDisposition.InvalidSchema;
             case "$vocabulary":
-                return draft == SchemaDraft.Draft7 ? SchemaDisposition.OutsideGuarantee
-                    : value.ValueKind == JsonValueKind.Object && value.EnumerateObject().All(vocabulary => vocabulary.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                return value.ValueKind == JsonValueKind.Object && value.EnumerateObject().All(vocabulary => vocabulary.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
                         ? SchemaDisposition.OutsideGuarantee : SchemaDisposition.InvalidSchema;
             case "minimum":
             case "maximum":
@@ -221,8 +220,17 @@ internal static class XaiSchemaLimits
             && branches.GetArrayLength() > 0 && branches.EnumerateArray().All(KnownObject);
     }
 
-    private enum SchemaDraft { Draft7, RetainSiblings, Unknown }
+    private enum SchemaDraft { Draft7, Draft202012, RetainSiblings, Unknown }
     private enum ResourceOrigin { Implicit, Relative, Absolute }
+
+    private static bool InactiveKeyword(string name, SchemaDraft draft) => draft switch
+    {
+        SchemaDraft.Draft7 => name is "prefixItems" or "dependentSchemas" or "dependentRequired"
+            or "unevaluatedItems" or "unevaluatedProperties" or "$anchor" or "$dynamicAnchor"
+            or "$dynamicRef" or "$vocabulary" or "deprecated",
+        SchemaDraft.Draft202012 => name is "additionalItems" or "dependencies",
+        _ => false
+    };
 
     private sealed record SchemaLocation(Uri BaseUri, SchemaDraft Draft, IReadOnlyList<JsonElement> AppliedChildren, bool AllowsBoolean = false);
     private sealed record SchemaResource(JsonElement Schema, ResourceOrigin Origin);
@@ -257,9 +265,14 @@ internal static class XaiSchemaLimits
                     draft = declaration.GetString() switch
                     {
                         "http://json-schema.org/draft-07/schema" or "http://json-schema.org/draft-07/schema#" => SchemaDraft.Draft7,
-                        "https://json-schema.org/draft/2020-12/schema" or "https://json-schema.org/draft/2020-12/schema#" => SchemaDraft.RetainSiblings,
+                        "https://json-schema.org/draft/2020-12/schema" or "https://json-schema.org/draft/2020-12/schema#" => SchemaDraft.Draft202012,
                         _ => SchemaDraft.Unknown
                     };
+                }
+                if (draft == SchemaDraft.Unknown)
+                {
+                    Locations.Add(schema, new(next.BaseUri, draft, []));
+                    continue;
                 }
                 Uri baseUri = next.BaseUri;
                 ResourceOrigin origin = next.Origin;
@@ -275,7 +288,8 @@ internal static class XaiSchemaLimits
                     if (_resources.TryGetValue(key, out SchemaResource? existing) && !existing.Schema.Equals(schema)) return false;
                     _resources[key] = new(schema, origin);
                 }
-                if (!ignoresSiblings && draft == SchemaDraft.RetainSiblings && schema.TryGetProperty("$anchor", out JsonElement anchor))
+                if (!ignoresSiblings && draft is SchemaDraft.Draft202012 or SchemaDraft.RetainSiblings
+                    && schema.TryGetProperty("$anchor", out JsonElement anchor))
                 {
                     if (anchor.ValueKind != JsonValueKind.String || anchor.GetString() is not { } name || !ValidAnchor(name)) return false;
                     string key = new UriBuilder(baseUri) { Fragment = name }.Uri.AbsoluteUri;
@@ -285,9 +299,21 @@ internal static class XaiSchemaLimits
                 foreach (JsonProperty property in schema.EnumerateObject())
                 {
                     JsonElement value = property.Value;
+                    if (InactiveKeyword(property.Name, draft)) continue;
                     if (ignoresSiblings && property.Name is not ("$defs" or "definitions")) continue;
                     switch (property.Name)
                     {
+                        case "dependencies" when draft == SchemaDraft.Draft7:
+                            if (value.ValueKind != JsonValueKind.Object) return Reject(SchemaDisposition.InvalidSchema);
+                            foreach (JsonProperty dependency in value.EnumerateObject())
+                            {
+                                if (dependency.Value.ValueKind == JsonValueKind.Array)
+                                {
+                                    if (!UniqueStrings(dependency.Value)) return Reject(SchemaDisposition.InvalidSchema);
+                                }
+                                else Add(dependency.Value);
+                            }
+                            break;
                         case "$defs":
                         case "definitions":
                         case "properties":
@@ -324,8 +350,8 @@ internal static class XaiSchemaLimits
                             Add(value, property.Name == "additionalProperties");
                             break;
                     }
-                    if (!ignoresSiblings && draft != SchemaDraft.Unknown
-                        && ClassifyKeyword(property, draft) == SchemaDisposition.InvalidSchema) return Reject(SchemaDisposition.InvalidSchema);
+                    if (!ignoresSiblings && ClassifyKeyword(property, draft) == SchemaDisposition.InvalidSchema)
+                        return Reject(SchemaDisposition.InvalidSchema);
                 }
                 Locations.Add(schema, new(baseUri, draft, applied));
 
