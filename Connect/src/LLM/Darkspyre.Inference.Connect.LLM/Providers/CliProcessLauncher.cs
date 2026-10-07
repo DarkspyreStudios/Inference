@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -35,10 +36,37 @@ internal static partial class CliProcessLauncher
         }
         else
         {
-            AddExecutableArguments(start, executable, arguments);
+            ConfigureUnix(start, executable, arguments, Environment.GetFolderPath(Environment.SpecialFolder.UserProfile));
         }
         return start;
     }
+
+    internal static void ConfigureUnix(ProcessStartInfo start, string executable, IReadOnlyList<string> arguments,
+        string userDirectory)
+    {
+        if (!executable.Contains('/'))
+        {
+            _ = start.Environment.TryGetValue("PATH", out string? path);
+            IEnumerable<string> directories = (path ?? string.Empty)
+                .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries)
+                .Append(Path.Combine(userDirectory, ".local", "bin"));
+            foreach (string directory in directories)
+            {
+                if (!Path.IsPathFullyQualified(directory)) continue;
+                string candidate = Path.Combine(directory, executable);
+                if (File.Exists(candidate) && UnixAccess(candidate, 1) == 0)
+                {
+                    executable = candidate;
+                    break;
+                }
+            }
+        }
+        AddExecutableArguments(start, executable, arguments);
+    }
+
+    // POSIX X_OK checks filesystem execute permission, not just a file-mode bit.
+    [LibraryImport("libc", EntryPoint = "access", StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int UnixAccess(string path, int mode);
 
     internal static void ConfigureWindows(ProcessStartInfo start, string executable, IReadOnlyList<string> arguments)
     {

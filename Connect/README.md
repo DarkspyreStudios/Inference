@@ -1743,7 +1743,10 @@ If a tool's cancellation callback throws when the process exits, the session ret
 for retirement, cancels the remaining tools, ends reported resources and closes its observation feed.
 
 Claude and Antigravity share one launcher for chat and native sessions. Their default commands are
-`claude` and `agy`. On Windows the launcher searches absolute PATH directories in order for `.exe`,
+`claude` and `agy`. On macOS and Linux the launcher searches absolute inherited PATH directories
+in order, then the current user's `~/.local/bin`. It binds the discovered file by absolute path
+without changing the child's PATH or running a login shell. A candidate must be a file with OS
+execute permission. On Windows the launcher searches absolute PATH directories in order for `.exe`,
 `.com`, `.cmd` and `.bat` entries. An explicit executable path keeps its configured target.
 Native executables receive structured arguments through `ProcessStartInfo.ArgumentList`.
 
@@ -3831,7 +3834,10 @@ new LlmConnection
 };
 ```
 
-`Endpoint` may be `agy`, `local://antigravity-cli`, or an absolute executable path. Desktop apps launched outside a login shell should prefer the absolute path because their `PATH` can differ from Terminal or PowerShell. Model discovery calls `agy models`; model `auto` omits the command-line model override and uses the CLI default.
+`Endpoint` may be `agy`, `local://antigravity-cli`, or an absolute executable path. On macOS and Linux,
+bare CLI names also resolve from `~/.local/bin` when a desktop app's inherited PATH omits it.
+An installation elsewhere requires its directory on PATH or an explicit executable path.
+Model discovery calls `agy models`; model `auto` omits the command-line model override and uses the CLI default.
 
 Each request runs in an empty temporary workspace with terminal sandboxing and slash-command expansion disabled. A streamed request sends its prompt as BOM-free UTF-8 through standard input. A request with `SupportsStreaming = false` is the exception: the CLI's only non-streaming form, `agy -p "<prompt>" --output-format json`, takes the prompt as a process argument, because stream-json input requires stream-json output. That prompt is visible in the local process list. It must fit in one argument: at most 131,071 UTF-8 bytes on macOS and Linux, and at most 30,000 characters on Windows, where a `.cmd` or `.bat` launcher cannot carry it at all because the prompt contains line breaks. A prompt that does not fit fails with `NotSupportedException` before the CLI starts. Native JSON Schema and the `Low`, `Medium` and `High` reasoning levels are supported. Only `agent_response` step deltas stream as answer text. A schema-backed request streams no provisional text: it returns the terminal event's canonical `structured_output` value, validated locally. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
 
