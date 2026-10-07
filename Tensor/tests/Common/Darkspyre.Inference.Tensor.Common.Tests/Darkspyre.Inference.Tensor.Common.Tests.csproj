@@ -19,5 +19,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\Common\Darkspyre.Inference.Tensor.Common\Darkspyre.Inference.Tensor.Common.csproj" />
+    <ProjectReference Include="..\..\..\tools\Darkspyre.Inference.Tensor.ConsoleTester\Darkspyre.Inference.Tensor.ConsoleTester.csproj" />
   </ItemGroup>
 </Project>

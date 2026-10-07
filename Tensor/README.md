@@ -280,6 +280,14 @@ if (registry.TryGetProvider(savedConfiguration.ImplementationId, out ITensorEngi
 `tensor registry --store <dir>` in the Tensor ConsoleTester lists every registered engine and opens
 its settings through the same provider calls. It installs, loads and saves nothing.
 
+The Qwen console runner retains the shared runtime owner that its engine borrows. It disposes the
+engine before retiring the runtime. Operation, engine cleanup and runtime cleanup failures remain
+independent causes. Runtime disposal preserves the supplier's original failure. A failed retirement
+is not retried to obtain a status. After successful retirement, the runner prints the owned JSON
+shutdown observation from `ShutdownAsync`; an already retired owner reports `AlreadyStopped`.
+An unsafe or busy observation and any cleanup failure produce a nonzero process exit. Successful
+generation alone does not establish runtime retirement.
+
 ## Provider setup
 
 `QwenSetup.Definition` and `SupraSetup.Definition` describe providers without constructing an engine,

@@ -1,7 +1,9 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Tensor.Common;
+using Darkspyre.Inference.Tensor.Ggml;
 using Darkspyre.Inference.Tensor.LLM.Qwen;
 
 namespace Darkspyre.Inference.Tensor.ConsoleTester;
@@ -58,12 +60,9 @@ internal static class Program
             Console.Error.WriteLine("Cancelled.");
             return 130;
         }
-        catch (Exception exception) when (exception is Darkspyre.Inference.Common.InferenceException or TensorModelPackException)
+        catch (Exception exception)
         {
-            // A failed load reports the engine's error; its inner exception names the native cause.
-            Console.Error.WriteLine($"Failed: {exception.Message}");
-            for (Exception? inner = exception.InnerException; inner is not null; inner = inner.InnerException)
-            { Console.Error.WriteLine($"  {inner.GetType().Name}: {inner.Message.Split('\n')[0]}"); }
+            WriteFailure(exception);
             return 1;
         }
     }
@@ -108,16 +107,61 @@ internal static class Program
             await InstallAsync(packs, definition.Key, cancellationToken);
         }
 
-        await using var engine = new QwenLlmInference(packs, options.Backend);
-        await AwaitStateAsync(engine, () => engine.StartAsync(cancellationToken), TensorEngineState.Started);
-        Stopwatch load = Stopwatch.StartNew();
-        await AwaitStateAsync(engine, () => engine.LoadAsync(definition.Key, cancellationToken), TensorEngineState.Loaded);
-        TensorModelObservation observation = await engine.GetObservationAsync(cancellationToken);
-        LlmModelInfo model = (await engine.ListModelsAsync(cancellationToken)).Single(item => item.Id == definition.Key.ModelId);
-        Console.WriteLine($"loaded  : {observation.Backend} in {load.Elapsed.TotalSeconds:F1}s; usable context {model.MaxContextTokens:N0} tokens");
+        GgmlRuntimeOwner runtime = GgmlRuntimeOwner.GetOrCreate();
+        var engine = new QwenLlmInference(packs, options.Backend, runtimeOwner: runtime);
+        return await RunOwnedEngineAsync(async () =>
+        {
+            await AwaitStateAsync(engine, () => engine.StartAsync(cancellationToken), TensorEngineState.Started);
+            Stopwatch load = Stopwatch.StartNew();
+            await AwaitStateAsync(engine, () => engine.LoadAsync(definition.Key, cancellationToken), TensorEngineState.Loaded);
+            TensorModelObservation observation = await engine.GetObservationAsync(cancellationToken);
+            LlmModelInfo model = (await engine.ListModelsAsync(cancellationToken)).Single(item => item.Id == definition.Key.ModelId);
+            Console.WriteLine($"loaded  : {observation.Backend} in {load.Elapsed.TotalSeconds:F1}s; usable context {model.MaxContextTokens:N0} tokens");
 
-        var suite = new QwenSuite(engine, model.Id);
-        return await suite.RunAsync(options, cancellationToken) ? 0 : 1;
+            var suite = new QwenSuite(engine, model.Id);
+            return await suite.RunAsync(options, cancellationToken) ? 0 : 1;
+        }, engine, runtime, Console.Out);
+    }
+
+    internal static async Task<int> RunOwnedEngineAsync(Func<Task<int>> run, IAsyncDisposable engine,
+        ITensorRuntimeOwner runtime, TextWriter output)
+    {
+        var failures = new List<Exception>();
+        int exitCode = 1;
+        try { exitCode = await run(); }
+        catch (Exception error) { failures.Add(error); }
+        try { await engine.DisposeAsync(); }
+        catch (Exception error) { failures.Add(error); }
+
+        // Disposal retains the supplier's actual cause. Do not retry a failed retirement to obtain a status.
+        bool retired = false;
+        try { await runtime.DisposeAsync(); retired = true; }
+        catch (Exception error) { failures.Add(error); }
+        if (retired)
+        {
+            try
+            {
+                TensorRuntimeShutdownResult shutdown = await runtime.ShutdownAsync();
+                await output.WriteLineAsync("runtime : " + JsonSerializer.Serialize(shutdown, TensorJson.TensorRuntimeShutdownResult));
+                if (shutdown.State is not (TensorRuntimeShutdownState.Completed or TensorRuntimeShutdownState.AlreadyStopped))
+                    exitCode = 1;
+            }
+            catch (Exception error) { failures.Add(error); }
+        }
+        if (failures.Count > 0)
+            ExceptionDispatchInfo.Capture(failures.Count == 1 ? failures[0]
+                : new AggregateException("The model run or its cleanup failed.", failures)).Throw();
+        return exitCode;
+    }
+
+    private static void WriteFailure(Exception error)
+    {
+        Console.Error.WriteLine($"Failed: {error.GetType().Name}: {error.Message.Split('\n')[0]}");
+        if (error is AggregateException aggregate)
+        {
+            foreach (Exception cause in aggregate.InnerExceptions) { WriteFailure(cause); }
+        }
+        else if (error.InnerException is { } inner) { WriteFailure(inner); }
     }
 
     private static async Task InstallAsync(TensorModelPackManager packs, TensorModelKey key, CancellationToken cancellationToken)
