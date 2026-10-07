@@ -2984,7 +2984,12 @@ Device sign-in completes with the account check, and model discovery returns eig
 One short prompt on the selected `grok-4.20-0309-non-reasoning` model returns `GROK-121-OK`,
 `Completed` with finish reason `completed`, and usage of 194 input and 7 output tokens.
 These checks use the public facade without retries or app credential access. They do not qualify
-the UnitedStates route, token refresh, other models, tools, structured output or media.
+token refresh, other models, strict tools, structured output or media.
+The same model completes a Global/Default nonstreaming request with `GROK-121-NONSTREAM-OK`,
+finish reason `completed`, and usage of 197 input and 10 output tokens. A UnitedStates/Default
+streaming request for that model returns the provider's HTTP 404 model/access error before output.
+The tester preserves that failure and does not retry or switch routes. UnitedStates generation
+remains unqualified; a Global catalog entry does not establish access on that route.
 On that same selected model and route, one managed turn with a three-iteration cap completes
 the existing echo callback and replays its successful text result. The turn completes after two
 model steps with final answer `GROK-121-ECHO-OK`. No retry, other tool, upload or media operation
