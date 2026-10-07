@@ -4,16 +4,30 @@ using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Connect.Audio;
+using Darkspyre.Inference.Connect.Image;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Darkspyre.Inference.Connect.Realtime;
 using Darkspyre.Inference.Connect.Resources;
+using Darkspyre.Inference.Connect.STT;
+using Darkspyre.Inference.Connect.TTS;
+using Darkspyre.Inference.Connect.Video;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class CollectibleSerializationTests
 {
-    private static readonly string[] GenerationAssemblies =
+    private static readonly Type[] CommonConnectMetadataOwners =
+    [
+        typeof(InferenceJson), typeof(ConnectLlmJson), typeof(ConnectImageJson), typeof(ConnectVideoJson),
+        typeof(ConnectTtsJson), typeof(ConnectSttJson), typeof(ConnectRealtimeJson), typeof(ConnectResourcesJson), typeof(ConnectAudioJson)
+    ];
+    private static readonly string[] GenerationAssemblies = CommonConnectMetadataOwners
+        .Select(owner => owner.Assembly.GetName().Name!).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
+    private static readonly string[] ResourcesAssemblies =
     [
         "Darkspyre.Inference.Common", "Darkspyre.Inference.Connect.Image", "Darkspyre.Inference.Connect.LLM",
         "Darkspyre.Inference.Connect.Resources", "Darkspyre.Inference.Connect.Video"
@@ -50,6 +64,21 @@ public sealed class CollectibleSerializationTests
     [Fact]
     public void ResourcesMetadataAndNestedCommitReceiptsDoNotKeepTheirCollectibleGenerationAlive()
     {
+        WeakReference[] generation = RoundTripInCollectibleGeneration(ResourcesResultJson(), resources: true);
+
+        AssertCollected(generation);
+    }
+
+    [Fact]
+    public void AllCommonConnectMetadataOwnersReleaseTheirCollectibleGeneration()
+    {
+        WeakReference[] generation = RoundTripInCollectibleGeneration(ResourcesResultJson(), resources: true, allOwners: true);
+
+        AssertCollected(generation);
+    }
+
+    private static string ResourcesResultJson()
+    {
         var resource = new InferenceResourceReference("workspace", "generated");
         var result = new LlmChatResult
         {
@@ -61,11 +90,8 @@ public sealed class CollectibleSerializationTests
             GeneratedResources = [new(new(resource, "session", "output.txt", "text/plain", 4),
                 new("workspace", "session", 1, [resource]))]
         };
-        string json = JsonSerializer.Serialize(new LlmBatchResultPage([new LlmBatchChatResult("row-1", result)], "cursor"),
+        return JsonSerializer.Serialize(new LlmBatchResultPage([new LlmBatchChatResult("row-1", result)], "cursor"),
             ConnectResourcesJson.LlmBatchResultPage);
-        WeakReference[] generation = RoundTripInCollectibleGeneration(json, resources: true);
-
-        AssertCollected(generation);
     }
 
     private static void AssertCollected(WeakReference[] generation)
@@ -96,7 +122,7 @@ public sealed class CollectibleSerializationTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference[] RoundTripInCollectibleGeneration(string json, bool resources = false)
+    private static WeakReference[] RoundTripInCollectibleGeneration(string json, bool resources = false, bool allOwners = false)
     {
         var context = new SerializationGeneration(Path.GetDirectoryName(typeof(ConnectLlmJson).Assembly.Location)!);
         try
@@ -106,20 +132,18 @@ public sealed class CollectibleSerializationTests
             Assert.Same(context, AssemblyLoadContext.GetLoadContext(assembly));
             Type metadataOwner = assembly.GetType(owner.FullName!, throwOnError: true)!;
             var references = new List<WeakReference> { new(context), new(assembly) };
-            PropertyInfo[] roots = metadataOwner.GetProperties(BindingFlags.Public | BindingFlags.Static)
-                .Where(property => typeof(JsonTypeInfo).IsAssignableFrom(property.PropertyType)).ToArray();
-            Assert.NotEmpty(roots);
-            foreach (PropertyInfo root in roots)
+            if (allOwners)
             {
-                var typeInfo = (JsonTypeInfo)root.GetValue(null)!;
-                if (typeInfo.Type.Assembly.GetName().Name!.StartsWith("Darkspyre.Inference.", StringComparison.Ordinal))
-                    Assert.Same(context, AssemblyLoadContext.GetLoadContext(typeInfo.Type.Assembly));
-                typeInfo.MakeReadOnly();
-                _ = typeInfo.Properties.Count;
-                Assert.Same(typeInfo, typeInfo.Options.GetTypeInfo(typeInfo.Type));
-                references.Add(new(typeInfo));
-                references.Add(new(typeInfo.Options));
+                int roots = 0;
+                foreach (Type sharedOwner in CommonConnectMetadataOwners)
+                {
+                    Assembly privateAssembly = context.LoadFromAssemblyPath(sharedOwner.Assembly.Location);
+                    Assert.Same(context, AssemblyLoadContext.GetLoadContext(privateAssembly));
+                    roots += ExerciseMetadata(privateAssembly.GetType(sharedOwner.FullName!, throwOnError: true)!, context, references);
+                }
+                Assert.Equal(504, roots);
             }
+            else ExerciseMetadata(metadataOwner, context, references);
             string rootName = resources ? nameof(ConnectResourcesJson.LlmBatchResultPage) : nameof(ConnectLlmJson.ChatResult);
             var metadata = (JsonTypeInfo)metadataOwner.GetProperty(rootName)!.GetValue(null)!;
             Assert.Same(assembly, metadata.Type.Assembly);
@@ -162,7 +186,8 @@ public sealed class CollectibleSerializationTests
             references.Add(new(usage));
             references.Add(new(tool));
             if (resources)
-                Assert.Equal(GenerationAssemblies, context.Assemblies.Select(loaded => loaded.GetName().Name).Order(StringComparer.Ordinal));
+                Assert.Equal(allOwners ? GenerationAssemblies : ResourcesAssemblies,
+                    context.Assemblies.Select(loaded => loaded.GetName().Name).Order(StringComparer.Ordinal));
             foreach (Assembly loaded in context.Assemblies) references.Add(new(loaded));
             return references.ToArray();
         }
@@ -170,6 +195,25 @@ public sealed class CollectibleSerializationTests
         {
             context.Unload();
         }
+    }
+
+    private static int ExerciseMetadata(Type metadataOwner, AssemblyLoadContext context, List<WeakReference> references)
+    {
+        PropertyInfo[] roots = metadataOwner.GetProperties(BindingFlags.Public | BindingFlags.Static)
+            .Where(property => typeof(JsonTypeInfo).IsAssignableFrom(property.PropertyType)).ToArray();
+        Assert.NotEmpty(roots);
+        foreach (PropertyInfo root in roots)
+        {
+            var typeInfo = (JsonTypeInfo)root.GetValue(null)!;
+            if (typeInfo.Type.Assembly.GetName().Name!.StartsWith("Darkspyre.Inference.", StringComparison.Ordinal))
+                Assert.Same(context, AssemblyLoadContext.GetLoadContext(typeInfo.Type.Assembly));
+            typeInfo.MakeReadOnly();
+            _ = typeInfo.Properties.Count;
+            Assert.Same(typeInfo, typeInfo.Options.GetTypeInfo(typeInfo.Type));
+            references.Add(new(typeInfo));
+            references.Add(new(typeInfo.Options));
+        }
+        return roots.Length;
     }
 
     private sealed class SerializationGeneration(string directory) : AssemblyLoadContext("ConnectJsonGeneration", isCollectible: true)

@@ -549,7 +549,13 @@ unload. The separate Resources case privately loads Common, LLM, Image, Video an
 It exercises the Resources metadata getters and round-trips a batch page with nested chat usage,
 tools and a generated-resource commit/selection receipt. It checks release of all five assemblies,
 the owned metadata/options and the nested result/receipt objects after unload. These checks do not
-exercise every metadata owner or execute or retire a provider or native engine.
+execute or retire a provider or native engine.
+The combined Common/Connect case exercises all 504 declared metadata getters across the nine fixed
+owners in one private generation. It retains the same batch-result roundtrip and checks release of
+all nine assemblies and their metadata/options. Test-only source references supply Audio, Realtime,
+STT and TTS; shipping dependencies stay unchanged. Getter execution does not serialize every possible
+request/result value or establish Tensor metadata, active provider lifetime, NativeAOT or release-package
+qualification.
 
 Retained chat protocol builders write stop arrays, model aliases, numeric/string control IDs and
 Responses output joins through structured JSON nodes and elements. Vertex argument-path identity
