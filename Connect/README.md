@@ -3877,6 +3877,13 @@ Native Unknown diagnostics retain the observed status.
 
 ### Antigravity native agent sessions
 
+The shared Antigravity capability resolver restricts the published fixed-effort Gemini 3.8/3.7/3.6
+Flash, Gemini 3.1 Pro and GPT-OSS 120B slugs to their pinned level. Discovery, chat and native turn
+admission use that resolver. Overrides cannot widen a pinned level. A conflicting effort fails before
+CLI invocation or native conversation reopening; the adapter never changes the selected model slug.
+Other model IDs retain their existing controls. Google documents
+[pinned model slugs and effort selection](https://www.antigravity.google/docs/cli/headless/).
+
 `LlmAgentProviderService` starts and resumes native AGY conversations. AGY owns the conversation, its
 Google sign-in, its native tools and its configured permission policy. Connect owns one local process
 per open session, with an open standard input and one output reader.
@@ -3927,6 +3934,8 @@ The ConsoleTester `agy-probe` command runs bounded live qualification cases; see
 [Subscription and AWS smoke tests](#subscription-and-aws-smoke-tests).
 The resume case requires a completed resumed turn as well as the retained conversation ID and recalled
 marker. Matching answer text on a failed or interrupted turn does not qualify resume.
+The control case uses an offered effort and checks local conflict refusal for a fixed-effort model
+before proving that the same session still completes its subsequent turns.
 
 `IsAuthenticatedAsync` performs the non-consuming `agy models` check, so an installed but signed-out executable is not reported as authenticated. Run `agy` interactively to sign in or refresh the CLI session. Antigravity owns its credential and session storage in the operating system's native keyring; Darkspyre.Inference.Connect.LLM does not inspect it.
 

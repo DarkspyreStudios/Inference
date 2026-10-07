@@ -1,6 +1,7 @@
 using Darkspyre.Inference.Connect.LLM.Internal;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -10,6 +11,46 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class AntigravityCliLlmClientTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PinnedModelRejectsConflictingEffortBeforeInvocationAndAcceptsItsOwnLevel(bool streaming)
+    {
+        const string model = "gemini-3.8-flash-low";
+        string output = streaming
+            ? "{\"event\":\"result\",\"result\":{\"status\":\"SUCCESS\",\"response\":\"OK\"}}"
+            : "{\"status\":\"SUCCESS\",\"response\":\"OK\"}";
+        var runner = new RecordingRunner(new(0, output, string.Empty));
+        var client = new AntigravityCliLlmClient(runner);
+        LlmConnection connection = Connection() with
+        {
+            CapabilityOverrides = new()
+            {
+                SupportsStreaming = streaming,
+                ReasoningLevels = LlmReasoningEffort.Levels(LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High)
+            }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = model,
+            Messages = [new("user", "Reply with OK.")],
+            ReasoningLevel = LlmReasoningLevel.Medium
+        };
+
+        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() => ReadAllAsync(client.StreamAsync(connection, request)));
+        Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
+        Assert.Empty(runner.Invocations);
+        Assert.Equal(LlmReasoningLevel.Low, Assert.Single(client.GetCapabilities(connection, model).ReasoningLevels));
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection,
+            request with { ReasoningLevel = LlmReasoningLevel.Low }));
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("OK", result.Text);
+        AntigravityCliInvocation invocation = Assert.Single(runner.Invocations);
+        Assert.Equal(model, invocation.Arguments[invocation.Arguments.ToList().IndexOf("--model") + 1]);
+        Assert.Equal("low", invocation.Arguments[invocation.Arguments.ToList().IndexOf("--effort") + 1]);
+    }
 
     [Fact]
     public async Task ToolHistoryReachesThePromptAsLabelledBlocks()

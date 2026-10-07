@@ -15,7 +15,7 @@ public sealed class ConsoleAgentDiagnosticsTests
         LlmAgentCompletionReason reason, int expectedExitCode)
     {
         await using var agents = new LlmAgentProviderService(new ProbeConnections(), [new ResumeClient(reason)]);
-        var probe = new AntigravityProbe(agents, "probe-connection", "probe-model", Environment.CurrentDirectory);
+        var probe = new AntigravityProbe(agents, "probe-connection", "probe-model", Environment.CurrentDirectory, new());
         using var report = new StringWriter();
 
         int exitCode = await ProbeRunner.RunAsync(probe.Cases,

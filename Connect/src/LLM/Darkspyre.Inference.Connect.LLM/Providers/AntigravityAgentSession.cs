@@ -25,9 +25,6 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
 
     private static readonly TimeSpan ReopenExitTimeout = TimeSpan.FromSeconds(10);
 
-    private static readonly IReadOnlySet<LlmReasoningLevel> Efforts = LlmReasoningEffort.Levels(
-        LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High);
-
     private readonly IAntigravityCliSessionProcessFactory _factory;
     private readonly string _executable;
     private readonly string _workingDirectory;
@@ -399,7 +396,6 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId, nameof(request));
         }
-        LlmReasoningEffort.Validate(request.ReasoningLevel, Efforts);
         if (request.OutputSchema is { ValueKind: not JsonValueKind.Object })
         {
             throw new ArgumentException("An output schema must be a JSON object.", nameof(request));
@@ -410,6 +406,8 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             request.ModelId ?? _defaults.ModelId,
             request.ReasoningLevel ?? _defaults.Effort,
             request.OutputSchema?.GetRawText());
+        LlmReasoningEffort.Validate(launch.Effort,
+            AntigravityCliLlmClient.ResolveCapabilities(_connection, launch.ModelId));
         return (launch, prompt.ToString(), request.OutputSchema);
     }
 

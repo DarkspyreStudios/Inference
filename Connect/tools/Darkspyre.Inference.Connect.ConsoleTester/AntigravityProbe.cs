@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
 
@@ -9,7 +10,8 @@ namespace Darkspyre.Inference.Connect.ConsoleTester;
 /// Explicit qualification of Antigravity native sessions through the public agent contract. Each case runs in
 /// a temporary workspace holding one fixture. No configuration is edited and no case is retried.
 /// </summary>
-internal sealed class AntigravityProbe(LlmAgentProviderService agents, string connectionId, string model, string workspace)
+internal sealed class AntigravityProbe(LlmAgentProviderService agents, string connectionId, string model, string workspace,
+    LlmProviderCapabilities capabilities)
 {
     private static readonly JsonElement Schema = JsonElement.Parse("""
         {"type":"object","properties":{"word":{"type":"string"}},"required":["word"]}
@@ -43,7 +45,10 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
         string workspace = Directory.CreateTempSubdirectory("darkspyre-agy-probe").FullName;
         try
         {
-            var probe = new AntigravityProbe(agents, invocation.Provider.ConnectionId, options.Model, workspace);
+            LlmProviderCapabilities capabilities = ready
+                ? await llms.GetModelCapabilitiesAsync(invocation.Provider.ConnectionId, options.Model, token)
+                : new();
+            var probe = new AntigravityProbe(agents, invocation.Provider.ConnectionId, options.Model, workspace, capabilities);
             await File.WriteAllTextAsync(Path.Combine(workspace, "fixture.txt"), probe._marker, token);
             int exitCode = await ProbeRunner.RunAsync(probe.Cases, options, ready, Console.Out, token);
             Console.WriteLine($"Turns sent: {probe.Turns}");
@@ -123,10 +128,27 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
     {
         await using ILlmAgentSession session = await StartAsync(token);
         string threadId = session.ThreadId;
-        TurnSummary low = await RunAsync(session, Turn("Reply with OK only. Use no tools.") with { ReasoningLevel = LlmReasoningLevel.Low }, token);
+        Require(capabilities.ReasoningLevels.Count > 0, "The selected model offers no reasoning control.");
+        LlmReasoningLevel effort = capabilities.ReasoningLevels.Order().First();
+        if (capabilities.ReasoningLevels.Count == 1)
+        {
+            LlmReasoningLevel conflict = new[] { LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High }
+                .First(level => level != effort);
+            bool rejected = false;
+            try
+            {
+                await Drain(session.RunTurnAsync(Turn("Reply with OK only. Use no tools.") with { ReasoningLevel = conflict }, token));
+            }
+            catch (InferenceException error) when (error.Code == InferenceFailureCode.InvalidRequest)
+            {
+                rejected = true;
+            }
+            Require(rejected, "A conflicting fixed-model effort was not rejected locally.");
+        }
+        TurnSummary selected = await RunAsync(session, Turn("Reply with OK only. Use no tools.") with { ReasoningLevel = effort }, token);
         TurnSummary schema = await RunAsync(session, Turn("Return word set to sample. Use no tools.") with { OutputSchema = Schema }, token);
         TurnSummary plain = await RunAsync(session, Turn("Reply with OK only. Use no tools."), token);
-        Require(low.Status == LlmAgentTurnStatus.Completed && schema.Status == LlmAgentTurnStatus.Completed
+        Require(selected.Status == LlmAgentTurnStatus.Completed && schema.Status == LlmAgentTurnStatus.Completed
             && plain.Status == LlmAgentTurnStatus.Completed, "A launch-option change did not complete cleanly.");
         Require(session.ThreadId == threadId, "Changing launch options changed the conversation.");
 
@@ -137,7 +159,7 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
             ModelId = model,
             Runtime = new() { WorkingDirectory = workspace, Policy = new LlmAgentHostRuntimePolicy() }
         }, token));
-        return "effort, schema and schema removal reopened the same conversation; unsupported input and host policy rejected";
+        return "selected effort, schema and schema removal retained the conversation; unsupported controls, input and host policy rejected";
     }
 
     private async Task<string> CancelAsync(CancellationToken token)

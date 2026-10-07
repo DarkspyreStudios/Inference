@@ -48,8 +48,22 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
     {
         ValidateConnection(connection);
         LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(Capabilities, connection, modelId);
+        // These published slugs pin the effort; a different flag must not select another model.
+        LlmReasoningLevel? pinnedEffort = modelId switch
+        {
+            "gemini-3.8-flash-low" or "gemini-3.7-flash-low" or "gemini-3.6-flash-low" or "gemini-3.1-pro-low"
+                => LlmReasoningLevel.Low,
+            "gemini-3.8-flash-medium" or "gemini-3.7-flash-medium" or "gemini-3.6-flash-medium" or "gpt-oss-120b-medium"
+                => LlmReasoningLevel.Medium,
+            "gemini-3.8-flash-high" or "gemini-3.7-flash-high" or "gemini-3.6-flash-high" or "gemini-3.1-pro-high"
+                => LlmReasoningLevel.High,
+            _ => null
+        };
         return capabilities with
         {
+            ReasoningLevels = pinnedEffort is { } pinned
+                ? LlmReasoningEffort.Levels(capabilities.ReasoningLevels.Where(level => level == pinned).ToArray())
+                : capabilities.ReasoningLevels,
             SupportsJsonObject = false,
             SupportsTemperature = false,
             SupportsTopP = false,
@@ -331,7 +345,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             throw CreateExitException(result);
         }
 
-        List<LlmModel> models = ParseModels(result.StandardOutput);
+        List<LlmModel> models = ParseModels(result.StandardOutput, connection);
         if (models.Count == 0)
         {
             throw new LlmProviderException(
@@ -713,7 +727,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         result.ConversationId,
         AntigravityStepLedger.Normalize(result.Usage));
 
-    private static List<LlmModel> ParseModels(string output)
+    private static List<LlmModel> ParseModels(string output, LlmConnection? connection = null)
     {
         var models = new List<LlmModel>();
         var ids = new HashSet<string>(StringComparer.Ordinal);
@@ -741,7 +755,8 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                 string owner = id.StartsWith("claude", StringComparison.OrdinalIgnoreCase)
                     ? "Anthropic via Google"
                     : "Google";
-                models.Add(new LlmModel(id, displayName, owner));
+                models.Add(new LlmModel(id, displayName, owner,
+                    connection is null ? null : ResolveCapabilities(connection, id)));
             }
         }
 
