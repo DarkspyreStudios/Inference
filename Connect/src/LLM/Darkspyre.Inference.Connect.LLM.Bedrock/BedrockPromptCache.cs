@@ -49,9 +49,10 @@ internal static class BedrockPromptCache
         var point = new CachePointBlock
         {
             Type = CachePointType.Default,
+            // Omitted ttl preserves default caching; explicit ttl enables extended handling.
             Ttl = hint.Retention == LlmPromptCacheRetention.Extended
                 && capabilities.Retentions.Contains(LlmPromptCacheRetention.Extended)
-                    ? CacheTTL.ONE_HOUR : CacheTTL.FIVE_MINUTES
+                    ? CacheTTL.ONE_HOUR : null
         };
         if (result.System is { Count: > 0 })
             result.System.Add(new SystemContentBlock { CachePoint = point });

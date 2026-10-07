@@ -2752,8 +2752,10 @@ raw `cache_control` options.
 Bedrock Converse and ConverseStream share one exact model-ID cache fact lookup after the existing
 geographic-prefix removal. Only documented Claude and Nova IDs receive markers or cache support.
 Claude supports system, tool and message points; Nova supports system and message points only.
-Default uses five minutes. Extended uses one hour only for documented supporting Claude IDs and
-otherwise falls back to five minutes. Supported Claude and Nova IDs report implicit caching too.
+Default omits `ttl` and uses the provider's five-minute behavior. Supplying `ttl`, even `5m`,
+activates extended-TTL handling and causes Nova requests to fail. Extended supplies `1h` only for
+documented supporting Claude IDs and otherwise retains the default behavior. Supported Claude and
+Nova IDs report implicit caching too.
 Unknown IDs keep their prompt unchanged. No local token threshold or cache hit is inferred.
 
 OpenAI Responses uses `prompt_cache_options.ttl = "30m"` for Extended on its supported GPT-5.6

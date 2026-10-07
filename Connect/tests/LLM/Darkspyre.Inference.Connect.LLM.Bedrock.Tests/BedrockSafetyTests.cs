@@ -20,6 +20,30 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 public sealed class BedrockSafetyTests
 {
     [Theory]
+    [InlineData("amazon.nova-micro-v1:0", LlmPromptCacheRetention.Default, null)]
+    [InlineData("us.amazon.nova-micro-v1:0", LlmPromptCacheRetention.Default, null)]
+    [InlineData("amazon.nova-micro-v1:0", LlmPromptCacheRetention.Extended, null)]
+    [InlineData("anthropic.claude-sonnet-4-6", LlmPromptCacheRetention.Default, null)]
+    [InlineData("anthropic.claude-sonnet-4-6", LlmPromptCacheRetention.Extended, "1h")]
+    public void PromptCacheDefaultOmitsTheExtendedTtlFieldInBothConverseModes(
+        string modelId, LlmPromptCacheRetention retention, string? expectedTtl)
+    {
+        ConverseRequest request = BedrockLlmClient.BuildRequest(Connection(), Request(instructions: "Reply concisely") with
+        {
+            ModelId = modelId,
+            PromptCache = new() { Scope = LlmPromptCacheScope.Conversation, Retention = retention }
+        }, modelId);
+        ConverseStreamRequest stream = BedrockLlmClient.ToStreamRequest(request);
+        CachePointBlock[] points = [request.System[^1].CachePoint, request.Messages[^1].Content[^1].CachePoint,
+            stream.System[^1].CachePoint, stream.Messages[^1].Content[^1].CachePoint];
+        Assert.All(points, point =>
+        {
+            Assert.Equal(CachePointType.Default, point.Type);
+            Assert.Equal(expectedTtl, point.Ttl?.Value);
+        });
+    }
+
+    [Theory]
     [InlineData("openai.gpt-oss-20b-1:0", LlmReasoningLevel.Low, "low")]
     [InlineData("openai.gpt-oss-20b-1:0", LlmReasoningLevel.Medium, "medium")]
     [InlineData("openai.gpt-oss-20b-1:0", LlmReasoningLevel.High, "high")]
