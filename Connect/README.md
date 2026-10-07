@@ -2979,6 +2979,13 @@ only OAuth tokens. Expiry comes from `expires_in` or the access-token JWT; accou
 The shared OAuth pipeline refreshes within 60 seconds of expiry. It preserves account metadata,
 accepts rotated tokens and saves through `LlmConnectionAccess`'s version-conditional source seam.
 
+ConsoleTester qualification uses its separate credential store and the Global/Default route.
+Device sign-in completes with the account check, and model discovery returns eight native choices.
+One short prompt on the selected `grok-4.20-0309-non-reasoning` model returns `GROK-121-OK`,
+`Completed` with finish reason `completed`, and usage of 194 input and 7 output tokens.
+These checks use the public facade without retries or app credential access. They do not qualify
+the UnitedStates route, token refresh, other models, tools, structured output or media.
+
 `XaiErrorClassifier` supplies one sanitized HTTP failure policy. It maps 401 and the specified
 token-validation 403 message to `AuthenticationRequired`, and 402 or a blocked account to the named
 entitlement failure (`AccessDenied`). Unknown 403 responses remain provider errors. Subscription-specific
