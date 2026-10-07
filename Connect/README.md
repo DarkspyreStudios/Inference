@@ -1048,6 +1048,10 @@ endpoint, region, service tier, agent count, headers, provider options and capab
 This catches a refreshed credential returned with its original source version; equality is local
 change detection, not account or principal proof. Unrelated runtime and authority graphs are not
 retained in this catalog projection.
+The focused catalog regressions exercise an actual credential-access refresh and conditional source
+save through the chat facade. The refreshed original-version snapshot replaces the old catalog and
+uses the new token for both REST listings. The HTTP boundary is offline; this does not qualify xAI
+OAuth or account entitlement.
 Concurrent requests for one connection share a single listing, request accounting and managed sessions
 read the same list, and a failed listing is not kept. Common's `ILlmInference` carries the same pair:
 `ListModelsAsync` may answer from a kept list, and `RefreshModelsAsync` lists again. A service built by
