@@ -13,6 +13,26 @@ public sealed class SetupEditorRegressionTests : BunitContext
     public SetupEditorRegressionTests() { Services.AddLumeo(); JSInterop.Mode = JSRuntimeMode.Loose; }
 
     [Fact]
+    public void ExecutableDefaultAppearsAsPlaceholderWithoutApplyingAnEdit()
+    {
+        var (settings, manager) = New();
+        int edits = 0;
+        var field = new SetupExecutableField(new("executable", "Executable"), new(string.Empty), new("claude"), _ =>
+        {
+            edits++;
+            return SetupEditResult.Applied;
+        });
+        IRenderedComponent<SetupFieldInput> component = Render<SetupFieldInput>(parameters => parameters
+            .Add(value => value.Field, field).Add(value => value.Settings, settings)
+            .Add(value => value.Manager, manager).Add(value => value.Host, new Host()));
+
+        Assert.Equal("claude", component.Find("input").GetAttribute("placeholder"));
+        Assert.Empty(component.Find("input").GetAttribute("value") ?? string.Empty);
+        Assert.Empty(field.Value.Value);
+        Assert.Equal(0, edits);
+    }
+
+    [Fact]
     public async Task InvalidUrlSurvivesRefreshAndAnotherEditAndNeverCommitsOldValue()
     {
         var (settings, manager) = New();

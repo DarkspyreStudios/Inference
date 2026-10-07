@@ -50,7 +50,7 @@
                     break;
                 case SetupExecutableField executable:
                     <Input Value="@_value" ValueChanged="@(value => SetExecutableAsync(executable, value))"
-                           Disabled="@Unavailable" />
+                           Disabled="@Unavailable" Placeholder="@executable.DefaultValue.Value" />
                     @if (Host is IInferenceSettingsPathPicker)
                     { <Button Variant="Button.ButtonVariant.Outline" Disabled="@(Unavailable || _picking)" OnClick="PickPathAsync">Browse…</Button> }
                     break;

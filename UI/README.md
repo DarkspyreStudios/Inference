@@ -47,6 +47,8 @@ with a `SetupPathSelectionKind.File` or `.Folder` hint, plus executable fields, 
 Return an absolute path or null for cancellation. The host owns the native dialog and access grants;
 manual entry remains available when no picker is supplied. A completion that arrives after a later
 edit cannot overwrite that edit. This capability is included starting with 11.4.0-rc.1.
+An empty executable input shows the field's default as a placeholder. Rendering this hint does not
+change the field value or apply an edit.
 
 ## Host-framed presentation
 
