@@ -9,6 +9,29 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class ConsoleAgentDiagnosticsTests
 {
+    [Theory]
+    [InlineData(false, "Inference error [InvalidRequest]")]
+    [InlineData(true, "Provider error [antigravity_cli_handshake_timeout]")]
+    public async Task ProbeFailureRetainsPublicDiagnosticsWithoutItsPrivateCause(bool providerFailure, string label)
+    {
+        const string message = "The selected CLI did not report its conversation before the handshake deadline.";
+        var cause = new IOException("private provider response");
+        Exception failure = providerFailure
+            ? new LlmProviderException(message, LlmTransport.GoogleAntigravityCli,
+                providerCode: "antigravity_cli_handshake_timeout", innerException: cause)
+            : new InferenceException(InferenceFailureCode.InvalidRequest, message, cause);
+        using var report = new StringWriter();
+
+        int exitCode = await ProbeRunner.RunAsync(
+            [new("opening", _ => Task.FromException<string>(failure))],
+            new("probe-model", "opening", 1, 5), true, report, CancellationToken.None);
+
+        Assert.Equal(1, exitCode);
+        Assert.Contains("FAIL 1/1 opening", report.ToString(), StringComparison.Ordinal);
+        Assert.Contains($"{label}: {message}", report.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(cause.Message, report.ToString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void InferenceFailurePrintsItsCodeAndPublicMessageWithoutItsPrivateCause()
     {
@@ -17,7 +40,7 @@ public sealed class ConsoleAgentDiagnosticsTests
             new IOException("private provider response"));
         using var diagnostics = new StringWriter();
 
-        Program.WriteInferenceFailure(failure, diagnostics);
+        diagnostics.WriteLine(Program.FormatInferenceFailure(failure));
 
         Assert.Equal($"Inference error [InvalidRequest]: {message}{Environment.NewLine}", diagnostics.ToString());
     }

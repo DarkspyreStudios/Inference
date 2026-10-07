@@ -101,12 +101,12 @@ internal static class Program
         }
         catch (InferenceException exception)
         {
-            WriteInferenceFailure(exception, Console.Error);
+            Console.Error.WriteLine(FormatInferenceFailure(exception));
             return 1;
         }
         catch (LlmProviderException exception)
         {
-            Console.Error.WriteLine($"Provider error [{exception.ProviderCode ?? "unknown"}]: {exception.Message}");
+            Console.Error.WriteLine(FormatProviderFailure(exception));
             return 1;
         }
         catch (ArgumentException exception)
@@ -126,8 +126,11 @@ internal static class Program
         }
     }
 
-    internal static void WriteInferenceFailure(InferenceException exception, TextWriter diagnostics) =>
-        diagnostics.WriteLine($"Inference error [{exception.Code}]: {exception.Message}");
+    internal static string FormatInferenceFailure(InferenceException exception) =>
+        $"Inference error [{exception.Code}]: {exception.Message}";
+
+    internal static string FormatProviderFailure(LlmProviderException exception) =>
+        $"Provider error [{exception.ProviderCode ?? "unknown"}]: {exception.Message}";
 
     private static async Task<int> RunLoginAsync(
         LlmProviderService llms,

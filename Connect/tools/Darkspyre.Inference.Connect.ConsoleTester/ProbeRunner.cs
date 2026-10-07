@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
 using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Connect.LLM;
 
 namespace Darkspyre.Inference.Connect.ConsoleTester;
 
@@ -37,7 +38,7 @@ internal sealed record ProviderProbeOptions(string Model, string Case, int Repea
 
 internal sealed record ProbeCase(string Name, Func<CancellationToken, Task<string>> Run);
 
-// Only assertion text owned by this harness may reach its report. Provider exceptions/content do not.
+// Reports include owned assertions and public typed failure diagnostics, never private exception causes or payloads.
 internal sealed class ProbeFailure(string message) : Exception(message);
 
 internal static class ProbeRunner
@@ -88,7 +89,8 @@ internal static class ProbeRunner
                     {
                         OperationCanceledException when deadline.IsCancellationRequested => "case deadline exceeded",
                         ProbeFailure assertion => assertion.Message,
-                        InferenceException inference => $"inference failure: {inference.Code}",
+                        InferenceException inference => Program.FormatInferenceFailure(inference),
+                        LlmProviderException provider => Program.FormatProviderFailure(provider),
                         _ => $"{error.GetType().Name} (provider details omitted)"
                     };
                 }

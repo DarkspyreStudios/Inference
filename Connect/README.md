@@ -4251,8 +4251,10 @@ it is not placed in process arguments. Antigravity rejects attachment options be
 protocol is text-only.
 
 The tester reports an SDK failure with its typed error code and public message, then exits with code 1.
-It does not print inner exceptions or stack traces. Local request refusals retain their explanation,
-including the reasoning levels the selected model accepts.
+Probe failures use the same typed SDK/provider error formatting as ordinary commands. They retain
+public error codes and explanations. Probes report only the type of other exceptions.
+The tester does not print inner exceptions, response bodies or stack traces. Local request refusals
+retain their explanation, including the reasoning levels the selected model accepts.
 
 Claude uses the same commands with `--provider claude`:
 
