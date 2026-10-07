@@ -2984,10 +2984,17 @@ facade's published catalog. Catalog reasoning levels and image modalities overri
 Unknown manually entered models still permit a request without fabricated discovery evidence.
 Image prompts require catalog image support and cannot exceed 20 MiB. Temperature and top-p follow
 the model profile; top-k, seed, penalties and string stops are unsupported on this Responses route.
-The numeric schema preflight follows schema positions and local references, not literal data. Bounds
+The schema preflight follows schema positions and local references, not literal data. Bounds
 above 2048 string characters, 256 array items or 64 properties require explicitly authorized local
-validation against the original schema. Strict tool schemas beyond those bounds fail without weakening.
-This numeric check does not implement the provider's complete regex and schema subset.
+validation against the original schema. The same admission owner treats `not`, conditionals and
+multi-branch `allOf` as outside native guarantees. xAI gives `oneOf` the same meaning as `anyOf`;
+native admission requires pairwise-disjoint explicit simple types on non-reference branches,
+including nullable type arrays. A `$ref` sibling type is not proof of exclusivity in Draft-07.
+`number` overlaps `integer`. Unproven exclusivity requires explicit local validation for responses
+and refuses explicitly strict tools before effects. Non-strict tools retain their original schema
+and strictness. Local validation uses the original schema and reports invalid output without
+rewriting it or retrying. This check does not implement the complete schema/dialect/reference
+classification or original-dialect ECMA regex evaluator.
 The client does not interpret unqualified xAI headers as OpenAI account-usage evidence. Its usage
 header names and units require separate provider qualification; no quota snapshot is fabricated.
 

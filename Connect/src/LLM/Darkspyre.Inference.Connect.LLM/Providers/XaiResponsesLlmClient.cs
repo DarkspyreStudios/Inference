@@ -362,7 +362,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
                     throw new ArgumentException("Grok tool input images must not exceed 20 MiB.", nameof(request));
         foreach (LlmToolDefinition tool in request.Tools.OfType<LlmToolDefinition>().Where(tool => tool.Strict))
             if (!XaiSchemaLimits.Fits(tool.InputSchema))
-                throw new NotSupportedException("A strict Grok tool schema exceeds the published numeric guarantees. The schema is not weakened or sent as non-strict.");
+                throw new NotSupportedException("A strict Grok tool schema is outside the supported native guarantees. The schema is not weakened or sent as non-strict.");
     }
 
     protected override JsonObject BuildPayload(LlmConnection connection, LlmChatRequest request,

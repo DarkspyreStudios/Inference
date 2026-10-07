@@ -13,6 +13,113 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ProviderTerminalEvidenceTests
 {
     [Theory]
+    [InlineData("{\"oneOf\":[{\"type\":\"number\"},{\"type\":\"integer\"}]}")]
+    [InlineData("{\"allOf\":[{\"minimum\":2},{\"maximum\":4}]}")]
+    [InlineData("{\"not\":{\"const\":1}}")]
+    [InlineData("{\"if\":{\"const\":1},\"then\":{\"const\":2}}")]
+    public async Task GrokBestEffortCompositionRequiresExplicitOriginalSchemaValidation(string constraint)
+    {
+        JsonElement schema = JsonElement.Parse("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"value\":" + constraint + "}}");
+        const string body = """
+            {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"value\":1}"}]}]}
+            """;
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = false, SupportsJsonSchema = true }
+        };
+        var request = new LlmChatRequest { ModelId = "selected-model", Messages = [new("user", "hello")] };
+        var tool = new LlmToolDefinition { Name = "echo", Strict = true, InputSchema = schema };
+
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with { Tools = [tool] })) { }
+        });
+        var output = new LlmStructuredOutputRequest { Name = "answer", Schema = schema };
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with { StructuredOutput = output })) { }
+        });
+        Assert.Equal(0, handler.Calls);
+
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request with
+        {
+            StructuredOutput = output with { Fallback = LlmStructuredOutputFallback.LocalValidation }
+        })) events.Add(item);
+        LlmStructuredOutputValidation validation = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.StructuredOutput!;
+        Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, validation.Enforcement);
+        Assert.False(validation.IsValid);
+        Assert.Equal(schema.GetRawText(), output.Schema.GetRawText());
+        using (var sent = JsonDocument.Parse(handler.RequestBody!)) Assert.False(sent.RootElement.TryGetProperty("text", out _));
+        Assert.Equal(1, handler.Calls);
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with { Tools = [tool with { Strict = false }] })) { }
+        using var nonStrict = JsonDocument.Parse(handler.RequestBody!);
+        JsonElement sentTool = Assert.Single(nonStrict.RootElement.GetProperty("tools").EnumerateArray());
+        Assert.False(sentTool.GetProperty("strict").GetBoolean());
+        Assert.Equal(schema.GetRawText(), sentTool.GetProperty("parameters").GetRawText());
+        Assert.Equal(2, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GrokSimpleTypeUnionRequiresUnreferencedDisjointBranches(bool referenced)
+    {
+        JsonElement schema = JsonElement.Parse(referenced ? """
+            {"$schema":"http://json-schema.org/draft-07/schema#","type":"object","definitions":{"value":{}},"properties":{"value":{"oneOf":[{"$ref":"#/definitions/value","type":"string"},{"$ref":"#/definitions/value","type":"integer"}]}}}
+            """ : """
+            {"type":"object","properties":{"value":{"oneOf":[{"type":["string","null"]},{"type":"integer"}]}}}
+            """);
+        const string body = """
+            {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"value\":1}"}]}]}
+            """;
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = false, SupportsJsonSchema = true }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = "selected-model",
+            Messages = [new("user", "hello")],
+            StructuredOutput = new() { Name = "answer", Schema = schema }
+        };
+        if (referenced)
+        {
+            await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            {
+                await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+            });
+            Assert.Equal(0, handler.Calls);
+            return;
+        }
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+        LlmStructuredOutputValidation validation = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.StructuredOutput!;
+        Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, validation.Enforcement);
+        Assert.True(validation.IsValid);
+        using var sent = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(schema.GetRawText(), sent.RootElement.GetProperty("text").GetProperty("format").GetProperty("schema").GetRawText());
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
     [InlineData("access_denied")]
     [InlineData("expired_token")]
     public async Task GrokDeviceAuthorizationTerminationKeepsSafeRequestAndRetryFacts(string code)
