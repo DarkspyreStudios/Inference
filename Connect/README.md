@@ -3020,6 +3020,16 @@ Draft-07 `dependencies` validates property-dependency arrays and indexes schema 
 the same position-aware worklist. Dependencies remain outside native guarantees. Unknown declared
 dialects remain unproven without applying a known dialect's keyword-container shapes. This boundary
 does not select a new dialect for original-schema evaluation or for undeclared default-profile schemas.
+The same admission owner scans known regex support differences without compiling or matching a
+pattern. It distinguishes escaped operators and character-class contents from active syntax.
+Documented backreferences, Unicode property escapes, word boundaries and lookaround/modifier groups
+have no native admission. Unescaped dot outside a class remains outside guarantees because
+[xAI dot-all matching](https://docs.x.ai/developers/model-capabilities/text/structured-outputs#regex-support-pattern)
+can accept a newline rejected by the original schema. Literal escaped dots and class dots keep their
+admission. Other alphanumeric escapes and unlisted group introducers remain unproven, not invented
+provider rejections. Unterminated escapes and classes also remain unproven. No provider regex-length
+or repetition cutoff is added. This support scan is
+not complete regex syntax validation or proof of full Unicode/dialect matching equivalence.
 Response schemas outside native admission retain explicit original-schema local fallback; non-strict
 functions stay unchanged. The deferred/batch Chat codec uses this same strict-function entry and
 response enforcement owner; its separate wire builder and decoder remain separate.
@@ -3045,7 +3055,7 @@ object proof merely because the schema document is a JSON object or contains `pr
 Draft-07 `$ref` siblings cannot supply that proof. This is not a general satisfiability analysis.
 Local validation uses the original schema and reports invalid output without
 rewriting it or retrying. Legacy fragment-ID resolution, complete dialect-specific keyword shapes
-and regex classification or original-dialect ECMA regex evaluation remain incomplete.
+and complete regex classification or original-dialect ECMA regex evaluation remain incomplete.
 The shared `StructuredOutput` validator builds the unchanged original schema in a fresh local
 registry for each validation. Repeated `$id` values across requests do not collide or retain request
 graphs in the global registry. Existing supplier default dialect, vocabulary and dialect registries,

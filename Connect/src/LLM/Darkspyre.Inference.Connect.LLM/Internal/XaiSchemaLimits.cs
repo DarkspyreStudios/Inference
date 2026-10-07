@@ -100,6 +100,8 @@ internal static class XaiSchemaLimits
                 return value.ValueKind != JsonValueKind.String ? SchemaDisposition.InvalidSchema
                     : value.GetString() is "date" or "time" or "date-time" or "email" or "uuid" or "ipv4" or "ipv6" or "uri"
                         ? SchemaDisposition.Guaranteed : SchemaDisposition.OutsideGuarantee;
+            case "pattern":
+                return ClassifyPattern(value);
             case "multipleOf":
                 return value.ValueKind == JsonValueKind.Number && JsonMath.NumberCompare(value, JsonElement.Parse("0")) > 0
                     ? SchemaDisposition.OutsideGuarantee : SchemaDisposition.InvalidSchema;
@@ -152,7 +154,6 @@ internal static class XaiSchemaLimits
             case "description":
             case "contentEncoding":
             case "contentMediaType":
-            case "pattern":
                 return Shape(value.ValueKind == JsonValueKind.String);
             case "readOnly":
             case "writeOnly":
@@ -179,6 +180,45 @@ internal static class XaiSchemaLimits
         }
 
         static SchemaDisposition Shape(bool valid) => valid ? SchemaDisposition.Guaranteed : SchemaDisposition.InvalidSchema;
+    }
+
+    // This pass classifies known support differences. It does not parse or match ECMA expressions.
+    private static SchemaDisposition ClassifyPattern(JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.String) return SchemaDisposition.InvalidSchema;
+        string pattern = value.GetString()!;
+        SchemaDisposition disposition = SchemaDisposition.Guaranteed;
+        bool characterClass = false;
+        for (int index = 0; index < pattern.Length; index++)
+        {
+            char atom = pattern[index];
+            if (atom == '\\')
+            {
+                if (++index == pattern.Length) return SchemaDisposition.OutsideGuarantee;
+                char escaped = pattern[index];
+                bool property = escaped is 'p' or 'P' && index + 1 < pattern.Length && pattern[index + 1] == '{';
+                bool namedReference = escaped == 'k' && index + 1 < pattern.Length && pattern[index + 1] == '<';
+                if (property || !characterClass && (escaped is >= '1' and <= '9' or 'b' or 'B' || namedReference))
+                    disposition = Merge(disposition, SchemaDisposition.ProviderRejected);
+                else if (char.IsAsciiLetterOrDigit(escaped) && escaped is not ('n' or 't' or 'r' or 'f' or 'x' or 'u'
+                    or 'd' or 'D' or 'w' or 'W' or 's' or 'S'))
+                    disposition = Merge(disposition, SchemaDisposition.OutsideGuarantee);
+                continue;
+            }
+            if (atom == '[') characterClass = true;
+            else if (atom == ']') characterClass = false;
+            else if (!characterClass && atom == '.')
+                disposition = Merge(disposition, SchemaDisposition.OutsideGuarantee);
+            else if (!characterClass && atom == '(' && index + 2 < pattern.Length && pattern[index + 1] == '?')
+            {
+                char introducer = pattern[index + 2];
+                bool lookbehind = introducer == '<' && index + 3 < pattern.Length && pattern[index + 3] is '=' or '!';
+                if (introducer is '=' or '!' or 'i' or 'm' or 's' or '-' || lookbehind)
+                    disposition = Merge(disposition, SchemaDisposition.ProviderRejected);
+                else if (introducer != ':') disposition = Merge(disposition, SchemaDisposition.OutsideGuarantee);
+            }
+        }
+        return characterClass ? Merge(disposition, SchemaDisposition.OutsideGuarantee) : disposition;
     }
 
     private static SchemaDisposition Count(JsonElement value, int maximum)

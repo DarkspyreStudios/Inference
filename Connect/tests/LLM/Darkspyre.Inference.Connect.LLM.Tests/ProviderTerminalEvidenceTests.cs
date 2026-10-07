@@ -33,6 +33,8 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"dependencies\":{\"value\":{\"type\":17}}}", true)]
     [InlineData("{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\",\"additionalItems\":17}", false)]
     [InlineData("{\"$schema\":\"https://schemas.example.test/custom-dialect\",\"type\":\"object\",\"properties\":17}", false)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"\\p{L}"}}}""", false)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"(?i:a)"}}}""", false)]
     public async Task GrokSchemaAdmissionDistinguishesMalformedValuesFromNativeRejections(string schema, bool malformed)
     {
         const string body = """
@@ -98,6 +100,9 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"additionalProperties\":false}", true)]
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":[\"string\",\"null\"],\"enum\":[\"x\",null],\"const\":\"x\"}},\"default\":{\"type\":17,\"anyOf\":[]},\"examples\":[{\"minContains\":\"one\"}]}", true)]
     [InlineData("{\"type\":\"object\",\"title\":\"Answer\",\"description\":\"A value\",\"$comment\":\"Annotation\",\"readOnly\":true,\"writeOnly\":false,\"deprecated\":false,\"properties\":{\"value\":{\"type\":\"string\",\"format\":\"email\"}}}", false)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"^x[.]?$"}}}""", true)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"^x\\.?$"}}}""", true)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"^[(?=]?x$"}}}""", true)]
     public async Task GrokSchemaAdmissionPreservesBooleanClosureAndLiteralPayloads(string schema, bool validOutput)
     {
         await CheckReferenceAdmission(JsonElement.Parse(schema), guaranteed: true, validOutput);
@@ -267,27 +272,32 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Theory]
-    [InlineData("{\"oneOf\":[{\"type\":\"number\"},{\"type\":\"integer\"}]}", false)]
-    [InlineData("{\"allOf\":[{\"minimum\":2},{\"maximum\":4}]}", false)]
-    [InlineData("{\"not\":{\"const\":1}}", false)]
-    [InlineData("{\"if\":{\"const\":1},\"then\":{\"const\":2}}", false)]
-    [InlineData("{\"format\":\"custom-format\"}", true)]
-    [InlineData("{\"multipleOf\":2}", false)]
-    [InlineData("{\"uniqueItems\":true}", true)]
-    [InlineData("{\"customAssertion\":false}", true)]
-    [InlineData("{\"$vocabulary\":{\"https://schemas.example.test/custom\":false}}", true)]
-    [InlineData("{\"prefixItems\":17}", true)]
-    [InlineData("{\"dependentSchemas\":17}", true)]
-    [InlineData("{\"unevaluatedProperties\":17}", true)]
-    [InlineData("{\"$anchor\":17}", true)]
-    [InlineData("{\"dependencies\":{\"requiredForValue\":[\"missing\"],\"value\":{\"multipleOf\":2}}}", true)]
-    public async Task GrokUnprovenGuaranteesRequireExplicitOriginalSchemaValidation(string constraint, bool validOutput)
+    [InlineData("{\"oneOf\":[{\"type\":\"number\"},{\"type\":\"integer\"}]}", false, "1")]
+    [InlineData("{\"allOf\":[{\"minimum\":2},{\"maximum\":4}]}", false, "1")]
+    [InlineData("{\"not\":{\"const\":1}}", false, "1")]
+    [InlineData("{\"if\":{\"const\":1},\"then\":{\"const\":2}}", false, "1")]
+    [InlineData("{\"format\":\"custom-format\"}", true, "1")]
+    [InlineData("{\"multipleOf\":2}", false, "1")]
+    [InlineData("{\"uniqueItems\":true}", true, "1")]
+    [InlineData("{\"customAssertion\":false}", true, "1")]
+    [InlineData("{\"$vocabulary\":{\"https://schemas.example.test/custom\":false}}", true, "1")]
+    [InlineData("{\"prefixItems\":17}", true, "1")]
+    [InlineData("{\"dependentSchemas\":17}", true, "1")]
+    [InlineData("{\"unevaluatedProperties\":17}", true, "1")]
+    [InlineData("{\"$anchor\":17}", true, "1")]
+    [InlineData("{\"dependencies\":{\"requiredForValue\":[\"missing\"],\"value\":{\"multipleOf\":2}}}", true, "1")]
+    [InlineData("""{"type":"string","pattern":"^.$"}""", false, "\"\\n\"")]
+    [InlineData("""{"type":"string","pattern":"^(a)\\1$"}""", true, "\"aa\"")]
+    [InlineData("""{"type":"string","pattern":"(?=a)a"}""", true, "\"a\"")]
+    [InlineData("""{"type":"string","pattern":"\\ba\\b"}""", true, "\"a\"")]
+    public async Task GrokUnprovenGuaranteesRequireExplicitOriginalSchemaValidation(string constraint, bool validOutput, string outputValue)
     {
         JsonElement schema = JsonElement.Parse("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"value\":" + constraint + "}}");
-        const string body = """
+        JsonNode body = JsonNode.Parse("""
             {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"value\":1}"}]}]}
-            """;
-        var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+            """)!;
+        body["output"]![0]!["content"]![0]!["text"] = new JsonObject { ["value"] = JsonNode.Parse(outputValue) }.ToJsonString();
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body.ToJsonString());
         using var http = new HttpClient(handler);
         var client = new XaiResponsesLlmClient(http);
         var connection = new LlmConnection
