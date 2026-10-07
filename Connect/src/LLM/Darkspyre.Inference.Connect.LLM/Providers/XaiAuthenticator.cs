@@ -87,6 +87,8 @@ internal sealed class XaiAuthenticator(HttpClient http) : OAuthAuthenticatorBase
                     {
                         throw new LlmProviderException("Grok device authorization ended; start sign-in again.",
                             Transport, response.StatusCode, code,
+                            requestId: ProviderHttp.ReadRequestId(response, null, [deviceAuthId, userCode]),
+                            retryAfter: response.Headers.RetryAfter?.Delta,
                             sanitizedResponseBody: SecretRedactor.Sanitize(body, null, [deviceAuthId, userCode]));
                     }
                 }

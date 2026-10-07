@@ -13,6 +13,36 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ProviderTerminalEvidenceTests
 {
     [Theory]
+    [InlineData("access_denied")]
+    [InlineData("expired_token")]
+    public async Task GrokDeviceAuthorizationTerminationKeepsSafeRequestAndRetryFacts(string code)
+    {
+        var retryAfter = TimeSpan.FromSeconds(17);
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            "{\"error\":\"" + code + "\",\"error_description\":\"Ended device-secret user-secret\",\"refresh_token\":\"provider-secret\"}",
+            HttpStatusCode.BadRequest, retryAfter, "request-device-secret-1");
+        using var http = new HttpClient(handler);
+        var authenticator = new XaiAuthenticator(http);
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            authenticator.CompleteAsync("device-secret", "user-secret"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, failure.StatusCode);
+        Assert.Equal(code, failure.ProviderCode);
+        Assert.Equal("request-[REDACTED]-1", failure.RequestId);
+        Assert.Equal(retryAfter, failure.RetryAfter);
+        Assert.Contains("start sign-in again", failure.Message, StringComparison.Ordinal);
+        Assert.Contains(code, failure.SanitizedResponseBody!, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", failure.SanitizedResponseBody!, StringComparison.Ordinal);
+        Assert.DoesNotContain("device-secret", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("user-secret", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("provider-secret", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.Equal(1, handler.Calls);
+        Assert.Contains("grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Adevice_code", handler.RequestBody!, StringComparison.Ordinal);
+        Assert.Contains("device_code=device-secret", handler.RequestBody!, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData(false, "reasoning.text", "text")]
     [InlineData(false, "reasoning.summary", "summary")]
     [InlineData(true, "reasoning.text", "text")]

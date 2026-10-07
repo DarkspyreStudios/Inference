@@ -2946,6 +2946,9 @@ The shared HTTP classifier preserves the response status, observed request ID an
 `Retry-After` across its resource and authentication routes. Request IDs use the same credential
 redactor as diagnostic bodies. A reported retry delay is diagnostic data, not permission to retry.
 Named authentication and entitlement failures clear the setup device attempt without saving a credential.
+Device-grant `access_denied` and `expired_token` failures retain their actual status and code,
+the redacted request ID and any observed delta retry delay. These failures end the sign-in attempt;
+the retry delay does not restart or extend it.
 
 The shared Responses pipeline retains xAI output as an ordered deep clone, including hosted-tool
 items and encrypted metadata. Continuation is bound to the transport, endpoint, account and model;
