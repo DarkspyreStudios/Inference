@@ -8,6 +8,7 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 /// <summary>
 /// Stand-in <c>/bin/sh</c> scripts play a Claude CLI that is finishing a token refresh. A cancelled caller must not
 /// wait for it, and the process must not receive SIGKILL before <see cref="ClaudeCliExits.Limit"/>.
+/// Refused logging must not prevent termination or erase the actual exit failure.
 /// </summary>
 public sealed class ClaudeCliExitTests
 {
@@ -105,6 +106,67 @@ public sealed class ClaudeCliExitTests
         }
     });
 
+    [UnixFact]
+    public Task RefusedForcedKillWarningStillEndsTheActualProcess() => Bounded(async () =>
+    {
+        using var scratch = new Scratch();
+        var warningFailure = new InvalidOperationException("The fixture refuses the forced-kill warning.");
+        var logger = new RecordingLogger(warningFailure: warningFailure);
+        var exits = new ClaudeCliExits(logger) { Limit = TimeSpan.FromMilliseconds(250) };
+        var invocation = new ClaudeCliInvocation("/bin/sh",
+            ["-c", "trap '' TERM; echo \"$$\"; while :; do sleep 1; done"],
+            StandardInput: null, scratch.Directory);
+        using var cancellation = new CancellationTokenSource();
+        Process? root = null;
+        try
+        {
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+            {
+                await foreach (ClaudeCliProcessEvent processEvent in new ClaudeCliProcessRunner(exits).StreamAsync(invocation, cancellation.Token))
+                {
+                    string line = Assert.IsType<ClaudeCliOutputLine>(processEvent).Line;
+                    root = Process.GetProcessById(int.Parse(line, CultureInfo.InvariantCulture));
+                    Assert.False(root.HasExited);
+                    await cancellation.CancelAsync();
+                }
+            });
+            for (int pass = 0; pass < 2; pass++)
+                Assert.Same(warningFailure, await Assert.ThrowsAsync<InvalidOperationException>(() => exits.DisposeAsync().AsTask()));
+            Assert.NotNull(root);
+            await root.WaitForExitAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(root.HasExited);
+            Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Warning);
+            Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Error);
+        }
+        finally
+        {
+            if (root is not null)
+            {
+                if (!root.HasExited) root.Kill();
+                root.Dispose();
+            }
+        }
+    });
+
+    [Fact]
+    public async Task BackgroundExitAndRefusedErrorLogRemainVisibleOnRepeatedDisposal()
+    {
+        var exitFailure = new IOException("The fixture exit fails.");
+        var loggingFailure = new InvalidOperationException("The fixture refuses the exit-error log.");
+        var logger = new RecordingLogger(errorFailure: loggingFailure);
+        var exits = new ClaudeCliExits(logger);
+        exits.Track(Task.FromException(exitFailure));
+
+        for (int pass = 0; pass < 2; pass++)
+        {
+            AggregateException error = await Assert.ThrowsAsync<AggregateException>(() => exits.DisposeAsync().AsTask());
+            Assert.Equal(2, error.InnerExceptions.Count);
+            Assert.Same(exitFailure, error.InnerExceptions[0]);
+            Assert.Same(loggingFailure, error.InnerExceptions[1]);
+        }
+        Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Error);
+    }
+
     private static Task Bounded(Func<Task> scenario) => Task.Run(scenario).WaitAsync(TimeSpan.FromSeconds(20));
 
     private sealed class Scratch : IDisposable
@@ -114,7 +176,7 @@ public sealed class ClaudeCliExitTests
         public void Dispose() => System.IO.Directory.Delete(Directory, recursive: true);
     }
 
-    private sealed class RecordingLogger : ILogger<ClaudeCliExits>
+    private sealed class RecordingLogger(Exception? warningFailure = null, Exception? errorFailure = null) : ILogger<ClaudeCliExits>
     {
         private readonly Lock _gate = new();
         private readonly List<(LogLevel, string)> _entries = [];
@@ -130,6 +192,8 @@ public sealed class ClaudeCliExitTests
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
             lock (_gate) _entries.Add((logLevel, formatter(state, exception)));
+            if (logLevel == LogLevel.Warning && warningFailure is not null) throw warningFailure;
+            if (logLevel == LogLevel.Error && errorFailure is not null) throw errorFailure;
         }
     }
 }
