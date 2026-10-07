@@ -22,8 +22,8 @@ owner, and Files operations delegate to its existing private Files codec. They n
 refresh the supplied snapshot again. TTS owns its observed voices codec, with no voice cache or
 second model-list owner. A missing facade supplies no hidden default and refuses catalog-dependent
 operations before effects. These internal extensions do not themselves implement other media routes.
-Shared snapshot-bound model discovery remains unwired pending the existing model-list owner's
-credential scope and callback-drain qualification; current chat model discovery is unchanged.
+Snapshot-bound model discovery uses the facade's existing model-list owner for the selected
+connection snapshot and family. The facade and caller fences are checked after the awaited listing.
 
 `ConnectLlmJson.XaiConnectionSelection` is the exact transferable metadata root. A runtime binding is
 not a transferable root. The owned context contains a fixed refusal converter: null is permitted,
