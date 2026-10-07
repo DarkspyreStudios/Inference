@@ -51,7 +51,7 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
             var probe = new AntigravityProbe(agents, invocation.Provider.ConnectionId, options.Model, workspace, capabilities);
             await File.WriteAllTextAsync(Path.Combine(workspace, "fixture.txt"), probe._marker, token);
             int exitCode = await ProbeRunner.RunAsync(probe.Cases, options, ready, Console.Out, token);
-            Console.WriteLine($"Turns sent: {probe.Turns}");
+            Console.WriteLine($"Turn attempts: {probe.Turns}");
             return exitCode;
         }
         finally

@@ -4274,7 +4274,8 @@ Antigravity uses `--provider antigravity` (or `agy`). Run `agy` interactively on
 tester does not request or store a Google authorization code. `agy-probe` runs explicit live cases
 through the native session: `text`, `structured`, `native-tools`, `session`, `resume`, `controls` and
 `cancel`. It works in a temporary workspace with one fixture, reports the CLI version and the number
-of turns sent, and never retries. The `usage` command is available for all three subscription providers:
+of turn attempts, and never retries. The attempt counter increments before dispatch and does not
+prove that a prompt reaches the provider. The `usage` command is available for all three subscription providers:
 
 ```bash
 dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- usage --provider claude
