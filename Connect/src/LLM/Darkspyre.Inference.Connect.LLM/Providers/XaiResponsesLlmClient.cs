@@ -328,8 +328,13 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
                 if (web.Location is not null)
                     throw new NotSupportedException("Grok web search does not accept a user location.");
             }
-            else if (tool is XaiXSearchTool { AllowedHandles: not null, ExcludedHandles: not null })
-                throw new ArgumentException("Grok X search cannot combine allowed and excluded handles.", nameof(request));
+            else if (tool is XaiXSearchTool social)
+            {
+                if (social.AllowedHandles is not null && social.ExcludedHandles is not null)
+                    throw new ArgumentException("Grok X search cannot combine allowed and excluded handles.", nameof(request));
+                if (social.AllowedHandles?.Count > 20 || social.ExcludedHandles?.Count > 20)
+                    throw new ArgumentException("Grok X search accepts at most 20 handles per filter.", nameof(request));
+            }
             else if (tool is LlmRemoteMcpTool mcp)
             {
                 if (!Uri.TryCreate(mcp.ServerUrl, UriKind.Absolute, out Uri? server)

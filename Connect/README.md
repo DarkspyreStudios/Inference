@@ -436,7 +436,9 @@ collection IDs and optional result limits; each descriptor accepts at most ten c
 Actual built `input_file` content also enables implicit document-search observations. Both paths
 request `file_search_call.results`. Hosted-tool include strings use primitive JSON nodes without
 default reflection metadata. Web controls use flat domains and image controls. X controls
-preserve handles and dates without an invented handle cutoff or date interpretation. Deferred MCP
+preserve exact handles and apply the [published 20-handle limit](https://docs.x.ai/developers/tools/x-search)
+to each allowed or excluded filter before effects. Oversized lists refuse without truncation.
+Typed date bounds project as `YYYY-MM-DD` without date interpretation. Deferred MCP
 adds the server-side `tool_search` descriptor and retains its ordered opaque call/output items.
 Pure preflight counts all wire tools before effects. Authorization resolves once per distinct
 borrowed authority during generation, never during estimation or serialization.

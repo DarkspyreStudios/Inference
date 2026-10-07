@@ -13,6 +13,59 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ProviderTerminalEvidenceTests
 {
     [Theory]
+    [InlineData(false, 20)]
+    [InlineData(true, 20)]
+    [InlineData(false, 21)]
+    [InlineData(true, 21)]
+    public async Task GrokXSearchUsesThePublishedHandleLimitWithoutTruncatingFilters(bool excluded, int count)
+    {
+        const string body = """
+            {"id":"response-1","model":"grok-4.7","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}
+            """;
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = false }
+        };
+        string[] handles = Enumerable.Range(0, count).Select(index => $"handle-{index}").ToArray();
+        var request = new LlmChatRequest
+        {
+            ModelId = "grok-4.7",
+            Messages = [new("user", "Search X")],
+            HostedTools = [excluded ? new XaiXSearchTool(ExcludedHandles: handles) : new XaiXSearchTool(AllowedHandles: handles)]
+        };
+        if (count > 20)
+        {
+            Assert.Throws<ArgumentException>(() => client.PreflightResourceRequest(connection, request));
+            await Assert.ThrowsAsync<ArgumentException>(async () =>
+            {
+                await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+            });
+            Assert.Equal(0, handler.Calls);
+            return;
+        }
+
+        client.PreflightResourceRequest(connection, request);
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+        Assert.Equal(LlmCompletionStatus.Completed, Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Status);
+        Assert.Equal(1, handler.Calls);
+        using JsonDocument sent = JsonDocument.Parse(handler.RequestBody!);
+        JsonElement tool = Assert.Single(sent.RootElement.GetProperty("tools").EnumerateArray());
+        Assert.Equal("x_search", tool.GetProperty("type").GetString());
+        Assert.Equal(handles, tool.GetProperty(excluded ? "excluded_x_handles" : "allowed_x_handles")
+            .EnumerateArray().Select(value => value.GetString()));
+        Assert.False(tool.TryGetProperty(excluded ? "allowed_x_handles" : "excluded_x_handles", out _));
+    }
+
+    [Theory]
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"enum\":[]}}}", false)]
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"anyOf\":[]}}}", false)]
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":true}}", false)]
