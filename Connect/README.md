@@ -4048,6 +4048,8 @@ refusal of an unsupported effort before proving that the same session still comp
 Account usage runs `/usage` as a standalone headless CLI command. Normalized model quota fields are
 returned when present; the sanitized CLI report is also retained in `Summary` because Antigravity
 documents the slash-command response as human-readable text rather than a versioned JSON schema.
+The quota parser recognizes the CLI's tab-separated weekly remaining-limit rows. It preserves each
+model-group label, reported remaining percentage and reset timestamp in the normalized quota window.
 
 ## Apple Foundation Models on device
 

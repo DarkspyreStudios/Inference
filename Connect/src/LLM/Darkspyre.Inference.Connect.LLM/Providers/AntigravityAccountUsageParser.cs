@@ -59,7 +59,9 @@ internal static partial class AntigravityAccountUsageParser
                 double remainingFraction = isRemaining
                     ? fraction
                     : Math.Clamp((100d - percent) / 100d, 0d, 1d);
-                string? resetText = ReadReset(line);
+                string? resetText = percentage.Groups["reset"].Success
+                    ? percentage.Groups["reset"].Value
+                    : ReadReset(line);
                 if (resetText is null && index + 1 < lines.Length)
                 {
                     resetText = ReadReset(lines[index + 1]);
@@ -269,7 +271,8 @@ internal static partial class AntigravityAccountUsageParser
     private static string StripAnsi(string value) => AnsiEscape().Replace(value, string.Empty);
 
     [GeneratedRegex(
-        @"^(?<prefix>.*?)(?<value>\d+(?:\.\d+)?)\s*%\s*(?<kind>remaining|used)\b",
+        @"^(?:(?<prefix>[^\t]+)\tWeekly Limit (?<kind>remaining)\t(?<value>\d+(?:\.\d+)?)%\t(?<reset>[^\t]+)$"
+        + @"|(?<prefix>.*?)(?<value>\d+(?:\.\d+)?)\s*%\s*(?<kind>remaining|used)\b)",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase)]
     private static partial Regex Percentage();
 

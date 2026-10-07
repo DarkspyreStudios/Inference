@@ -14,6 +14,37 @@ public sealed class AntigravityCliLlmClientTests
 {
     private const string ErrorDetail = """{"access_token":"diagnostic-secret","detail":"The selected model is unavailable in this region."}""";
 
+    [Fact]
+    public async Task AccountUsagePreservesCliTablePercentagesAndResetTimes()
+    {
+        const string summary = "Gemini Models\tWeekly Limit Remaining\t88%\t2026-10-14T09:21:58Z\n"
+            + "Claude and GPT models\tWeekly Limit Remaining\t71%\t2026-10-14T11:03:44Z";
+        var runner = new RecordingRunner(new(0,
+            new JsonObject { ["status"] = "SUCCESS", ["response"] = summary }.ToJsonString(), string.Empty));
+        var client = new AntigravityCliLlmClient(runner);
+
+        LlmAccountUsageSnapshot result = await client.GetAccountUsageAsync(Connection());
+
+        Assert.Equal(summary, result.Summary);
+        Assert.Collection(result.Quotas,
+            quota =>
+            {
+                Assert.Equal("Gemini Models", quota.DisplayName);
+                Assert.Equal(0.88d, quota.RemainingFraction);
+                Assert.Equal(0.12d, quota.UsedFraction);
+                Assert.Equal(new DateTimeOffset(2026, 10, 14, 9, 21, 58, TimeSpan.Zero), quota.ResetsAt);
+                Assert.Equal(LlmQuotaState.Available, quota.State);
+            },
+            quota =>
+            {
+                Assert.Equal("Claude and GPT models", quota.DisplayName);
+                Assert.Equal(0.71d, quota.RemainingFraction);
+                Assert.Equal(0.29d, quota.UsedFraction);
+                Assert.Equal(new DateTimeOffset(2026, 10, 14, 11, 3, 44, TimeSpan.Zero), quota.ResetsAt);
+                Assert.Equal(LlmQuotaState.Available, quota.State);
+            });
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
