@@ -8,7 +8,7 @@ namespace Darkspyre.Inference.Tensor.ConsoleTester;
 /// <summary>The test calls: a chat, thinking, a tool round trip and structured output, each streamed to the console.</summary>
 internal sealed class QwenSuite(ILlmInference engine, string modelId)
 {
-    private static readonly JsonElement TimeSchema = JsonElement.Parse("""{"type":"object","properties":{},"additionalProperties":false}""");
+    internal static readonly JsonElement TimeSchema = JsonElement.Parse("""{"type":"object","properties":{},"additionalProperties":false}""");
     private static readonly JsonElement CitySchema = JsonElement.Parse("""
         {"type":"object","properties":{"city":{"type":"string"},"country":{"type":"string"},"population":{"type":"integer"}},
          "required":["city","country","population"],"additionalProperties":false}

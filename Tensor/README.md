@@ -288,6 +288,10 @@ shutdown observation from `ShutdownAsync`; an already retired owner reports `Alr
 An unsafe or busy observation and any cleanup failure produce a nonzero process exit. Successful
 generation alone does not establish runtime retirement.
 
+The console's direct Qwen and Connect SelfHost tool suites share one parsed JSON schema for
+`get_time`. Schema construction does not use reflection serialization. SelfHost runs the managed
+agent tool round-trip over the borrowed loaded engine, including when JSON reflection defaults are disabled.
+
 ## Provider setup
 
 `QwenSetup.Definition` and `SupraSetup.Definition` describe providers without constructing an engine,

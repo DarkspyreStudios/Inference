@@ -1,5 +1,4 @@
 using System.Globalization;
-using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
@@ -34,7 +33,7 @@ internal static class SelfHostSuite
         {
             ModelId = modelId,
             Tools = [new LlmAgentToolDefinition() { Name = "get_time", Description = "Returns the current local date and time.",
-                InputSchema = JsonSerializer.SerializeToElement(new { type = "object", properties = new { }, additionalProperties = false }) }],
+                InputSchema = QwenSuite.TimeSchema }],
             ToolHandler = (call, _) =>
             {
                 string now = DateTime.Now.ToString("F", CultureInfo.InvariantCulture);
