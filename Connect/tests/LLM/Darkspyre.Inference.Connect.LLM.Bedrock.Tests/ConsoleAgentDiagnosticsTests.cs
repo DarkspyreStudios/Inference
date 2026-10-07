@@ -9,6 +9,26 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class ConsoleAgentDiagnosticsTests
 {
+    [Fact]
+    public void AgentIterationLimitBuildsTheExistingManagedPolicyAndPreservesOmittedDefaults()
+    {
+        Program.PromptOptions capped = Program.ParsePromptOptions(
+            ["--max-model-iterations", "3"], "selected-model", allowModelIterationLimit: true);
+
+        Assert.Equal(3, Assert.IsType<LlmAgentExecutionOptions>(capped.ExecutionOptions).MaxModelIterations);
+        Assert.Equal("selected-model", capped.Model);
+        Assert.Null(Program.ParsePromptOptions([], "selected-model", allowModelIterationLimit: true).ExecutionOptions);
+    }
+
+    [Fact]
+    public void AgentIterationLimitRefusesNonpositiveValuesAndUnrelatedCommands()
+    {
+        Assert.Throws<ArgumentException>(() => Program.ParsePromptOptions(
+            ["--max-model-iterations", "0"], "selected-model", allowModelIterationLimit: true));
+        Assert.Throws<ArgumentException>(() => Program.ParsePromptOptions(
+            ["--max-model-iterations", "3"], "selected-model"));
+    }
+
     [Theory]
     [InlineData(false, "Inference error [InvalidRequest]")]
     [InlineData(true, "Provider error [antigravity_cli_handshake_timeout]")]

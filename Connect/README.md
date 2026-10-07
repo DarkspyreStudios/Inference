@@ -4391,6 +4391,10 @@ dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- managed-
 
 The first checks direct tools, attachments and state replay. The second checks the managed loop,
 JSON capture/reopen, fork and low-cap host compaction. Use a model returned by `models`.
+The `agent` command accepts `--max-model-iterations` as a positive integer. It passes that cap to
+the existing managed execution policy. Omission keeps the library defaults. Other commands reject
+the option, and native sessions reject managed execution options. A model iteration includes a
+tool request or the model's answer after a tool result; the cap is not a count of all HTTP requests.
 The managed tester persists captured contexts through `ConnectLlmJson.AgentContext` metadata.
 Its round-trip retains document bytes, tool identities and resource-selection facts without
 default reflection serialization.

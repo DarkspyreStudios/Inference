@@ -401,7 +401,8 @@ internal static class Program
         ConsoleInvocation invocation,
         CancellationToken cancellationToken)
     {
-        PromptOptions options = ParsePromptOptions(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId);
+        PromptOptions options = ParsePromptOptions(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId,
+            allowModelIterationLimit: true);
         if (!await CheckReadyAsync(llms, invocation, cancellationToken)) return 3;
         LlmProviderCapabilities capabilities = await llms.GetModelCapabilitiesAsync(
             invocation.Provider.ConnectionId, options.Model, cancellationToken);
@@ -439,6 +440,7 @@ internal static class Program
             {
                 ModelId = options.Model,
                 Runtime = RuntimeFor(capabilities.Agent),
+                ExecutionOptions = options.ExecutionOptions,
                 Tools = tools,
                 ToolHandler = tools.Count > 0 ? ExecuteToolAsync : null
             },
@@ -631,11 +633,13 @@ internal static class Program
         if (completed.Error is { Length: > 0 } error) diagnostics.WriteLine($"[error] {error}");
     }
 
-    private static PromptOptions ParsePromptOptions(string[] args, string? defaultModel = null)
+    internal static PromptOptions ParsePromptOptions(string[] args, string? defaultModel = null,
+        bool allowModelIterationLimit = false)
     {
         string? model = defaultModel;
         LlmReasoningLevel? effort = null;
         string? schemaPath = null;
+        int? maxModelIterations = null;
         var attachments = new List<AttachmentOption>();
         for (int index = 0; index < args.Length; index++)
         {
@@ -645,6 +649,9 @@ internal static class Program
                 "--model" or "--effort" or "--schema" or "--attach-image" or "--attach-document"
                     when index + 1 < args.Length => args[++index],
                 "--model" or "--effort" or "--schema" or "--attach-image" or "--attach-document" =>
+                    throw new ArgumentException($"{option} requires a value."),
+                "--max-model-iterations" when allowModelIterationLimit && index + 1 < args.Length => args[++index],
+                "--max-model-iterations" when allowModelIterationLimit =>
                     throw new ArgumentException($"{option} requires a value."),
                 _ => throw new ArgumentException($"Unknown prompt option '{option}'.")
             };
@@ -669,6 +676,11 @@ internal static class Program
                 case "--attach-document":
                     attachments.Add(new AttachmentOption(LlmBinaryKind.Document, value));
                     break;
+                case "--max-model-iterations":
+                    maxModelIterations = int.TryParse(value, out int limit) && limit > 0
+                        ? limit
+                        : throw new ArgumentException("--max-model-iterations must be a positive integer.");
+                    break;
             }
         }
 
@@ -677,7 +689,8 @@ internal static class Program
             throw new ArgumentException("prompt requires --model <model-id>.");
         }
 
-        return new PromptOptions(model, effort, schemaPath, attachments);
+        return new PromptOptions(model, effort, schemaPath, attachments,
+            maxModelIterations is int maximum ? new() { MaxModelIterations = maximum } : null);
     }
 
     private static async Task<IReadOnlyList<LlmAttachment>> ReadAttachmentsAsync(
@@ -811,7 +824,7 @@ internal static class Program
               darkspyre-inference-connect-tester codex-probe --provider codex --model <model-id>
               darkspyre-inference-connect-tester managed-probe --provider codex --model <model-id>
               darkspyre-inference-connect-tester prompt --provider <codex|claude|antigravity|bedrock|agentcore> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>]
-              darkspyre-inference-connect-tester agent  --provider <codex|claude|agentcore|antigravity> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>]
+              darkspyre-inference-connect-tester agent  --provider <codex|claude|agentcore|antigravity|bedrock|grok-subscription> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--max-model-iterations <positive integer>]
 
             prompt reads one line interactively, or the complete prompt from redirected standard input:
               echo 'Reply only with OK.' | darkspyre-inference-connect-tester prompt --provider codex --model gpt-5.6-terra
@@ -859,13 +872,14 @@ internal static class Program
         }
     }
 
-    private sealed record PromptOptions(
+    internal sealed record PromptOptions(
         string Model,
         LlmReasoningLevel? Effort,
         string? SchemaPath,
-        IReadOnlyList<AttachmentOption> Attachments);
+        IReadOnlyList<AttachmentOption> Attachments,
+        LlmAgentExecutionOptions? ExecutionOptions);
 
-    private sealed record AttachmentOption(LlmBinaryKind Kind, string Path);
+    internal sealed record AttachmentOption(LlmBinaryKind Kind, string Path);
 
     internal sealed record BedrockLoginOptions(string Profile, string Region);
 }
