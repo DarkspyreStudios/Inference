@@ -219,9 +219,15 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
                     summary.Usage = usage.Usage;
                     break;
                 case LlmAgentTurnCompletedEvent completed:
-                    summary.Status = completed.Status;
+                    summary.Completion = completed;
                     break;
             }
+        }
+        if (summary.Completion is { Status: not LlmAgentTurnStatus.Completed } failure)
+        {
+            using var diagnostics = new StringWriter();
+            Program.WriteAgentCompletion(failure, diagnostics);
+            throw new ProbeFailure(diagnostics.ToString().TrimEnd());
         }
         return summary;
     }
@@ -280,7 +286,9 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
 
     private sealed class TurnSummary
     {
-        public LlmAgentTurnStatus? Status { get; set; }
+        public LlmAgentTurnCompletedEvent? Completion { get; set; }
+
+        public LlmAgentTurnStatus? Status => Completion?.Status;
 
         public string StreamedText { get; set; } = string.Empty;
 

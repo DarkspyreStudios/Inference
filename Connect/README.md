@@ -4253,6 +4253,9 @@ protocol is text-only.
 The tester reports an SDK failure with its typed error code and public message, then exits with code 1.
 Probe failures use the same typed SDK/provider error formatting as ordinary commands. They retain
 public error codes and explanations. Probes report only the type of other exceptions.
+Antigravity turn probes retain the actual non-success terminal status, reason and public error.
+They stop that case before another turn is sent. A stream without terminal completion still fails
+its existing completion check.
 The tester does not print inner exceptions, response bodies or stack traces. Local request refusals
 retain their explanation, including the reasoning levels the selected model accepts.
 

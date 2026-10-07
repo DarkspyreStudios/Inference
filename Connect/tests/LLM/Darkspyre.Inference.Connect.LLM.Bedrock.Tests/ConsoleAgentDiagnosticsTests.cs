@@ -69,8 +69,13 @@ public sealed class ConsoleAgentDiagnosticsTests
 
         Assert.Equal(expectedExitCode, exitCode);
         Assert.Equal(2, probe.Turns);
-        Assert.Contains(expectedExitCode == 0 ? "PASS 1/1 resume" : "The resumed turn did not complete.",
+        Assert.Contains(expectedExitCode == 0 ? "PASS 1/1 resume" : "status=Failed",
             report.ToString(), StringComparison.Ordinal);
+        if (expectedExitCode != 0)
+        {
+            Assert.Contains("reason=ProviderFailure", report.ToString(), StringComparison.Ordinal);
+            Assert.Contains("[error] Failure after matching text.", report.ToString(), StringComparison.Ordinal);
+        }
     }
 
     [Fact]
