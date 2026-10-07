@@ -7,11 +7,71 @@ using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using Darkspyre.Inference.Connect.LLM.Vertex;
+using Darkspyre.Inference.Connect.Resources;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ResourcePreparationTests
 {
+    [Fact]
+    public async Task ImportedDeferredReceiptConsumesOnceAndReturnsTheActualChatResult()
+    {
+        var handler = new ResourceResults();
+        using var http = new HttpClient(handler);
+        var source = new Source(ResourceResults.Connection());
+        ILlmClient[] clients = [new XaiResponsesLlmClient(http)];
+        await using var access = new LlmConnectionAccess(source, [], clients);
+        await using var core = new LlmProviderService(source, clients, [], connectionAccess: access);
+        await using var resources = new LlmResourceProviderService(access, core);
+        var receipt = new LlmDeferredCompletion("request-1",
+            new("https://api.x.ai/v1/chat/deferred-completion", "original-connection"));
+        LlmDeferredCompletion imported = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(receipt, ConnectResourcesJson.LlmDeferredCompletion), ConnectResourcesJson.LlmDeferredCompletion)!;
+
+        LlmDeferredResult result = await resources.GetDeferredAsync("selected-connection", imported);
+
+        LlmChatResult chat = Assert.IsType<LlmDeferredCompleted>(result).Result;
+        Assert.Equal("resource answer", chat.Text);
+        Assert.Equal("observed-model", chat.ModelId);
+        Assert.Equal(LlmCompletionStatus.Completed, chat.Status);
+        Assert.Equal("stop", chat.FinishReason);
+        Assert.Equal(5, chat.Usage!.TotalTokens);
+        Assert.Empty(chat.GeneratedResources);
+        Assert.Equal("original-connection", imported.Scope.Identity);
+        Assert.Equal(new Uri("https://api.x.ai/v1/chat/deferred-completion/request-1"), Assert.Single(handler.Requests));
+    }
+
+    [Fact]
+    public async Task BatchChatResultsUseTheActualEnvelopeAndReturnOnlyTheRequestedPage()
+    {
+        var handler = new ResourceResults(batch: true);
+        using var http = new HttpClient(handler);
+        var source = new Source(ResourceResults.Connection());
+        ILlmClient[] clients = [new XaiResponsesLlmClient(http)];
+        await using var access = new LlmConnectionAccess(source, [], clients);
+        await using var core = new LlmProviderService(source, clients, [], connectionAccess: access);
+        await using var resources = new LlmResourceProviderService(access, core);
+        var batch = new LlmBatch("batch-1", "batch", new("https://api.x.ai/v1/batches", "original-connection"),
+            new(null, null, null, null, null));
+
+        LlmBatchResultPage page = await resources.GetResultsAsync("selected-connection", batch,
+            new(2, "input-cursor"), new(1024, 4096));
+
+        Assert.Equal("next-cursor", page.PaginationToken);
+        Assert.Equal(["row-1", "row-2"], page.Items.Select(item => item.CustomId));
+        LlmChatResult chat = Assert.IsType<LlmBatchChatResult>(page.Items[0]).Result;
+        Assert.Equal("resource answer", chat.Text);
+        Assert.Equal("observed-model", chat.ModelId);
+        Assert.Equal(LlmCompletionStatus.Completed, chat.Status);
+        Assert.Equal(5, chat.Usage!.TotalTokens);
+        Assert.Equal(InferenceFailureCode.ExecutionFailed, Assert.IsType<LlmBatchFailure>(page.Items[1]).Error.Code);
+        Assert.Equal(new[]
+        {
+            new Uri("https://api.x.ai/v1/batches/batch-1"),
+            new Uri("https://api.x.ai/v1/batches/batch-1/results?limit=2&pagination_token=input-cursor")
+        }, handler.Requests);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -631,6 +691,56 @@ public sealed class ResourcePreparationTests
                     + "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":0}}\n\ndata: {\"type\":\"message_stop\"}\n\n",
                     System.Text.Encoding.UTF8, "text/event-stream")
             };
+        }
+    }
+
+    private sealed class ResourceResults(bool batch = false) : HttpMessageHandler
+    {
+        private const string Chat = """
+            {"id":"completion-1","model":"observed-model","choices":[{"index":0,
+            "message":{"role":"assistant","content":"resource answer"},"finish_reason":"stop"}],
+            "usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}
+            """;
+
+        public List<Uri> Requests { get; } = [];
+
+        public static LlmConnection Connection() => new()
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Xai = new(),
+            Endpoint = "https://api.x.ai/v1",
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            Catalog = []
+        };
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal("test-token", request.Headers.Authorization!.Parameter);
+            Requests.Add(request.RequestUri!);
+            if (!batch)
+                return Task.FromResult(new HttpResponseMessage(Requests.Count == 1 ? HttpStatusCode.OK : HttpStatusCode.Gone)
+                { Content = new StringContent(Requests.Count == 1 ? Chat : "{}") });
+            Assert.InRange(Requests.Count, 1, 2);
+            string body = Requests.Count == 1
+                ? "{\"batch_id\":\"batch-1\",\"name\":\"batch\"}"
+                : new JsonObject
+                {
+                    ["results"] = new JsonArray(
+                        new JsonObject
+                        {
+                            ["batch_request_id"] = "row-1",
+                            ["batch_result"] = new JsonObject { ["response"] = new JsonObject { ["chat_get_completion"] = JsonNode.Parse(Chat) } }
+                        },
+                        new JsonObject
+                        {
+                            ["batch_request_id"] = "row-2",
+                            ["batch_result"] = new JsonObject { ["error"] = "The row failed." }
+                        }),
+                    ["pagination_token"] = "next-cursor"
+                }.ToJsonString();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
         }
     }
 

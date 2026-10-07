@@ -195,6 +195,13 @@ by retirement; ordinary operation failures do not poison retirement. No operatio
 Caller cancellation retains the existing facade entry precedence. The owned codec refuses both
 nonnull concrete and interface facade values; null runtime values remain portable.
 
+The existing LLM `ResourcePreparationTests` exercises imported deferred receipts through the real
+resource facade with a consume-once HTTP stand-in. It checks one retrieval request and the canonical
+returned text, reported model, terminal status and usage. Its batch case checks authorization followed
+by one result-page request, the native `chat_get_completion` envelope, ordered row outcomes and the
+returned cursor without automatic paging. These managed cases do not establish provider access,
+media materialization or independent transport/cleanup fault qualification.
+
 This assembly activates no global provider registration and makes no OAuth or endpoint-qualification claim.
 Caller workspace storage remains caller-owned. Constructing or serializing a receipt performs no
 upload, polling, materialization, cache creation or tool execution.
