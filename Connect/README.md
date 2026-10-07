@@ -1379,6 +1379,9 @@ HTTP/refresh lifetimes are separate from these authentication-call retirement gu
 control-plane and AgentCore client by an opaque fingerprint of region, profile, access key, secret
 and session token. Concurrent acquisition constructs one client; a failed construction can be
 retried. Changes to configured credential fields use a different client and logging-verification key.
+The internal generic acquisition declares `Lazy<T>`'s public-parameterless-constructor requirement
+for trimming. Client creation still uses the supplied factory. Signed, redacted and tool continuation
+blocks enter their existing JSON array through the nongeneric node overload without reflection.
 
 Every SDK call holds an owner lease. Streaming leases cover response reading and disposal, not
 just response creation. Owner retirement fences new acquisition, cancels active calls, waits for

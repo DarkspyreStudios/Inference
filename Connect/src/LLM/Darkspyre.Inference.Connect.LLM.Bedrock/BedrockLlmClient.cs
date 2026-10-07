@@ -537,7 +537,7 @@ internal sealed class BedrockLlmClient(
             switch (block)
             {
                 case BedrockTextBlock text:
-                    output.Add(new JsonObject { ["type"] = "text", ["text"] = text.Text });
+                    output.Add(item: new JsonObject { ["type"] = "text", ["text"] = text.Text });
                     break;
                 case BedrockReasoningBlock reasoning:
                     var item = new JsonObject { ["type"] = "reasoning", ["text"] = reasoning.Text };
@@ -545,13 +545,13 @@ internal sealed class BedrockLlmClient(
                     {
                         item["signature"] = reasoning.Signature;
                     }
-                    output.Add(item);
+                    output.Add(item: item);
                     break;
                 case BedrockRedactedReasoningBlock redacted:
-                    output.Add(new JsonObject { ["type"] = "redacted_reasoning", ["data"] = Convert.ToBase64String(redacted.Data) });
+                    output.Add(item: new JsonObject { ["type"] = "redacted_reasoning", ["data"] = Convert.ToBase64String(redacted.Data) });
                     break;
                 case BedrockToolUseBlock tool when toolCalls.Any(call => call.Id == tool.Id):
-                    output.Add(new JsonObject
+                    output.Add(item: new JsonObject
                     {
                         ["type"] = "tool_use",
                         ["id"] = tool.Id,

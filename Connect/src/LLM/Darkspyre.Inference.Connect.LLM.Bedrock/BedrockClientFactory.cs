@@ -63,7 +63,7 @@ internal sealed class BedrockClientFactory : IDisposable, IAsyncDisposable
     internal IAsyncEnumerable<T> StreamAsync<T>(Func<CancellationToken, IAsyncEnumerable<T>> source,
         CancellationToken cancellationToken) => _lifetime.StreamAsync(source, cancellationToken);
 
-    private Lease<T> Acquire<T>(Dictionary<string, Lazy<T>> clients, LlmAwsCredentials aws,
+    private Lease<T> Acquire<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicParameterlessConstructor)] T>(Dictionary<string, Lazy<T>> clients, LlmAwsCredentials aws,
         Func<LlmAwsCredentials, T> create, CancellationToken caller) where T : class, IDisposable
     {
         LlmOperationLifetime.Lease operation = _lifetime.Enter(caller);
