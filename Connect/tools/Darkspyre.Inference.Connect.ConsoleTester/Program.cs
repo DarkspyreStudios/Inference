@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
@@ -417,9 +418,11 @@ internal static class Program
         {
             tools.Add(CreateEchoTool());
             LlmRichContentSupported richContent = capabilities.Agent.RichContentSupported;
-            if (richContent.Images == LlmRichContentCarriage.Native)
+            if (richContent.Images == LlmRichContentCarriage.Native
+                || richContent.TextDocuments != LlmRichContentCarriage.Unsupported)
             {
-                tools.Add(CreateAttachmentTool(richContent.TextDocuments != LlmRichContentCarriage.Unsupported));
+                tools.Add(CreateAttachmentTool(richContent.TextDocuments != LlmRichContentCarriage.Unsupported,
+                    richContent.Images == LlmRichContentCarriage.Native));
             }
         }
         await using ILlmAgentSession session = await agent.StartSessionAsync(
@@ -487,36 +490,28 @@ internal static class Program
         };
     }
 
-    internal static LlmAgentToolDefinition CreateAttachmentTool(bool supportsDocuments)
+    internal static LlmAgentToolDefinition CreateAttachmentTool(bool supportsDocuments, bool supportsImages = true)
     {
-        string schemaJson = supportsDocuments
-            ?
-            """
+        var kinds = new JsonArray();
+        if (supportsImages) kinds.Add(JsonValue.Create("image"));
+        if (supportsDocuments) kinds.Add(JsonValue.Create("document"));
+        var schemaObject = new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = new JsonObject
             {
-              "type": "object",
-              "properties": {
-                "kind": { "type": "string", "enum": ["image", "document"] }
-              },
-              "required": ["kind"],
-              "additionalProperties": false
-            }
-            """
-            :
-            """
-            {
-              "type": "object",
-              "properties": {
-                "kind": { "type": "string", "enum": ["image"] }
-              },
-              "required": ["kind"],
-              "additionalProperties": false
-            }
-            """;
-        using JsonDocument schema = JsonDocument.Parse(schemaJson);
+                ["kind"] = new JsonObject { ["type"] = "string", ["enum"] = kinds }
+            },
+            ["required"] = new JsonArray(JsonValue.Create("kind")),
+            ["additionalProperties"] = false
+        };
+        using JsonDocument schema = JsonDocument.Parse(schemaObject.ToJsonString());
         return new LlmAgentToolDefinition
         {
             Name = "darkspyre_inference_connect_attachment",
-            Description = supportsDocuments
+            Description = !supportsImages
+                ? "Returns a small text document attachment for Darkspyre.Inference.Connect.LLM smoke testing."
+                : supportsDocuments
                 ? "Returns a small image or text document attachment for Darkspyre.Inference.Connect.LLM smoke testing."
                 : "Returns a small image attachment for Darkspyre.Inference.Connect.LLM smoke testing.",
             InputSchema = schema.RootElement.Clone()

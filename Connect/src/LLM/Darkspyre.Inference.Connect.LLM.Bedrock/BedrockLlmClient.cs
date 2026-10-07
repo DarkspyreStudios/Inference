@@ -84,12 +84,17 @@ internal sealed class BedrockLlmClient(
         EnsureTransport(connection);
         IReadOnlySet<LlmReasoningLevel> offered = modelId is null ? FrozenSet<LlmReasoningLevel>.Empty : ReasoningLevels(modelId);
         (BedrockModelFamily family, string baseModelId) = BedrockModelFamilies.Classify(modelId ?? string.Empty);
+        LlmRichContentSupported richContent = ModelRichContent(modelId);
         bool claudeSampling = family != BedrockModelFamily.AnthropicClaude
             || AnthropicModelProfiles.Resolve(BedrockModelFamilies.AnthropicModelId(baseModelId), null).AllowsSampling;
         LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(
             Defaults with
             {
                 ReasoningLevels = offered,
+                SupportsPromptImages = richContent.Images == LlmRichContentCarriage.Native,
+                SupportsPromptDocuments = richContent.PdfDocuments == LlmRichContentCarriage.Native,
+                RichContentSupported = richContent,
+                Agent = Defaults.Agent with { RichContentSupported = richContent },
                 PromptCache = BedrockPromptCache.Capabilities(modelId ?? string.Empty),
                 SupportsTemperature = claudeSampling,
                 SupportsTopP = claudeSampling,
@@ -102,6 +107,11 @@ internal sealed class BedrockLlmClient(
             SupportsPresencePenalty = false,
             SupportsFrequencyPenalty = false
         };
+        if ((richContent.Images == LlmRichContentCarriage.Unsupported && capabilities.SupportsPromptImages)
+            || (richContent.PdfDocuments == LlmRichContentCarriage.Unsupported && capabilities.SupportsPromptDocuments))
+        {
+            throw new NotSupportedException("Bedrock capability overrides cannot enable image or document input for this text-only model.");
+        }
         // An override can narrow the model family's levels but never widen them: Converse maps no other level.
         if (capabilities.ReasoningLevels.Any(level => !offered.Contains(level)))
         {
@@ -117,6 +127,18 @@ internal sealed class BedrockLlmClient(
         }
         return capabilities;
     }
+
+    private static LlmRichContentSupported ModelRichContent(string? modelId) =>
+        BedrockModelFamilies.Classify(modelId ?? string.Empty).BaseModelId is
+            "amazon.nova-micro-v1:0" or "openai.gpt-oss-20b-1:0" or "openai.gpt-oss-120b-1:0"
+            ? RichContentRoutes.BedrockConverse with
+            {
+                Images = LlmRichContentCarriage.Unsupported,
+                ImageMediaTypes = FrozenSet<string>.Empty,
+                PdfDocuments = LlmRichContentCarriage.Unsupported,
+                TextDocuments = LlmRichContentCarriage.Text
+            }
+            : RichContentRoutes.BedrockConverse;
 
     /// <summary>
     /// The levels a model takes through additional model request fields. Only the qualified gpt-oss identities
@@ -777,7 +799,7 @@ internal sealed class BedrockLlmClient(
                             Content = BuildToolResultContent(ToolOutputProjector.Project(
                                 toolResult.Output,
                                 RichContentRoutes.BedrockConverse.For(connection, null),
-                                RichContentRoutes.BedrockConverse.For(connection, modelId)), ref documents, temporaryStreams)
+                                ModelRichContent(modelId).For(connection, modelId)), ref documents, temporaryStreams)
                         }
                     });
                 }

@@ -2489,7 +2489,8 @@ An override never raises a carriage.
 |---|---|---|---|---|---|---|---|---|
 | Direct Codex (chat and agent), OpenAI Responses | Native | Native | Native | Unsupported | Text | Text | Text | Text |
 | Anthropic Messages | Native | Native | Native | Unsupported | Text | Text | Text | Native |
-| Bedrock Converse | Native | Native | Native | Unsupported | Text | Text | Native | Native |
+| Bedrock Converse route baseline | Native | Native | Native | Unsupported | Text | Text | Native | Native |
+| Bedrock Converse Nova Micro and gpt-oss 20B/120B | Unsupported | Unsupported | Text | Unsupported | Text | Text | Native | Native |
 | Claude CLI agent | Native | Unsupported | Text | Unsupported | Native | Native | Text | Native |
 | Claude CLI streaming chat | Native | Native | Native | Unsupported | Text | Text | Text | Text |
 | AgentCore Harness | Unsupported | Unsupported | Text | Unsupported | Text | Text | Text | Native |
@@ -2498,9 +2499,22 @@ An override never raises a carriage.
 Every route omits other binary content. `PreservesOrder` reports each route's ordering. Claude CLI
 streaming chat appends native tool files after the flattened text history, so it reports false.
 Direct Codex and the Claude CLI
-agent rows are measured. Bedrock managed tool-result text documents are live-qualified on Nova Lite,
-including two document callbacks followed by a completed response. The remaining Bedrock carriages
+agent rows are measured. Bedrock managed tool-result text documents are live-qualified on Nova Lite
+with two native document callbacks, and on Nova Micro and gpt-oss 20B/120B with text conversion.
+Each qualified turn completes after reading the returned content. The remaining Bedrock carriages
 and the other rows follow each provider's protocol and are not live-verified.
+
+The exact Bedrock IDs `amazon.nova-micro-v1:0`, `openai.gpt-oss-20b-1:0` and
+`openai.gpt-oss-120b-1:0` declare no prompt image or document input. The existing recognized inference-profile
+prefixes retain their base model's declaration. Capability overrides cannot enable those unsupported inputs.
+Chat and managed-agent tool results carry UTF-8 documents through the shared labelled-text projection;
+PDF and image tool parts remain unsupported. The native request builder reads the same model declaration
+as capabilities. Nova Lite and other model declarations remain unchanged. The console tester offers a
+document-only tool when text-document carriage is available without native image carriage.
+The published model cards identify their text-only inputs:
+[Nova Micro](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-micro.html),
+[gpt-oss 20B](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-oss-20b.html) and
+[gpt-oss 120B](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-oss-120b.html).
 
 The text renderings are fixed. A resource link becomes `[Resource link: name] uri`. An embedded text
 resource becomes `[Resource: uri]` followed by its text. A text document becomes `[File: name]`

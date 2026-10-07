@@ -117,6 +117,65 @@ public sealed class BedrockSafetyTests
         Assert.Empty(BedrockLlmClient.ReasoningLevels(modelId));
 
     [Theory]
+    [InlineData("amazon.nova-micro-v1:0")]
+    [InlineData("us.amazon.nova-micro-v1:0")]
+    [InlineData("openai.gpt-oss-20b-1:0")]
+    [InlineData("openai.gpt-oss-120b-1:0")]
+    public async Task TextOnlyModelsConvertToolDocumentsAndRefusePromptDocumentsBeforeEffects(string modelId)
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new InvalidOperationException("Unexpected SDK acquisition"),
+            _ => throw new InvalidOperationException("Unexpected SDK acquisition"),
+            _ => throw new InvalidOperationException("Unexpected SDK acquisition"));
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker();
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = Connection();
+        LlmProviderCapabilities capabilities = client.GetCapabilities(connection, modelId);
+        Assert.False(capabilities.SupportsPromptImages);
+        Assert.False(capabilities.SupportsPromptDocuments);
+        Assert.Equal(LlmRichContentCarriage.Unsupported, capabilities.RichContentSupported.Images);
+        Assert.Equal(LlmRichContentCarriage.Unsupported, capabilities.RichContentSupported.PdfDocuments);
+        Assert.Equal(LlmRichContentCarriage.Text, capabilities.RichContentSupported.TextDocuments);
+        Assert.Equal(capabilities.RichContentSupported, capabilities.Agent.RichContentSupported);
+
+        var attachment = new LlmAttachment
+        {
+            Kind = LlmBinaryKind.Document,
+            MediaType = "text/plain",
+            FileName = "reference.txt",
+            Data = "reference text"u8.ToArray()
+        };
+        await using var events = client.StreamAsync(connection, Request(messages:
+            [new("user", "Read the reference") { Attachments = [attachment] }]) with
+        { ModelId = modelId }).GetAsyncEnumerator();
+        await Assert.ThrowsAsync<NotSupportedException>(() => events.MoveNextAsync().AsTask());
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+        Assert.Throws<NotSupportedException>(() => client.GetCapabilities(connection with
+        { CapabilityOverrides = new() { SupportsPromptDocuments = true } }, modelId));
+
+        ConverseRequest request = BedrockLlmClient.BuildRequest(connection, Request(messages:
+        [
+            new("user", "Read the reference"),
+            new("assistant", string.Empty) { ToolCalls = [new LlmToolCall("read-1", "read", "{}")] },
+            new("user", string.Empty)
+            {
+                ToolResults = [new LlmToolResult("read-1", new()
+                {
+                    Parts = [new LlmToolOutputBinary(LlmBinaryKind.Document, "text/plain", attachment.Data, attachment.FileName)]
+                })]
+            }
+        ]) with
+        { ModelId = modelId }, modelId);
+        foreach (List<Message> messages in new[] { request.Messages, BedrockLlmClient.ToStreamRequest(request).Messages })
+        {
+            ToolResultContentBlock content = Assert.Single(messages[^1].Content[0].ToolResult.Content);
+            Assert.Null(content.Document);
+            Assert.Equal("[File: reference.txt]\nreference text", content.Text);
+        }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task PortableDocumentsReachConverseThroughManagedSessionOpening(bool generatedByTool)

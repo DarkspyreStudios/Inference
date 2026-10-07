@@ -8,6 +8,15 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class ConsoleAgentDiagnosticsTests
 {
+    [Fact]
+    public void TextDocumentToolDoesNotOfferAnUnsupportedImageArgument()
+    {
+        LlmAgentToolDefinition tool = Program.CreateAttachmentTool(supportsDocuments: true, supportsImages: false);
+        Assert.Equal("document", Assert.Single(tool.InputSchema.GetProperty("properties").GetProperty("kind")
+            .GetProperty("enum").EnumerateArray()).GetString());
+        Assert.Contains("text document", tool.Description, StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(LlmAgentCompletionReason.Completed, 0)]
     [InlineData(LlmAgentCompletionReason.ProviderFailure, 1)]
