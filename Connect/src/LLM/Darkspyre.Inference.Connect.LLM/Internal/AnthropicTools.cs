@@ -101,7 +101,7 @@ internal sealed class AnthropicTools
             if (!string.IsNullOrWhiteSpace(definition.Description)) tool["description"] = definition.Description;
             if (clientOptions.TryGetValue(definition.Name, out JsonElement options))
                 foreach (JsonProperty field in options.EnumerateObject()) tool[field.Name] = JsonNode.Parse(field.Value.GetRawText());
-            tools.Add(tool);
+            tools.Add(item: tool);
         }
         foreach (JsonNode? tool in serverTools) tools.Add(tool!.DeepClone());
         return tools;

@@ -653,14 +653,14 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     private string BuildClaudeStandardInput(LlmConnection connection, LlmChatRequest request, string prompt)
     {
-        var content = new JsonArray { new JsonObject { ["type"] = "text", ["text"] = prompt } };
+        var content = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = prompt });
         foreach (LlmAttachment attachment in request.Messages.SelectMany(item => item.Attachments).Select(LlmAttachments.RequireBinary))
         {
-            content.Add(AnthropicAttachments.BuildContentBlock(attachment));
+            content.Add(item: AnthropicAttachments.BuildContentBlock(attachment));
         }
         foreach (LlmToolResult result in request.Messages.SelectMany(message => ClientTools.Functions(message.ToolResults)))
             foreach (SentToolPart part in ProjectToolOutput(connection, request.ModelId, result.Output).Parts)
-                if (part is SentImage or SentFile) content.Add(AnthropicAttachments.BuildToolPart(part));
+                if (part is SentImage or SentFile) content.Add(item: AnthropicAttachments.BuildToolPart(part));
 
         return new JsonObject
         {

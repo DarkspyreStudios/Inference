@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http;
@@ -25,7 +26,7 @@ internal static class SdkHttpRegistration
         services.TryAddSingleton<SdkHttpGenerationPool>();
         return configuration;
     }
-    internal static IHttpClientBuilder AddInferenceHttpClient<T>(this IServiceCollection services, Action<HttpClient>? configure = null) where T : class
+    internal static IHttpClientBuilder AddInferenceHttpClient<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] T>(this IServiceCollection services, Action<HttpClient>? configure = null) where T : class
     {
         Register(services); string name = typeof(T).Name; ValidateName(name);
         IHttpClientBuilder builder = services.AddHttpClient(name);

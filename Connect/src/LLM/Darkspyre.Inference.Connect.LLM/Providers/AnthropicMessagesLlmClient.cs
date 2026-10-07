@@ -734,7 +734,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         var system = new JsonArray();
         if (!string.IsNullOrWhiteSpace(request.Instructions))
         {
-            system.Add(new JsonObject { ["type"] = "text", ["text"] = request.Instructions });
+            system.Add(item: new JsonObject { ["type"] = "text", ["text"] = request.Instructions });
         }
 
         var messages = new JsonArray();
@@ -745,7 +745,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             {
                 JsonArray retained = ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId);
                 containerId = AnthropicContinuation.ReadPayload(message.ContinuationState.Payload).ContainerId ?? containerId;
-                messages.Add(new JsonObject
+                messages.Add(item: new JsonObject
                 {
                     ["role"] = "assistant",
                     ["content"] = retained
@@ -753,7 +753,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             }
             else if (message.Role is "system" or "developer")
             {
-                system.Add(new JsonObject { ["type"] = "text", ["text"] = message.Content });
+                system.Add(item: new JsonObject { ["type"] = "text", ["text"] = message.Content });
             }
             else if (message.Role is "user" or "assistant" || message.ToolResults.Count > 0)
             {
@@ -761,7 +761,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 foreach (LlmToolResult result in ClientTools.Functions(message.ToolResults))
                 {
                     ProjectedToolOutput projected = projectToolOutput(result.Output);
-                    content.Add(new JsonObject
+                    content.Add(item: new JsonObject
                     {
                         ["type"] = "tool_result",
                         ["tool_use_id"] = result.ToolCallId,
@@ -772,12 +772,12 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
 
                 if (message.Content.Length > 0)
                 {
-                    content.Add(new JsonObject { ["type"] = "text", ["text"] = message.Content });
+                    content.Add(item: new JsonObject { ["type"] = "text", ["text"] = message.Content });
                 }
 
                 foreach (LlmAttachment attachment in message.Attachments.Select(LlmAttachments.RequireBinary))
                 {
-                    content.Add(attachment.Kind switch
+                    content.Add(item: attachment.Kind switch
                     {
                         LlmBinaryKind.Image or LlmBinaryKind.Document =>
                             AnthropicAttachments.BuildContentBlock(attachment),
@@ -787,7 +787,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
 
                 foreach (LlmToolCall call in ClientTools.Functions(message.ToolCalls))
                 {
-                    content.Add(new JsonObject
+                    content.Add(item: new JsonObject
                     {
                         ["type"] = "tool_use",
                         ["id"] = call.Id,
@@ -796,7 +796,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                     });
                 }
 
-                messages.Add(new JsonObject
+                messages.Add(item: new JsonObject
                 {
                     ["role"] = message.ToolResults.Count > 0 ? "user" : message.Role,
                     ["content"] = content
@@ -911,7 +911,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         var content = new JsonArray();
         foreach (SentToolPart part in projected.Parts)
         {
-            content.Add(part is SentText text
+            content.Add(item: part is SentText text
                 ? new JsonObject { ["type"] = "text", ["text"] = text.Text }
                 : AnthropicAttachments.BuildToolPart(part));
         }

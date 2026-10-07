@@ -399,6 +399,10 @@ Each metadata getter owns its options and type cache. Callers can retain the ret
 their generation and release it at retirement. Rejected foreign types have no static metadata cache.
 Common binary-data and Resources caller-service converters are taken from their existing owned
 type metadata. Converter composition does not use the reflection-oriented `GetConverter` API.
+Retained chat adapters append request, replay, tool and embedding JSON nodes through the nongeneric
+`JsonArray.Add(JsonNode)` overload. This avoids reflection serialization without changing node order
+or payload values. Typed HTTP registration declares the public constructors required by the framework's
+typed-client factory so trimming preserves its construction path.
 
 `ConnectLlmJson.PortableRequest` closes the Common request graph with the fixed `XaiXSearchTool`
 variant, also supported by `ChatRequest` metadata. It adds no arbitrary CLR subtype registry and

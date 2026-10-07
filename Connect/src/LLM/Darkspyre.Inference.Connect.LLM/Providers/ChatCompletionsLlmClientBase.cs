@@ -588,7 +588,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         var messages = new JsonArray();
         if (!string.IsNullOrWhiteSpace(request.Instructions))
         {
-            messages.Add(new JsonObject
+            messages.Add(item: new JsonObject
             {
                 ["role"] = "system",
                 ["content"] = request.Instructions
@@ -606,7 +606,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                     ProjectedToolOutput output = ToolOutputProjector.Project(
                         result.Output, capabilities.RichContentSupported, capabilities.RichContentSupported,
                         resources is null ? null : resources.Project);
-                    messages.Add(new JsonObject
+                    messages.Add(item: new JsonObject
                     {
                         ["role"] = "tool",
                         ["tool_call_id"] = result.ToolCallId,
@@ -633,7 +633,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 var mappedCalls = new JsonArray();
                 foreach (LlmToolCall call in ClientTools.Functions(message.ToolCalls))
                 {
-                    mappedCalls.Add(new JsonObject
+                    mappedCalls.Add(item: new JsonObject
                     {
                         ["id"] = call.Id,
                         ["type"] = "function",
@@ -654,7 +654,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 else if (retained["reasoning_content"] is { } content) { mappedMessage["reasoning_content"] = content.DeepClone(); }
             }
 
-            messages.Add(mappedMessage);
+            messages.Add(item: mappedMessage);
         }
 
         var payload = new JsonObject
@@ -719,7 +719,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                     function["description"] = tool.Description;
                 }
 
-                tools.Add(new JsonObject
+                tools.Add(item: new JsonObject
                 {
                     ["type"] = "function",
                     ["function"] = function
@@ -825,10 +825,10 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             switch (part)
             {
                 case SentText text:
-                    parts.Add(new JsonObject { ["type"] = "text", ["text"] = text.Text });
+                    parts.Add(item: new JsonObject { ["type"] = "text", ["text"] = text.Text });
                     break;
                 case SentNativeFile file:
-                    parts.Add(BuildNativeFile(file.FileId));
+                    parts.Add(item: BuildNativeFile(file.FileId));
                     break;
             }
         }
@@ -844,16 +844,16 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
     private JsonArray BuildContentParts(LlmChatMessage message)
     {
         var parts = new JsonArray();
-        if (message.Content.Length > 0) parts.Add(new JsonObject { ["type"] = "text", ["text"] = message.Content });
+        if (message.Content.Length > 0) parts.Add(item: new JsonObject { ["type"] = "text", ["text"] = message.Content });
         foreach (LlmMessageAttachment source in message.Attachments)
         {
             if (Transport == LlmTransport.XaiResponses && source is LlmFileReference file)
             {
-                parts.Add(BuildNativeFile(file.File.FileId));
+                parts.Add(item: BuildNativeFile(file.File.FileId));
                 continue;
             }
             LlmAttachment attachment = LlmAttachments.RequireBinary(source);
-            parts.Add(attachment.Kind switch
+            parts.Add(item: attachment.Kind switch
             {
                 LlmBinaryKind.Image => new JsonObject
                 { ["type"] = "image_url", ["image_url"] = new JsonObject { ["url"] = LlmAttachments.ToDataUrl(attachment) } },

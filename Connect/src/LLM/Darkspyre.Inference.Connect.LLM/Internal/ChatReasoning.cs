@@ -48,7 +48,7 @@ internal sealed class ChatReasoning
                         if (previous[name] is null && detail[name] is { } value) { previous[name] = value.DeepClone(); }
                     }
                 }
-                else { _details.Add(detail); }
+                else { _details.Add(item: detail); }
             }
         }
 

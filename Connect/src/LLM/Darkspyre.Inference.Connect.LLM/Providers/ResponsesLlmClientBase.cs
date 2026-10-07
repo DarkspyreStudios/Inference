@@ -160,7 +160,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 if (compaction)
                 {
                     payload.Remove("text");
-                    ((JsonArray)payload["input"]!).Add(new JsonObject { ["type"] = "compaction_trigger" });
+                    ((JsonArray)payload["input"]!).Add(item: new JsonObject { ["type"] = "compaction_trigger" });
                 }
                 Fence();
                 iterator = StreamResponseAsync(connection, request, payload, capabilities, enforcement, consumption, resources is not null, compaction, hostedPreparation, cancellationToken)

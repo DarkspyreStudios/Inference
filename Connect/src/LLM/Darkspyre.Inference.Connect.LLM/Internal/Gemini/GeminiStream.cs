@@ -114,7 +114,7 @@ internal static class GeminiStream
                                 string streamedId = (string)observation.Part["connectCallId"]!;
                                 string streamedName = (string)observation.Part["functionCall"]!["name"]!;
                                 if (!callIds.Add(streamedId)) { throw Failure($"{route.Name} returned a duplicate function identity."); }
-                                parts.Add(observation.Part);
+                                parts.Add(item: observation.Part);
                                 yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallStartedEvent(streamedId, streamedName, calls.Count));
                             }
                             if (observation.Completed is { } completed) { calls.Add(completed); }
@@ -133,7 +133,7 @@ internal static class GeminiStream
                         calls.Add(new(id, name, arguments.ToJsonString()));
                         yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallStartedEvent(id, name, calls.Count - 1));
                     }
-                    parts.Add(part);
+                    parts.Add(item: part);
                 }
             }
         }

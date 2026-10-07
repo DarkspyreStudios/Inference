@@ -192,7 +192,7 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
                 }
                 vectors[index] = vector;
                 observed[index] = true;
-                ownedData.Add(new JsonObject { ["object"] = "embedding", ["index"] = index, ["embedding"] = ownedVector });
+                ownedData.Add(item: new JsonObject { ["object"] = "embedding", ["index"] = index, ["embedding"] = ownedVector });
             }
             if (observed.Any(value => !value)) throw new JsonException();
             LlmEmbeddingUsage? usage = null;

@@ -379,9 +379,9 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
         {
             var tools = payload["tools"] as JsonArray ?? new JsonArray();
             if (payload["tools"] is null) payload["tools"] = tools;
-            foreach (LlmHostedTool tool in request.HostedTools) tools.Add(BuildHostedTool(tool));
+            foreach (LlmHostedTool tool in request.HostedTools) tools.Add(item: BuildHostedTool(tool));
             if (request.HostedTools.OfType<LlmRemoteMcpTool>().Any(tool => tool.DeferLoading))
-                tools.Add(new JsonObject { ["type"] = "tool_search" });
+                tools.Add(item: new JsonObject { ["type"] = "tool_search" });
         }
         if (request.MaxHostedTurns is { } turns) payload["max_turns"] = turns;
         // Primitive nodes avoid Add<T>'s dependency on default serializer metadata.

@@ -299,7 +299,7 @@ internal static class ProviderContinuationStateCodec
                 throw new ArgumentException("Response state cannot contain non-assistant messages.");
             }
             ValidateItem(copy, transport, type);
-            projected.Add(copy);
+            projected.Add(item: copy);
         }
 
         return projected;
@@ -394,7 +394,7 @@ internal static class ProviderContinuationStateCodec
             var copy = new JsonObject { ["type"] = type, [field] = block?[field]?.GetValue<string>() };
             // Annotations/log probabilities are observations, not required model context. Do not
             // retain arbitrary nested provider metadata in the replayable assistant payload.
-            projected.Add(copy);
+            projected.Add(item: copy);
         }
 
         return projected;

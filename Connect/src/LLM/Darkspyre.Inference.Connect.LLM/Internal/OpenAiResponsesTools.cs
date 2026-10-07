@@ -47,7 +47,7 @@ internal static class OpenAiResponsesTools
                             };
                             if (command.Stdout is not null) item["stdout"] = command.Stdout;
                             if (command.Stderr is not null) item["stderr"] = command.Stderr;
-                            output.Add(item);
+                            output.Add(item: item);
                         }
                         var itemOutput = new JsonObject
                         {
@@ -57,10 +57,10 @@ internal static class OpenAiResponsesTools
                         };
                         if (shellCalls[shell.ToolCallId].MaxOutputLength is { } limit)
                             itemOutput["max_output_length"] = limit;
-                        input.Add(itemOutput);
+                        input.Add(item: itemOutput);
                     }
                     else if (result is LlmToolResult function)
-                        input.Add(new JsonObject
+                        input.Add(item: new JsonObject
                         {
                             ["type"] = "function_call_output",
                             ["call_id"] = function.ToolCallId,
@@ -71,7 +71,7 @@ internal static class OpenAiResponsesTools
 
                 if (message.Content.Length > 0 || message.Attachments.Count > 0)
                 {
-                    input.Add(mapTextMessage(message));
+                    input.Add(item: mapTextMessage(message));
                 }
 
                 continue;
@@ -79,7 +79,7 @@ internal static class OpenAiResponsesTools
 
             if (message.Content.Length > 0 || message.ToolCalls.Count == 0)
             {
-                input.Add(mapTextMessage(message));
+                input.Add(item: mapTextMessage(message));
             }
 
             foreach (LlmClientToolCall call in message.ToolCalls)
@@ -92,10 +92,10 @@ internal static class OpenAiResponsesTools
                     };
                     if (shell.TimeoutMs is { } timeout) action["timeout_ms"] = timeout;
                     if (shell.MaxOutputLength is { } limit) action["max_output_length"] = limit;
-                    input.Add(new JsonObject { ["type"] = "shell_call", ["call_id"] = shell.Id, ["action"] = action });
+                    input.Add(item: new JsonObject { ["type"] = "shell_call", ["call_id"] = shell.Id, ["action"] = action });
                 }
                 else if (call is LlmToolCall function)
-                    input.Add(new JsonObject
+                    input.Add(item: new JsonObject
                     {
                         ["type"] = "function_call",
                         ["call_id"] = function.Id,
@@ -123,7 +123,7 @@ internal static class OpenAiResponsesTools
         var content = new JsonArray();
         if (message.Content.Length > 0)
         {
-            content.Add(new JsonObject
+            content.Add(item: new JsonObject
             {
                 ["type"] = "input_text",
                 ["text"] = message.Content
@@ -132,7 +132,7 @@ internal static class OpenAiResponsesTools
 
         foreach (LlmMessageAttachment attachment in message.Attachments)
         {
-            content.Add(attachment is LlmFileReference file
+            content.Add(item: attachment is LlmFileReference file
                 ? new JsonObject { ["type"] = "input_file", ["file_id"] = file.File.FileId }
                 : BuildAttachment(LlmAttachments.RequireBinary(attachment)));
         }
@@ -159,7 +159,7 @@ internal static class OpenAiResponsesTools
         var output = new JsonArray();
         foreach (SentToolPart part in projected.Parts)
         {
-            output.Add(part switch
+            output.Add(item: part switch
             {
                 SentText text => new JsonObject { ["type"] = "input_text", ["text"] = text.Text },
                 SentImage image => new JsonObject
@@ -206,7 +206,7 @@ internal static class OpenAiResponsesTools
         {
             if (definition is LlmShellTool shell)
             {
-                tools.Add(new JsonObject
+                tools.Add(item: new JsonObject
                 {
                     ["type"] = "shell",
                     ["environment"] = new JsonObject
@@ -236,7 +236,7 @@ internal static class OpenAiResponsesTools
                 tool["description"] = function.Description;
             }
 
-            tools.Add(tool);
+            tools.Add(item: tool);
         }
 
         return tools;

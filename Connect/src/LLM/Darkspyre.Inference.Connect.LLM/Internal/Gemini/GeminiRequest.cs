@@ -37,14 +37,14 @@ internal static class GeminiRequest
         var calls = new Dictionary<string, (string Name, string? WireId)>(StringComparer.Ordinal);
         var pending = new HashSet<string>(StringComparer.Ordinal);
         var system = new JsonArray();
-        if (!string.IsNullOrWhiteSpace(request.Instructions)) { system.Add(Text(request.Instructions)); }
+        if (!string.IsNullOrWhiteSpace(request.Instructions)) { system.Add(item: Text(request.Instructions)); }
         foreach (LlmChatMessage message in request.Messages)
         {
             if (message.Role == "system")
             {
                 if (message.ToolCalls.Count != 0 || message.ToolResults.Count != 0 || message.ContinuationState is not null)
                 { throw new ArgumentException("A system message cannot carry tool or continuation content."); }
-                system.Add(Text(message.Content));
+                system.Add(item: Text(message.Content));
                 continue;
             }
             if (message.Role is not ("user" or "assistant" or "tool"))
@@ -65,10 +65,10 @@ internal static class GeminiRequest
             else
             {
                 parts = new JsonArray();
-                if (message.Content.Length > 0) { parts.Add(Text(message.Content)); }
+                if (message.Content.Length > 0) { parts.Add(item: Text(message.Content)); }
                 foreach (LlmMessageAttachment source in message.Attachments)
                 {
-                    if (attachmentProjection is not null) { parts.Add(attachmentProjection(source)); continue; }
+                    if (attachmentProjection is not null) { parts.Add(item: attachmentProjection(source)); continue; }
                     LlmAttachment attachment = LlmAttachments.RequireBinary(source);
                     string mime = LlmAttachments.ResolveMediaType(attachment);
                     if (attachment.Kind == LlmBinaryKind.Document && LlmAttachments.IsTextMediaType(mime))
@@ -76,7 +76,7 @@ internal static class GeminiRequest
                         _ = LlmAttachments.ReadText(attachment);
                         mime = "text/plain";
                     }
-                    parts.Add(new JsonObject
+                    parts.Add(item: new JsonObject
                     {
                         ["inlineData"] = new JsonObject
                         { ["mimeType"] = mime, ["data"] = LlmAttachments.ToBase64(attachment), ["displayName"] = attachment.FileName }
@@ -94,7 +94,7 @@ internal static class GeminiRequest
                     if (first && reasoning.RequiresThoughtSignatures) { part["thoughtSignature"] = DummyThoughtSignature; }
                     first = false;
                     AddCall(call.Id, call.Name, null);
-                    parts.Add(part);
+                    parts.Add(item: part);
                 }
             }
             // Without native call IDs, Gemini associates repeated names by their original order.
@@ -122,8 +122,8 @@ internal static class GeminiRequest
                         JsonObject filePart = nativeFile(fileReference.FileId);
                         string fileName = DisplayName(nested.Count + 1, null);
                         filePart["fileData"]!["displayName"] = fileName;
-                        nested.Add(filePart);
-                        references.Add(new JsonObject { ["$ref"] = fileName });
+                        nested.Add(item: filePart);
+                        references.Add(item: new JsonObject { ["$ref"] = fileName });
                         continue;
                     }
                     (string? mime, ReadOnlyMemory<byte> data, string? name) = part switch
@@ -134,12 +134,12 @@ internal static class GeminiRequest
                     };
                     if (mime is null) { continue; }
                     string displayName = DisplayName(nested.Count + 1, name);
-                    nested.Add(new JsonObject
+                    nested.Add(item: new JsonObject
                     {
                         ["inlineData"] = new JsonObject
                         { ["displayName"] = displayName, ["mimeType"] = mime, ["data"] = Convert.ToBase64String(data.Span) }
                     });
-                    references.Add(new JsonObject { ["$ref"] = displayName });
+                    references.Add(item: new JsonObject { ["$ref"] = displayName });
                 }
                 if (nested.Count > 0)
                 {
@@ -147,11 +147,11 @@ internal static class GeminiRequest
                     function["response"]!["attachments"] = references;
                 }
                 if (call.WireId is not null) { function["id"] = call.WireId; }
-                parts.Add(new JsonObject { ["functionResponse"] = function });
+                parts.Add(item: new JsonObject { ["functionResponse"] = function });
             }
             if (parts.Count > 0)
             {
-                contents.Add(new JsonObject { ["role"] = message.Role == "assistant" ? "model" : "user", ["parts"] = parts });
+                contents.Add(item: new JsonObject { ["role"] = message.Role == "assistant" ? "model" : "user", ["parts"] = parts });
             }
         }
         if (pending.Count != 0) { throw new ArgumentException("Every Gemini tool call requires a result before continuing generation."); }
@@ -216,7 +216,7 @@ internal static class GeminiRequest
                 var definition = new JsonObject
                 { ["name"] = tool.Name, ["parametersJsonSchema"] = JsonNode.Parse(tool.InputSchema.GetRawText()) };
                 if (tool.Description is not null) { definition["description"] = tool.Description; }
-                declarations.Add(definition);
+                declarations.Add(item: definition);
             }
             payload["tools"] = new JsonArray(new JsonObject { ["functionDeclarations"] = declarations });
         }
