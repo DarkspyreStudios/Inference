@@ -5,6 +5,7 @@
     <Description>Provider-neutral hosted speech-transcription bindings and settings.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.STT.Tests" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <ProjectReference Include="../../../../Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj" />
     <ProjectReference Include="../../LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />

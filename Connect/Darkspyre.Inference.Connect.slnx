@@ -49,6 +49,15 @@
   <Folder Name="/tests/Image/">
     <Project Path="tests/Image/Darkspyre.Inference.Connect.Image.Tests/Darkspyre.Inference.Connect.Image.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/TTS/">
+    <Project Path="tests/TTS/Darkspyre.Inference.Connect.TTS.Tests/Darkspyre.Inference.Connect.TTS.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/STT/">
+    <Project Path="tests/STT/Darkspyre.Inference.Connect.STT.Tests/Darkspyre.Inference.Connect.STT.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tests/Realtime/">
+    <Project Path="tests/Realtime/Darkspyre.Inference.Connect.Realtime.Tests/Darkspyre.Inference.Connect.Realtime.Tests.csproj" />
+  </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/AppleFoundationModelsPrototype/AppleFoundationModelsPrototype.csproj" />
     <Project Path="tools/Darkspyre.Inference.Connect.ConsoleTester/Darkspyre.Inference.Connect.ConsoleTester.csproj" />

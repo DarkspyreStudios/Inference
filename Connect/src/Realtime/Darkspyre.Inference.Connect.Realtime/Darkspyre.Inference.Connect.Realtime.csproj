@@ -5,6 +5,7 @@
     <Description>Typed realtime voice connections, session opening and provider-owned configuration.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Realtime.Tests" />
     <PackageReference Include="Microsoft.Extensions.Http" />
   </ItemGroup>
   <ItemGroup>

@@ -3048,6 +3048,13 @@ constructor accepting an arbitrary borrowed `HttpClient`.
 
 ## Realtime Voice Contracts
 
+The owning TTS, STT and Realtime test projects drive the production session codecs and lifetimes
+with stand-in WebSockets. They check ordered sends, actual completion observations, reusable TTS
+and Realtime sessions, bounded feeds with paused readers, resource drain and committed-audio
+recovery after cleanup failure. The test-only transport source is shared within Connect.
+The Realtime tests start at the connected session boundary. These tests do not qualify live OAuth,
+HTTP upgrade, provider entitlement, native resumption or actual speech quality.
+
 `AddRealtimeConnect()` registers `RealtimeProviderService` and `XaiRealtimeProvider`.
 Its setup catalog contains registered `IRealtimeProvider` definitions. Registration performs no
 OAuth or socket request and does not prove provider entitlement or session readiness.

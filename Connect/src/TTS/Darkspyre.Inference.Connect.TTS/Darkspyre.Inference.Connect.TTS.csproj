@@ -4,6 +4,7 @@
     <Description>Typed external text-to-speech connections with PocketTTS HTTP support.</Description>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.TTS.Tests" />
     <PackageReference Include="Microsoft.Extensions.Http" />
     <ProjectReference Include="../../../../Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj" />
     <ProjectReference Include="../../LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />

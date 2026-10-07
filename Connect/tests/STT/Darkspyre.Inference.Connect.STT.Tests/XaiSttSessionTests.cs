@@ -1,0 +1,58 @@
+using System.Net.WebSockets;
+using Darkspyre.Inference.Common.STT;
+using Darkspyre.Inference.Connect.Voice.Tests;
+
+namespace Darkspyre.Inference.Connect.STT.Tests;
+
+public sealed class XaiSttSessionTests
+{
+    private static readonly string[] AudioCommands = ["finalize", "audio.done"];
+    private static Task<XaiSttSession> OpenAsync(VoiceSocket socket, int events = 16)
+        => XaiSttSession.OpenAsync(socket.ConnectAsync, VoiceTestData.Connection,
+            new() { Transport = SttTransport.XaiStt, Endpoint = new(VoiceTestData.Connection.Endpoint) },
+            new(), VoiceTestData.Limits(events), () => { }, _ => { }, default);
+
+    [Fact]
+    public async Task ActualReadyAndDoneObservationsBoundOrderedAudioCommands()
+    {
+        using var socket = new VoiceSocket();
+        Task<XaiSttSession> opening = OpenAsync(socket);
+        Assert.False(opening.IsCompleted);
+        socket.Json("""{"type":"transcript.created","id":"transcript-1"}""");
+        await using var session = await opening.WaitAsync(VoiceTestData.Timeout);
+        await session.AppendAudioAsync(new byte[] { 1, 2, 3 }).WaitAsync(VoiceTestData.Timeout);
+        await session.FinalizeAsync();
+        await session.CompleteAudioAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => session.AppendAudioAsync(new byte[] { 4 }));
+        Assert.Equal(WebSocketMessageType.Binary, socket.Sent[0].Type);
+        Assert.Equal(new byte[] { 1, 2, 3 }, socket.Sent[0].Bytes);
+        Assert.Equal(AudioCommands, socket.Sent.Skip(1).Select(frame => VoiceTestData.Type(frame.Bytes)));
+        socket.Json("""{"type":"transcript.done","text":"hello","duration":1.25,"words":[]}""");
+        socket.End();
+        await using var events = session.Events.GetAsyncEnumerator();
+        Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(VoiceTestData.Timeout));
+        Assert.Equal("transcript-1", Assert.IsType<SpeechTranscriptCreatedEvent>(events.Current).SessionId);
+        Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(VoiceTestData.Timeout));
+        var done = Assert.IsType<SpeechTranscriptDoneEvent>(events.Current);
+        Assert.Equal("hello", done.Text);
+        Assert.Equal(TimeSpan.FromSeconds(1.25), done.Duration);
+        Assert.False(await events.MoveNextAsync().AsTask().WaitAsync(VoiceTestData.Timeout));
+    }
+
+    [Fact]
+    public async Task PausedTranscriptReaderDoesNotHoldSocketRetirement()
+    {
+        using var socket = new VoiceSocket();
+        socket.Json("""{"type":"transcript.created","id":"transcript-1"}""");
+        await using var session = await OpenAsync(socket, 1).WaitAsync(VoiceTestData.Timeout);
+        await using var events = session.Events.GetAsyncEnumerator();
+        Assert.True(await events.MoveNextAsync());
+        const string partial = """{"type":"transcript.partial","text":"hello","start":0,"duration":1,"is_final":false,"speech_final":false,"words":[]}""";
+        socket.Json(partial); socket.Json(partial);
+        await socket.WaitReceivedAsync(3);
+        await session.DisposeAsync().AsTask().WaitAsync(VoiceTestData.Timeout);
+        Assert.True(socket.Disposed);
+        Assert.False(await events.MoveNextAsync());
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => session.FinalizeAsync());
+    }
+}
