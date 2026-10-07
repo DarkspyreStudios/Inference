@@ -101,7 +101,7 @@ internal static class Program
         }
         catch (InferenceException exception)
         {
-            Console.Error.WriteLine($"Inference error [{exception.Code}].");
+            WriteInferenceFailure(exception, Console.Error);
             return 1;
         }
         catch (LlmProviderException exception)
@@ -125,6 +125,9 @@ internal static class Program
             return 1;
         }
     }
+
+    internal static void WriteInferenceFailure(InferenceException exception, TextWriter diagnostics) =>
+        diagnostics.WriteLine($"Inference error [{exception.Code}]: {exception.Message}");
 
     private static async Task<int> RunLoginAsync(
         LlmProviderService llms,

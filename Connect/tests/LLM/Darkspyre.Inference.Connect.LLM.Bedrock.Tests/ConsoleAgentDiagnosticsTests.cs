@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.ConsoleTester;
 using Darkspyre.Inference.Connect.LLM;
@@ -8,6 +9,19 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class ConsoleAgentDiagnosticsTests
 {
+    [Fact]
+    public void InferenceFailurePrintsItsCodeAndPublicMessageWithoutItsPrivateCause()
+    {
+        const string message = "The selected model does not accept reasoning level 'Medium'. It accepts: Low.";
+        var failure = new InferenceException(InferenceFailureCode.InvalidRequest, message,
+            new IOException("private provider response"));
+        using var diagnostics = new StringWriter();
+
+        Program.WriteInferenceFailure(failure, diagnostics);
+
+        Assert.Equal($"Inference error [InvalidRequest]: {message}{Environment.NewLine}", diagnostics.ToString());
+    }
+
     [Fact]
     public void TextDocumentToolDoesNotOfferAnUnsupportedImageArgument()
     {

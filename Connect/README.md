@@ -4241,6 +4241,10 @@ Prompt text is sent to the tester over standard input and dispatched through the
 it is not placed in process arguments. Antigravity rejects attachment options because its headless
 protocol is text-only.
 
+The tester reports an SDK failure with its typed error code and public message, then exits with code 1.
+It does not print inner exceptions or stack traces. Local request refusals retain their explanation,
+including the reasoning levels the selected model accepts.
+
 Claude uses the same commands with `--provider claude`:
 
 ```bash
