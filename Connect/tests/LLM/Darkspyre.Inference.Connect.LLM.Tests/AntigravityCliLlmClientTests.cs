@@ -11,6 +11,31 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class AntigravityCliLlmClientTests
 {
+    [Fact]
+    public async Task TerminalResultFencesTrailingTextAndStillRequiresSuccessfulProcessExit()
+    {
+        const string output = """
+            {"event":"result","result":{"status":"SUCCESS","response":"OK","usage":{"input_tokens":12,"output_tokens":2,"total_tokens":14}}}
+            {"event":"step_update","step_update":{"step_index":1,"state":"DONE","step_type":"agent_response","text_delta":"STALE","usage":{"input_tokens":90,"output_tokens":9,"total_tokens":99}}}
+            """;
+        var request = new LlmChatRequest { ModelId = "auto", Messages = [new("user", "Reply with OK.")] };
+        var client = new AntigravityCliLlmClient(new RecordingRunner(new(0, output, string.Empty)));
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(Connection(), request));
+        Assert.Equal("OK", string.Concat(events.OfType<LlmTextDeltaEvent>().Select(item => item.Delta)));
+        Assert.Empty(events.OfType<LlmUsageDeltaEvent>());
+        Assert.Single(events.OfType<LlmActivityEvent>());
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("OK", result.Text);
+        Assert.Equal(new LlmUsage(12, 2, 14), result.Usage);
+
+        var failedClient = new AntigravityCliLlmClient(new RecordingRunner(new(1, output, "process failure")));
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            ReadAllAsync(failedClient.StreamAsync(Connection(), request)));
+        Assert.Equal("antigravity_cli_exit_1", failure.ProviderCode);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

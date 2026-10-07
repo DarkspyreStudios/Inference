@@ -145,7 +145,8 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                 processResult = completion.Result;
                 continue;
             }
-            if (processEvent is not AntigravityCliOutputLine outputLine
+            if (response is not null
+                || processEvent is not AntigravityCliOutputLine outputLine
                 || string.IsNullOrWhiteSpace(outputLine.Line))
             {
                 continue;

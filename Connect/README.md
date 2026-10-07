@@ -3874,6 +3874,9 @@ Antigravity chat reports `Unknown` for an unrecognized or missing terminal statu
 actual response text, usage, conversation ID and observed status. It does not validate that result
 as successful structured output. Recognized success and error/interruption handling remain distinct.
 Native Unknown diagnostics retain the observed status.
+After the native terminal result, chat drains the process without projecting trailing text, activity
+or usage. The terminal answer stays authoritative. A failed process exit still fails the operation;
+the native result does not turn unsuccessful process cleanup into success.
 
 ### Antigravity native agent sessions
 
