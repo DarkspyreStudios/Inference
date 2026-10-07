@@ -11,17 +11,26 @@ namespace Darkspyre.Inference.Connect.Video.Tests;
 public sealed class XaiVideoPollTests
 {
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task OwnedVideoDownloadDrainsHeldReadsAndRetainsResponseCleanupFailure(bool refuseCleanup)
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task OwnedVideoDownloadDrainsHeldReadsAndRetainsResponseCleanupFailure(bool refuseCleanup, bool sdkOwned)
     {
         var body = new HeldBody(refuseCleanup);
         using var handler = new DownloadHandler(body);
+        using var mediaHandler = new DownloadHandler(body);
         using var factory = new Factory(handler);
         var services = new ServiceCollection();
-        services.AddLlmConnect(options => options.CreationMode = InferenceHttpCreationMode.BorrowHostFactory);
+        services.AddLlmConnect(options => options.CreationMode = sdkOwned
+            ? InferenceHttpCreationMode.SdkGenerationOwned : InferenceHttpCreationMode.BorrowHostFactory);
         services.AddVideoConnect();
         services.AddSingleton<IHttpClientFactory>(factory);
+        if (sdkOwned)
+        {
+            services.AddHttpClient("XaiResponsesLlmClient").ConfigurePrimaryHttpMessageHandler(() => handler);
+            services.AddHttpClient("XaiMediaDownloadClient").ConfigurePrimaryHttpMessageHandler(() => mediaHandler);
+        }
         services.AddSingleton<ILlmConnectionSource>(new Source());
         ServiceProvider container = services.BuildServiceProvider();
         AsyncServiceScope scope = container.CreateAsyncScope();
@@ -33,6 +42,8 @@ public sealed class XaiVideoPollTests
             Endpoint = "https://api.x.ai/v1",
             Xai = binding.Selection
         }, binding);
+        DownloadHandler downloadHandler = sdkOwned ? mediaHandler : handler;
+        Task? generationRetirement = null;
         try
         {
             VideoJobSnapshot observed = await video.GetAsync(new("job-1", new("https://api.x.ai/v1/videos", "selected")));
@@ -43,11 +54,18 @@ public sealed class XaiVideoPollTests
 
             Task facadeRetirement = video.DisposeAsync().AsTask();
             Task coreRetirement = core.DisposeAsync().AsTask();
+            if (sdkOwned) generationRetirement = container.DisposeAsync().AsTask();
             await body.CloseEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.False(facadeRetirement.IsCompleted);
             Assert.False(coreRetirement.IsCompleted);
             Assert.Equal(1, body.Disposals);
-            Assert.Equal(1, handler.DownloadResponse!.Disposals);
+            Assert.Equal(1, downloadHandler.DownloadResponse!.Disposals);
+            if (sdkOwned)
+            {
+                Assert.False(generationRetirement!.IsCompleted);
+                Assert.Equal(0, handler.Disposals);
+                Assert.Equal(0, mediaHandler.Disposals);
+            }
             body.ReleaseRead.TrySetResult();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read.WaitAsync(TimeSpan.FromSeconds(5)));
 
@@ -62,18 +80,32 @@ public sealed class XaiVideoPollTests
                 Assert.Same(facadeFailure, await Assert.ThrowsAnyAsync<Exception>(() => video.DisposeAsync().AsTask()));
                 Assert.Same(coreFailure, await Assert.ThrowsAnyAsync<Exception>(() => core.DisposeAsync().AsTask()));
                 await Assert.ThrowsAnyAsync<Exception>(() => download.DisposeAsync().AsTask());
+                if (sdkOwned)
+                {
+                    Exception generationFailure = await Assert.ThrowsAnyAsync<Exception>(() => generationRetirement!.WaitAsync(TimeSpan.FromSeconds(5)));
+                    Assert.Contains(Causes(generationFailure), error => ReferenceEquals(error, body.Failure));
+                    Assert.Equal(1, handler.Disposals);
+                    Assert.Equal(0, mediaHandler.Disposals);
+                }
             }
             else
             {
                 await facadeRetirement.WaitAsync(TimeSpan.FromSeconds(5));
                 await coreRetirement.WaitAsync(TimeSpan.FromSeconds(5));
                 await download.DisposeAsync();
+                if (sdkOwned)
+                {
+                    await generationRetirement!.WaitAsync(TimeSpan.FromSeconds(5));
+                    Assert.Equal(1, handler.Disposals);
+                    Assert.Equal(1, mediaHandler.Disposals);
+                }
             }
             Assert.Equal(1, body.Disposals);
-            Assert.Equal(1, handler.DownloadResponse.Disposals);
+            Assert.Equal(1, downloadHandler.DownloadResponse.Disposals);
             Assert.Equal(2, handler.Polls);
-            Assert.Equal(1, handler.Downloads);
+            Assert.Equal(1, downloadHandler.Downloads);
             Assert.All(factory.Clients, client => Assert.Equal(TimeSpan.FromSeconds(100), client.Timeout));
+            if (sdkOwned) Assert.Empty(factory.Clients);
         }
         finally
         {
@@ -81,6 +113,8 @@ public sealed class XaiVideoPollTests
             Exception? facadeCleanup = await Record.ExceptionAsync(() => video.DisposeAsync().AsTask());
             Exception? coreCleanup = await Record.ExceptionAsync(() => core.DisposeAsync().AsTask());
             Exception? scopeCleanup = await Record.ExceptionAsync(() => scope.DisposeAsync().AsTask());
+            if (generationRetirement is not null)
+                await Record.ExceptionAsync(() => generationRetirement.WaitAsync(TimeSpan.FromSeconds(5)));
             Exception? containerCleanup = await Record.ExceptionAsync(() => container.DisposeAsync().AsTask());
             if (!refuseCleanup)
             {
@@ -122,6 +156,12 @@ public sealed class XaiVideoPollTests
         public int Polls { get; private set; }
         public int Downloads { get; private set; }
         public CountedResponse? DownloadResponse { get; private set; }
+        public int Disposals { get; private set; }
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) Disposals++;
+            base.Dispose(disposing);
+        }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Assert.Equal(HttpMethod.Get, request.Method);
@@ -169,6 +209,7 @@ public sealed class XaiVideoPollTests
     private sealed class HeldBody(bool refuseCleanup) : Stream
     {
         private int _closed;
+        public Exception Failure { get; } = new InvalidOperationException("The controlled response body refuses cleanup.");
         public TaskCompletionSource ReadEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ReleaseRead { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource CloseEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -192,7 +233,7 @@ public sealed class XaiVideoPollTests
             {
                 Disposals++;
                 CloseEntered.TrySetResult();
-                if (refuseCleanup) throw new InvalidOperationException("The controlled response body refuses cleanup.");
+                if (refuseCleanup) throw Failure;
             }
             base.Dispose(disposing);
         }
