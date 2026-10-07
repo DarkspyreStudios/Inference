@@ -3792,6 +3792,9 @@ retired before options are published. Manual model selection remains available. 
 explicitly attach the optional browser-authorized catalog OAuth credential to use the existing
 paged HTTP catalog instead. Prompts, CLI readiness, usage and agent tools ignore that credential.
 Installed CLI initialization compatibility remains a separate qualification requirement.
+The focused chat-adapter tests use a process stand-in to check returned alias/metadata preservation,
+the no-catalog-OAuth route and cancellation while process retirement drains. These checks use no
+installed CLI or provider calls.
 
 ## Antigravity CLI subscription transport
 

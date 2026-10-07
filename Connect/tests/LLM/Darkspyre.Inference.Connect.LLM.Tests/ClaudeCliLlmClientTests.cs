@@ -1,6 +1,7 @@
 using Darkspyre.Inference.Connect.LLM.Internal;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -11,6 +12,50 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ClaudeCliLlmClientTests
 {
+    [Fact]
+    public async Task ModelDiscoveryWithoutCatalogOAuthPreservesCliChoicesAndRetiresItsProcess()
+    {
+        var process = new CatalogProcess();
+        var runner = new RecordingRunner(new(0, string.Empty, string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, process);
+
+        IReadOnlyList<LlmModel> models = await client.ListModelsAsync(CliConnection());
+
+        LlmModel model = Assert.Single(models);
+        Assert.Equal("cli-returned-alias", model.Id);
+        Assert.Equal("CLI model choice", model.DisplayName);
+        Assert.Equal("preserved", model.CatalogEntry!.Value.GetProperty("unmappedOption").GetString());
+        Assert.Empty(runner.Invocations);
+        Assert.True(process.Disposed);
+        Assert.False(Directory.Exists(process.Invocation!.WorkingDirectory));
+    }
+
+    [Fact]
+    public async Task CancellationDuringCatalogRetirementWaitsForProcessCleanup()
+    {
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var process = new CatalogProcess { DisposalRelease = release.Task };
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, new RecordingRunner(new(0, string.Empty, string.Empty)), process);
+        using var cancellation = new CancellationTokenSource();
+        Task<IReadOnlyList<LlmModel>> listing = client.ListModelsAsync(CliConnection(), cancellation.Token);
+        try
+        {
+            await process.DisposalEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(Directory.Exists(process.Invocation!.WorkingDirectory));
+            cancellation.Cancel();
+            Assert.False(listing.IsCompleted);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => listing.WaitAsync(TimeSpan.FromSeconds(5)));
+        }
+        Assert.True(process.Disposed);
+        Assert.False(Directory.Exists(process.Invocation!.WorkingDirectory));
+    }
+
     [Fact]
     public async Task ToolHistoryReachesThePromptAsLabelledBlocks()
     {
@@ -136,5 +181,58 @@ public sealed class ClaudeCliLlmClientTests
         public Task<IClaudeCliSessionProcess> StartAsync(
             ClaudeCliSessionInvocation invocation, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class CatalogProcess : IClaudeCliSessionProcessFactory, IClaudeCliSessionProcess
+    {
+        private string? _reply;
+        public ClaudeCliSessionInvocation? Invocation { get; private set; }
+        public Task? DisposalRelease { get; init; }
+        public TaskCompletionSource DisposalEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool Disposed { get; private set; }
+
+        public Task<IClaudeCliSessionProcess> StartAsync(ClaudeCliSessionInvocation invocation, CancellationToken cancellationToken = default)
+        {
+            Invocation = invocation;
+            return Task.FromResult<IClaudeCliSessionProcess>(this);
+        }
+
+        public ValueTask WriteLineAsync(string line, CancellationToken cancellationToken = default)
+        {
+            using JsonDocument document = JsonDocument.Parse(line);
+            JsonElement request = document.RootElement;
+            Assert.Equal("control_request", request.GetProperty("type").GetString());
+            Assert.Equal("initialize", request.GetProperty("request").GetProperty("subtype").GetString());
+            _reply = new JsonObject
+            {
+                ["type"] = "control_response",
+                ["response"] = new JsonObject
+                {
+                    ["subtype"] = "success",
+                    ["request_id"] = request.GetProperty("request_id").GetString(),
+                    ["response"] = JsonNode.Parse("""
+                        {"models":[{"value":"cli-returned-alias","displayName":"CLI model choice","unmappedOption":"preserved"}]}
+                        """)
+                }
+            }.ToJsonString();
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken = default)
+        {
+            string? reply = _reply;
+            _reply = null;
+            return ValueTask.FromResult(reply);
+        }
+
+        public Task<ClaudeCliProcessResult> WaitForExitAsync(CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Model discovery must consume the initialize reply before process retirement.");
+
+        public async ValueTask DisposeAsync()
+        {
+            DisposalEntered.TrySetResult();
+            if (DisposalRelease is not null) await DisposalRelease;
+            Disposed = true;
+        }
     }
 }
