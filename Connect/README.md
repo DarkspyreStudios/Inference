@@ -2023,6 +2023,9 @@ Core-owned download opening retains the selected core, Files and HTTP generation
 its caller releases them after closure and read drain. Video uses this opening path for returned live
 streams. Response closure starts before read drain; leases and creator fences release only after both
 settle. Actual cleanup failures remain visible to the transport and facade as well as the core owner.
+The focused Video regression enters this path through the registered transport, selected binding and
+public facade. A controlled HTTP body verifies held-read drain, response-only closure and repeated
+cleanup failure reporting. The HTTP stand-in does not establish live provider entitlement or wire acceptance.
 
 ## Host-executed tools
 
