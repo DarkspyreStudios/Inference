@@ -281,8 +281,13 @@ and is redacted from diagnostics. The internal `XaiResponsesLlmClient` sends OAu
 requests, applies model profiles and catalog modalities, and checks numeric schema guarantees.
 Its catalog reads the facade's published snapshot. `LlmModelListCache` owns the generic listing and
 lazy chat, image, video and embedding views. Profile-backed setup offers supported multi-agent counts
-and the provider default. Full schema/regex checks and Skills remain incomplete. Registration does
-not qualify actual OAuth or provider behavior, or enable an unimplemented image/video adapter.
+and the provider default. The facade implements native Files operations. Skills list, metadata retrieval,
+ZIP download and deletion are implemented. Skills upload and generation attachment remain unavailable; see
+[Files and Skills](../Connect/README.md#files-and-skills-facade). Full schema/regex checks and actual
+OAuth/provider qualification remain incomplete. Image and Video register separately through
+`AddImageConnect` and `AddVideoConnect`; their source adapters use the shared family binding.
+See [Grok Image](../Connect/README.md#grok-image) and
+[Video bindings](../Connect/README.md#video-bindings). LLM registration does not register or qualify those families.
 
 ComfyUI setup edits endpoint, timeout, protected headers and workflow selection. An
 `IImageWorkflowChoiceSource` supplied by the host provides paged/searchable workflow identities and

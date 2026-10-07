@@ -206,8 +206,11 @@ status. The caller supplies shell execution through a borrowed executor; Connect
 The internal `XaiResponsesLlmClient` supplies OAuth-only chat requests with typed endpoint/tier checks,
 catalog-driven profiles and numeric schema preflight. `LlmModelListCache` owns the shared generic
 listing and lazy chat, image, video and embedding views. Profile-backed multi-agent setup exposes
-the supported counts and provider default. The complete provider schema/regex subset, Skills and
-actual OAuth/provider qualification remain incomplete.
+the supported counts and provider default. The facade implements native Files operations.
+Skills list, metadata retrieval, ZIP download and deletion are implemented. Skills upload and
+generation attachment remain unavailable; [the Files and Skills contract](../Connect/README.md#files-and-skills-facade) describes
+the operation boundaries. The complete provider schema/regex subset and actual OAuth/provider
+qualification remain incomplete.
 [Connect's setup contract](../Connect/README.md#provider-setup-and-editing) describes the registered
 provider. Registration does not establish live qualification or another family's implementation.
 
