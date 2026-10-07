@@ -137,7 +137,7 @@ internal static class AppleSchema
         var lines = new List<string>();
         if (node.Description is { } description) lines.Add($"{path}: {description}");
         foreach (AppleSchemaProperty property in node.Properties ?? [])
-            lines.Add(Guidance(property.Schema, $"{path}[{JsonSerializer.Serialize(property.Name)}]"));
+            lines.Add(Guidance(property.Schema, $"{path}[{JsonSerializer.Serialize(property.Name, ConnectLlmJsonContext.Default.String)}]"));
         if (node.Items is { } items) lines.Add(Guidance(items, $"{path}[]"));
         return string.Join("\n", lines.Where(static line => line.Length > 0));
     }

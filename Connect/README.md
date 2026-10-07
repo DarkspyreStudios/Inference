@@ -541,6 +541,8 @@ Apple helper generation and cancellation commands use their own internal generat
 including the recursive typed schema plan. The helper protocol retains its camel-case Web names,
 null omission, escaping, sampling fields and maximum JSON depth of 128. No helper/session lifetime
 behavior or Apple private framework format is changed by this serialization boundary.
+Schema-guidance property paths use the existing Connect generated string metadata. Quoting and
+escaping do not depend on reflection-based serialization or add a public metadata root.
 
 PocketTTS voice responses and JSON bridge requests, and TangoFlux generation requests, use their
 provider-owned internal generated metadata. PocketTTS retains explicit null voice/speaker fields;

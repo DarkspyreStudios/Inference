@@ -5,11 +5,23 @@ using System.Runtime.Loader;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class CollectibleSerializationTests
 {
+    [Fact]
+    public void SchemaGuidanceQuotesNestedPropertyNamesWithoutReflection()
+    {
+        var node = new AppleSchemaNode("object")
+        {
+            Properties = [new("part\"\\\n\u00e9", true, new("string") { Description = "leaf" })]
+        };
+
+        Assert.Equal("$[\"part\\u0022\\\\\\n\\u00E9\"]: leaf", AppleSchema.Guidance(node));
+    }
+
     [Fact]
     public void OwnedResultMetadataDoesNotKeepItsCollectibleGenerationAlive()
     {
