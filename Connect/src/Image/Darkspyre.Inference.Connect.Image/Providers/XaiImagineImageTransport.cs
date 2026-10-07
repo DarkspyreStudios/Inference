@@ -574,7 +574,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
             "Image authorization or access failed.", SafeFailure(provider)),
         LlmProviderException provider => new LlmProviderException("The image provider request failed.", LlmTransport.XaiResponses,
             provider.StatusCode, provider.ProviderCode is "xai_authentication_required" or "xai_entitlement_required" ? provider.ProviderCode : null,
-            retryAfter: provider.RetryAfter, innerException: new ImageEvidence(provider), isContextOverflow: provider.IsContextOverflow),
+            requestId: provider.RequestId, retryAfter: provider.RetryAfter, innerException: new ImageEvidence(provider), isContextOverflow: provider.IsContextOverflow),
         InferenceException inference => new InferenceException(inference.Code, "The image operation failed.", new ImageEvidence(inference)),
         _ => new InferenceException(error is JsonException ? InferenceFailureCode.ProtocolFailure : InferenceFailureCode.ExecutionFailed,
             "The image operation failed.", new ImageEvidence(error))

@@ -75,6 +75,8 @@ copied receipt graph and does not replace failed work with success or infer roll
 The transport owns its local results and HTTP request/response cleanup, not the borrowed core,
 HTTP client, resource access or source streams. Catalog health confirms discovery access only;
 generation entitlement, OAuth media compatibility and runtime retirement remain unqualified.
+Image request failures preserve the shared classifier's sanitized request ID, HTTP status and retry
+delay. Diagnostic bodies remain withheld.
 
 ## Batch and deferred contracts
 
