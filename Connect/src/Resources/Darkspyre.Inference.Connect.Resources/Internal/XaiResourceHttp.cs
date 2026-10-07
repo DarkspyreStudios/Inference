@@ -60,7 +60,7 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
             if (result is LlmDeferredCompletion deferred) observation.ObservedDeferred = deferred;
             fence();
         }
-        catch (Exception error) { errors.Add(SafeFailure(error, observation)); }
+        catch (Exception error) { errors.Add(SafeFailure(error, observation, connection: connection)); }
         finally
         {
             if (response is not null)
@@ -91,20 +91,21 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
 
     internal static Exception CombineFailures(IEnumerable<Exception> errors) => new ExchangeFailure(errors);
 
-    internal static Exception SafeFailure(Exception error, Observation observation, bool forceSafe = false)
+    internal static Exception SafeFailure(Exception error, Observation observation, bool forceSafe = false,
+        LlmConnection? connection = null)
     {
         if (error is FailureEvidence or ExchangeFailure) return error;
         if (error is XaiFileClient.ExchangeFailure files)
-            return new ExchangeFailure(files.InnerExceptions.Select(item => SafeFailure(item, observation, forceSafe: true)), files);
+            return new ExchangeFailure(files.InnerExceptions.Select(item => SafeFailure(item, observation, forceSafe: true, connection)), files);
         if (error is LlmResourcePreparation.PreparationFailure preparation)
-            return new ExchangeFailure(preparation.InnerExceptions.Select(item => SafeFailure(item, observation, forceSafe: true)), preparation);
+            return new ExchangeFailure(preparation.InnerExceptions.Select(item => SafeFailure(item, observation, forceSafe: true, connection)), preparation);
         if (error is InferenceResourceOperationException resource)
         {
             observation.ResourceFailure = resource.Failure;
             if (IsOwnedSafe(resource.InnerException)) return resource;
             Exception safe = new InferenceResourceOperationException(resource.Code,
                 "The resource operation failed.", resource.Failure,
-                new FailureEvidence(resource, resource.InnerException is { } cause ? SafeFailure(cause, observation, true) : null));
+                new FailureEvidence(resource, resource.InnerException is { } cause ? SafeFailure(cause, observation, true, connection) : null));
             return resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup
                 ? LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: resource) : safe;
         }
@@ -114,26 +115,30 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
             if (IsOwnedSafe(canceledResource.InnerException)) return canceledResource;
             Exception safe = new InferenceResourceOperationCanceledException(canceledResource.Failure,
                 canceledResource.CancellationToken,
-                new FailureEvidence(canceledResource, canceledResource.InnerException is { } cause ? SafeFailure(cause, observation, true) : null));
+                new FailureEvidence(canceledResource, canceledResource.InnerException is { } cause ? SafeFailure(cause, observation, true, connection) : null));
             return canceledResource.Failure.Phase == InferenceResourceOperationPhase.Cleanup
                 ? LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: canceledResource) : safe;
         }
         if (!forceSafe && !observation.HasEffects && observation.SecretContext.Count == 0) return error;
         if (error is AggregateException aggregate)
-            return new AggregateException("The resource operation failed.", aggregate.InnerExceptions.Select(item => SafeFailure(item, observation, forceSafe)));
+            return new AggregateException("The resource operation failed.", aggregate.InnerExceptions.Select(item => SafeFailure(item, observation, forceSafe, connection)));
         if (error is OperationCanceledException canceled)
             return new OperationCanceledException("The resource operation was interrupted.", new FailureEvidence(canceled, observation: observation), canceled.CancellationToken);
         if (error is InferenceException inference && inference.InnerException is LlmProviderException provider)
-            return new InferenceException(inference.Code, "Resource authorization or access failed.", SafeProvider(provider, inference, observation));
-        if (error is LlmProviderException failure) return SafeProvider(failure, failure, observation);
+            return new InferenceException(inference.Code, "Resource authorization or access failed.", SafeProvider(provider, inference, observation, connection));
+        if (error is LlmProviderException failure) return SafeProvider(failure, failure, observation, connection);
         return new LlmProviderException(error is ProtocolFailure ? "xAI returned invalid resource protocol data." : "The resource transport failed.",
             LlmTransport.XaiResponses, observation.StatusCode is { } status ? (System.Net.HttpStatusCode)status : null,
             requestId: observation.RequestId, innerException: new FailureEvidence(error, observation: observation));
     }
 
-    private static LlmProviderException SafeProvider(LlmProviderException provider, Exception original, Observation observation) => new(
+    private static LlmProviderException SafeProvider(LlmProviderException provider, Exception original, Observation observation,
+        LlmConnection? connection) => new(
         "The resource request failed.", LlmTransport.XaiResponses, provider.StatusCode,
-        provider.ProviderCode is "xai_authentication_required" or "xai_entitlement_required" ? provider.ProviderCode : null,
+        provider.ProviderCode is { } code && (connection is not null || provider.InnerException is FailureEvidence
+            || code is "xai_authentication_required" or "xai_entitlement_required")
+            ? SecretRedactor.Sanitize(code, LlmCredential.Parse(connection?.Credential),
+                (connection?.AdditionalHeaders.Values ?? []).Concat(observation.SecretContext)) : null,
         requestId: observation.RequestId, retryAfter: provider.RetryAfter,
         innerException: new FailureEvidence(original, observation: observation), isContextOverflow: provider.IsContextOverflow);
 

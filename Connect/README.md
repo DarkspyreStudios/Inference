@@ -2943,8 +2943,10 @@ token-validation 403 message to `AuthenticationRequired`, and 402 or a blocked a
 entitlement failure (`AccessDenied`). Unknown 403 responses remain provider errors. Subscription-specific
 403 matching is not implemented or live-qualified. Errors never trigger a retry or refresh.
 The shared HTTP classifier preserves the response status, observed request ID and delta
-`Retry-After` across its resource and authentication routes. Request IDs use the same credential
-redactor as diagnostic bodies. A reported retry delay is diagnostic data, not permission to retry.
+`Retry-After` across its resource and authentication routes. Ordinary provider error codes come from
+the redacted error envelope, including when a route withholds the diagnostic body. Batch and deferred
+resource failures retain that safe code. Request IDs use the same credential redactor as diagnostic
+bodies. A reported retry delay is diagnostic data, not permission to retry.
 Named authentication and entitlement failures clear the setup device attempt without saving a credential.
 Device-grant `access_denied` and `expired_token` failures retain their actual status and code,
 the redacted request ID and any observed delta retry delay. These failures end the sign-in attempt;

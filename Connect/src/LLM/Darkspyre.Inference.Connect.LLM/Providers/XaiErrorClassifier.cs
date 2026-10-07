@@ -64,12 +64,14 @@ public static class XaiErrorClassifier
 
         string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
-        string safe = diagnosticBody ? SecretRedactor.Sanitize(body, credential, additionalSecrets)
-            : diagnosticMessage;
+        string sanitizedBody = SecretRedactor.Sanitize(body, credential, additionalSecrets);
+        string safe = diagnosticBody ? sanitizedBody : diagnosticMessage;
         string? requestId = ProviderHttp.ReadRequestId(response, credential, additionalSecrets);
         TimeSpan? retryAfter = response.Headers.RetryAfter?.Delta;
         (string? code, string? message) = ReadError(body);
-        throw Classify(response.StatusCode, code, message, safe, requestId: requestId, retryAfter: retryAfter);
+        string? safeCode = ReadError(sanitizedBody).Code;
+        throw Classify(response.StatusCode, code, message, safe, requestId: requestId, retryAfter: retryAfter,
+            diagnosticCode: safeCode);
     }
 
     internal static Exception SpeechUpgradeFailure(HttpStatusCode status, Exception original)
@@ -82,7 +84,7 @@ public static class XaiErrorClassifier
     }
 
     private static Exception Classify(HttpStatusCode status, string? code, string? message, string safe,
-        Exception? evidence = null, string? requestId = null, TimeSpan? retryAfter = null)
+        Exception? evidence = null, string? requestId = null, TimeSpan? retryAfter = null, string? diagnosticCode = null)
     {
         bool requiresSignIn = status == HttpStatusCode.Unauthorized
             || (status == HttpStatusCode.Forbidden
@@ -101,7 +103,7 @@ public static class XaiErrorClassifier
         }
 
         // Subscription-specific 403 matching requires a qualified provider response.
-        return Failure(status, null, safe, evidence, requestId, retryAfter, LlmContextOverflow.Responses(code));
+        return Failure(status, diagnosticCode, safe, evidence, requestId, retryAfter, LlmContextOverflow.Responses(code));
     }
 
     internal static InferenceException EntitlementFailure(HttpStatusCode status, string safe, Exception? evidence = null,

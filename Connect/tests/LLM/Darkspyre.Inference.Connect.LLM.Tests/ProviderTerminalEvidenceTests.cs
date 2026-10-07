@@ -126,7 +126,7 @@ public sealed class ProviderTerminalEvidenceTests
     {
         var retryAfter = TimeSpan.FromSeconds(17);
         var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
-            "{\"error\":{\"message\":\"Rate limit test-token\",\"refresh_token\":\"provider-secret\"}}",
+            "{\"error\":{\"code\":\"rate_limit_test-token_provider-secret\",\"message\":\"Rate limit test-token\",\"refresh_token\":\"provider-secret\"}}",
             HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-1");
         using var http = new HttpClient(handler);
         var client = new XaiResponsesLlmClient(http);
@@ -147,6 +147,7 @@ public sealed class ProviderTerminalEvidenceTests
         LlmProviderException failure = Assert.IsType<LlmProviderException>(operation.InnerException);
 
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]", failure.ProviderCode);
         Assert.Equal("request-[REDACTED]-1", failure.RequestId);
         Assert.Equal(retryAfter, failure.RetryAfter);
         Assert.Equal(failure.RequestId, operation.Observation.RequestId);
@@ -165,7 +166,7 @@ public sealed class ProviderTerminalEvidenceTests
     {
         var retryAfter = TimeSpan.FromSeconds(17);
         var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
-            "{\"error\":{\"message\":\"Rate limit test-token\",\"refresh_token\":\"provider-secret\"}}",
+            "{\"error\":{\"code\":\"rate_limit_test-token_provider-secret\",\"message\":\"Rate limit test-token\",\"refresh_token\":\"provider-secret\"}}",
             HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-1");
         using var http = new HttpClient(handler);
         await using var files = new XaiFileClient(http);
@@ -183,6 +184,7 @@ public sealed class ProviderTerminalEvidenceTests
             files.UploadAsync(connection, source, "reference.txt", null, () => { }, CancellationToken.None));
 
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]", failure.ProviderCode);
         Assert.Equal("request-[REDACTED]-1", failure.RequestId);
         Assert.Equal(retryAfter, failure.RetryAfter);
         Assert.DoesNotContain("test-token", failure.ToString(), StringComparison.Ordinal);
