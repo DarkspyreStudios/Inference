@@ -6,6 +6,17 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 internal static class StructuredOutput
 {
+    public static void ValidateRequest(LlmChatRequest request)
+    {
+        if (request.StructuredOutput is { } structured
+            && (string.IsNullOrWhiteSpace(structured.Name)
+                || structured.Schema.ValueKind != JsonValueKind.Object))
+        {
+            throw new ArgumentException(
+                "Structured output requires a name and a JSON object schema.", nameof(request));
+        }
+    }
+
     public static LlmStructuredOutputEnforcement ResolveEnforcement(
         LlmStructuredOutputRequest request,
         LlmProviderCapabilities capabilities)

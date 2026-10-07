@@ -91,6 +91,8 @@ internal sealed class BedrockLlmClient(
             Defaults with
             {
                 ReasoningLevels = offered,
+                SupportsJsonSchema = baseModelId is "openai.gpt-oss-20b-1:0" or "openai.gpt-oss-120b-1:0"
+                    or "anthropic.claude-sonnet-4-6",
                 SupportsPromptImages = richContent.Images == LlmRichContentCarriage.Native,
                 SupportsPromptDocuments = richContent.PdfDocuments == LlmRichContentCarriage.Native,
                 RichContentSupported = richContent,
@@ -107,6 +109,10 @@ internal sealed class BedrockLlmClient(
             SupportsPresencePenalty = false,
             SupportsFrequencyPenalty = false
         };
+        if (capabilities.SupportsJsonObject)
+        {
+            throw new NotSupportedException("Bedrock Converse does not expose JSON-object-only output enforcement.");
+        }
         if ((richContent.Images == LlmRichContentCarriage.Unsupported && capabilities.SupportsPromptImages)
             || (richContent.PdfDocuments == LlmRichContentCarriage.Unsupported && capabilities.SupportsPromptDocuments))
         {
@@ -233,7 +239,7 @@ internal sealed class BedrockLlmClient(
             aws,
             cancellationToken);
         control.ThrowIfCanceled();
-        ConverseRequest built = BuildRequest(connection, request, modelId);
+        ConverseRequest built = BuildRequest(connection, request, modelId, enforcement);
         if (!capabilities.SupportsStreaming)
         {
             ConverseResponse response = await invoker.ConverseAsync(aws, built, cancellationToken);
@@ -360,6 +366,11 @@ internal sealed class BedrockLlmClient(
         }
 
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        StructuredOutput.ValidateRequest(request);
+        if (request.StructuredOutput is { } structured)
+        {
+            _ = StructuredOutput.ResolveEnforcement(structured, capabilities);
+        }
         HostedTools.Validate(request, capabilities);
         ExplicitCaches.Validate(request, capabilities.SupportsExplicitCache);
         ProviderControlPolicy.Validate(connection, request);
@@ -842,7 +853,8 @@ internal sealed class BedrockLlmClient(
     internal static ConverseRequest BuildRequest(
         LlmConnection connection,
         LlmChatRequest request,
-        string modelId)
+        string modelId,
+        LlmStructuredOutputEnforcement? enforcement = null)
     {
         List<SystemContentBlock> system = BuildSystem(request);
         List<Message> messages = BuildMessages(connection, request, modelId);
@@ -853,6 +865,26 @@ internal sealed class BedrockLlmClient(
         }
 
         var result = new ConverseRequest { ModelId = modelId, Messages = messages };
+        if (enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema
+            && request.StructuredOutput is { } structured)
+        {
+            result.OutputConfig = new OutputConfig
+            {
+                TextFormat = new OutputFormat
+                {
+                    Type = OutputFormatType.Json_schema,
+                    Structure = new OutputFormatStructure
+                    {
+                        JsonSchema = new JsonSchemaDefinition
+                        {
+                            Name = structured.Name,
+                            Description = structured.Description,
+                            Schema = structured.Schema.GetRawText()
+                        }
+                    }
+                }
+            };
+        }
         if (system.Count > 0)
         {
             result.System = system;
@@ -1006,6 +1038,7 @@ internal sealed class BedrockLlmClient(
         System = request.System,
         InferenceConfig = request.InferenceConfig,
         ToolConfig = request.ToolConfig,
+        OutputConfig = request.OutputConfig,
         RequestMetadata = request.RequestMetadata,
         AdditionalModelRequestFields = request.AdditionalModelRequestFields
     };

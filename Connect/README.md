@@ -3486,6 +3486,24 @@ Converse sends a tool's `strict` flag only when `LlmToolDefinition.Strict` is tr
 strict schemas, such as Amazon Nova, reject the field even when it is false; a strict tool on such a
 model fails with Bedrock's own error.
 
+Converse and ConverseStream send native response schemas through the SDK's
+`outputConfig.textFormat` with type `json_schema`. The original schema string, name and description
+are unchanged. The completion records `ProviderJsonSchema` only when that configuration is sent;
+local validation still checks the original response against the original schema. The shared shape
+guard rejects an empty name or a non-object schema before resource reads or SDK acquisition.
+
+The exact IDs `openai.gpt-oss-20b-1:0`, `openai.gpt-oss-120b-1:0` and
+`anthropic.claude-sonnet-4-6` advertise native schema support from their AWS model cards. Existing
+geographic-prefix normalization applies. Other IDs and ARNs require an explicit schema capability
+override for a native attempt. An override can disable native enforcement on a known model.
+Without native support, only an explicit `LocalValidation` fallback permits structured output;
+that request carries no native output configuration. JSON-object-only enforcement is unavailable.
+Provider schema compilation failures propagate without schema rewriting, retry or automatic fallback.
+See [AWS structured output](https://docs.aws.amazon.com/bedrock/latest/userguide/structured-output.html),
+[gpt-oss 20B](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-oss-20b.html),
+[gpt-oss 120B](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-oss-120b.html)
+and [Sonnet 4.6](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-4-6.html).
+
 Converse sends a reasoning level through `additionalModelRequestFields` for Claude, Nova 2 and the
 qualified gpt-oss models, classified from the model or inference-profile id:
 

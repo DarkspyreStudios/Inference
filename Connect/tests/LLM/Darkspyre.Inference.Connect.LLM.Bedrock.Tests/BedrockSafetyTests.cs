@@ -20,6 +20,126 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 public sealed class BedrockSafetyTests
 {
     [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    public async Task StructuredOutputEnforcementMatchesTheActualConverseRequest(bool streaming, bool nativeSchema)
+    {
+        var control = new StreamControl();
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => control, _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var usage = new TokenUsage { InputTokens = 4, OutputTokens = 6, TotalTokens = 10 };
+        const string answer = """{"word":"OK"}""";
+        var invoker = new StubConverseInvoker
+        {
+            Response = StubConverseInvoker.Converse([new() { Text = answer }], "end_turn", usage),
+            Events = [new ContentBlockDeltaEvent { ContentBlockIndex = 0, Delta = new() { Text = answer } },
+                new MessageStopEvent { StopReason = new("end_turn") }, new ConverseStreamMetadataEvent { Usage = usage }]
+        };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = ResourceConnection(streaming) with
+        {
+            CapabilityOverrides = new() { SupportsStreaming = streaming, SupportsJsonSchema = nativeSchema }
+        };
+        LlmChatRequest request = Request() with
+        {
+            ModelId = "openai.gpt-oss-20b-1:0",
+            StructuredOutput = new()
+            {
+                Name = "answer",
+                Description = "The requested word",
+                Schema = JsonElement.Parse("""{ "type": "object", "properties": { "word": { "type": "string" } }, "required": ["word"], "additionalProperties": false }"""),
+                Fallback = nativeSchema ? LlmStructuredOutputFallback.None : LlmStructuredOutputFallback.LocalValidation
+            }
+        };
+        request = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(request,
+            ConnectLlmJson.ChatRequest), ConnectLlmJson.ChatRequest)!;
+        await using var providers = new LlmProviderService(new Source(connection), [client]);
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in providers.StreamAsync("connection", request)) events.Add(item);
+        OutputConfig? config = streaming
+            ? Assert.Single(invoker.StreamRequests).OutputConfig
+            : Assert.Single(invoker.ConverseRequests).OutputConfig;
+        if (nativeSchema)
+        {
+            Assert.NotNull(config);
+            Assert.Equal(OutputFormatType.Json_schema, config.TextFormat.Type);
+            JsonSchemaDefinition schema = config.TextFormat.Structure.JsonSchema;
+            Assert.Equal(request.StructuredOutput!.Name, schema.Name);
+            Assert.Equal(request.StructuredOutput.Description, schema.Description);
+            Assert.Equal(request.StructuredOutput.Schema.GetRawText(), schema.Schema);
+        }
+        else Assert.Null(config);
+        LlmChatResult terminal = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
+        LlmChatResult restored = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(terminal,
+            ConnectLlmJson.ChatResult), ConnectLlmJson.ChatResult)!;
+        Assert.Equal(answer, restored.Text);
+        Assert.Equal(LlmCompletionStatus.Completed, restored.Status);
+        Assert.Equal(nativeSchema ? LlmStructuredOutputEnforcement.ProviderJsonSchema
+            : LlmStructuredOutputEnforcement.LocalValidationOnly, restored.StructuredOutput!.Enforcement);
+        Assert.True(restored.StructuredOutput.WasEvaluated);
+        Assert.True(restored.StructuredOutput.IsValid);
+        Assert.Equal(new LlmUsage(4, 6, 10), restored.Usage);
+        await providers.DisposeAsync();
+        await factory.DisposeAsync();
+        Assert.True(control.Disposed);
+        Assert.Equal(streaming, invoker.Disposed);
+    }
+
+    [Fact]
+    public async Task NativeSchemaCapabilitiesUseExactModelFactsAndExplicitOverrides()
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => throw new NotSupportedException(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var client = new BedrockLlmClient(factory, guard, new StubConverseInvoker(), NullLogger<BedrockLlmClient>.Instance);
+        foreach (string model in new[] { "openai.gpt-oss-20b-1:0", "openai.gpt-oss-120b-1:0",
+                     "anthropic.claude-sonnet-4-6", "us.anthropic.claude-sonnet-4-6" })
+        {
+            Assert.True(client.GetCapabilities(Connection(), model).SupportsJsonSchema);
+            Assert.False(client.GetCapabilities(Connection() with
+            { CapabilityOverrides = new() { SupportsJsonSchema = false } }, model).SupportsJsonSchema);
+        }
+        foreach (string model in new[] { "openai.gpt-oss-20b-2:0", "anthropic.claude-haiku",
+                     "arn:aws:bedrock:us-east-1:123456789012:inference-profile/unknown" })
+        {
+            Assert.False(client.GetCapabilities(Connection(), model).SupportsJsonSchema);
+            Assert.True(client.GetCapabilities(Connection() with
+            { CapabilityOverrides = new() { SupportsJsonSchema = true } }, model).SupportsJsonSchema);
+        }
+    }
+
+    [Theory]
+    [InlineData("", "{}", false)]
+    [InlineData("answer", "[]", false)]
+    [InlineData("answer", "{}", true)]
+    public async Task InvalidStructuredControlsRefuseBeforeSdkAcquisition(string name, string schema, bool jsonObject)
+    {
+        int acquired = 0;
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => { acquired++; throw new InvalidOperationException("SDK acquired before refusal"); },
+            _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker();
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = ResourceConnection(streaming: true) with
+        { CapabilityOverrides = new() { SupportsJsonSchema = true, SupportsJsonObject = jsonObject } };
+        LlmChatRequest request = Request() with
+        { StructuredOutput = new() { Name = name, Schema = JsonElement.Parse(schema) } };
+        Exception error = await Assert.ThrowsAnyAsync<Exception>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+        });
+        if (jsonObject) Assert.IsType<NotSupportedException>(error);
+        else Assert.IsType<ArgumentException>(error);
+        Assert.Equal(0, acquired);
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+    }
+
+    [Theory]
     [InlineData("amazon.nova-micro-v1:0", LlmPromptCacheRetention.Default, null)]
     [InlineData("us.amazon.nova-micro-v1:0", LlmPromptCacheRetention.Default, null)]
     [InlineData("amazon.nova-micro-v1:0", LlmPromptCacheRetention.Extended, null)]

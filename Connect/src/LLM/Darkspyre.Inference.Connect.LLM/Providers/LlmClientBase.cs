@@ -161,14 +161,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
             throw new NotSupportedException("This route cannot enforce MaxOutputTokens; an output reserve is budgeting only.");
         }
 
-        if (request.StructuredOutput is { } structured
-            && (string.IsNullOrWhiteSpace(structured.Name)
-                || structured.Schema.ValueKind != JsonValueKind.Object))
-        {
-            throw new ArgumentException(
-                "Structured output requires a name and a JSON object schema.",
-                nameof(request));
-        }
+        StructuredOutput.ValidateRequest(request);
 
         ValidatePromptAttachments(request, capabilities, SupportsResourcePreparation);
         ValidateToolUse(request, capabilities, nativeToolNames);
