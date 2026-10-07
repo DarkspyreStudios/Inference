@@ -545,7 +545,11 @@ metadata for these closed families does not establish retirement of an active pr
 The LLM serializer retirement check loads Common and Connect LLM privately into one collectible
 context. It exercises the owned LLM metadata roots and a result with nested Common usage and tool
 data. Its weak-reference checks cover both assemblies, metadata, options and result data after
-unload. This check does not execute or retire a provider or native engine.
+unload. The separate Resources case privately loads Common, LLM, Image, Video and Resources.
+It exercises the Resources metadata getters and round-trips a batch page with nested chat usage,
+tools and a generated-resource commit/selection receipt. It checks release of all five assemblies,
+the owned metadata/options and the nested result/receipt objects after unload. These checks do not
+exercise every metadata owner or execute or retire a provider or native engine.
 
 Retained chat protocol builders write stop arrays, model aliases, numeric/string control IDs and
 Responses output joins through structured JSON nodes and elements. Vertex argument-path identity
