@@ -167,6 +167,27 @@ public sealed class ClaudeCliExitTests
         Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Error);
     }
 
+    [UnixFact]
+    public Task RealStderrCaptureFailureRemainsVisibleDuringRetirement() => Bounded(async () =>
+    {
+        using var scratch = new Scratch();
+        var logger = new RecordingLogger();
+        var exits = new ClaudeCliExits(logger) { Limit = TimeSpan.FromMilliseconds(250) };
+        var invocation = new ClaudeCliInvocation("/bin/sh",
+            ["-c", "echo ready; /usr/bin/head -c 16777217 /dev/zero | /usr/bin/tr '\\000' x >&2; sleep 10"],
+            StandardInput: null, scratch.Directory);
+
+        InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (ClaudeCliProcessEvent processEvent in new ClaudeCliProcessRunner(exits).StreamAsync(invocation))
+                Assert.Equal("ready", Assert.IsType<ClaudeCliOutputLine>(processEvent).Line);
+        });
+        Assert.Equal("Claude CLI StandardError exceeded the 16777216-character safety limit.", failure.Message);
+        for (int pass = 0; pass < 2; pass++)
+            Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => exits.DisposeAsync().AsTask()));
+        Assert.Single(logger.Entries, entry => entry.Level == LogLevel.Error);
+    });
+
     private static Task Bounded(Func<Task> scenario) => Task.Run(scenario).WaitAsync(TimeSpan.FromSeconds(20));
 
     private sealed class Scratch : IDisposable

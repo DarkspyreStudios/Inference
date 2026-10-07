@@ -1679,7 +1679,9 @@ remain visible together. Cancelling an owned pipe drain during retirement is not
 and forced termination of a same-group child that ignores SIGTERM. A refused warning
 still permits actual process termination and remains visible on repeated disposal.
 A failed background task and refused error log preserve both exception identities
-without repeating logging during disposal. These cases do
+without repeating logging during disposal. An actual stderr capture above the 16 MiB
+limit interrupts the read and preserves the same failure through background retirement.
+These cases do
 not exercise an installed provider CLI, its OAuth refresh or Windows containment.
 
 After a kill, Connect waits at most 5 seconds for the runtime to report the exit. When the bound
