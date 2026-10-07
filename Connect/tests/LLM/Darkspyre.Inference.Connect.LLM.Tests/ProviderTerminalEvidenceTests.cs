@@ -35,6 +35,60 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Theory]
+    [InlineData("{\"type\":\"string\"}", false)]
+    [InlineData("{\"properties\":{\"value\":{\"type\":\"string\"}}}", false)]
+    [InlineData("{\"type\":[\"object\",\"null\"]}", false)]
+    [InlineData("{\"anyOf\":[{\"type\":\"object\"},{\"type\":\"string\"}]}", false)]
+    [InlineData("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"$ref\":\"#/definitions/input\",\"definitions\":{\"input\":{\"type\":\"string\"}}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}", true)]
+    [InlineData("{\"$ref\":\"#/$defs/input\",\"$defs\":{\"input\":{\"type\":\"object\"}}}", true)]
+    [InlineData("{\"anyOf\":[{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}}},{\"type\":\"object\",\"properties\":{\"b\":{\"type\":\"integer\"}}}]}", true)]
+    public async Task GrokStrictToolsRequireProvenObjectRootsWithoutChangingNonStrictTools(string schema, bool guaranteed)
+    {
+        const string body = """
+            {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}
+            """;
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = false }
+        };
+        var tool = new LlmToolDefinition { Name = "echo", Strict = true, InputSchema = JsonElement.Parse(schema) };
+        var request = new LlmChatRequest { ModelId = "selected-model", Messages = [new("user", "hello")], Tools = [tool] };
+        if (!guaranteed)
+        {
+            await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            {
+                await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+            });
+            Assert.Equal(0, handler.Calls);
+        }
+        else
+        {
+            var events = new List<LlmStreamEvent>();
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+            Assert.Equal("hello", Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Text);
+            using var sent = JsonDocument.Parse(handler.RequestBody!);
+            JsonElement sentTool = Assert.Single(sent.RootElement.GetProperty("tools").EnumerateArray());
+            Assert.True(sentTool.GetProperty("strict").GetBoolean());
+            Assert.Equal(schema, sentTool.GetProperty("parameters").GetRawText());
+        }
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with { Tools = [tool with { Strict = false }] })) { }
+        using var nonStrict = JsonDocument.Parse(handler.RequestBody!);
+        JsonElement unchanged = Assert.Single(nonStrict.RootElement.GetProperty("tools").EnumerateArray());
+        Assert.False(unchanged.GetProperty("strict").GetBoolean());
+        Assert.Equal(schema, unchanged.GetProperty("parameters").GetRawText());
+        Assert.Equal(guaranteed ? 2 : 1, handler.Calls);
+    }
+
+    [Theory]
     [InlineData(4096, 1, false)]
     [InlineData(1, 4096, true)]
     public async Task GrokReferenceGuaranteeUsesTheEmbeddedResourceNotTheOuterPointer(int innerBound, int outerBound, bool guaranteed)

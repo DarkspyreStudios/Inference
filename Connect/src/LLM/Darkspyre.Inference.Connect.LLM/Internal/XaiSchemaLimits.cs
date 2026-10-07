@@ -4,25 +4,40 @@ using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
-/// <summary>Checks numeric and composition guarantees without inspecting literal values or changing the schema.</summary>
+/// <summary>Checks schema guarantees and strict function roots without changing the schema.</summary>
 internal static class XaiSchemaLimits
 {
     internal static LlmStructuredOutputEnforcement? ResolveEnforcement(LlmStructuredOutputRequest? output,
         LlmProviderCapabilities capabilities) => output is null ? null : StructuredOutput.ResolveEnforcement(output,
         Fits(output.Schema) ? capabilities : capabilities with { SupportsJsonSchema = false, SupportsJsonObject = false });
 
-    internal static bool Fits(JsonElement root)
+    internal static void ValidateStrictTool(JsonElement schema)
+    {
+        if (!Fits(schema, requireObjectRoot: true))
+            throw new NotSupportedException("A strict Grok tool schema is outside the supported native guarantees. The schema is not weakened or sent as non-strict.");
+    }
+
+    internal static bool Fits(JsonElement root) => Fits(root, requireObjectRoot: false);
+
+    private static bool Fits(JsonElement root, bool requireObjectRoot)
     {
         var index = new SchemaIndex();
         if (!index.Build(root)) return false;
         var pending = new Stack<(JsonElement Schema, bool Exit)>();
         var active = new HashSet<JsonElement>();
         var done = new HashSet<JsonElement>();
+        Dictionary<JsonElement, bool>? objectRoots = requireObjectRoot ? [] : null;
         pending.Push((root, false));
         while (pending.TryPop(out var next))
         {
             JsonElement schema = next.Schema;
-            if (next.Exit) { active.Remove(schema); done.Add(schema); continue; }
+            if (next.Exit)
+            {
+                if (objectRoots is not null) objectRoots[schema] = ProvesObject(schema, index, objectRoots);
+                active.Remove(schema);
+                done.Add(schema);
+                continue;
+            }
             if (done.Contains(schema) || schema.ValueKind is JsonValueKind.True or JsonValueKind.False) continue;
             if (!active.Add(schema)) return false;
             if (schema.ValueKind != JsonValueKind.Object) return false;
@@ -72,7 +87,27 @@ internal static class XaiSchemaLimits
             }
             foreach (JsonElement child in location.AppliedChildren) pending.Push((child, false));
         }
-        return true;
+        return objectRoots is null || objectRoots.TryGetValue(root, out bool objectRoot) && objectRoot;
+    }
+
+    private static bool ProvesObject(JsonElement schema, SchemaIndex index, Dictionary<JsonElement, bool> proofs)
+    {
+        SchemaLocation location = index.Locations[schema];
+        bool referencedObject = schema.TryGetProperty("$ref", out JsonElement reference)
+            && index.Resolve(location, reference, out JsonElement target) && KnownObject(target);
+        if (location.Draft == SchemaDraft.Draft7 && schema.TryGetProperty("$ref", out _)) return referencedObject;
+        if (schema.TryGetProperty("type", out JsonElement type))
+            return type.ValueKind == JsonValueKind.String ? TypeMask(type) == 8
+                : type.ValueKind == JsonValueKind.Array && type.GetArrayLength() > 0
+                    && type.EnumerateArray().All(alternative => TypeMask(alternative) == 8);
+        return referencedObject || ObjectUnion("anyOf") || ObjectUnion("oneOf")
+            || schema.TryGetProperty("allOf", out JsonElement intersection)
+                && intersection.GetArrayLength() == 1 && KnownObject(intersection[0]);
+
+        bool KnownObject(JsonElement candidate) => proofs.TryGetValue(candidate, out bool result) && result;
+
+        bool ObjectUnion(string keyword) => schema.TryGetProperty(keyword, out JsonElement branches)
+            && branches.GetArrayLength() > 0 && branches.EnumerateArray().All(KnownObject);
     }
 
     private enum SchemaDraft { Draft7, RetainSiblings, Unknown }

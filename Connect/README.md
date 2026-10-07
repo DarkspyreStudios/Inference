@@ -3006,7 +3006,12 @@ native admission requires pairwise-disjoint explicit simple types on non-referen
 including nullable type arrays. A `$ref` sibling type is not proof of exclusivity in Draft-07.
 `number` overlaps `integer`. Unproven exclusivity requires explicit local validation for responses
 and refuses explicitly strict tools before effects. Non-strict tools retain their original schema
-and strictness. Local validation uses the original schema and reports invalid output without
+and strictness. Explicitly strict function roots also require a proven object type after local
+reference resolution. The same traversal records object proofs for referenced targets, single-branch
+intersections and object-only unions. Scalar, nullable/mixed and untyped roots do not acquire an
+object proof merely because the schema document is a JSON object or contains `properties`.
+Draft-07 `$ref` siblings cannot supply that proof. This is not a general satisfiability analysis.
+Local validation uses the original schema and reports invalid output without
 rewriting it or retrying. This check does not implement the complete keyword/vocabulary, legacy
 fragment-ID and regex classification or original-dialect ECMA regex evaluator.
 The shared `StructuredOutput` validator builds the unchanged original schema in a fresh local
