@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.ConsoleTester;
@@ -7,6 +8,25 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class ConsoleAgentDiagnosticsTests
 {
+    [Theory]
+    [InlineData(LlmAgentCompletionReason.Completed, 0)]
+    [InlineData(LlmAgentCompletionReason.ProviderFailure, 1)]
+    public async Task ResumeProbeRequiresSuccessfulTerminalAfterMatchingText(
+        LlmAgentCompletionReason reason, int expectedExitCode)
+    {
+        await using var agents = new LlmAgentProviderService(new ProbeConnections(), [new ResumeClient(reason)]);
+        var probe = new AntigravityProbe(agents, "probe-connection", "probe-model", Environment.CurrentDirectory);
+        using var report = new StringWriter();
+
+        int exitCode = await ProbeRunner.RunAsync(probe.Cases,
+            new("probe-model", "resume", 1, 5), true, report, CancellationToken.None);
+
+        Assert.Equal(expectedExitCode, exitCode);
+        Assert.Equal(2, probe.Turns);
+        Assert.Contains(expectedExitCode == 0 ? "PASS 1/1 resume" : "The resumed turn did not complete.",
+            report.ToString(), StringComparison.Ordinal);
+    }
+
     [Fact]
     public void UsageOutputPreservesUnknownQuotaFactsWithReflectionDisabled()
     {
@@ -90,5 +110,70 @@ public sealed class ConsoleAgentDiagnosticsTests
         Assert.Contains("status=Failed", output, StringComparison.Ordinal);
         Assert.Contains("reason=ProviderFailure", output, StringComparison.Ordinal);
         Assert.Contains("[error] The selected model requires an inference profile.", output, StringComparison.Ordinal);
+    }
+
+    private sealed class ProbeConnections : ILlmConnectionSource
+    {
+        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<LlmConnection?>(new()
+            {
+                Version = "1",
+                Transport = LlmTransport.GoogleAntigravityCli,
+                Endpoint = "agy"
+            });
+
+        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class ResumeClient(LlmAgentCompletionReason resumedReason) : ILlmAgentResumeClient
+    {
+        private string? _remembered;
+        public LlmTransport Transport => LlmTransport.GoogleAntigravityCli;
+
+        public Task<ILlmAgentSession> StartSessionAsync(string connectionId, LlmConnection connection,
+            LlmAgentSessionOptions options, CancellationToken cancellationToken = default) =>
+            Task.FromResult<ILlmAgentSession>(new ProbeSession("probe-thread", LlmAgentCompletionReason.Completed, request =>
+            {
+                _remembered = Assert.IsType<LlmAgentTextContent>(Assert.Single(request.Input)).Text;
+                return "OK";
+            }));
+
+        public Task<ILlmAgentSession> ResumeSessionAsync(string connectionId, LlmConnection connection, string threadId,
+            LlmAgentResumeOptions? options = null, CancellationToken cancellationToken = default) =>
+            Task.FromResult<ILlmAgentSession>(new ProbeSession(threadId, resumedReason,
+                _ => _remembered ?? throw new InvalidOperationException("The first turn did not run.")));
+    }
+
+    private sealed class ProbeSession(string threadId, LlmAgentCompletionReason reason,
+        Func<LlmAgentTurnRequest, string> answer) : ILlmAgentSession
+    {
+        public string ThreadId => threadId;
+        public string SessionId => "probe-session";
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+
+        public async IAsyncEnumerable<LlmAgentEvent> RunTurnAsync(LlmAgentTurnRequest request,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.Yield();
+            yield return new LlmAgentMessageCompletedEvent(threadId, "probe-turn", "message", answer(request));
+            yield return new LlmAgentTurnCompletedEvent(threadId, "probe-turn", reason,
+                reason == LlmAgentCompletionReason.Completed ? null : "Failure after matching text.");
+        }
+
+        public Task<LlmRequestAccounting> MeasureContextAsync(LlmAgentContext context, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<LlmAgentCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<LlmAgentContextStatus> GetContextStatusAsync(LlmAgentTurnRequest? turn = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<LlmAgentContext> CaptureContextAsync(LlmAgentContextCaptureOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task ReplaceContextAsync(LlmAgentContext context, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<LlmAgentContext> CompactWithProviderAsync(LlmProviderCompactionRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public IAsyncEnumerable<LlmAgentEvent> ContinueTurnAsync(LlmAgentTurnContinuation continuation, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task InterruptAsync(string turnId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public IAsyncEnumerable<LlmAgentEvent> ObserveAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<LlmAgentResourceOutput> ReadResourceOutputAsync(string resourceId, string? cursor, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<LlmAgentResourceStopStatus> StopResourceAsync(string resourceId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 }

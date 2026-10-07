@@ -114,6 +114,7 @@ internal sealed class AntigravityProbe(LlmAgentProviderService agents, string co
         }, token);
         Require(resumed.ThreadId == threadId, "Resume returned a different conversation.");
         TurnSummary second = await RunAsync(resumed, Turn("Which code did I ask you to remember? Reply with it only. Use no tools."), token);
+        Require(second.Status == LlmAgentTurnStatus.Completed, "The resumed turn did not complete.");
         Require(second.Text.Contains(_marker, StringComparison.Ordinal), "The resumed conversation did not recall the code.");
         return "a new process resumed the exact conversation ID";
     }

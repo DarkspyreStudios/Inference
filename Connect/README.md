@@ -3923,6 +3923,8 @@ per open session, with an open standard input and one output reader.
 
 The ConsoleTester `agy-probe` command runs bounded live qualification cases; see
 [Subscription and AWS smoke tests](#subscription-and-aws-smoke-tests).
+The resume case requires a completed resumed turn as well as the retained conversation ID and recalled
+marker. Matching answer text on a failed or interrupted turn does not qualify resume.
 
 `IsAuthenticatedAsync` performs the non-consuming `agy models` check, so an installed but signed-out executable is not reported as authenticated. Run `agy` interactively to sign in or refresh the CLI session. Antigravity owns its credential and session storage in the operating system's native keyring; Darkspyre.Inference.Connect.LLM does not inspect it.
 
