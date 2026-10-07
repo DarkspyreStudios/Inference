@@ -223,7 +223,7 @@ internal static class ProviderDefinitions
     public static LlmProviderDefinition GeminiSubscription { get; } = new()
     {
         Id = "gemini-subscription",
-        DisplayName = "Gemini Subscription",
+        DisplayName = "Gemini Subscription (Antigravity)",
         Description = "Use a Google subscription through the separately authenticated Antigravity CLI.",
         Transport = LlmTransport.GoogleAntigravityCli,
         DefaultEndpoint = "agy",

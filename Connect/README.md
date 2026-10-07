@@ -3800,6 +3800,8 @@ native agent sessions. The published 11.15.0-rc.1 adapter includes chat and nati
 installed CLI and target-platform execution remain separate qualification requirements.
 
 `GoogleAntigravityCli` wraps the official [Antigravity CLI headless mode](https://antigravity.google/docs/cli/headless/). Darkspyre.Inference.Connect.LLM sends prompts over the documented stdin NDJSON protocol, consumes stdout events line by line, and emits model text and activity while the CLI is still running. It does not read, copy, or store Antigravity OAuth credentials. The CLI process starts and ends as [Wrapped CLI processes](#wrapped-cli-processes) describes.
+The setup catalog displays `Gemini Subscription (Antigravity)` and retains the provider ID
+`gemini-subscription`.
 
 Install the CLI and complete its interactive Google sign-in once:
 

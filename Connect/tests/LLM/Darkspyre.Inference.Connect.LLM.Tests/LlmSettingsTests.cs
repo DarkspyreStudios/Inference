@@ -9,6 +9,17 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class LlmSettingsTests
 {
+    [Fact]
+    public void AntigravitySetupCatalogNamesTheCliWithoutChangingProviderIdentity()
+    {
+        var catalog = new LlmProviderCatalog([ProviderDefinitions.GeminiSubscription]);
+        InferenceSetupDefinition setup = Assert.Single(catalog.SetupDefinitions);
+
+        Assert.Contains("Antigravity", setup.Implementation.DisplayName, StringComparison.Ordinal);
+        Assert.Equal("gemini-subscription", setup.Implementation.Id);
+        Assert.Equal(LlmTransport.GoogleAntigravityCli, Assert.Single(catalog.SupportedProviders).Transport);
+    }
+
     [Theory]
     [InlineData(LlmTransport.AnthropicClaudeCli)]
     [InlineData(LlmTransport.GoogleAntigravityCli)]
