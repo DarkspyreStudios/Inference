@@ -4148,6 +4148,12 @@ The resume case requires a completed resumed turn as well as the retained conver
 marker. Matching answer text on a failed or interrupted turn does not qualify resume.
 The control case uses an offered effort, or omits effort when the model has no control. It checks local
 refusal of an unsupported effort before proving that the same session still completes subsequent turns.
+Actual native qualification covers the controls and native-tools cases on Antigravity 1.3.1 with
+the selected `claude-opus-4-6-thinking` model. The controls case completes three turns and retains
+the conversation through schema addition and removal after local unsupported-effort refusal.
+The tool case completes one fixture-file read with reported tool output and exact marker recall.
+These cases qualify the selected route, not an independently observed upstream model identity,
+all catalog models, credential refresh or other CLI platforms.
 
 `IsAuthenticatedAsync` performs the non-consuming `agy models` check, so an installed but signed-out executable is not reported as authenticated. Run `agy` interactively to sign in or refresh the CLI session. Antigravity owns its credential and session storage in the operating system's native keyring; Darkspyre.Inference.Connect.LLM does not inspect it.
 
