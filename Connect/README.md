@@ -2988,8 +2988,11 @@ token refresh, other models, strict tools, structured output or media.
 The same model completes a Global/Default nonstreaming request with `GROK-121-NONSTREAM-OK`,
 finish reason `completed`, and usage of 197 input and 10 output tokens. A UnitedStates/Default
 streaming request for that model returns the provider's HTTP 404 model/access error before output.
-The tester preserves that failure and does not retry or switch routes. UnitedStates generation
-remains unqualified; a Global catalog entry does not establish access on that route.
+The tester preserves that failure and does not retry or switch routes. UnitedStates discovery
+returns two native choices, `grok-4.6` and `grok-4.7`. One UnitedStates/Default streaming request
+on the listed `grok-4.6` model completes with `GROK-121-US-OK`, finish reason `completed`, and
+reported usage of 648 input and 358 output tokens. This qualifies that selected model and route,
+not every US model; a Global catalog entry does not establish access on the US route.
 On that same selected model and route, one managed turn with a three-iteration cap completes
 the existing echo callback and replays its successful text result. The turn completes after two
 model steps with final answer `GROK-121-ECHO-OK`. No retry, other tool, upload or media operation
