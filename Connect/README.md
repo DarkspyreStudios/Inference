@@ -2524,6 +2524,9 @@ text and tool calls, connection identity, model and a 16 MiB UTF-8 payload bound
 Encrypted reasoning remains opaque and never becomes a public reasoning event. The adapter reads
 `reasoning_content`, `reasoning`, text details and summary details in that display order, so
 overlapping wire fields produce one event. AgentCore and CLI chat do not import this opaque state.
+Nonstreaming responses retain complete reasoning blocks in order, including their IDs, indices and
+signatures. Only streaming text and summary fragments are joined; merging complete blocks loses
+the identities required for tool-enabled replay.
 
 ### Carrying history to another model or provider
 

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -11,6 +12,85 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ProviderTerminalEvidenceTests
 {
+    [Theory]
+    [InlineData(false, "reasoning.text", "text")]
+    [InlineData(false, "reasoning.summary", "summary")]
+    [InlineData(true, "reasoning.text", "text")]
+    [InlineData(true, "reasoning.summary", "summary")]
+    public async Task CompatibleReasoningReplayPreservesCompleteBlocksAndAssemblesStreamingChunks(
+        bool streaming, string type, string field)
+    {
+        var first = new JsonObject
+        {
+            ["type"] = type,
+            [field] = "first",
+            ["id"] = "block-0",
+            ["format"] = "anthropic-claude-v1",
+            ["index"] = 0
+        };
+        var second = new JsonObject
+        {
+            ["type"] = type,
+            [field] = "second",
+            ["id"] = streaming ? "block-0" : "block-1",
+            ["format"] = "anthropic-claude-v1",
+            ["index"] = streaming ? 0 : 1
+        };
+        if (field == "text")
+        {
+            first["signature"] = "signature-0";
+            second["signature"] = streaming ? "signature-0" : "signature-1";
+        }
+        string body = streaming
+            ? "data: {\"choices\":[{\"delta\":{\"reasoning_details\":[" + first.ToJsonString() + "]}}]}\n\n"
+                + "data: {\"choices\":[{\"delta\":{\"reasoning_details\":[" + second.ToJsonString() + "]},\"finish_reason\":\"stop\"}]}\n\n"
+                + "data: [DONE]\n\n"
+            : "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"\",\"reasoning_details\":["
+                + first.ToJsonString() + "," + second.ToJsonString() + "]},\"finish_reason\":\"stop\"}]}";
+        var handler = new Handler(LlmTransport.OpenAiCompatibleChat, streaming, body);
+        using var http = new HttpClient(handler);
+        var client = new OpenAiCompatibleChatLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.OpenAiCompatibleChat,
+            Endpoint = "https://openrouter.ai/api/v1",
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = "selected-model",
+            Messages = [new("user", "hello")],
+            Tools = [new LlmToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }]
+        };
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        LlmChatResult restored = JsonSerializer.Deserialize(
+            JsonSerializer.Serialize(result, ConnectLlmJson.ChatResult), ConnectLlmJson.ChatResult)!;
+        Assert.Equal(LlmCompletionStatus.Completed, restored.Status);
+        Assert.NotNull(restored.ContinuationState);
+        Assert.Equal("firstsecond", string.Concat(events.OfType<LlmReasoningDeltaEvent>().Select(item => item.Delta)));
+        Assert.All(events.OfType<LlmReasoningDeltaEvent>(), item => Assert.Equal(field == "summary", item.IsSummary));
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with
+        {
+            Messages = [new("user", "hello"),
+                new("assistant", restored.Text) { ContinuationState = restored.ContinuationState },
+                new("user", "continue")]
+        })) { }
+
+        var expected = new JsonArray();
+        if (streaming) first[field] = "firstsecond";
+        expected.Add(item: first);
+        if (!streaming) expected.Add(item: second);
+        using var sent = JsonDocument.Parse(handler.RequestBody!);
+        JsonElement replay = sent.RootElement.GetProperty("messages")[1].GetProperty("reasoning_details");
+        Assert.Equal(expected.ToJsonString(), replay.GetRawText());
+        Assert.Equal(2, handler.Calls);
+    }
+
     [Fact]
     public async Task GrokBatchFailureKeepsSafeRequestIdInTheProviderErrorAndOperationReceipt()
     {
@@ -356,10 +436,12 @@ public sealed class ProviderTerminalEvidenceTests
         HttpStatusCode statusCode = HttpStatusCode.OK, TimeSpan? retryAfter = null, string? requestId = null) : HttpMessageHandler
     {
         internal int Calls { get; private set; }
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        internal string? RequestBody { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
             Assert.Equal(HttpMethod.Post, request.Method);
+            RequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             string body = scriptedBody ?? Body(transport, streaming);
             var response = new HttpResponseMessage(statusCode)
             {
@@ -367,7 +449,7 @@ public sealed class ProviderTerminalEvidenceTests
             };
             if (retryAfter is { } delay) response.Headers.RetryAfter = new(delay);
             if (requestId is not null) response.Headers.Add("x-request-id", requestId);
-            return Task.FromResult(response);
+            return response;
         }
     }
 

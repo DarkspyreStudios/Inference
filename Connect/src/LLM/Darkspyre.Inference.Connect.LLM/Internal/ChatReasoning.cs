@@ -14,7 +14,7 @@ internal sealed class ChatReasoning
     public string? ReasoningContent => _content.Length == 0 ? null : _content.ToString();
     public JsonArray? ReasoningDetails => (JsonArray?)_details?.DeepClone();
 
-    public LlmReasoningDeltaEvent? Observe(JsonElement message)
+    public LlmReasoningDeltaEvent? Observe(JsonElement message, bool isDelta)
     {
         string? content = LlmJson.GetString(message, "reasoning_content");
         if (!string.IsNullOrEmpty(content)) { _content.Append(content); }
@@ -38,7 +38,7 @@ internal sealed class ChatReasoning
                 string type = (string)detail["type"]!;
                 if (type == "reasoning.text") { texts.Append((string?)detail["text"]); }
                 if (type == "reasoning.summary") { summaries.Append((string?)detail["summary"]); }
-                if (type is "reasoning.text" or "reasoning.summary"
+                if (isDelta && type is ("reasoning.text" or "reasoning.summary")
                     && _details.LastOrDefault() is JsonObject previous && (string?)previous["type"] == type)
                 {
                     string field = type == "reasoning.text" ? "text" : "summary";

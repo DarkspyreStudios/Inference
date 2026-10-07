@@ -257,7 +257,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 }
 
                 string contentDelta = LlmJson.GetString(delta, "content") ?? string.Empty;
-                if (reasoning.Observe(delta) is { } reasoningDelta && capabilities.SupportsReasoningText) { yield return consumption.Publish<LlmStreamEvent>(reasoningDelta); }
+                if (reasoning.Observe(delta, isDelta: true) is { } reasoningDelta && capabilities.SupportsReasoningText) { yield return consumption.Publish<LlmStreamEvent>(reasoningDelta); }
                 if (contentDelta.Length > 0)
                 {
                     text.Append(contentDelta);
@@ -431,7 +431,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
 
             var toolCalls = new List<LlmToolCall>();
             var reasoning = new ChatReasoning();
-            LlmReasoningDeltaEvent? observation = reasoning.Observe(message);
+            LlmReasoningDeltaEvent? observation = reasoning.Observe(message, isDelta: false);
             if (message.TryGetProperty("tool_calls", out JsonElement calls) && calls.ValueKind == JsonValueKind.Array)
             {
                 foreach (JsonElement call in calls.EnumerateArray())
