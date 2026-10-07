@@ -289,8 +289,11 @@ An unsafe or busy observation and any cleanup failure produce a nonzero process 
 generation alone does not establish runtime retirement.
 
 The console's direct Qwen and Connect SelfHost tool suites share one parsed JSON schema for
-`get_time`. Schema construction does not use reflection serialization. SelfHost runs the managed
-agent tool round-trip over the borrowed loaded engine, including when JSON reflection defaults are disabled.
+`get_time`. Schema construction does not use reflection serialization. SelfHost borrows the loaded
+engine through the managed agent lane. Its schema setup works with JSON reflection defaults disabled;
+the supplier's prompt serializers have separate runtime requirements.
+`--trace-exceptions` prints first-line exception diagnostics and invalid-operation stacks.
+It exposes the throw site of errors a managed turn reports through its safe failure boundary.
 
 ## Provider setup
 

@@ -46,7 +46,10 @@ internal static class Program
         {
             // Shows exceptions a library handles and reports generically, such as the managed agent lane's.
             AppDomain.CurrentDomain.FirstChanceException += (_, raised) =>
+            {
                 Console.Error.WriteLine($"[exception] {raised.Exception.GetType().Name}: {raised.Exception.Message.Split('\n')[0]}");
+                if (raised.Exception is InvalidOperationException) Console.Error.WriteLine(raised.Exception.StackTrace);
+            };
         }
 
         using var cancellation = new CancellationTokenSource();
