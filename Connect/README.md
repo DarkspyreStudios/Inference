@@ -4305,6 +4305,13 @@ Actual usage is 1179 input, 78 output and 1257 total tokens, with zero cached in
 1177 cache-write input tokens. Reasoning and cost are unreported. One tester call uses the
 existing sign-in without a Connect retry, credential copying or schema fallback. This qualifies
 the selected catalog-backed complete route, not every model, schema, refresh or platform.
+One streaming request at source `fd5e6b2` also passes through that catalog-admission path.
+The selected `sonnet` alias and Low effort return the unchanged closed-object schema's exact
+`CONNECT_CLAUDE_STREAM_SCHEMA_121` marker, `Completed`, `tool_use` and valid
+`ProviderJsonSchema` enforcement. Reported usage is 1173 input, 77 output and 1250 total tokens,
+with zero cached input and 1171 cache-write input tokens. Reasoning and cost remain unknown.
+The existing tester exits successfully with reflection disabled, no retry and no credential copy.
+This qualifies the selected streaming schema route, not other models, refresh or platforms.
 
 ### Model discovery
 
