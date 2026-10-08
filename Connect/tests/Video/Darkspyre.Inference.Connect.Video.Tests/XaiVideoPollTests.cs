@@ -155,6 +155,52 @@ public sealed class XaiVideoPollTests
     }
 
     [Theory]
+    [InlineData("last-frame")]
+    [InlineData("keyframes")]
+    [InlineData("reference-images")]
+    [InlineData("preset-voice")]
+    [InlineData("reference-audio")]
+    public void ReferenceModeResolutionLimitUsesKnownModelFacts(string mode)
+    {
+        var image = new UrlMediaSource(new("https://media.example.test/image"));
+        var audio = new UrlMediaSource(new("https://media.example.test/audio"));
+        var request = new VideoGenerationRequest
+        {
+            ModelId = "future-video-model",
+            Prompt = "A paper boat",
+            ResolutionHeight = 1080,
+            LastFrame = mode == "last-frame" ? image : null,
+            Keyframes = mode == "keyframes" ? [new(image, TimeSpan.FromSeconds(1))] : null,
+            ReferenceImages = mode == "reference-images" ? [image] : null,
+            ReferenceAudio = mode == "preset-voice" ? [new VideoVoiceReference("eve")]
+                : mode == "reference-audio" ? [new VideoAudioReference(audio)] : null
+        };
+
+        (string route, JsonObject body) = XaiVideoProtocol.Build(request,
+            source => new() { ["url"] = Assert.IsType<UrlMediaSource>(source).Url.OriginalString }, static () => { });
+
+        Assert.Equal("videos/generations", route);
+        Assert.Equal(request.ModelId, body["model"]!.GetValue<string>());
+        Assert.Equal("1080p", body["resolution"]!.GetValue<string>());
+        Assert.Null(XaiVideoProtocol.Capabilities(request.ModelId).ResolutionHeights);
+        switch (mode)
+        {
+            case "last-frame": Assert.Equal(image.Url.OriginalString, body["last_frame"]!["url"]!.GetValue<string>()); break;
+            case "keyframes":
+                Assert.Equal(image.Url.OriginalString, body["keyframes"]![0]!["image"]!["url"]!.GetValue<string>());
+                Assert.Equal(1, body["keyframes"]![0]!["timestamp_s"]!.GetValue<double>());
+                break;
+            case "reference-images": Assert.Equal(image.Url.OriginalString, body["reference_images"]![0]!["url"]!.GetValue<string>()); break;
+            case "preset-voice": Assert.Equal("eve", body["reference_audios"]![0]!["voice_id"]!.GetValue<string>()); break;
+            case "reference-audio": Assert.Equal(audio.Url.OriginalString, body["reference_audios"]![0]!["url"]!.GetValue<string>()); break;
+        }
+
+        request = request with { ModelId = "grok-imagine-video-1.5" };
+        Assert.Throws<NotSupportedException>(() => XaiVideoProtocol.Build(request,
+            _ => throw new InvalidOperationException("Unsupported resolution reached source resolution."), static () => { }));
+    }
+
+    [Theory]
     [InlineData("grok-imagine-video-1.5", false)]
     [InlineData("grok-imagine-video-1.5", true)]
     [InlineData("grok-imagine-video-1.5-lite", false)]

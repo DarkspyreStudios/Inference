@@ -2228,9 +2228,13 @@ classic reference-to-video duration is at most ten seconds. The codec accepts th
 and `5:2` aspect ratios unchanged. These facts follow the
 [xAI Video model table](https://docs.x.ai/developers/model-capabilities/video/overview) and
 [REST schema](https://docs.x.ai/developers/rest-api-reference/inference/videos).
-An unknown model's null resolution list does not refuse an otherwise mapped 1080p text or first-frame
-request. The codec sends the requested model and resolution unchanged for a caller-selected attempt.
-This does not advertise confirmed model support. Known model and mode restrictions still refuse.
+The published 1.5 reference mode uses at most 720p, including last-frame and keyframe pins, image
+references and either voice-reference variant. These known-invalid 1080p requests refuse before source
+resolution. The [reference-mode guide](https://docs.x.ai/developers/model-capabilities/video/reference-to-video)
+defines this mode and limit. An unknown model's null resolution list does not refuse an otherwise
+mapped 1080p request, including reference and pinned-frame controls. The codec sends the requested
+model, resolution and controls unchanged for a caller-selected attempt. This does not advertise
+confirmed model support. Known model and mode restrictions still refuse.
 Serialized job/output scope is data, not proof of authority. Each implemented transport owns
 receipt validation and download-origin authorization before effects. Lookup and download carry a
 private view of the same borrowed binding, with the facade's retirement fence, before acquisition or refresh.

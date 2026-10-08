@@ -152,8 +152,8 @@ internal static class XaiVideoProtocol
         if (request.ResolutionHeight is { } resolution)
         {
             if (resolution is not (480 or 720 or 1080)) throw new ArgumentOutOfRangeException(nameof(request));
-            if (resolution == 1080 && (references || request.Keyframes is { Count: > 0 }
-                || capabilities.ResolutionHeights?.Contains(1080) == false))
+            if (resolution == 1080 && capabilities.ResolutionHeights is { } heights
+                && (!heights.Contains(1080) || references || request.LastFrame is not null || request.Keyframes is { Count: > 0 }))
                 throw new NotSupportedException("The selected video mode has no documented native 1080p mapping.");
         }
         if (request.ModelId == "grok-imagine-video" && (request.LastFrame is not null
