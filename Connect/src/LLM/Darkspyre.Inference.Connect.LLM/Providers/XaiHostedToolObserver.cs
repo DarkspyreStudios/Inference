@@ -124,12 +124,13 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
         {
             "file_search_call" => (LlmHostedToolKind.DocumentSearch, "file_search"),
             "web_search_call" => (LlmHostedToolKind.WebSearch, "web_search"),
-            // https://docs.x.ai/developers/tools/tool-usage-details identifies the native Responses type.
             "x_search_call" => (LlmHostedToolKind.SocialSearch, "x_search"),
             "code_interpreter_call" => (LlmHostedToolKind.CodeExecution, "code_interpreter"),
             "image_generation_call" => (LlmHostedToolKind.ImageGeneration, "image_generation"),
             "mcp_call" => (LlmHostedToolKind.RemoteMcp, RequiredString(item, "name")),
-            "custom_tool_call" when LlmJson.GetString(item, "name") is "x_keyword_search" or "x_semantic_search" or "x_user_search" or "x_thread_fetch"
+            // https://docs.x.ai/developers/tools/tool-usage-details identifies X Search by its native call ID.
+            "custom_tool_call" when LlmJson.GetString(item, "call_id")?.StartsWith("xs_", StringComparison.Ordinal) == true
+                || LlmJson.GetString(item, "name") is "x_keyword_search" or "x_semantic_search" or "x_user_search" or "x_thread_fetch"
                 => (LlmHostedToolKind.SocialSearch, RequiredString(item, "name")),
             _ => null
         };

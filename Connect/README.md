@@ -514,11 +514,16 @@ collections, strings and numeric zero remain exact. The provider's documented om
 does not replace the shared API's unreported-score observation. Full terminal output remains unchanged
 in opaque replay. Result-only `CompleteAsync` retains its terminal chat result; callers enumerate
 `StreamAsync` for hosted observations. This mapping does not qualify live OAuth acceptance or
-provider-specific file-search phase events. X custom calls are classified only by the published
-search names and retain actual call IDs separately from opaque item IDs. Image progress uses only
+provider-specific file-search phase events. X custom calls use the
+[documented `xs_` call-ID prefix](https://docs.x.ai/developers/tools/tool-usage-details) as positive
+SocialSearch evidence and retain the actual name and literal string input. The observer also recognizes
+the published search names. Actual call IDs stay separate from opaque item IDs; an item's `xs_` prefix
+alone does not classify its call. Attachment-search `as_` and unknown prefixes with unknown names remain
+unmapped, with their complete items retained in opaque replay. Image progress uses only
 documented lifecycle events. Unpublished understanding output/event shapes remain unmapped.
-The [documented native `x_search_call` type](https://docs.x.ai/developers/tools/tool-usage-details)
-also produces SocialSearch observations through the same lifecycle owner. Its observed ID and status
+The observer also recognizes `x_search_call` through the same lifecycle owner. The current guide
+documents `custom_tool_call` with an `xs_` call ID; the separate `x_search_call` item shape remains
+live-unqualified. Its observed ID and status
 remain exact. Undocumented input/output facts stay null; the complete native item remains in opaque
 continuation. Classification does not qualify live OAuth X Search execution.
 Two bounded OAuth requests against production source `8db9204` use Global/Default
