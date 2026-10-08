@@ -15,6 +15,46 @@ public sealed class ProviderTerminalEvidenceTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task GrokRequestsNoInlineCitationsThroughThePublishedIncludeList(bool streaming)
+    {
+        const string terminal = """
+            {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}
+            """;
+        string body = streaming ? "data: {\"type\":\"response.completed\",\"response\":" + terminal + "}\n\n" : terminal;
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, new()
+        {
+            ModelId = "grok-4.20-0309-non-reasoning",
+            Messages = [new("user", "Search the selected domain.")],
+            MaxOutputTokens = 64,
+            MaxHostedTurns = 2,
+            HostedTools = [new LlmWebSearchTool(AllowedDomains: ["docs.x.ai"])]
+        })) { }
+
+        using JsonDocument sent = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(64, sent.RootElement.GetProperty("max_output_tokens").GetInt32());
+        Assert.Equal(2, sent.RootElement.GetProperty("max_turns").GetInt32());
+        string?[] includes = sent.RootElement.GetProperty("include").EnumerateArray().Select(value => value.GetString()).ToArray();
+        Assert.Contains("reasoning.encrypted_content", includes);
+        Assert.Contains("web_search_call.action.sources", includes);
+        Assert.Contains("no_inline_citations", includes);
+        Assert.False(sent.RootElement.TryGetProperty("no_inline_citations", out _));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task GrokNativeXSearchItemsProduceHostedObservationsAndRetainOpaqueReplay(bool streaming)
     {
         const string search = """{"type":"x_search_call","id":"x-call","status":"failed"}""";

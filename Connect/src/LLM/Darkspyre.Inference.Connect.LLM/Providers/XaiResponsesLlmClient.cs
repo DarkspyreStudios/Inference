@@ -395,7 +395,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             ((JsonArray)payload["include"]!).Add((JsonNode?)"web_search_call.action.sources");
         if (request.HostedTools.OfType<LlmCodeExecutionTool>().Any())
             ((JsonArray)payload["include"]!).Add((JsonNode?)"code_interpreter_call.outputs");
-        payload["no_inline_citations"] = true;
+        ((JsonArray)payload["include"]!).Add((JsonNode?)"no_inline_citations");
         if (request.ProviderControls is XaiMultiAgentControls { AgentCount: { } count })
             payload["reasoning"] = new JsonObject
             {

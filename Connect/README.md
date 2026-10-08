@@ -471,7 +471,9 @@ selected code-tool route in both modes, not downloadable artifacts, progress eve
 families. The tester uses its own saved OAuth credential without retries or account/route fallback.
 
 Citations preserve first-observed annotation order and suppress terminal copies of the same
-occurrence. The adapter requests `no_inline_citations`. Offset units are unqualified, so positions
+occurrence. The adapter requests `no_inline_citations` in the existing `include` array, as the
+[Responses citation protocol](https://docs.x.ai/developers/tools/citations) specifies; it sends no
+top-level boolean for that control. Offset units are unqualified, so positions
 remain absent. Code outputs preserve actual code, logs and image URLs without fetching remote
 artifacts. MCP arguments, output and error remain actual JSON values, including JSON strings.
 Generated images decode bare base64 and identify JPEG/PNG from bytes. Without Resources they carry
