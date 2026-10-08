@@ -65,6 +65,12 @@ internal sealed record ConsoleInvocation(
                 }
                 harnessArn = args[index];
             }
+            else if (argument == "--endpoint")
+            {
+                if (endpoint is not null || ++index >= args.Length || string.IsNullOrWhiteSpace(args[index]))
+                    throw new ArgumentException("--endpoint requires one endpoint URI.", nameof(args));
+                endpoint = args[index];
+            }
             else if (argument == "--google-authentication")
             {
                 if (googleAuthentication is not null || ++index >= args.Length

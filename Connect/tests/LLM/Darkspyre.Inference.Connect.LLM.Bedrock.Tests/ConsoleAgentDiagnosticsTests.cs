@@ -140,6 +140,19 @@ public sealed class ConsoleAgentDiagnosticsTests
     }
 
     [Fact]
+    public void CompatibleEndpointOverrideIsNotPromptInput()
+    {
+        using var http = new HttpClient();
+        var providers = new ConsoleTesterProviders([new OpenAiCompatibleChatLlmClient(http)]);
+        ConsoleInvocation invocation = ConsoleInvocation.Parse(
+            ["prompt", "--provider", "openai-compatible-api", "--endpoint", "http://gpu-box:8080/v1",
+                "--model", "qwen3.8-27b"], providers);
+
+        Assert.Equal("http://gpu-box:8080/v1", invocation.EndpointOverride);
+        Assert.Equal(["--model", "qwen3.8-27b"], invocation.CommandArguments);
+    }
+
+    [Fact]
     public void GrokProbeUsesTheSelectedRegionAndRefusesAnotherProvider()
     {
         using var http = new HttpClient();

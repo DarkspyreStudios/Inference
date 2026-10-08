@@ -4638,6 +4638,7 @@ echo 'Reply only with OK.' | dotnet run --project tools/Darkspyre.Inference.Conn
 `models` accepts the same provider and endpoint options. The override selects an
 anonymous endpoint without reading or writing stored credentials. It is process-local and does
 not persist a connection. The default endpoint retains its stored credential.
+The invocation parser consumes `--endpoint` and its value before prompt and model option parsing.
 The compatible provider does not support the tester's `agent` command.
 
 `tools/Darkspyre.Inference.Connect.ConsoleTester` exercises the public Darkspyre.Inference.Connect.LLM facade directly without a shim or
