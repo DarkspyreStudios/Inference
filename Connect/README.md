@@ -4853,6 +4853,11 @@ At source `1efcc21`, one Global/Default read-only batch page passes in 0.78 seco
 credential. Its actual creation and expiry fields are valid calendar dates; the receipt retains
 unknown instants. No generation, mutation, cleanup or retry occurs. This qualifies that receipt
 decoding, not batch creation/add/results, every timestamp variant or the lost earlier creation payload.
+A new one-row Global/Default batch using the same corrected source returns its native receipt,
+accepts one add, and completes get/request listing. Its single result page is empty, so the case
+reports `SKIP` in 3.57 seconds and acknowledges cancellation of only its returned batch.
+No further page, poll or retry occurs. This qualifies those creation/submission/metadata paths,
+not completed results or terminal cancellation. The earlier unparsed creation remains unrecovered.
 
 Live Global/Default qualification at source `1418ba1` passes both cases with the tester's
 existing OAuth credential and no retries. The strict case selects
