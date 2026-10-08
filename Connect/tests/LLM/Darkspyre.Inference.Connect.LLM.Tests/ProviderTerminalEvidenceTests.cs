@@ -950,9 +950,23 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData("""{"type":"string","pattern":"^(a)\\1$"}""", true, "\"aa\"")]
     [InlineData("""{"type":"string","pattern":"(?=a)a"}""", true, "\"a\"")]
     [InlineData("""{"type":"string","pattern":"\\ba\\b"}""", true, "\"a\"")]
-    public async Task GrokUnprovenGuaranteesRequireExplicitOriginalSchemaValidation(string constraint, bool validOutput, string outputValue)
+    public Task GrokUnprovenGuaranteesRequireExplicitOriginalSchemaValidation(string constraint, bool validOutput, string outputValue) =>
+        CheckOriginalSchemaValidation(JsonElement.Parse("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"value\":" + constraint + "}}"), validOutput, outputValue);
+
+    [Theory]
+    [InlineData("http://json-schema.org/draft-07/schema#", "17", false)]
+    [InlineData("http://json-schema.org/draft-07/schema#", "{\"payload\":{\"required\":17}}", false)]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "17", true)]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "{\"payload\":{\"required\":17}}", true)]
+    public Task GrokDefinitionsKeywordFollowsDeclaredDialect(string dialect, string definitions, bool malformed)
     {
-        JsonElement schema = JsonElement.Parse("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"value\":" + constraint + "}}");
+        var schema = new JsonObject { ["$schema"] = dialect, ["type"] = "object", ["$defs"] = JsonNode.Parse(definitions) };
+        return malformed ? CheckInvalidSchemaAdmission(schema.ToJsonString())
+            : CheckOriginalSchemaValidation(JsonElement.Parse(schema.ToJsonString()), validOutput: true, "1");
+    }
+
+    private static async Task CheckOriginalSchemaValidation(JsonElement schema, bool validOutput, string outputValue)
+    {
         JsonNode body = JsonNode.Parse("""
             {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"value\":1}"}]}]}
             """)!;

@@ -3319,7 +3319,7 @@ native guarantees, not invented provider rejections. Known standard annotations 
 values. Invalid keyword shapes refuse before dispatch. The default case does not grant unknown
 keywords a native guarantee. Original-schema format evaluation keeps the selected supplier dialect
 and vocabulary policy; native admission does not turn invalid output into valid output.
-Explicit Draft-07 admission does not interpret newer applicators, anchor declarations, vocabulary
+Explicit Draft-07 admission does not interpret `$defs`, newer applicators, anchor declarations, vocabulary
 declarations or `deprecated` payloads as that draft's keyword shapes. Explicit Draft 2020-12 does
 not interpret retired `additionalItems` or `dependencies` payloads as active keywords. These names
 remain outside native guarantees, and their literal payloads are not traversed as schemas.

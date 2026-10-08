@@ -283,7 +283,7 @@ internal static class XaiSchemaLimits
 
     private static bool InactiveKeyword(string name, SchemaDraft draft) => draft switch
     {
-        SchemaDraft.Draft7 => name is "prefixItems" or "dependentSchemas" or "dependentRequired"
+        SchemaDraft.Draft7 => name is "$defs" or "prefixItems" or "dependentSchemas" or "dependentRequired"
             or "unevaluatedItems" or "unevaluatedProperties" or "$anchor" or "$dynamicAnchor"
             or "$dynamicRef" or "$vocabulary" or "deprecated",
         SchemaDraft.Draft202012 => name is "additionalItems" or "dependencies",
