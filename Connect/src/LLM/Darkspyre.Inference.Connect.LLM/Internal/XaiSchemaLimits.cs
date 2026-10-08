@@ -330,8 +330,9 @@ internal static class XaiSchemaLimits
                 bool ignoresSiblings = draft == SchemaDraft.Draft7 && schema.TryGetProperty("$ref", out _);
                 if (!ignoresSiblings && schema.TryGetProperty("$id", out JsonElement id))
                 {
-                    if (id.ValueKind != JsonValueKind.String || !Uri.TryCreate(baseUri, id.GetString(), out Uri? selected)
-                        || selected.Fragment.Length > 1) return false;
+                    if (id.ValueKind != JsonValueKind.String || !Uri.TryCreate(baseUri, id.GetString(), out Uri? selected))
+                        return Reject(SchemaDisposition.InvalidSchema);
+                    if (selected.Fragment.Length > 1) return false;
                     baseUri = selected;
                     origin = origin == ResourceOrigin.Absolute || Uri.TryCreate(id.GetString(), UriKind.Absolute, out _)
                         ? ResourceOrigin.Absolute : ResourceOrigin.Relative;
@@ -342,7 +343,8 @@ internal static class XaiSchemaLimits
                 if (!ignoresSiblings && draft is SchemaDraft.Draft202012 or SchemaDraft.RetainSiblings
                     && schema.TryGetProperty("$anchor", out JsonElement anchor))
                 {
-                    if (anchor.ValueKind != JsonValueKind.String || anchor.GetString() is not { } name || !ValidAnchor(name)) return false;
+                    if (anchor.ValueKind != JsonValueKind.String || anchor.GetString() is not { } name || !ValidAnchor(name))
+                        return Reject(SchemaDisposition.InvalidSchema);
                     string key = new UriBuilder(baseUri) { Fragment = name }.Uri.AbsoluteUri;
                     if (!_anchors.TryAdd(key, schema)) return false;
                 }

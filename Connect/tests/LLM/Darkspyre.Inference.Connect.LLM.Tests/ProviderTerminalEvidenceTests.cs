@@ -598,8 +598,13 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.False(tool.TryGetProperty(excluded ? "allowed_x_handles" : "excluded_x_handles", out _));
     }
 
-    [Fact]
-    public async Task GrokDraft7MalformedReferenceRefusesLocalFallbackBeforeDispatch()
+    [Theory]
+    [InlineData("""{"$schema":"http://json-schema.org/draft-07/schema#","$ref":42}""")]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":42}""")]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"http://["}""")]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$anchor":42}""")]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$anchor":"bad anchor"}""")]
+    public async Task GrokMalformedSchemaIdentityRefusesLocalFallbackBeforeDispatch(string schema)
     {
         const string body = """
             {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{}"}]}]}
@@ -623,7 +628,7 @@ public sealed class ProviderTerminalEvidenceTests
             StructuredOutput = new()
             {
                 Name = "answer",
-                Schema = JsonElement.Parse("""{"$schema":"http://json-schema.org/draft-07/schema#","$ref":42}"""),
+                Schema = JsonElement.Parse(schema),
                 Fallback = LlmStructuredOutputFallback.LocalValidation
             }
         };
