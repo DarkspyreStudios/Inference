@@ -215,6 +215,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             Transport,
             credential,
             "Anthropic Messages request",
+            httpRequest.Headers.SelectMany(header => header.Value),
             cancellationToken);
 
         if (!stream)
@@ -649,6 +650,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 Transport,
                 credential,
                 "Anthropic model discovery",
+                request.Headers.SelectMany(header => header.Value),
                 cancellationToken);
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             JsonDocument document;

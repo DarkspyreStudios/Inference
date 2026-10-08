@@ -545,6 +545,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 Transport,
                 credential,
                 "Anthropic model discovery",
+                request.Headers.SelectMany(header => header.Value),
                 cancellationToken);
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             JsonDocument document;

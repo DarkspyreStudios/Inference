@@ -206,7 +206,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
             ApplyCodexHeaders(request, connection);
             using var response = await Http.SendAsync(request, cancellationToken);
             await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
-                "Codex model discovery", cancellationToken);
+                "Codex model discovery", request.Headers.SelectMany(header => header.Value), cancellationToken);
             using var document = JsonDocument.Parse(await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken));
             if (!document.RootElement.TryGetProperty("models", out var models) || models.ValueKind != JsonValueKind.Array)
             {
@@ -250,7 +250,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
             ApplyCodexHeaders(request, connection);
             using var response = await Http.SendAsync(request, cancellationToken);
             await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
-                "Codex account usage", cancellationToken);
+                "Codex account usage", request.Headers.SelectMany(header => header.Value), cancellationToken);
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             try
             {

@@ -40,8 +40,11 @@ completion options or body values. Raw arbitrary caller use of .NET `HttpContent
 intercepted: its nonvirtual cached APIs can bypass content overrides. Direct supplied clients and
 `BorrowHostFactory` keep ordinary body and ownership semantics.
 
-The shared LLM HTTP failure helper redacts known credentials from request IDs in both public fields
-and rendered messages. Credential-aware ID reads also sanitize when no extra secret context is supplied.
+The shared LLM HTTP failure helper redacts known credentials and observed outgoing request headers
+from the response body, provider code, request ID and rendered message. This includes borrowed-client
+default headers. Each send owner supplies its live request headers after the send; redaction does not
+depend on the response retaining its request. Credential-aware ID reads also sanitize when no extra
+secret context is supplied.
 Missing IDs remain absent in fields and render as `unknown`; observed HTTP status and retry delay remain intact.
 
 Mapped task results publish after response, body and request cleanup completes; retirement begun by

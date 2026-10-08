@@ -24,7 +24,7 @@ public sealed class GeminiArgumentStreamTests
         var codec = new GeminiContinuationCodec("test-vertex", "Vertex");
         var route = new GeminiRoute(LlmTransport.GoogleVertexAi, "Vertex", "vertex_",
             (response, token) => ProviderHttp.ThrowIfUnsuccessfulAsync(response, LlmTransport.GoogleVertexAi,
-                null, "Vertex generation", token), codec.Encode);
+                null, "Vertex generation", [], token), codec.Encode);
         var connection = new LlmConnection
         {
             Version = "1",
@@ -91,7 +91,7 @@ public sealed class GeminiArgumentStreamTests
         var codec = new GeminiContinuationCodec("test-vertex", "Vertex");
         var route = new GeminiRoute(LlmTransport.GoogleVertexAi, "Vertex", "vertex_",
             (response, token) => ProviderHttp.ThrowIfUnsuccessfulAsync(response, LlmTransport.GoogleVertexAi,
-                null, "Vertex generation", token), codec.Encode);
+                null, "Vertex generation", [], token), codec.Encode);
         var connection = new LlmConnection
         {
             Version = "1",

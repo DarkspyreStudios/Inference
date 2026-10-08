@@ -80,7 +80,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             ProviderHttp.ApplyHeaders(request, connection);
             using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
             await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
-                "OpenRouter key usage", cancellationToken);
+                "OpenRouter key usage", request.Headers.SelectMany(header => header.Value), cancellationToken);
             using JsonDocument document = await JsonDocument.ParseAsync(await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken), cancellationToken: cancellationToken);
             result = OpenRouterAccountUsageParser.Parse(document.RootElement, DateTimeOffset.UtcNow, LlmCredential.Parse(connection.Credential));
         }
@@ -174,6 +174,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             Transport,
             credential,
             "OpenAI-compatible chat request",
+            httpRequest.Headers.SelectMany(header => header.Value),
             cancellationToken);
 
         if (!capabilities.SupportsStreaming)

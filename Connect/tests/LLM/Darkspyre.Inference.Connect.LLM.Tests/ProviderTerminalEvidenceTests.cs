@@ -16,13 +16,14 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData(LlmTransport.OpenAiResponses)]
     [InlineData(LlmTransport.OpenAiCompatibleChat)]
     [InlineData(LlmTransport.AnthropicMessages)]
-    public async Task HttpGenerationFailuresRedactCredentialEchoesFromRequestIds(LlmTransport transport)
+    public async Task HttpGenerationFailuresRedactEffectiveRequestSecrets(LlmTransport transport)
     {
         var retryAfter = TimeSpan.FromSeconds(17);
         using var handler = new Handler(transport, streaming: false,
-            "{\"error\":{\"code\":\"rate_limit_test-key_provider-secret\",\"message\":\"Failure test-key\",\"refresh_token\":\"provider-secret\"}}",
-            HttpStatusCode.TooManyRequests, retryAfter, "request-test-key-1");
+            "{\"error\":{\"code\":\"rate_limit_test-key_provider-secret_header-value_default-value\",\"message\":\"Failure test-key header-value default-value\",\"refresh_token\":\"provider-secret\"}}",
+            HttpStatusCode.TooManyRequests, retryAfter, "request-test-key-header-value-default-value-1");
         using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
         ILlmClient client = transport switch
         {
             LlmTransport.OpenAiResponses => new OpenAiResponsesLlmClient(http),
@@ -34,7 +35,8 @@ public sealed class ProviderTerminalEvidenceTests
             Version = "1",
             Transport = transport,
             Endpoint = "https://provider.example.test/v1",
-            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
         };
 
         LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
@@ -44,12 +46,16 @@ public sealed class ProviderTerminalEvidenceTests
         });
 
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
-        Assert.Equal("request-[REDACTED]-1", failure.RequestId);
-        Assert.Contains("request request-[REDACTED]-1", failure.Message, StringComparison.Ordinal);
-        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        Assert.Contains("request request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.Message, StringComparison.Ordinal);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
         Assert.Equal(retryAfter, failure.RetryAfter);
         Assert.DoesNotContain("test-key", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
         Assert.DoesNotContain("provider-secret", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("header-value", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("default-value", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
         Assert.Equal(1, handler.Calls);
     }
 
@@ -1166,7 +1172,7 @@ public sealed class ProviderTerminalEvidenceTests
         var request = new LlmChatRequest { ModelId = "gemini-2.5-flash", Messages = [new("user", "hello")] };
         var codec = new GeminiContinuationCodec("test-gemini", "Gemini");
         var route = new GeminiRoute(transport, "Gemini", "gemini_",
-            (response, token) => ProviderHttp.ThrowIfUnsuccessfulAsync(response, transport, null, "generation", token), codec.Encode);
+            (response, token) => ProviderHttp.ThrowIfUnsuccessfulAsync(response, transport, null, "generation", [], token), codec.Encode);
         var events = new List<LlmStreamEvent>();
         await foreach (LlmStreamEvent item in GeminiStream.ReadAsync(http, new(HttpMethod.Post, connection.Endpoint), route,
             connection, request, null, stream: true, usageDeltas: true, reasoningText: false, CancellationToken.None))
@@ -1230,7 +1236,7 @@ public sealed class ProviderTerminalEvidenceTests
         {
             var codec = new GeminiContinuationCodec("test-gemini", "Gemini");
             var route = new GeminiRoute(transport, "Gemini", "gemini_",
-                (response, token) => ProviderHttp.ThrowIfUnsuccessfulAsync(response, transport, null, "generation", token), codec.Encode);
+                (response, token) => ProviderHttp.ThrowIfUnsuccessfulAsync(response, transport, null, "generation", [], token), codec.Encode);
             source = GeminiStream.ReadAsync(http, new(HttpMethod.Post, connection.Endpoint), route, connection,
                 request, null, streaming, usageDeltas: true, reasoningText: false, CancellationToken.None);
         }

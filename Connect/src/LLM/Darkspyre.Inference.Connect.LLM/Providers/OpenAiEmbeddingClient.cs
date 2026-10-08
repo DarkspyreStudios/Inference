@@ -64,6 +64,7 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
                 connection.Transport,
                 credential,
                 "Embedding request",
+                httpRequest.Headers.SelectMany(header => header.Value),
                 cancellationToken);
             string raw = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             try

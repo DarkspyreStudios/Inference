@@ -53,6 +53,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
                 Transport,
                 credential,
                 "Model discovery",
+                request.Headers.SelectMany(header => header.Value),
                 cancellationToken);
 
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
