@@ -170,11 +170,12 @@ literal batch ID through one nondestructive Get using that same snapshot. Receip
 fixed batches route and originally selected connection ID, not account or principal proof; imported
 receipts can use another selected connection ID when the route matches and the current token authorizes.
 Supplied page controls are forwarded without inferred limits or automatic paging. Response counts,
-cursors and timezone-qualified timestamps retain actual observations; date-only timestamps are not
-converted to invented instants. The shared batch/metadata timestamp reader uses the BCL JSON parser
+cursors and timezone-qualified timestamps retain actual observations. Valid provider calendar dates
+produce null time observations without rejecting the receipt or inventing an instant.
+The shared batch/metadata timestamp reader uses the BCL JSON parser
 for [xAI's Protobuf timestamps](https://github.com/xai-org/xai-proto/blob/main/proto/xai/api/v1/batch.proto).
 It accepts the provider's nine fractional digits and retains the first seven at `DateTimeOffset`'s
-100-nanosecond precision. The explicit UTC or numeric offset remains required; absent values remain null.
+100-nanosecond precision. A reported instant requires explicit UTC or a numeric offset; absent values remain null.
 The same reader accepts observed nonnegative 64-bit counts as JSON integers or quoted decimal
 strings, matching the provider's `int64` wire type. It does not pass counts through floating point.
 Mutation dispatch and validated prior/returned receipts survive late
@@ -4826,11 +4827,12 @@ batch, reads one metadata page and one result page, and retains at most one MiB 
 Metadata IDs remain provider IDs; result correlation uses the submitted CustomId. Completed output
 must match the marker. An empty result page reports `SKIP` and exit 3, not successful completion
 or a fabricated pending state.
-`batch-list` reads one page with limit one. It requires an actual receipt with its observed creation
-time and reports an empty page as unqualified. It sends no generation or mutation, performs no
+`batch-list` reads one page with limit one. It requires an actual receipt, reports whether its
+creation instant is known, and reports an empty page as unqualified. It sends no generation or mutation, performs no
 cleanup, and does not infer ownership of an existing batch from its name.
 The explicit `batch-list` selection prints only the JSON types and string lengths of known receipt
-fields from that page. It prints no field values, provider body, headers, credential or URL.
+fields from that page and whether a timestamp is a valid calendar date. It prints no field values,
+provider body, headers, credential or URL.
 Cleanup requests cancellation only for its own receipt when the observed pending count is nonzero
 or unknown. A cancellation acknowledgement does not prove terminal cleanup. Cleanup uses the
 case's selected timeout and retains both the operation and cancellation failure if both occur.

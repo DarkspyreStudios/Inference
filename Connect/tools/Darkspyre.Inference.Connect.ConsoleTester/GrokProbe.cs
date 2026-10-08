@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
@@ -76,10 +77,11 @@ internal static class GrokProbe
     {
         LlmBatchPage page = await batches.ListAsync(connectionId, new(Limit: 1), token);
         if (page.Items.Count == 0)
-            throw new ProbeUnavailable("The single batch page is empty; receipt timestamp parsing is unqualified.");
-        if (page.Items.Count != 1 || page.Items[0].CreateTime is null)
-            throw new ProbeFailure("The single batch page must contain one receipt with its observed creation time.");
-        return "one native batch receipt and its creation time parsed; one read-only page, no generation, mutation, cleanup or retry";
+            throw new ProbeUnavailable("The single batch page is empty; receipt parsing is unqualified.");
+        if (page.Items.Count != 1)
+            throw new ProbeFailure("The single batch page must contain one native receipt.");
+        string creation = page.Items[0].CreateTime is null ? "unknown" : "observed";
+        return $"one native batch receipt parsed; creation instant={creation}; one read-only page, no generation, mutation, cleanup or retry";
     }
 
     internal sealed class BatchShapeHandler(TextWriter output) : DelegatingHandler
@@ -122,7 +124,9 @@ internal static class GrokProbe
             if (!owner.TryGetProperty(name, out JsonElement value))
             { output.WriteLine($"Batch shape: {name}=absent."); return; }
             string length = value.ValueKind == JsonValueKind.String ? $"; length={value.GetString()!.Length}" : "";
-            output.WriteLine($"Batch shape: {name}={value.ValueKind}{length}.");
+            string date = name.EndsWith("_time", StringComparison.Ordinal) && value.ValueKind == JsonValueKind.String
+                ? $"; date-only={DateOnly.TryParseExact(value.GetString(), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)}" : "";
+            output.WriteLine($"Batch shape: {name}={value.ValueKind}{length}{date}.");
         }
     }
 

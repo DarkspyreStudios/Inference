@@ -1080,6 +1080,37 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Fact]
+    public async Task GrokBatchReceiptKeepsDateOnlyTimesUnknown()
+    {
+        const string body = """
+            {"batch_id":"batch-1","name":"batch","create_time":"2026-10-08","expire_time":"2026-10-09","cancel_time":"2026-10-08","state":{"num_requests":0,"num_pending":0}}
+            """;
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var source = new ResourcePreparationTests.Source(new()
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize()
+        });
+        await using var access = new LlmConnectionAccess(source, [], [client]);
+        await using var core = new LlmProviderService(source, [client], [], connectionAccess: access);
+        await using var batches = new LlmResourceProviderService(access, core);
+
+        LlmBatch batch = await batches.CreateAsync("connection", "batch");
+
+        Assert.Equal("batch-1", batch.Id);
+        Assert.Equal(new(0, 0, null, null, null), batch.Counts);
+        Assert.Null(batch.CreateTime);
+        Assert.Null(batch.ExpireTime);
+        Assert.Null(batch.CancelTime);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
     public async Task GrokBatchReceiptAcceptsExactQuotedInt64Counts()
     {
         const string body = """

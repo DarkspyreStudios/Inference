@@ -174,6 +174,8 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
         if (value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null) return null;
         if (value.ValueKind != JsonValueKind.String) throw new JsonException();
         string text = value.GetString()!;
+        // A provider calendar date has no observed instant or zone.
+        if (DateOnly.TryParseExact(text, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out _)) return null;
         // Require full seconds and an explicit zone: 20 characters with Z, 25 with +/-HH:mm.
         // The JSON parser accepts provider nanoseconds at DateTimeOffset's tick precision.
         bool hasZone = text.Length >= 20 && (text.EndsWith('Z') || text.Length >= 25 && text[^6] is '+' or '-');
