@@ -28,8 +28,8 @@ public static class XaiErrorClassifier
             diagnosticBody, "Provider rejected the Files request.", cancellationToken);
 
     internal static Task ThrowIfUnsuccessfulSpeechAsync(HttpResponseMessage response, LlmCredential? credential,
-        CancellationToken cancellationToken) =>
-        ThrowIfUnsuccessfulCoreAsync(response, credential, [],
+        IEnumerable<string> additionalSecrets, CancellationToken cancellationToken) =>
+        ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
             false, "Provider rejected the speech request.", cancellationToken);
 
     internal static Task ThrowIfUnsuccessfulImageAsync(HttpResponseMessage response, LlmCredential? credential,

@@ -929,6 +929,10 @@ from borrowed input; input-only operation failures do not poison client retireme
 No automatic reconnect/replay occurs. OAuth endpoint acceptance and real
 voice/latency qualification remain open: the guide's latency value 2 is passed through unchanged despite
 the standalone schema's narrower 0/1 declaration. Controlled tests do not qualify live provider access.
+REST synthesis and transcription failures use the shared xAI HTTP classifier. Its redaction context
+includes selected-connection headers, family headers and effective outgoing request headers, including
+borrowed HttpClient defaults. Public errors retain sanitized provider codes, request IDs, actual HTTP
+status and retry delay. They do not expose reflected protected headers or the raw speech response body.
 Failed BCL WebSocket upgrades use only collected actual HTTP status: 401/402 retain the shared
 authentication/entitlement status rules, while 400/403 cannot imply hidden body-dependent facts.
 Unobserved status remains a safe transport failure. Raw bodies, headers and transport diagnostics

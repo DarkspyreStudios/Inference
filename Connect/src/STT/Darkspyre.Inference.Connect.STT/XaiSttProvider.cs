@@ -149,7 +149,9 @@ public sealed class XaiSttProvider : ISttProvider
                 foreach (var header in _connection!.AdditionalHeaders) if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value)) throw XaiSttProtocol.Invalid();
                 timeout.CancelAfter(_connection.RequestTimeout);
                 response = await _provider!._http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false); fence();
-                await XaiErrorClassifier.ThrowIfUnsuccessfulSpeechAsync(response, LlmCredential.Parse(snapshot.Credential), timeout.Token).ConfigureAwait(false); fence();
+                await XaiErrorClassifier.ThrowIfUnsuccessfulSpeechAsync(response, LlmCredential.Parse(snapshot.Credential),
+                    snapshot.AdditionalHeaders.Values.Concat(_connection.AdditionalHeaders.Values).Concat(request.Headers.SelectMany(header => header.Value)),
+                    timeout.Token).ConfigureAwait(false); fence();
                 result = await read(response, timeout.Token).ConfigureAwait(false); fence();
             }
             catch (Exception error) { errors.Add(error); }

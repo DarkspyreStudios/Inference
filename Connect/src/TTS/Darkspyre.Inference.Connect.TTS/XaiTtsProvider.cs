@@ -176,7 +176,9 @@ public sealed class XaiTtsProvider : ITtsProvider
                 XaiRequestHeaders.Apply(request, snapshot, false); foreach (var header in _connection!.Headers) if (!request.Headers.TryAddWithoutValidation(header.Key, header.Value)) throw XaiTtsProtocol.Invalid();
                 timeout.CancelAfter(_connection.RequestTimeout);
                 response = await (http ?? _provider!._http).SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false); CombinedFence();
-                await XaiErrorClassifier.ThrowIfUnsuccessfulSpeechAsync(response, LlmCredential.Parse(snapshot.Credential), timeout.Token).ConfigureAwait(false); CombinedFence();
+                await XaiErrorClassifier.ThrowIfUnsuccessfulSpeechAsync(response, LlmCredential.Parse(snapshot.Credential),
+                    snapshot.AdditionalHeaders.Values.Concat(_connection.Headers.Values).Concat(request.Headers.SelectMany(header => header.Value)),
+                    timeout.Token).ConfigureAwait(false); CombinedFence();
                 result = await read(response, timeout.Token).ConfigureAwait(false); CombinedFence();
             }
             catch (JsonException) { errors.Add(XaiTtsProtocol.Protocol()); }

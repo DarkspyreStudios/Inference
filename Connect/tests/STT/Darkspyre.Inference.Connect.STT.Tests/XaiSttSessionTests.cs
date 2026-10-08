@@ -1,11 +1,35 @@
 using System.Net.WebSockets;
 using Darkspyre.Inference.Common.STT;
+using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.Voice.Tests;
 
 namespace Darkspyre.Inference.Connect.STT.Tests;
 
 public sealed class XaiSttSessionTests
 {
+    [Fact]
+    public async Task RestFailurePreservesSafeEvidenceWithoutExposingProtectedHeaders()
+    {
+        using var handler = new RejectedVoiceHttp("/v1/stt");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-secret");
+        await using var access = new LlmConnectionAccess(new VoiceConnectionSource(), []);
+        var binding = new XaiFamilyBinding(new("selected"), access);
+        await using ISpeechTranscriptionClient client = new XaiSttProvider(http).Bind(new()
+        {
+            Transport = SttTransport.XaiStt,
+            Endpoint = new(VoiceTestData.Connection.Endpoint),
+            Xai = binding.Selection,
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Family"] = "family-secret" }
+        }, binding);
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            client.TranscribeAsync(new BinarySpeechInput("audio/wav", new byte[] { 1, 2, 3 }, "speech.wav"), new()));
+
+        VoiceTestData.AssertRestFailure(failure);
+        Assert.Equal(1, handler.Sends);
+    }
+
     private static readonly string[] AudioCommands = ["finalize", "audio.done"];
     private static Task<XaiSttSession> OpenAsync(VoiceSocket socket, int events = 16)
         => XaiSttSession.OpenAsync(socket.ConnectAsync, VoiceTestData.Connection,
