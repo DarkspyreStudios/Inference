@@ -955,6 +955,51 @@ public sealed class ProviderTerminalEvidenceTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task GrokCompactionFailuresRedactEffectiveRequestHeaders(bool malformed)
+    {
+        var retryAfter = TimeSpan.FromSeconds(17);
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            malformed ? "{}" :
+                "{\"error\":{\"code\":\"rate_limit_test-token_header-value_default-value\",\"message\":\"Failure default-value\"}}",
+            malformed ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests, retryAfter,
+            "request-test-token-header-value-default-value-1");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var client = new XaiResponsesLlmClient(http);
+        await using var files = new XaiFileClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            client.CompactWithResourcesAsync(connection,
+                new() { ModelId = "grok-4.6", Messages = [new("user", "reference text")] }, files,
+                static () => { }, CancellationToken.None));
+
+        Assert.Equal(malformed ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        if (!malformed)
+        {
+            Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+            Assert.Equal(retryAfter, failure.RetryAfter);
+        }
+        Assert.Null(failure.SanitizedResponseBody);
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task GrokSearchAndEmbeddingFailuresKeepSafeProviderCodes(bool embedding)
     {
         var retryAfter = TimeSpan.FromSeconds(17);

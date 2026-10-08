@@ -2849,6 +2849,8 @@ follows it. Compacted and usage events retain actual request ID, nullable droppe
 nullable usage. Compaction billing contributes to turn usage, not model iterations or context occupancy.
 Priority compaction is unsupported pending qualification and refuses before refresh, resource callbacks
 or HTTP. Ordinary Priority generation remains available and never silently downgrades its tier.
+Compaction failures redact selected and effective outgoing header values captured after the send,
+including borrowed HttpClient defaults, from provider codes and request IDs. Raw response bodies stay withheld.
 
 `CanCompactHistory` is true when unprotected history exists or a protected function result contains
 a text part longer than 2,000 characters or a binary part. `ProtectedFits` is the nullable inverse of

@@ -202,10 +202,10 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             message = new(HttpMethod.Post, ProviderHttp.BuildUri(connection, "responses/compact"));
             message.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
             XaiRequestHeaders.Apply(message, connection, stream: false);
-            secrets = message.Headers.SelectMany(header => header.Value).ToArray();
             Fence();
             response = await Http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, consumption.Token).ConfigureAwait(false);
             Fence();
+            secrets = connection.AdditionalHeaders.Values.Concat(message.Headers.SelectMany(header => header.Value)).ToArray();
             try
             {
                 await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, credential, secrets, consumption.Token).ConfigureAwait(false);
