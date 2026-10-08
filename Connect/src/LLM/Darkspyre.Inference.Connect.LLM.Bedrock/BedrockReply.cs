@@ -18,7 +18,7 @@ internal sealed record BedrockRedactedReasoningBlock(byte[] Data) : BedrockBlock
 internal sealed record BedrockToolUseBlock(string Id, string Name, string ArgumentsJson, bool ValidArguments) : BedrockBlock;
 
 /// <summary>A complete Converse reply, from ConverseStream or Converse.</summary>
-internal sealed record BedrockReply(IReadOnlyList<BedrockBlock> Blocks, string? StopReason, TokenUsage? Usage, string? RequestId);
+internal sealed record BedrockReply(IReadOnlyList<BedrockBlock> Blocks, string? StopReason, TokenUsage? Usage, string? RequestId, string? ModelId);
 
 /// <summary>Turns ConverseStream events into Connect events and accumulates the reply.</summary>
 internal sealed class BedrockStreamAccumulator
@@ -28,6 +28,7 @@ internal sealed class BedrockStreamAccumulator
     private bool _stopped;
     private string? _stopReason;
     private TokenUsage? _usage;
+    private string? _modelId;
 
     public IReadOnlyList<LlmStreamEvent> Observe(IEventStreamEvent streamEvent)
     {
@@ -52,6 +53,7 @@ internal sealed class BedrockStreamAccumulator
                 return [];
             case ConverseStreamMetadataEvent metadata:
                 _usage = metadata.Usage;
+                _modelId = metadata.Trace?.PromptRouter?.InvokedModelId;
                 return [];
             default:
                 // Message start, image and tool-result starts, and other block stops carry nothing Connect maps.
@@ -68,7 +70,7 @@ internal sealed class BedrockStreamAccumulator
                 LlmTransport.AwsBedrockConverse);
         }
 
-        return new BedrockReply([.. _blocks.Values.Select(block => block.ToReplyBlock())], _stopReason, _usage, requestId);
+        return new BedrockReply([.. _blocks.Values.Select(block => block.ToReplyBlock())], _stopReason, _usage, requestId, _modelId);
     }
 
     private IReadOnlyList<LlmStreamEvent> ObserveDelta(int index, ContentBlockDelta delta)

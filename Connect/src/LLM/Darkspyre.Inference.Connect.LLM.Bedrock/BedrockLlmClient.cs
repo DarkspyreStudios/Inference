@@ -480,7 +480,8 @@ internal sealed class BedrockLlmClient(
             }
         }
 
-        var reply = new BedrockReply(blocks, response.StopReason?.Value, response.Usage, response.ResponseMetadata?.RequestId);
+        var reply = new BedrockReply(blocks, response.StopReason?.Value, response.Usage, response.ResponseMetadata?.RequestId,
+            response.Trace?.PromptRouter?.InvokedModelId);
         LlmChatResult result = BuildResult(connection, request, enforcement, reply);
         LlmReasoningText[] reasoningText = [.. blocks.OfType<BedrockReasoningBlock>()
             .Where(block => block.Text.Length > 0)
@@ -556,6 +557,8 @@ internal sealed class BedrockLlmClient(
         return new LlmChatResult
         {
             Text = text,
+            ModelId = ObservedModel.Read(reply.ModelId, LlmTransport.AwsBedrockConverse, connection,
+                LlmCredential.Parse(connection.Credential), null),
             Refusal = status == LlmCompletionStatus.Refused ? text : null,
             Status = status,
             FinishReason = MapFinishReason(stopReason),

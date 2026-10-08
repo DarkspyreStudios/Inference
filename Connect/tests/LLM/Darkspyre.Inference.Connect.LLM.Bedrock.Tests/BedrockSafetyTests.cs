@@ -21,6 +21,55 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class BedrockSafetyTests
 {
+    [Theory]
+    [InlineData(false, "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0", false)]
+    [InlineData(true, "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0", false)]
+    [InlineData(false, null, false)]
+    [InlineData(true, null, false)]
+    [InlineData(false, "model-fixture-secret", true)]
+    [InlineData(true, "model-fixture-secret", true)]
+    public async Task RoutedModelIdentityRemainsActualOrUnknownAndRejectsProtectedValues(bool streaming, string? observedModel, bool invalid)
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => new StreamControl(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var response = StubConverseInvoker.Converse([new() { Text = "answer" }], "end_turn", null);
+        response.Trace = new() { PromptRouter = new() { InvokedModelId = observedModel } };
+        var invoker = new StubConverseInvoker
+        {
+            Response = response,
+            Events = [new ContentBlockDeltaEvent { ContentBlockIndex = 0, Delta = new() { Text = "answer" } },
+                new MessageStopEvent { StopReason = new("end_turn") }, new ConverseStreamMetadataEvent
+                { Trace = new() { PromptRouter = new() { InvokedModelId = observedModel } } }]
+        };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        var events = new List<LlmStreamEvent>();
+        async Task GenerateAsync()
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(ResourceConnection(streaming), Request())) events.Add(item);
+        }
+
+        if (invalid)
+        {
+            LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(GenerateAsync);
+            Assert.Equal("invalid_model_observation", failure.ProviderCode);
+            Assert.DoesNotContain("fixture-secret", failure.ToString(), StringComparison.Ordinal);
+            Assert.Empty(events.OfType<LlmChatCompletionEvent>());
+        }
+        else
+        {
+            await GenerateAsync();
+            LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+            LlmChatResult restored = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(result,
+                ConnectLlmJson.ChatResult), ConnectLlmJson.ChatResult)!;
+            Assert.Equal(observedModel, restored.ModelId);
+            Assert.Equal("answer", restored.Text);
+            Assert.Equal(LlmCompletionStatus.Completed, restored.Status);
+        }
+        Assert.Equal(streaming ? 1 : 0, invoker.StreamRequests.Count);
+        Assert.Equal(streaming ? 0 : 1, invoker.ConverseRequests.Count);
+    }
+
     [Fact]
     public async Task ManagedOpeningRefusesUnmappedConnectionOptionsBeforeCatalogAcquisition()
     {

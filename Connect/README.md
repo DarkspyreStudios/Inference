@@ -3947,6 +3947,11 @@ final metadata event and reaches the host on the completion.
 Converse usage includes cache reads and writes in normalized input tokens. A reported `totalTokens`
 remains authoritative and is not replaced by that normalized sum. A total-only SDK observation keeps
 input and output counts null. Both request modes use the same projection.
+Both modes preserve `trace.promptRouter.invokedModelId` as the result's actual model identity when
+AWS supplies it. Missing identity remains unknown; the requested ID or resolved inference profile
+does not replace it. The shared model-observation boundary rejects invalid or credential-bearing
+identity before completion publication. The existing Common projection carries that identity into
+provenance. This follows [AWS PromptRouterTrace](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_PromptRouterTrace.html).
 
 Valid tool calls return with `RequiresAction` or `Unknown`. Unknown calls remain observed evidence,
 not admitted tool execution. The stop reasons `max_tokens` and
