@@ -166,6 +166,7 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                 string? stopReason = null;
 
                 await foreach (IEventStreamEvent streamEvent in _invoker.InvokeAsync(
+                                   _connection,
                                    _aws,
                                    invokeRequest,
                                    token))

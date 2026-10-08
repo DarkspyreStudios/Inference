@@ -91,6 +91,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         string? stopReason = null;
 
         await foreach (IEventStreamEvent streamEvent in invoker.InvokeAsync(
+                           connection,
                            aws,
                            invokeRequest,
                            cancellationToken))

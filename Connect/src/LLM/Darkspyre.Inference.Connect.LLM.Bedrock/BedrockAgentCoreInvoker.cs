@@ -10,6 +10,7 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock;
 internal interface IBedrockAgentCoreInvoker
 {
     IAsyncEnumerable<IEventStreamEvent> InvokeAsync(
+        LlmConnection connection,
         LlmAwsCredentials aws,
         InvokeHarnessRequest request,
         CancellationToken cancellationToken);
@@ -19,19 +20,28 @@ internal sealed class BedrockAgentCoreInvoker(BedrockClientFactory factory)
     : IBedrockAgentCoreInvoker
 {
     public IAsyncEnumerable<IEventStreamEvent> InvokeAsync(
+        LlmConnection connection,
         LlmAwsCredentials aws,
         InvokeHarnessRequest request,
         CancellationToken cancellationToken) =>
-        factory.StreamAsync(token => InvokeOwnedAsync(aws, request, token), cancellationToken);
+        factory.StreamAsync(token => InvokeOwnedAsync(connection, aws, request, token), cancellationToken);
 
     [SuppressMessage("Design", "CA1031", Justification = "The adapter preserves the operation and each independent owned cleanup failure.")]
     [SuppressMessage("Usage", "CA2219", Justification = "Iterator retirement must surface recorded operation and cleanup failures on early reader disposal.")]
     private async IAsyncEnumerable<IEventStreamEvent> InvokeOwnedAsync(
+        LlmConnection connection,
         LlmAwsCredentials aws,
         InvokeHarnessRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using BedrockClientFactory.Lease<AmazonBedrockAgentCoreClient> lease = factory.AgentCore(aws, cancellationToken);
+        BedrockClientFactory.Lease<AmazonBedrockAgentCoreClient> acquired;
+        try { acquired = factory.AgentCore(aws, cancellationToken); }
+        catch (Exception error)
+        {
+            ExceptionDispatchInfo.Throw(BedrockLlmClient.ClassifyFailure(error, connection));
+            throw;
+        }
+        using BedrockClientFactory.Lease<AmazonBedrockAgentCoreClient> lease = acquired;
         cancellationToken = lease.Token;
         var failures = new List<Exception>();
         IDisposable? ownedResponse = null;
@@ -46,7 +56,7 @@ internal sealed class BedrockAgentCoreInvoker(BedrockClientFactory factory)
                 lease.ThrowIfCanceled();
                 events = response.Stream.GetAsyncEnumerator(cancellationToken);
             }
-            catch (Exception error) { failures.Add(error); }
+            catch (Exception error) { failures.Add(BedrockLlmClient.ClassifyFailure(error, connection)); }
             while (events is not null)
             {
                 bool moved;
@@ -64,7 +74,7 @@ internal sealed class BedrockAgentCoreInvoker(BedrockClientFactory factory)
                     failures.Add(new OperationCanceledException(cancellationToken));
                     break;
                 }
-                catch (Exception error) { failures.Add(error); break; }
+                catch (Exception error) { failures.Add(BedrockLlmClient.ClassifyFailure(error, connection)); break; }
                 yield return current;
             }
         }

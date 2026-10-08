@@ -4133,6 +4133,13 @@ API with a host-managed tool loop; AgentCore invokes a deployed
 [Harness](https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/harness.html) and owns the
 remote agent session. Both are registered by `AddLlmConnectBedrock()`.
 
+AgentCore chat and native-session calls pass the captured connection to the shared Bedrock failure
+classifier. SDK acquisition, Harness invocation and event-stream failures expose credential-redacted
+diagnostics for `AwsBedrockAgentCore`. Recognized service, client and HTTP stream causes retain their
+safe explanations; observed service status, code and request ID and HTTP status remain available.
+Unobserved metadata remains null. Raw exception graphs remain private. Cancellation and independent
+owned cleanup failures retain their existing handling.
+
 Configure AgentCore with the Harness ARN as the endpoint and the same protected AWS profile/region
 shape used by Bedrock Converse. The AWS SDK resolves the actual credentials from its standard chain:
 

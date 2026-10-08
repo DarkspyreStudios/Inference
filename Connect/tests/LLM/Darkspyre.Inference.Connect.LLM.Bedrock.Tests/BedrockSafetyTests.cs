@@ -1294,6 +1294,73 @@ public sealed class BedrockSafetyTests
     }
 
     [Theory]
+    [InlineData("service", false)]
+    [InlineData("service", true)]
+    [InlineData("client", false)]
+    [InlineData("client", true)]
+    [InlineData("http", false)]
+    [InlineData("http", true)]
+    [InlineData("wrapped-http", false)]
+    [InlineData("wrapped-http", true)]
+    [InlineData("acquisition", false)]
+    [InlineData("acquisition", true)]
+    public async Task AgentCoreSdkFailuresRetainSafeObservedDiagnostics(string kind, bool agent)
+    {
+        const string message = "Harness failed for fixture-key and fixture-secret.";
+        var cause = new IOException("Private Harness graph fixture-secret.");
+        Exception original = kind switch
+        {
+            "service" => new AmazonBedrockAgentCoreException(message, cause, ErrorType.Sender,
+                "unavailable_fixture-key_fixture-secret", "request-fixture-key-fixture-secret", HttpStatusCode.ServiceUnavailable),
+            "client" or "acquisition" => new AmazonClientException(message, cause),
+            "wrapped-http" => new BedrockAgentCoreEventStreamException("Private Harness wrapper fixture-key.",
+                new HttpRequestException(message, cause, HttpStatusCode.BadGateway)),
+            _ => new HttpRequestException(message, cause, HttpStatusCode.BadGateway)
+        };
+        AgentCoreStreamClient? sdkClient = kind == "acquisition" ? null : new(new()) { Failure = original };
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => throw new NotSupportedException(), _ => kind == "acquisition" ? throw original : sdkClient!);
+        var client = new BedrockAgentCoreLlmClient(new BedrockAgentCoreInvoker(factory));
+        LlmConnection connection = Connection() with
+        {
+            Transport = LlmTransport.AwsBedrockAgentCore,
+            Endpoint = "arn:aws:bedrock-agentcore:us-east-1:123456789012:harness/fixture",
+            Credential = new LlmCredential
+            {
+                Aws = new() { Region = "us-east-1", AccessKeyId = "fixture-key", SecretAccessKey = "fixture-secret" }
+            }.Serialize()
+        };
+        int completions = 0;
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            if (agent)
+            {
+                await using ILlmAgentSession session = await client.StartSessionAsync("connection", connection, new()
+                {
+                    ModelId = BedrockAgentCoreLlmClient.DefaultModelId,
+                    Runtime = new() { WorkingDirectory = AppContext.BaseDirectory }
+                });
+                await foreach (LlmAgentEvent item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hello")] }))
+                    if (item is LlmAgentTurnCompletedEvent) completions++;
+            }
+            else
+                await foreach (LlmStreamEvent item in client.StreamAsync(connection, Request() with { ModelId = BedrockAgentCoreLlmClient.DefaultModelId }))
+                    if (item is LlmChatCompletionEvent) completions++;
+        });
+        Assert.Contains("Harness failed for [REDACTED] and [REDACTED].", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(LlmTransport.AwsBedrockAgentCore, failure.Transport);
+        Assert.Equal(kind == "service" ? HttpStatusCode.ServiceUnavailable
+            : kind is "http" or "wrapped-http" ? HttpStatusCode.BadGateway : (HttpStatusCode?)null, failure.StatusCode);
+        Assert.Equal(kind == "service" ? "unavailable_[REDACTED]_[REDACTED]" : null, failure.ProviderCode);
+        Assert.Equal(kind == "service" ? "request-[REDACTED]-[REDACTED]" : null, failure.RequestId);
+        Assert.Null(failure.RetryAfter);
+        foreach (string value in new[] { "fixture-key", "fixture-secret", "Private Harness" })
+            Assert.DoesNotContain(value, failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal(0, completions);
+        Assert.Equal(kind == "acquisition" ? 0 : 1, sdkClient?.Calls ?? 0);
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
@@ -1436,6 +1503,7 @@ public sealed class BedrockSafetyTests
         Exception? operation = await Record.ExceptionAsync(async () =>
         {
             await foreach (IEventStreamEvent unused in invoker.InvokeAsync(
+                Connection() with { Transport = LlmTransport.AwsBedrockAgentCore, Credential = new LlmCredential { Aws = aws }.Serialize() },
                 aws, new AgentCore.InvokeHarnessRequest(), CancellationToken.None))
                 throw new InvalidOperationException("The failed invocation must not emit an event.");
         }).WaitAsync(TimeSpan.FromSeconds(5));
@@ -1444,7 +1512,11 @@ public sealed class BedrockSafetyTests
 
         Exception[] causes = Assert.IsType<AggregateException>(operation).Flatten().InnerExceptions.ToArray();
         Assert.Equal(2, causes.Length);
-        Assert.Same(readFailure, Assert.IsType<BedrockAgentCoreEventStreamException>(causes[0]).InnerException);
+        var failure = Assert.IsType<LlmProviderException>(causes[0]);
+        Assert.Equal(LlmTransport.AwsBedrockAgentCore, failure.Transport);
+        Assert.Null(failure.StatusCode);
+        Assert.Null(failure.InnerException?.InnerException);
+        Assert.DoesNotContain(readFailure.Message, failure.ToString(), StringComparison.Ordinal);
         var cleanup = Assert.IsType<InferenceResourceOperationException>(causes[1]);
         Assert.Equal(InferenceResourceOperationPhase.Cleanup, cleanup.Failure.Phase);
         Assert.Same(cleanup, retirement);
@@ -1479,6 +1551,7 @@ public sealed class BedrockSafetyTests
             SecretAccessKey = "fixture-secret"
         };
         await using IAsyncEnumerator<IEventStreamEvent> events = invoker.InvokeAsync(
+            Connection() with { Transport = LlmTransport.AwsBedrockAgentCore, Credential = new LlmCredential { Aws = aws }.Serialize() },
             aws, new AgentCore.InvokeHarnessRequest(), CancellationToken.None).GetAsyncEnumerator();
 
         Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
@@ -1785,10 +1858,15 @@ public sealed class BedrockSafetyTests
         : AmazonBedrockAgentCoreClient(new BasicAWSCredentials("fixture-key", "fixture-secret"), RegionEndpoint.USEast1)
     {
         internal bool Disposed { get; private set; }
+        internal Exception? Failure { get; init; }
+        internal int Calls { get; private set; }
 
         public override Task<AgentCore.InvokeHarnessResponse> InvokeHarnessAsync(
-            AgentCore.InvokeHarnessRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(response);
+            AgentCore.InvokeHarnessRequest request, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return Failure is { } failure ? Task.FromException<AgentCore.InvokeHarnessResponse>(failure) : Task.FromResult(response);
+        }
 
         protected override void Dispose(bool disposing)
         {

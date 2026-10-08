@@ -217,7 +217,7 @@ internal sealed class BedrockLlmClient(
                 try { moved = await events.MoveNextAsync().ConfigureAwait(false); }
                 catch (Exception error)
                 {
-                    failures.Add(ClassifyConverseFailure(error, connection));
+                    failures.Add(ClassifyFailure(error, connection));
                     break;
                 }
                 if (!moved) break;
@@ -309,33 +309,39 @@ internal sealed class BedrockLlmClient(
         yield return new LlmChatCompletionEvent(BuildResult(connection, request, enforcement, reply));
     }
 
-    private static Exception ClassifyConverseFailure(Exception error, LlmConnection connection)
+    /// <summary>Projects Bedrock SDK failures into credential-safe diagnostics for the selected transport.</summary>
+    internal static Exception ClassifyFailure(Exception error, LlmConnection connection)
     {
+        if (error is Amazon.BedrockAgentCore.BedrockAgentCoreEventStreamException
+            { InnerException: Amazon.Runtime.AmazonServiceException or Amazon.Runtime.AmazonClientException or HttpRequestException } agentCore)
+            return ClassifyFailure(agentCore.InnerException!, connection);
         if (error is InvalidOperationException { InnerException: { } cause } wrapped)
         {
-            Exception classifiedCause = ClassifyConverseFailure(cause, connection);
+            Exception classifiedCause = ClassifyFailure(cause, connection);
             if (ReferenceEquals(cause, classifiedCause)) return error;
             return new InvalidOperationException(SecretRedactor.Sanitize(wrapped.Message,
                 LlmCredential.Parse(connection.Credential), connection.AdditionalHeaders.Values), classifiedCause);
         }
         if (error is not Amazon.Runtime.AmazonServiceException && error is not Amazon.Runtime.AmazonClientException
-            && error is not BedrockRuntimeEventStreamException && error is not HttpRequestException
-            && error is not LlmProviderException { Transport: LlmTransport.AwsBedrockConverse }) return error;
+            && error is not BedrockRuntimeEventStreamException
+            && error is not Amazon.BedrockAgentCore.BedrockAgentCoreEventStreamException && error is not HttpRequestException
+            && (error is not LlmProviderException known || known.Transport != connection.Transport)) return error;
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         string Safe(string value) => SecretRedactor.Sanitize(value, credential, connection.AdditionalHeaders.Values);
         if (error is HttpRequestException transport)
             return new LlmProviderException($"Bedrock HTTP request failed: {Safe(transport.Message)}",
-                LlmTransport.AwsBedrockConverse, transport.StatusCode, innerException: new ConverseFailureEvidence(transport));
+                connection.Transport, transport.StatusCode, innerException: new FailureEvidence(transport));
         if (error is LlmProviderException classified)
             return new LlmProviderException(Safe(classified.Message), classified.Transport, classified.StatusCode,
                 classified.ProviderCode is { } classifiedCode ? Safe(classifiedCode) : null,
                 classified.RequestId is { } classifiedId ? Safe(classifiedId) : null,
                 classified.RetryAfter,
                 classified.SanitizedResponseBody is { } classifiedBody ? Safe(classifiedBody) : null,
-                new ConverseFailureEvidence(classified), classified.IsContextOverflow);
-        if (error is Amazon.Runtime.AmazonClientException or BedrockRuntimeEventStreamException)
+                new FailureEvidence(classified), classified.IsContextOverflow);
+        if (error is Amazon.Runtime.AmazonClientException or BedrockRuntimeEventStreamException
+            or Amazon.BedrockAgentCore.BedrockAgentCoreEventStreamException)
             return new LlmProviderException($"Bedrock {Safe(error.GetType().Name)}: {Safe(error.Message)}",
-                LlmTransport.AwsBedrockConverse, innerException: new ConverseFailureEvidence(error));
+                connection.Transport, innerException: new FailureEvidence(error));
         var aws = (Amazon.Runtime.AmazonServiceException)error;
         string message = Safe(aws.Message);
         if (aws is ModelStreamErrorException stream)
@@ -346,16 +352,16 @@ internal sealed class BedrockLlmClient(
                 message += $" Original model status: {originalStatus.ToString(CultureInfo.InvariantCulture)}.";
         }
         return new LlmProviderException($"Bedrock {Safe(aws.GetType().Name)}: {message}",
-            LlmTransport.AwsBedrockConverse, (int)aws.StatusCode == 0 ? null : aws.StatusCode,
+            connection.Transport, (int)aws.StatusCode == 0 ? null : aws.StatusCode,
             aws.ErrorCode is { } code ? Safe(code) : null, aws.RequestId is { } id ? Safe(id) : null,
-            innerException: new ConverseFailureEvidence(aws));
+            innerException: new FailureEvidence(aws));
     }
 
     private static AggregateException ClassifyConverseOperationAndCleanup(AggregateException error, LlmConnection connection)
     {
         if (error.InnerExceptions.Count < 2) return error;
         return new AggregateException("Bedrock Converse and owned cleanup failed.",
-            new[] { ClassifyConverseFailure(error.InnerExceptions[0], connection) }
+            new[] { ClassifyFailure(error.InnerExceptions[0], connection) }
                 .Concat(error.InnerExceptions.Skip(1).Select(cleanup => CleanupFailure(cleanup, error))));
     }
 
@@ -364,12 +370,12 @@ internal sealed class BedrockLlmClient(
         if (LlmResourcePreparation.IsCleanupFailure(error))
             return LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: owner);
         Exception safe = error is OperationCanceledException canceled
-            ? new OperationCanceledException("Bedrock owned cleanup was interrupted.", new ConverseFailureEvidence(error), canceled.CancellationToken)
-            : new ConverseFailureEvidence(error);
+            ? new OperationCanceledException("Bedrock owned cleanup was interrupted.", new FailureEvidence(error), canceled.CancellationToken)
+            : new FailureEvidence(error);
         return LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: owner);
     }
 
-    private sealed class ConverseFailureEvidence(Exception original) : Exception("Bedrock reported an operation or cleanup failure.")
+    private sealed class FailureEvidence(Exception original) : Exception("Bedrock reported an operation or cleanup failure.")
     {
         internal Exception Original { get; } = original;
     }
