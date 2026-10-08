@@ -2997,6 +2997,12 @@ On that same selected model and route, one managed turn with a three-iteration c
 the existing echo callback and replays its successful text result. The turn completes after two
 model steps with final answer `GROK-121-ECHO-OK`. No retry, other tool, upload or media operation
 occurs. This qualifies ordinary client-tool replay, not strict functions or hosted tools.
+One small UTF-8 reference note sent through the existing inline document attachment path returns
+`GROK-121-DOCUMENT-OK` on the Global/Default `grok-4.20-0309-non-reasoning` model. Both streaming
+and nonstreaming requests complete with finish reason `completed` and reported usage of 247 input
+and 10 output tokens each. The tester uses its separate saved OAuth credential without a Files
+upload, retry or alternate route. This qualifies that inline document input, not Files CRUD,
+provider file references, cross-provider resource transfer or hosted-search lifecycle observations.
 
 `XaiErrorClassifier` supplies one sanitized HTTP failure policy. It maps 401 and the specified
 token-validation 403 message to `AuthenticationRequired`, and 402 or a blocked account to the named
