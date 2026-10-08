@@ -4436,6 +4436,9 @@ and individual citation URLs on stderr. Model answer text remains on stdout. Bot
 same formatter. Missing call identity and terminal status display as `unknown`; a terminal call
 does not imply successful tool execution. Diagnostics do not dump hosted input/output JSON or
 generated image bytes.
+Image-generation completions also report the actual typed image byte count, or `unknown` when
+the payload is absent. This diagnostic reports payload presence, not pixel validity, dimensions
+or a resource commit. It writes neither binary content nor base64 to either output stream.
 `prompt --request <file>` loads a complete `LlmChatRequest` using `ConnectLlmJson.ChatRequest`
 instead of reading stdin. The file supplies model, messages, supported controls and ordered hosted
 descriptors. It cannot be combined with inline model, effort, schema or attachment options and is

@@ -431,8 +431,16 @@ internal static class Program
     private static void WriteHostedProgress(string callId, LlmHostedToolPhase phase, TextWriter diagnostics) =>
         diagnostics.WriteLine($"[hosted:progress] id={callId} phase={phase}");
 
-    private static void WriteHostedCompleted(LlmHostedToolCall call, TextWriter diagnostics) =>
+    private static void WriteHostedCompleted(LlmHostedToolCall call, TextWriter diagnostics)
+    {
         diagnostics.WriteLine($"[hosted:completed] id={call.CallId ?? "unknown"} kind={call.Kind} name={call.Name} status={call.Status ?? "unknown"}");
+        if (call.Kind == LlmHostedToolKind.ImageGeneration)
+        {
+            string bytes = call.Output is LlmHostedImageOutput image
+                ? image.Data.Length.ToString(CultureInfo.CurrentCulture) : "unknown";
+            diagnostics.WriteLine($"[hosted:image] bytes={bytes}");
+        }
+    }
 
     private static void WriteCitation(LlmCitation citation, TextWriter diagnostics) =>
         diagnostics.WriteLine($"[citation] {citation.Url}");

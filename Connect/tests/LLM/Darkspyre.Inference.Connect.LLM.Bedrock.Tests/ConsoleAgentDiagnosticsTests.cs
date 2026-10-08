@@ -182,6 +182,30 @@ public sealed class ConsoleAgentDiagnosticsTests
         Assert.Equal(HostedDiagnostics, diagnostics.ToString());
     }
 
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    public void HostedImageDiagnosticsReportObservedBytesWithoutPrintingThePayload(bool agent, bool hasOutput)
+    {
+        var call = new LlmHostedToolCall("image-call", LlmHostedToolKind.ImageGeneration,
+            "image_generation", "completed", null,
+            hasOutput ? new LlmHostedImageOutput(new byte[] { 0xff, 0xd8, 0xff }, "image/jpeg") : null);
+        using var answer = new StringWriter();
+        using var diagnostics = new StringWriter();
+
+        if (agent)
+            Program.WriteAgentEvent(new LlmAgentHostedToolCallCompletedEvent("session", "turn", "request", call), answer, diagnostics);
+        else
+            Assert.False(Program.WritePromptEvent(new LlmHostedToolCallCompletedEvent(call), answer, diagnostics));
+
+        Assert.Equal(string.Empty, answer.ToString());
+        Assert.Equal(string.Join(Environment.NewLine,
+            "[hosted:completed] id=image-call kind=ImageGeneration name=image_generation status=completed",
+            $"[hosted:image] bytes={(hasOutput ? "3" : "unknown")}", string.Empty), diagnostics.ToString());
+    }
+
     private static string HostedDiagnostics => string.Join(Environment.NewLine,
         "[hosted:started] id=observed-call kind=DocumentSearch name=file_search",
         "[hosted:progress] id=observed-call phase=Searching",
