@@ -3094,6 +3094,10 @@ returns two native choices, `grok-4.6` and `grok-4.7`. One UnitedStates/Default 
 on the listed `grok-4.6` model completes with `GROK-121-US-OK`, finish reason `completed`, and
 reported usage of 648 input and 358 output tokens. This qualifies that selected model and route,
 not every US model; a Global catalog entry does not establish access on the US route.
+The public tester rechecks UnitedStates/Default model discovery against source `b64c30f` with its
+existing OAuth credential. Authentication succeeds and the list again contains `grok-4.6` and
+`grok-4.7`, without a region/endpoint mismatch or generation prompt. This checks library catalog
+execution, not a consuming application's saved settings or sign-in display.
 One genuine UnitedStates/Default nonstreaming request at source `ced2dfd` selects `grok-4.6`,
 Low reasoning and 128 requested output tokens. It returns `GROK-121-US-NONSTREAM-OK`,
 `Completed` with finish reason `completed`, and reported usage of 654 input and 137 output
