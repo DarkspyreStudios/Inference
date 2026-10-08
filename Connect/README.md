@@ -4725,6 +4725,14 @@ The provider reports zero sources used separately from those five citations; the
 native usage field without deriving a count from citations. This qualifies the selected hosted search,
 not other hosted tools, domain-filter enforcement, output-cap enforcement, billing or every model.
 
+One streamed hosted code-execution request at source `33ddb0c` uses the same selected model and
+Global/Default route to evaluate `sum([2, 3, 5])`. Caller budgets are two hosted turns and 128
+visible output tokens. Connect surfaces one matching CodeExecution start/completion, answer `10`
+and `Completed/completed`. Actual usage reports 997 input, 21 output and 1018 total tokens,
+one CodeExecution call, one total hosted call and cost of 0.0062987500 USD. The request does not
+retry, read local files or copy credentials. This qualifies the selected synthetic code-execution
+route, not arbitrary remote execution, generated artifacts, output-cap enforcement or billing.
+
 ```bash
 dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- grok-probe --provider grok-subscription --case strict --repeat 1 --timeout-seconds 60
 ```
