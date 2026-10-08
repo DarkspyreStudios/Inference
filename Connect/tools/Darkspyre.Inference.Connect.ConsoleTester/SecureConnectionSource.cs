@@ -24,7 +24,7 @@ internal sealed class SecureConnectionSource(
             return null;
         }
 
-        string? credential = StoresHostCredential(provider.Transport)
+        string? credential = UsesHostCredential(provider)
             ? await credentials.GetAsync(CredentialName(provider), cancellationToken)
             : null;
         return BuildConnection(provider, credential);
@@ -41,7 +41,7 @@ internal sealed class SecureConnectionSource(
         {
             throw new InvalidOperationException($"No LLM connection found for '{connectionId}'.");
         }
-        if (!StoresHostCredential(provider.Transport))
+        if (!UsesHostCredential(provider))
         {
             throw new NotSupportedException(
                 $"{provider.DisplayName} does not use a host-stored credential.");
@@ -141,6 +141,13 @@ internal sealed class SecureConnectionSource(
 
     private static string CredentialName(ConsoleTesterProvider provider) =>
         $"{CredentialPrefix}{provider.Id}";
+
+    private bool UsesHostCredential(ConsoleTesterProvider provider) =>
+        StoresHostCredential(provider.Transport) &&
+        // An explicit local test endpoint is anonymous. A credential stored for the
+        // default endpoint must not be read or sent to this different destination.
+        !(provider.Transport == LlmTransport.OpenAiCompatibleChat &&
+          invocation?.Provider.ConnectionId == provider.ConnectionId && invocation.EndpointOverride is not null);
 
     private static bool StoresHostCredential(LlmTransport transport) => transport is
         LlmTransport.OpenAiCodex

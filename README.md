@@ -14,7 +14,7 @@ Typed .NET inference libraries for applications that need external AI providers,
 models, or both. Darkspyre Inference separates **what an application asks a model to do** from
 **how a particular provider or engine performs it**.
 
-The project ships libraries, not a standalone server. A Desktop application can call Tensor
+The four NuGet packages supply inference libraries. A Desktop application can call Tensor
 directly without an HTTP bridge. A web service can host the same libraries and translate its API
 into their typed contracts. In either case, the application owns startup, configuration, credentials,
 persistence, user consent, and shutdown.
@@ -31,6 +31,10 @@ not compatible with its managed wrapper. The corrected Mac package is available 
 feed. Fresh package-only consumer checks verify CPU, Metal and Auto initialization and clean shutdown
 in Debug and Release. These checks do not qualify model execution. The managed GGML wrapper is not
 a native driver and does not select the native package automatically.
+
+The repository also hosts the [GPU arbiter](App/README.md), an independent .NET 10 Windows
+x64 application under `App/` that shares a GPU between llama.cpp and ComfyUI. It owns its
+solution, version and deployment outside the four-package release.
 
 ## Goals
 
@@ -389,6 +393,11 @@ to the private feed, verifies fresh downloads, and pushes the release source and
 
 ## License
 
+<!-- ownership-notice:start -->
 > **Proprietary software.** Copyright © 2026 Brandon Mathis. All rights reserved.
 > No permission is granted to use, copy, modify, or distribute this software
-> without prior written authorization. See [LICENSE.md](LICENSE.md).
+> without prior written authorization.
+> Any contribution, including code, reviews, patches, issues and designs, is
+> assigned to Brandon Mathis on submission. See [LICENSE.md](LICENSE.md) and
+> [CONTRIBUTING.md](CONTRIBUTING.md).
+<!-- ownership-notice:end -->

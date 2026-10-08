@@ -4167,6 +4167,18 @@ from that engine; both are required to save. Checking and testing are local veri
 
 ## Console smoke tester
 
+The OpenAI-compatible ConsoleTester accepts `--endpoint` for a local server:
+
+```bash
+echo 'Reply only with OK.' | dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- \
+  prompt --provider openai-compatible-api --endpoint http://gpu-box:8080/v1 --model qwen3.8-27b
+```
+
+`models` accepts the same provider and endpoint options. The override selects an
+anonymous endpoint without reading or writing stored credentials. It is process-local and does
+not persist a connection. The default endpoint retains its stored credential.
+The compatible provider does not support the tester's `agent` command.
+
 `tools/Darkspyre.Inference.Connect.ConsoleTester` exercises the public Darkspyre.Inference.Connect.LLM facade directly without a shim or
 consuming application. `providers` lists the registered adapters; `setup --provider <id>` displays
 their own setup steps, fields, requirements and action effects without running those actions.

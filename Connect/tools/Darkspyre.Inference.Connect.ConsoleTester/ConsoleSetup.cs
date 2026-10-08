@@ -56,12 +56,13 @@ internal static class ConsoleSetup
         if (invocation.EndpointOverride is { } endpoint)
         {
             SetupField field = settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields)
-                .Single(field => field is SetupExecutableField || field.Description.Id == "harness-arn");
+                .Single(field => field is SetupExecutableField || field.Description.Id is "harness-arn" or "endpoint");
             SetupEditResult edit = field switch
             {
                 SetupExecutableField executable => executable.SetValue(new(endpoint)),
                 SetupTextField arn => arn.SetValue(endpoint),
-                _ => throw new ArgumentException("The provider has no executable or harness ARN field.")
+                SetupUriField uri => uri.SetValue(new Uri(endpoint, UriKind.Absolute)),
+                _ => throw new ArgumentException("The provider has no editable endpoint field.")
             };
             if (edit.State != SetupEditState.Applied) throw new ArgumentException("Invalid endpoint override.");
         }

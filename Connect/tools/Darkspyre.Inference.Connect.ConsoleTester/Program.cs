@@ -240,7 +240,7 @@ internal static class Program
         return await CheckReadyAsync(llms, invocation, cancellationToken) ? 0 : 3;
     }
 
-    private static async Task<bool> CheckReadyAsync(LlmProviderService llms,
+    internal static async Task<bool> CheckReadyAsync(LlmProviderService llms,
         ConsoleInvocation invocation, CancellationToken cancellationToken)
     {
         if (invocation.Provider.Transport == LlmTransport.GoogleVertexAi && invocation.Vertex?.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey)
@@ -251,6 +251,15 @@ internal static class Program
         }
         if (invocation.Provider.Transport is LlmTransport.AppleFoundationModels or LlmTransport.GoogleVertexAi)
             return await ConsoleSetup.CheckAsync(llms, invocation, Console.Error, cancellationToken) == SetupActionState.Completed;
+        if (invocation.Provider.Transport == LlmTransport.OpenAiCompatibleChat)
+        {
+            IReadOnlyList<LlmModel> models = await llms.ListModelsAsync(invocation.Provider.ConnectionId, cancellationToken);
+            bool reachable = models.Count > 0;
+            Console.Error.WriteLine(reachable
+                ? $"{invocation.Provider.DisplayName} is reachable and has registered models."
+                : $"{invocation.Provider.DisplayName} has no registered models.");
+            return reachable;
+        }
         bool ready = await llms.IsAuthenticatedAsync(invocation.Provider.ConnectionId, cancellationToken);
         Console.Error.WriteLine(ready
             ? $"{invocation.Provider.DisplayName} is authenticated."
@@ -789,6 +798,8 @@ internal static class Program
             Darkspyre.Inference.Connect.ConsoleTester - direct Connect LLM smoke tests
 
             Usage:
+              darkspyre-inference-connect-tester prompt --provider openai-compatible-api --endpoint http://gpu-box:8080/v1 --model qwen3.8-27b
+              darkspyre-inference-connect-tester models --provider openai-compatible-api --endpoint http://gpu-box:8080/v1
               darkspyre-inference-connect-tester providers
               darkspyre-inference-connect-tester setup --provider <provider-id-or-alias> [--helper <path>]
               darkspyre-inference-connect-tester status --provider apple [--helper <path>]
@@ -822,6 +833,7 @@ internal static class Program
               echo 'Call darkspyre_inference_connect_attachment with kind document and quote its text.' | darkspyre-inference-connect-tester agent --provider claude --model sonnet
 
             providers and setup display adapter-owned metadata without generation or authentication.
+            OpenAI-compatible --endpoint selects an anonymous test endpoint without reading or writing stored credentials.
             Apple needs its separately built helper and a ready on-device model; no login is required.
             Apple defaults its model from provider metadata. --helper accepts a name on PATH or an absolute path.
             vertex-probe performs explicit metered cloud generation with the configured Google authentication mode.
