@@ -4708,6 +4708,14 @@ in 2.13 seconds, verifies all 89 original bytes and confirms deletion of its exa
 These results do not qualify arbitrary strict schemas, regex semantics, public URLs, every page,
 expiry enforcement, cross-provider resource transfer or credential refresh.
 
+One public nonstreaming prompt at source `d26da43`, Global/Default and
+`grok-4.20-0309-non-reasoning` returns exactly `CONNECT_GROK_COMPLETE_OK` with
+`Completed/completed`. Actual usage reports 198 input, 6 output and 204 total tokens, with
+128 cached input tokens and provider-reported cost of 0.0001281000 USD. The connection selects
+`SupportsStreaming = false`; the adapter sends the native complete Responses request.
+This qualifies the selected plain complete route, not native response schemas, all models,
+credential refresh or actual account billing. The call does not retry or copy application credentials.
+
 ```bash
 dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- grok-probe --provider grok-subscription --case strict --repeat 1 --timeout-seconds 60
 ```
