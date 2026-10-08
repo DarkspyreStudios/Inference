@@ -31,8 +31,67 @@ public sealed class ConsoleAgentDiagnosticsTests
 
         Program.WriteCompletion(result, diagnostics);
 
-        Assert.Equal($"[completed] status=Completed finish=unknown usage={expectedUsage}{Environment.NewLine}",
-            diagnostics.ToString());
+        using var lines = new StringReader(diagnostics.ToString());
+        Assert.Equal($"[completed] status=Completed finish=unknown usage={expectedUsage}", lines.ReadLine());
+    }
+
+    [Theory]
+    [InlineData("completion")]
+    [InlineData("prompt")]
+    [InlineData("agent")]
+    public void ModelUsageDiagnosticsPreserveAllNormalizedFactsWithoutReflection(string source)
+    {
+        Assert.False(JsonSerializer.IsReflectionEnabledByDefault);
+        var usage = new LlmUsage(0, 19, null)
+        {
+            CachedInputTokens = 8,
+            CacheWriteInputTokens = 0,
+            ReasoningOutputTokens = null,
+            ProviderReportedCostUsd = 0.0000000001m,
+            HostedToolCallCount = 0,
+            HostedSourcesUsed = null,
+            HostedToolCalls = new Dictionary<LlmHostedToolKind, int> { [LlmHostedToolKind.CodeExecution] = 0 }
+        };
+        using var answer = new StringWriter();
+        using var diagnostics = new StringWriter();
+        switch (source)
+        {
+            case "completion":
+                Program.WriteCompletion(new()
+                {
+                    Text = "answer",
+                    Status = LlmCompletionStatus.Completed,
+                    Usage = usage,
+                    Diagnostics = new(200, null, null)
+                }, diagnostics);
+                break;
+            case "prompt":
+                Assert.False(Program.WritePromptEvent(new LlmUsageDeltaEvent(usage), answer, diagnostics));
+                break;
+            case "agent":
+                Program.WriteAgentEvent(new LlmAgentUsageEvent("session", "turn", "request", usage, null), answer, diagnostics);
+                Assert.Contains("[usage request] session=session turn=turn request=request", diagnostics.ToString(), StringComparison.Ordinal);
+                Assert.Contains($"[run usage] null{Environment.NewLine}", diagnostics.ToString(), StringComparison.Ordinal);
+                break;
+        }
+
+        Assert.Equal(string.Empty, answer.ToString());
+        using var lines = new StringReader(diagnostics.ToString());
+        string? line;
+        do { line = lines.ReadLine(); } while (line is not null && !line.StartsWith("[usage] ", StringComparison.Ordinal));
+        Assert.NotNull(line);
+        using JsonDocument document = JsonDocument.Parse(line[8..]);
+        JsonElement observed = document.RootElement;
+        Assert.Equal(0, observed.GetProperty("InputTokens").GetInt32());
+        Assert.Equal(19, observed.GetProperty("OutputTokens").GetInt32());
+        Assert.Equal(JsonValueKind.Null, observed.GetProperty("TotalTokens").ValueKind);
+        Assert.Equal(8, observed.GetProperty("CachedInputTokens").GetInt32());
+        Assert.Equal(0, observed.GetProperty("CacheWriteInputTokens").GetInt32());
+        Assert.Equal(JsonValueKind.Null, observed.GetProperty("ReasoningOutputTokens").ValueKind);
+        Assert.Equal(0.0000000001m, observed.GetProperty("ProviderReportedCostUsd").GetDecimal());
+        Assert.Equal(0, observed.GetProperty("HostedToolCallCount").GetInt32());
+        Assert.Equal(JsonValueKind.Null, observed.GetProperty("HostedSourcesUsed").ValueKind);
+        Assert.Equal(0, observed.GetProperty("HostedToolCalls").GetProperty("CodeExecution").GetInt32());
     }
 
     [Fact]

@@ -407,7 +407,7 @@ internal static class Program
                 diagnostics.WriteLine($"[activity] {activity.Activity}");
                 break;
             case LlmUsageDeltaEvent usage:
-                diagnostics.WriteLine($"[usage] input={usage.Cumulative.InputTokens} output={usage.Cumulative.OutputTokens} total={usage.Cumulative.TotalTokens}");
+                WriteModelUsage("usage", usage.Cumulative, diagnostics);
                 break;
             case LlmHostedToolCallStartedEvent started:
                 WriteHostedStarted(started.CallId, started.Kind, started.Name, diagnostics);
@@ -436,6 +436,9 @@ internal static class Program
 
     private static void WriteCitation(LlmCitation citation, TextWriter diagnostics) =>
         diagnostics.WriteLine($"[citation] {citation.Url}");
+
+    private static void WriteModelUsage(string label, LlmUsage? usage, TextWriter diagnostics) =>
+        diagnostics.WriteLine($"[{label}] {JsonSerializer.Serialize(usage, (JsonTypeInfo)InferenceJson.LlmUsage)}");
 
     private static async Task<int> RunAgentAsync(
         LlmProviderService llms,
@@ -645,6 +648,11 @@ internal static class Program
             case LlmAgentCitationsSnapshotEvent citations:
                 diagnostics.WriteLine($"[citations snapshot] request={citations.RequestId} count={citations.Citations.Count}");
                 break;
+            case LlmAgentUsageEvent usage:
+                diagnostics.WriteLine($"[usage request] session={usage.ThreadId} turn={usage.TurnId} request={usage.RequestId}");
+                WriteModelUsage("usage", usage.Usage, diagnostics);
+                WriteModelUsage("run usage", usage.RunTotals, diagnostics);
+                break;
             case LlmAgentHostedToolCallStartedEvent started:
                 WriteHostedStarted(started.CallId, started.Kind, started.Name, diagnostics);
                 break;
@@ -841,6 +849,7 @@ internal static class Program
             : $"{result.Usage.InputTokens?.ToString(CultureInfo.CurrentCulture) ?? "unknown"} in / {result.Usage.OutputTokens?.ToString(CultureInfo.CurrentCulture) ?? "unknown"} out";
         diagnostics.WriteLine(
             $"[completed] status={result.Status} finish={result.FinishReason ?? "unknown"} usage={usage}");
+        WriteModelUsage("usage", result.Usage, diagnostics);
         if (result.StructuredOutput is { } structured)
         {
             diagnostics.WriteLine(

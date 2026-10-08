@@ -1691,6 +1691,13 @@ are suppressed. Only completion usage is authoritative, including when it correc
 ConsoleTester completion diagnostics render each unreported token count as `unknown`, preserve
 reported zero as `0`, and render an absent usage object as `unavailable`. Missing provider counts
 never appear as measured zero.
+Prompt usage deltas and completion diagnostics include the complete normalized `LlmUsage` as
+JSON through the owned `InferenceJson.LlmUsage` metadata. Agent usage diagnostics preserve the
+actual session, turn and request IDs, followed by separate current-request and run-total usage
+objects. Every reported token subset, provider cost, hosted count and source count remains exact;
+unreported fields and absent objects remain JSON null. One serializer serves all three paths
+without reflection, local accounting or raw provider-body logging. Diagnostics stay on stderr,
+separate from answer text.
 `LlmUsage` also carries nullable `ProviderReportedCostUsd`, `HostedToolCallCount`, `HostedSourcesUsed`
 and a frozen `HostedToolCalls` map keyed by `LlmHostedToolKind`. These are independent provider facts;
 no local price calculation or named-count sum invents an unreported total. Distinct completed calls
