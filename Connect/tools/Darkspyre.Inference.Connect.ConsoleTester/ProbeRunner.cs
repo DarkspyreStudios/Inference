@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM;
+using Darkspyre.Inference.Connect.Resources;
 
 namespace Darkspyre.Inference.Connect.ConsoleTester;
 
@@ -38,8 +39,9 @@ internal sealed record ProviderProbeOptions(string Model, string Case, int Repea
 
 internal sealed record ProbeCase(string Name, Func<CancellationToken, Task<string>> Run);
 
-// Reports include owned assertions and public typed failure diagnostics, never private exception causes or payloads.
+// Reports include owned assertions and public typed diagnostics, never arbitrary exception text or payloads.
 internal sealed class ProbeFailure(string message) : Exception(message);
+internal sealed class ProbeUnavailable(string message) : Exception(message);
 
 internal static class ProbeRunner
 {
@@ -76,6 +78,12 @@ internal static class ProbeRunner
                     state = "PASS";
                     passed++;
                 }
+                catch (ProbeUnavailable error)
+                {
+                    state = "SKIP";
+                    skipped++;
+                    detail = error.Message;
+                }
                 catch (OperationCanceledException) when (token.IsCancellationRequested)
                 {
                     output.WriteLine($"CANCELLED {iteration}/{options.Repeat} {test.Name}; passed={passed} failed={failed} skipped={skipped}");
@@ -100,8 +108,16 @@ internal static class ProbeRunner
     {
         AggregateException aggregate => string.Join("; ", aggregate.InnerExceptions.Select(FailureDetail)),
         ProbeFailure assertion => assertion.Message,
+        ProbeUnavailable unavailable => unavailable.Message,
+        LlmResourceOperationException resource => ResourceFailureDetail(resource.Observation, resource.InnerException),
+        LlmResourceOperationCanceledException resource => ResourceFailureDetail(resource.Observation, resource.InnerException),
         InferenceException inference => Program.FormatInferenceFailure(inference),
         LlmProviderException provider => Program.FormatProviderFailure(provider),
         _ => $"{error.GetType().Name} (provider details omitted)"
     };
+
+    private static string ResourceFailureDetail(LlmResourceOperationObservation observation, Exception? cause) =>
+        $"Resource {observation.Operation}: HTTP {observation.HttpStatusCode?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}; "
+        + $"request={observation.RequestId ?? "unknown"}; "
+        + (cause is null ? "cause unavailable" : FailureDetail(cause));
 }

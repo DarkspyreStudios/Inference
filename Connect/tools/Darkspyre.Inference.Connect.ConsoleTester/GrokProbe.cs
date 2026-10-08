@@ -1,8 +1,11 @@
 using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
+using Darkspyre.Inference.Connect.Resources;
+using Darkspyre.Inference.Connect.TTS;
 
 namespace Darkspyre.Inference.Connect.ConsoleTester;
 
@@ -13,7 +16,8 @@ internal static class GrokProbe
     private const string ToolName = "connect_strict_marker";
 
     internal static async Task<int> RunAsync(LlmProviderService llms, LlmAgentProviderService agents,
-        ConsoleInvocation invocation, CancellationToken token)
+        ILlmConnectionSource connections, LlmConnectionAccess access, TtsProviderService speech,
+        ILlmBatchClient batches, ConsoleInvocation invocation, CancellationToken token)
     {
         ProviderProbeOptions options = ProviderProbeOptions.Parse(invocation.CommandArguments,
             "grok-4.20-0309-non-reasoning");
@@ -23,9 +27,135 @@ internal static class GrokProbe
             new("strict", cancellation => StrictAsync(agents, invocation.Provider.ConnectionId, options.Model,
                 Console.Out, cancellation)),
             new("files", cancellation => FilesAsync(llms, invocation.Provider.ConnectionId,
-                options.TimeoutSeconds, Console.Out, cancellation))
+                options.TimeoutSeconds, Console.Out, cancellation)),
+            new("tts", cancellation => SpeechAsync(llms, connections, access, speech,
+                invocation.Provider.ConnectionId, options.TimeoutSeconds, cancellation)),
+            new("batch", cancellation => BatchAsync(batches, invocation.Provider.ConnectionId,
+                options.Model, options.TimeoutSeconds, Console.Out, cancellation)),
+            new("deferred", cancellation => DeferredAsync(batches, invocation.Provider.ConnectionId,
+                options.Model, Console.Out, cancellation))
         ];
         return await ProbeRunner.RunAsync(cases, options, ready, Console.Out, token);
+    }
+
+    private static async Task<string> SpeechAsync(LlmProviderService llms, ILlmConnectionSource connections,
+        LlmConnectionAccess access, TtsProviderService speech, string connectionId, int timeoutSeconds,
+        CancellationToken token)
+    {
+        LlmConnection selected = await connections.GetConnectionAsync(connectionId, token)
+            ?? throw new ProbeUnavailable("The selected Grok connection is unavailable.");
+        var binding = new XaiFamilyBinding(new(connectionId), access, llms);
+        await using ITtsClient client = speech.Bind(new()
+        {
+            Transport = TtsTransport.XaiTts,
+            Endpoint = new Uri(selected.Endpoint),
+            RequestTimeout = TimeSpan.FromSeconds(timeoutSeconds),
+            Xai = binding.Selection
+        }, binding);
+        IReadOnlyList<TtsVoice> voices = await client.ListVoicesAsync(token);
+        if (voices.Count == 0) throw new ProbeUnavailable("Grok returned no voices; speech generation is not qualified.");
+        TtsResult result = await client.SpeakAsync(new()
+        {
+            Text = "Hello from Connect.",
+            VoiceId = voices[0].Id,
+            Language = "en",
+            Format = TtsAudioFormat.Wav
+        }, token);
+        ValidateSpeech(result);
+        return $"voice catalog and one short REST utterance returned {result.Audio.Length} bytes ({result.ContentType}); no playback or persisted audio";
+    }
+
+    internal static void ValidateSpeech(TtsResult result)
+    {
+        if (result.Audio.IsEmpty || !result.ContentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
+            throw new ProbeFailure("Speech must return nonempty audio with an audio media type.");
+    }
+
+    internal static async Task<string> BatchAsync(ILlmBatchClient batches, string connectionId, string model,
+        int cleanupTimeoutSeconds, TextWriter output, CancellationToken token)
+    {
+        string marker = $"CONNECT_BATCH_{Guid.NewGuid():N}";
+        string customId = $"connect-{Guid.NewGuid():N}";
+        LlmBatch? batch = null;
+        Exception? failure = null;
+        try
+        {
+            batch = await batches.CreateFromRequestsAsync(connectionId, customId,
+                [new(customId, new LlmBatchChatOperation(MarkerRequest(model, marker)))], cancellationToken: token);
+            output.WriteLine($"Synthetic batch receipt: {batch.Id}; one request: {customId}.");
+            batch = await batches.GetAsync(connectionId, batch, token);
+            LlmBatchRequestPage requests = await batches.ListRequestsAsync(connectionId, batch, new(Limit: 1), token);
+            if (requests.Items.Count != 1)
+                throw new ProbeFailure("The single batch metadata page must contain one request.");
+            // A single marker result needs no media; retain at most one MiB of the response page.
+            LlmBatchResultPage results = await batches.GetResultsAsync(connectionId, batch, new(Limit: 1),
+                new(1_048_576, 1_048_576), cancellationToken: token);
+            if (results.Items.Count == 0)
+                throw new ProbeUnavailable("Batch submission/get/list succeeded; the one result page is empty. Completion is unqualified; no poll or retry follows.");
+            if (results.Items.Count == 1 && results.Items[0] is LlmBatchFailure failed)
+                throw new InferenceException(failed.Error.Code, $"Batch {failed.Error.ProviderCode ?? "unknown"}: {failed.Error.Message}");
+            if (results.Items.Count != 1 || results.Items[0] is not LlmBatchChatResult chat || chat.CustomId != customId)
+                throw new ProbeFailure("The batch page must return exactly the submitted chat result with its CustomId.");
+            ValidateMarker(chat.Result, marker);
+        }
+        catch (Exception error)
+        {
+            failure = error;
+            batch ??= error switch
+            {
+                LlmResourceOperationException resource => resource.Observation.ObservedBatch,
+                LlmResourceOperationCanceledException resource => resource.Observation.ObservedBatch,
+                _ => null
+            };
+        }
+        if (batch is not null && batch.Counts.Pending != 0)
+        {
+            using var cleanup = new CancellationTokenSource(TimeSpan.FromSeconds(cleanupTimeoutSeconds));
+            try
+            {
+                LlmBatch cancelled = await batches.CancelAsync(connectionId, batch, cleanup.Token);
+                if (cancelled.Id != batch.Id)
+                    throw new ProbeFailure("Cancellation does not acknowledge the exact synthetic batch.");
+                output.WriteLine($"Synthetic batch cancellation acknowledged: {batch.Id}; terminal cleanup remains unqualified.");
+            }
+            catch (Exception error)
+            {
+                output.WriteLine($"Synthetic batch cleanup failed: {ProbeRunner.FailureDetail(error)}");
+                if (failure is not null) throw new AggregateException(failure, error);
+                throw;
+            }
+        }
+        if (failure is not null) ExceptionDispatchInfo.Capture(failure).Throw();
+        return "one batch row and its actual marker result verified; no retry or unrelated batch cancellation";
+    }
+
+    private static async Task<string> DeferredAsync(ILlmBatchClient batches, string connectionId, string model,
+        TextWriter output, CancellationToken token)
+    {
+        string marker = $"CONNECT_DEFERRED_{Guid.NewGuid():N}";
+        LlmDeferredCompletion receipt = await batches.SubmitDeferredAsync(connectionId, MarkerRequest(model, marker),
+            cancellationToken: token);
+        output.WriteLine($"Synthetic deferred receipt: {receipt.RequestId}; exactly one retrieval follows.");
+        LlmDeferredResult result = await batches.GetDeferredAsync(connectionId, receipt, cancellationToken: token);
+        if (result is LlmDeferredPending)
+            throw new ProbeUnavailable("Deferred submission/get succeeded; the provider reports Pending. Completion is unqualified; no consuming retry follows.");
+        if (result is not LlmDeferredCompleted completed) throw new ProbeFailure("Unknown deferred result kind.");
+        ValidateMarker(completed.Result, marker);
+        return "one deferred request completed with its actual marker; exactly one consuming GET";
+    }
+
+    private static LlmChatRequest MarkerRequest(string model, string marker) => new()
+    {
+        ModelId = model,
+        Messages = [new("user", $"Reply only with {marker}. Use no tools.")],
+        // One marker needs only a short answer, not an unrestricted generation.
+        MaxOutputTokens = 64
+    };
+
+    private static void ValidateMarker(LlmChatResult result, string marker)
+    {
+        if (result.Status != LlmCompletionStatus.Completed || result.Text.Trim() != marker)
+            throw new ProbeFailure("The synthetic request must complete with its exact marker.");
     }
 
     internal static async Task<string> StrictAsync(LlmAgentProviderService agents, string connectionId,

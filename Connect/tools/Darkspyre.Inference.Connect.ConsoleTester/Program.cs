@@ -10,6 +10,8 @@ using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Bedrock;
 using Darkspyre.Inference.Connect.LLM.Vertex;
+using Darkspyre.Inference.Connect.Resources;
+using Darkspyre.Inference.Connect.TTS;
 using Microsoft.Extensions.DependencyInjection;
 using SecureStore;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -52,6 +54,8 @@ internal static class Program
         services.AddLlmConnect();
         services.AddLlmConnectBedrock();
         services.AddLlmConnectVertex();
+        services.AddTtsConnect();
+        services.AddLlmResources();
         await using ServiceProvider provider = services.BuildServiceProvider();
         try
         {
@@ -80,7 +84,9 @@ internal static class Program
                 "usage" => await RunUsageAsync(llms, invocation, cancellation.Token),
                 "prompt" => await RunPromptAsync(llms, invocation, cancellation.Token),
                 "grok-probe" when invocation.Provider.Transport == LlmTransport.XaiResponses =>
-                    await GrokProbe.RunAsync(llms, agent, invocation, cancellation.Token),
+                    await GrokProbe.RunAsync(llms, agent, provider.GetRequiredService<ILlmConnectionSource>(),
+                        provider.GetRequiredService<LlmConnectionAccess>(), provider.GetRequiredService<TtsProviderService>(),
+                        provider.GetRequiredService<LlmResourceProviderService>(), invocation, cancellation.Token),
                 "agy-probe" when invocation.Provider.Transport == LlmTransport.GoogleAntigravityCli =>
                     await NativeCliProbe.RunAsync(llms, agent, invocation, cancellation.Token),
                 "claude-probe" when invocation.Provider.Transport == LlmTransport.AnthropicClaudeCli =>
@@ -914,7 +920,7 @@ internal static class Program
               darkspyre-inference-connect-tester agy-probe --provider antigravity [--model <id>] [--case all|text|structured|native-tools|session|resume|controls|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
               darkspyre-inference-connect-tester claude-probe --provider claude [--model <id>] [--case all|resume|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
               darkspyre-inference-connect-tester codex-probe --provider codex --model <model-id>
-              darkspyre-inference-connect-tester grok-probe --provider grok-subscription [--model <id>] [--case all|strict|files] [--repeat 1..20] [--timeout-seconds 1..600] [--xai-region Global|UnitedStates]
+              darkspyre-inference-connect-tester grok-probe --provider grok-subscription [--model <id>] [--case all|strict|files|tts|batch|deferred] [--repeat 1..20] [--timeout-seconds 1..600] [--xai-region Global|UnitedStates]
               darkspyre-inference-connect-tester managed-probe --provider codex --model <model-id>
               darkspyre-inference-connect-tester prompt --provider <codex|claude|antigravity|bedrock|agentcore|grok-subscription> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--non-streaming] [--xai-region Global|UnitedStates]
               darkspyre-inference-connect-tester prompt --provider <provider-id> --request <file> [--harness-arn <arn>] [--non-streaming] [--xai-region Global|UnitedStates]

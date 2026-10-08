@@ -4793,11 +4793,12 @@ public error codes and explanations. Probes report only the type of other except
 Antigravity turn probes retain the actual non-success terminal status, reason and public error.
 They stop that case before another turn is sent. A stream without terminal completion still fails
 its existing completion check.
-The tester does not print inner exceptions, response bodies or stack traces. Local request refusals
+The tester does not print arbitrary inner exception text, response bodies or stack traces. Local request refusals
 retain their explanation, including the reasoning levels the selected model accepts.
 
-`grok-probe --provider grok-subscription` explicitly checks `strict`, `files`, or both with
-`--case all`. It uses the existing probe model/repeat/deadline options and typed `--xai-region`.
+`grok-probe --provider grok-subscription` explicitly checks `strict`, `files`, `tts`, `batch`
+or `deferred`, or every case with `--case all`. It uses the existing probe model/repeat/deadline
+options and typed `--xai-region`.
 Strict checks use one original closed object schema, validate the returned required enum argument,
 permit at most two managed model iterations and require the successful callback's unique result
 as the completed answer. This is not qualification of arbitrary strict schemas or regex guarantees.
@@ -4807,6 +4808,24 @@ ID returned by that upload. Cleanup uses a separate wait with the case's selecte
 preserves independent operation and cleanup failures. An upload without a returned receipt leaves
 remote creation unknown; no guessed ID, filename search deletion, retry or rollback is performed.
 The checks use the existing agent and Files facades and do not copy application credentials.
+TTS uses the same selected connection access and LLM core through `XaiFamilyBinding`. It lists
+actual voices and requests one three-word English WAV utterance with the first returned voice.
+It requires nonempty audio and an audio media type. It does not play or persist the result,
+or qualify STT, WebSocket speech or Realtime.
+Batch creates one text row with a 64-token allowance for its marker reply. It gets the actual
+batch, reads one metadata page and one result page, and retains at most one MiB of inline response.
+Metadata IDs remain provider IDs; result correlation uses the submitted CustomId. Completed output
+must match the marker. An empty result page reports `SKIP` and exit 3, not successful completion
+or a fabricated pending state.
+Cleanup requests cancellation only for its own receipt when the observed pending count is nonzero
+or unknown. A cancellation acknowledgement does not prove terminal cleanup. Cleanup uses the
+case's selected timeout and retains both the operation and cancellation failure if both occur.
+Deferred submits one short marker request and performs exactly one consuming retrieval. It prints
+the actual receipt ID. Pending reports `SKIP` and exit 3 with completion explicitly unqualified;
+the tester does not poll or retry. A completed response must retain the exact marker.
+Resource failures report actual typed HTTP/request facts and safe typed causes. Arbitrary cause
+messages remain omitted. Missing authentication skips the case; provider access failures remain
+visible failures and do not become passes. These checks reuse existing facades and add no SDK contract.
 
 Live Global/Default qualification at source `1418ba1` passes both cases with the tester's
 existing OAuth credential and no retries. The strict case selects

@@ -2,15 +2,127 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.ConsoleTester;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Darkspyre.Inference.Connect.Resources;
+using Darkspyre.Inference.Connect.TTS;
 using SecureStore;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class ConsoleAgentDiagnosticsTests
 {
+    [Theory]
+    [InlineData("audio/wav", true)]
+    [InlineData("application/json", false)]
+    public void SpeechProbeDoesNotAcceptAnErrorPayloadAsAudio(string mediaType, bool valid)
+    {
+        var result = new TtsResult(mediaType, new byte[] { 1 }, new() { ImplementationId = "probe", ModelId = null });
+        if (valid) GrokProbe.ValidateSpeech(result);
+        else Assert.Throws<ProbeFailure>(() => GrokProbe.ValidateSpeech(result));
+        Assert.Throws<ProbeFailure>(() => GrokProbe.ValidateSpeech(result with { Audio = ReadOnlyMemory<byte>.Empty }));
+    }
+
+    [Fact]
+    public async Task PendingProbeIsSkippedAndNeverReportedAsPassed()
+    {
+        using var output = new StringWriter();
+        int status = await ProbeRunner.RunAsync(
+            [new("deferred", _ => Task.FromException<string>(new ProbeUnavailable("Provider reports Pending.")))],
+            new("model", "deferred", 1, 1), true, output, CancellationToken.None);
+        Assert.Equal(3, status);
+        Assert.Contains("SKIP 1/1 deferred", output.ToString(), StringComparison.Ordinal);
+        Assert.Contains("passed=0 failed=0 skipped=1", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ResourceProbeReportsTypedHttpFailureWithoutArbitraryCauseText()
+    {
+        var observation = new LlmResourceOperationObservation(LlmResourceOperation.SubmitDeferred, false, true, false, true)
+        {
+            HttpStatusCode = 403,
+            RequestId = "safe-request"
+        };
+        string diagnostics = ProbeRunner.FailureDetail(new LlmResourceOperationException(observation,
+            new InferenceException(InferenceFailureCode.AccessDenied, "The selected account lacks access.")));
+        Assert.Contains("HTTP 403", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("request=safe-request", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("AccessDenied", diagnostics, StringComparison.Ordinal);
+        Assert.Contains("lacks access", diagnostics, StringComparison.Ordinal);
+        string opaque = ProbeRunner.FailureDetail(new LlmResourceOperationException(observation,
+            new IOException("private-cause-text")));
+        Assert.Contains("IOException", opaque, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-cause-text", opaque, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EmptyBatchPageKeepsCompletionUnqualifiedAndCancelsOnlyItsReceipt()
+    {
+        var batches = new SyntheticBatch();
+        using var output = new StringWriter();
+        ProbeUnavailable pending = await Assert.ThrowsAsync<ProbeUnavailable>(() =>
+            GrokProbe.BatchAsync(batches, "connection", "model", 1, output, CancellationToken.None));
+        Assert.Contains("empty", pending.Message, StringComparison.Ordinal);
+        Assert.Contains("Completion is unqualified", pending.Message, StringComparison.Ordinal);
+        Assert.Equal("synthetic-batch", Assert.Single(batches.CancelledIds));
+        Assert.Contains("cancellation acknowledged", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task BatchProbePreservesResultAndCancellationFailuresTogether()
+    {
+        var operation = new IOException("Results failed.");
+        var cleanup = new IOException("Cancellation failed.");
+        var batches = new SyntheticBatch { ResultFailure = operation, CancelFailure = cleanup };
+        using var output = new StringWriter();
+        AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() =>
+            GrokProbe.BatchAsync(batches, "connection", "model", 1, output, CancellationToken.None));
+        Assert.Equal([operation, cleanup], failure.InnerExceptions);
+        Assert.Equal("synthetic-batch", Assert.Single(batches.CancelledIds));
+        Assert.DoesNotContain("cancellation acknowledged", output.ToString(), StringComparison.Ordinal);
+    }
+
+    private sealed class SyntheticBatch : ILlmBatchClient
+    {
+        private readonly LlmBatch _batch = new("synthetic-batch", "synthetic", new("test", "test"), new(1, 1, 0, 0, 0));
+        public List<string> CancelledIds { get; } = [];
+        public Exception? ResultFailure { get; init; }
+        public Exception? CancelFailure { get; init; }
+
+        public Task<LlmBatch> CreateFromRequestsAsync(string connectionId, string name,
+            IReadOnlyList<LlmBatchRequest> requests, IInferenceResourceAccess? resources = null,
+            CancellationToken cancellationToken = default)
+        {
+            LlmBatchRequest request = Assert.Single(requests);
+            Assert.Equal(64, Assert.IsType<LlmBatchChatOperation>(request.Operation).Request.MaxOutputTokens);
+            return Task.FromResult(_batch);
+        }
+        public Task<LlmBatch> GetAsync(string connectionId, LlmBatch batch, CancellationToken cancellationToken = default) => Task.FromResult(batch);
+        public Task<LlmBatchRequestPage> ListRequestsAsync(string connectionId, LlmBatch batch,
+            LlmResourcePageRequest page, CancellationToken cancellationToken = default) => Task.FromResult(
+                new LlmBatchRequestPage([new("native-request", null, null, null)], null));
+        public Task<LlmBatchResultPage> GetResultsAsync(string connectionId, LlmBatch batch,
+            LlmResourcePageRequest page, LlmMediaMaterializationOptions materialization,
+            IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default) =>
+            ResultFailure is null ? Task.FromResult(new LlmBatchResultPage([], null)) : Task.FromException<LlmBatchResultPage>(ResultFailure);
+        public Task<LlmBatch> CancelAsync(string connectionId, LlmBatch batch, CancellationToken cancellationToken = default)
+        {
+            CancelledIds.Add(batch.Id);
+            return CancelFailure is null ? Task.FromResult(batch) : Task.FromException<LlmBatch>(CancelFailure);
+        }
+        public Task<LlmBatch> CreateAsync(string connectionId, string name, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task AddRequestsAsync(string connectionId, LlmBatch batch, IReadOnlyList<LlmBatchRequest> requests,
+            IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<LlmBatchPage> ListAsync(string connectionId, LlmResourcePageRequest page,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<LlmDeferredCompletion> SubmitDeferredAsync(string connectionId, LlmChatRequest request,
+            IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<LlmDeferredResult> GetDeferredAsync(string connectionId, LlmDeferredCompletion completion,
+            IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
     [Fact]
     public void StrictProbeChecksTheOriginalRequiredEnumAndClosedObject()
     {
