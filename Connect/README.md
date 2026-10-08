@@ -3273,6 +3273,8 @@ the same finite SDK HTTP pipelines. Provider discovery performs no OAuth or mode
 Registration alone does not qualify OAuth refresh or every provider capability. The selected live
 qualifications above do not change registration behavior.
 `LlmModelListCache` owns generic and lazy listings for all four model families. Agent counts are distinct from reasoning levels.
+Grok catalog HTTP and malformed-catalog failures redact reflected credentials and selected/effective
+outgoing headers, including borrowed HttpClient defaults, while retaining actual safe request IDs.
 The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/pricing).
 
 `LlmProviderService` implements Connect's `ILlmTextTokenizer`. `TokenizeAsync` accepts a connection

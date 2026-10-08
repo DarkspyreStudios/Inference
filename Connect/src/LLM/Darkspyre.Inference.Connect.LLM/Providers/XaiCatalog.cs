@@ -33,10 +33,10 @@ internal static class XaiCatalog
             Fence();
             request = new(HttpMethod.Get, ProviderHttp.BuildUri(connection, path));
             XaiRequestHeaders.Apply(request, connection, false);
-            string[] appliedHeaderValues = request.Headers.SelectMany(header => header.Value).ToArray();
             Fence();
             response = await http.SendAsync(request, consumption.Token).ConfigureAwait(false);
             Fence();
+            string[] appliedHeaderValues = connection.AdditionalHeaders.Values.Concat(request.Headers.SelectMany(header => header.Value)).ToArray();
             await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), appliedHeaderValues, consumption.Token).ConfigureAwait(false);
             Fence();
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, consumption.Token).ConfigureAwait(false);
@@ -51,7 +51,8 @@ internal static class XaiCatalog
             }
             catch (JsonException) { }
             if (result is null) throw new LlmProviderException("Grok model discovery returned an invalid catalog.",
-                LlmTransport.XaiResponses, response.StatusCode, requestId: ProviderHttp.ReadRequestId(response),
+                LlmTransport.XaiResponses, response.StatusCode,
+                requestId: ProviderHttp.ReadRequestId(response, LlmCredential.Parse(connection.Credential), appliedHeaderValues),
                 sanitizedResponseBody: SecretRedactor.Sanitize(body, LlmCredential.Parse(connection.Credential), appliedHeaderValues));
             Fence();
         }
