@@ -246,6 +246,68 @@ public sealed class BedrockSafetyTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HttpFailuresRetainRedactedExplanationAndObservedStatus(bool streaming)
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => new StreamControl(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker
+        {
+            Failure = new HttpRequestException("Connection rejected fixture-key and fixture-secret.",
+                new IOException("Private SDK cause fixture-secret."), HttpStatusCode.BadGateway)
+        };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        var events = new List<LlmStreamEvent>();
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(ResourceConnection(streaming), Request())) events.Add(item);
+        });
+        Assert.Contains("Connection rejected [REDACTED] and [REDACTED].", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(LlmTransport.AwsBedrockConverse, failure.Transport);
+        Assert.Equal(HttpStatusCode.BadGateway, failure.StatusCode);
+        Assert.Null(failure.ProviderCode);
+        Assert.Null(failure.RequestId);
+        Assert.Null(failure.RetryAfter);
+        Assert.DoesNotContain("fixture-key", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("fixture-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Private SDK cause", failure.ToString(), StringComparison.Ordinal);
+        Assert.Empty(events.OfType<LlmChatCompletionEvent>());
+        Assert.Equal(streaming ? 0 : 1, invoker.ConverseRequests.Count);
+        Assert.Equal(streaming ? 1 : 0, invoker.StreamRequests.Count);
+    }
+
+    [Fact]
+    public async Task LoggingVerificationRefusalRetainsSafeAwsCauseWithoutSendingGeneration()
+    {
+        var control = new StreamControl
+        {
+            LoggingFailure = new AmazonBedrockException("Permission denied for fixture-key and fixture-secret.",
+                ErrorType.Sender, "denied-fixture-secret", "request-fixture-key", HttpStatusCode.Forbidden)
+        };
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => control, _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker();
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(ResourceConnection(streaming: true), Request())) { }
+        });
+        Assert.Contains("model invocation logging could not be verified", failure.Message, StringComparison.Ordinal);
+        LlmProviderException cause = Assert.IsType<LlmProviderException>(failure.InnerException);
+        Assert.Contains("Permission denied for [REDACTED] and [REDACTED].", cause.Message, StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.Forbidden, cause.StatusCode);
+        Assert.Equal("denied-[REDACTED]", cause.ProviderCode);
+        Assert.Equal("request-[REDACTED]", cause.RequestId);
+        Assert.DoesNotContain("fixture-key", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("fixture-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+    }
+
+    [Theory]
     [InlineData(false, true)]
     [InlineData(true, true)]
     [InlineData(false, false)]
@@ -1631,6 +1693,7 @@ public sealed class BedrockSafetyTests
         : AmazonBedrockClient(new BasicAWSCredentials("fixture-key", "fixture-secret"), RegionEndpoint.USEast1)
     {
         internal bool Disposed { get; private set; }
+        internal Exception? LoggingFailure { get; init; }
 
         public override Task<ListFoundationModelsResponse> ListFoundationModelsAsync(
             ListFoundationModelsRequest request, CancellationToken cancellationToken = default) =>
@@ -1652,7 +1715,9 @@ public sealed class BedrockSafetyTests
 
         public override Task<GetModelInvocationLoggingConfigurationResponse> GetModelInvocationLoggingConfigurationAsync(
             GetModelInvocationLoggingConfigurationRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new GetModelInvocationLoggingConfigurationResponse());
+            LoggingFailure is { } failure
+                ? Task.FromException<GetModelInvocationLoggingConfigurationResponse>(failure)
+                : Task.FromResult(new GetModelInvocationLoggingConfigurationResponse());
 
         protected override void Dispose(bool disposing)
         {

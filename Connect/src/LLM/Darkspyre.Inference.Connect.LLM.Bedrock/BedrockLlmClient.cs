@@ -311,10 +311,20 @@ internal sealed class BedrockLlmClient(
 
     private static Exception ClassifyConverseFailure(Exception error, LlmConnection connection)
     {
-        if (error is not AmazonBedrockRuntimeException
+        if (error is InvalidOperationException { InnerException: { } cause } wrapped)
+        {
+            Exception classifiedCause = ClassifyConverseFailure(cause, connection);
+            if (ReferenceEquals(cause, classifiedCause)) return error;
+            return new InvalidOperationException(SecretRedactor.Sanitize(wrapped.Message,
+                LlmCredential.Parse(connection.Credential), connection.AdditionalHeaders.Values), classifiedCause);
+        }
+        if (error is not Amazon.Runtime.AmazonServiceException && error is not HttpRequestException
             && error is not LlmProviderException { Transport: LlmTransport.AwsBedrockConverse }) return error;
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         string Safe(string value) => SecretRedactor.Sanitize(value, credential, connection.AdditionalHeaders.Values);
+        if (error is HttpRequestException transport)
+            return new LlmProviderException($"Bedrock HTTP request failed: {Safe(transport.Message)}",
+                LlmTransport.AwsBedrockConverse, transport.StatusCode, innerException: new ConverseFailureEvidence(transport));
         if (error is LlmProviderException classified)
             return new LlmProviderException(Safe(classified.Message), classified.Transport, classified.StatusCode,
                 classified.ProviderCode is { } classifiedCode ? Safe(classifiedCode) : null,
@@ -322,7 +332,7 @@ internal sealed class BedrockLlmClient(
                 classified.RetryAfter,
                 classified.SanitizedResponseBody is { } classifiedBody ? Safe(classifiedBody) : null,
                 new ConverseFailureEvidence(classified), classified.IsContextOverflow);
-        var aws = (AmazonBedrockRuntimeException)error;
+        var aws = (Amazon.Runtime.AmazonServiceException)error;
         string message = Safe(aws.Message);
         if (aws is ModelStreamErrorException stream)
         {

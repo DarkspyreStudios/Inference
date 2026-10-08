@@ -34,6 +34,7 @@ internal sealed class StubConverseInvoker : IBedrockConverseInvoker
         CancellationToken cancellationToken)
     {
         ConverseRequests.Add(request);
+        if (Failure is { } failure) return Task.FromException<ConverseResponse>(failure);
         return Task.FromResult(Response ?? throw new InvalidOperationException("No Converse response is scripted."));
     }
 
