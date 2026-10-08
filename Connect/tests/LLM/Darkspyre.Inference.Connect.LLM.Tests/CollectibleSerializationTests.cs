@@ -15,6 +15,7 @@ using Darkspyre.Inference.Connect.Resources;
 using Darkspyre.Inference.Connect.STT;
 using Darkspyre.Inference.Connect.TTS;
 using Darkspyre.Inference.Connect.Video;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -75,6 +76,62 @@ public sealed class CollectibleSerializationTests
         WeakReference[] generation = RoundTripInCollectibleGeneration(ResourcesResultJson(), resources: true, allOwners: true);
 
         AssertCollected(generation);
+    }
+
+    [Fact]
+    public void RegisteredChatFacadeHttpGraphReleasesItsCollectibleGeneration()
+    {
+        WeakReference[] generation = RetireRegisteredChatGeneration();
+
+        AssertCollected(generation);
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static WeakReference[] RetireRegisteredChatGeneration()
+    {
+        var context = new SerializationGeneration(Path.GetDirectoryName(typeof(ConnectLlmJson).Assembly.Location)!);
+        ServiceProvider? container = null;
+        try
+        {
+            Assembly assembly = context.LoadFromAssemblyPath(typeof(ConnectLlmJson).Assembly.Location);
+            Assert.Same(context, AssemblyLoadContext.GetLoadContext(assembly));
+            Assert.Equal(typeof(ConnectLlmJson).Assembly.ManifestModule.ModuleVersionId, assembly.ManifestModule.ModuleVersionId);
+            Type registration = assembly.GetType(typeof(ServiceCollectionExtensions).FullName!, throwOnError: true)!;
+            MethodInfo register = registration.GetMethods().Single(method => method.Name == nameof(ServiceCollectionExtensions.AddLlmConnect)
+                && method.GetParameters().Length == 1);
+            Assembly fixtures = context.LoadFromAssemblyPath(typeof(AgentFacadeRetirementTests).Assembly.Location);
+            Assert.Same(context, AssemblyLoadContext.GetLoadContext(fixtures));
+            Assert.Equal(typeof(AgentFacadeRetirementTests).Assembly.ManifestModule.ModuleVersionId, fixtures.ManifestModule.ModuleVersionId);
+            object source = Activator.CreateInstance(fixtures.GetType(
+                typeof(AgentFacadeRetirementTests).FullName + "+Source", throwOnError: true)!, nonPublic: true)!;
+            Type sourceContract = assembly.GetType(typeof(ILlmConnectionSource).FullName!, throwOnError: true)!;
+            Assert.IsAssignableFrom(sourceContract, source);
+            IServiceCollection services = new ServiceCollection();
+            services.Add(ServiceDescriptor.Singleton(sourceContract, source));
+            register.Invoke(null, [services]);
+            container = services.BuildServiceProvider();
+            Type clientType = assembly.GetType(typeof(ILlmClient).FullName!, throwOnError: true)!;
+            var clients = (System.Collections.IEnumerable)container.GetRequiredService(typeof(IEnumerable<>).MakeGenericType(clientType));
+            object[] resolved = clients.Cast<object>().ToArray();
+            Assert.Equal(9, resolved.Length);
+            Assert.Contains(resolved, client => client.GetType().Name == "XaiResponsesLlmClient");
+            Assert.All(resolved, client => Assert.Same(assembly, client.GetType().Assembly));
+            object pool = container.GetRequiredService(assembly.GetType(
+                "Darkspyre.Inference.Connect.LLM.Internal.SdkHttpGenerationPool", throwOnError: true)!);
+            Assert.Same(assembly, pool.GetType().Assembly);
+            object chat = container.GetRequiredService(assembly.GetType(typeof(LlmProviderService).FullName!, throwOnError: true)!);
+            Assert.Same(chat, container.GetRequiredService(assembly.GetType(typeof(ILlmFileClient).FullName!, throwOnError: true)!));
+            object agents = container.GetRequiredService(assembly.GetType(typeof(LlmAgentProviderService).FullName!, throwOnError: true)!);
+            object embeddings = container.GetRequiredService(assembly.GetType(typeof(LlmEmbeddingProviderService).FullName!, throwOnError: true)!);
+            Assert.All(new[] { chat, agents, embeddings }, facade => Assert.Same(assembly, facade.GetType().Assembly));
+            return [new(context), new(assembly), new(fixtures), new(source), new(container), new(pool),
+                new(chat), new(agents), new(embeddings), .. resolved.Select(client => new WeakReference(client))];
+        }
+        finally
+        {
+            try { container?.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+            finally { context.Unload(); }
+        }
     }
 
     private static string ResourcesResultJson()

@@ -1161,6 +1161,14 @@ A disposed default-context facade or authorization object can remain retained wi
 separately collectible source or adapter generation alive through those released references.
 Retained caller metadata, live settings objects and genuine foreign exception objects remain separate
 roots. This does not establish retirement of an active provider, native runtime or whole SDK graph.
+The focused collectible-generation regression executes actual `AddLlmConnect` registration and
+resolves all nine default chat clients, the SDK HTTP pool, chat/agent/embedding facades and the
+Files alias. The alias resolves the same chat facade. Connect and the reused connection-source
+fixture execute in the foreign load context with matching source MVIDs. After real container
+disposal, the load context, assemblies, source, clients, pool and facades collect from an outer
+frame that retains only weak references. No network request, credential callback, CLI process or
+native engine runs. This checks healthy default-registration retirement, not every extension,
+active session/body, cleanup refusal, retained exception or target platform.
 
 Cache retirement clears kept models, cancels provider listings through an owner token, and waits
 for every listing, including entries replaced by an edit or refresh. A cancelled caller only stops
