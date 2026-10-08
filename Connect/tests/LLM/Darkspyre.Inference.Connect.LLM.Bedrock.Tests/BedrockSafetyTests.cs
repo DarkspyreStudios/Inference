@@ -21,6 +21,35 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class BedrockSafetyTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnmappedProviderOptionsRefuseBeforeSdkAcquisition(bool connectionOptions)
+    {
+        int acquired = 0;
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => { acquired++; throw new InvalidOperationException("SDK acquired before option refusal"); },
+            _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker();
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        var options = new Dictionary<string, JsonElement> { ["unsupported"] = JsonElement.Parse("true") };
+        LlmConnection connection = ResourceConnection(streaming: true);
+        LlmChatRequest request = Request();
+        if (connectionOptions) connection = connection with { ProviderOptions = options };
+        else request = request with { ProviderOptions = options };
+
+        NotSupportedException failure = await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+        });
+
+        Assert.Equal("Bedrock provider request options are not yet mapped to Converse fields.", failure.Message);
+        Assert.Equal(0, acquired);
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+    }
+
     [Fact]
     public async Task ClassifiedOverflowRedactsDiagnosticsAndPreservesTheOverflowFlag()
     {

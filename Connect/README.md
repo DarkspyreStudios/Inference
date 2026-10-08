@@ -3975,6 +3975,10 @@ Claude on Bedrock. An inference profile such as `us.anthropic.claude-sonnet-4-5-
 base model's entry. A model that is not in the table, including every non-Claude model and an ARN,
 reports null limits, which mean unknown.
 
+Converse refuses nonempty connection or request `ProviderOptions` during pure request admission.
+The refusal precedes SDK acquisition, discovery, logging-control calls and resource preparation.
+Typed supported controls retain their existing Converse projection.
+
 Converse streams use the factory's existing bounded producer. Factory retirement cancels and drains
 the producer, closes owned streams and releases clients without waiting for paused callers to resume.
 Actual cleanup failures remain visible to retirement callers.

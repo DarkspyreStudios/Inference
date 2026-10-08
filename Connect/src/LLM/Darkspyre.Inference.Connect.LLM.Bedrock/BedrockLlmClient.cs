@@ -382,6 +382,11 @@ internal sealed class BedrockLlmClient(
         {
             throw new ArgumentException("A model id is required.", nameof(request));
         }
+        if (connection.ProviderOptions.Count > 0 || request.ProviderOptions.Count > 0)
+        {
+            throw new NotSupportedException(
+                "Bedrock provider request options are not yet mapped to Converse fields.");
+        }
 
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         StructuredOutput.ValidateRequest(request);
@@ -992,12 +997,6 @@ internal sealed class BedrockLlmClient(
             }
 
             result.ToolConfig = toolConfiguration;
-        }
-
-        if (connection.ProviderOptions.Count > 0 || request.ProviderOptions.Count > 0)
-        {
-            throw new NotSupportedException(
-                "Bedrock provider request options are not yet mapped to Converse fields.");
         }
 
         // Bedrock records this free-form map. Keep it deliberately generic and never derive it from a
