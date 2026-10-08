@@ -85,6 +85,8 @@ internal sealed class BedrockLlmClient(
         EnsureTransport(connection);
         IReadOnlySet<LlmReasoningLevel> offered = modelId is null ? FrozenSet<LlmReasoningLevel>.Empty : ReasoningLevels(modelId);
         (BedrockModelFamily family, string baseModelId) = BedrockModelFamilies.Classify(modelId ?? string.Empty);
+        // The India Haiku 4.5 profile does not support structured outputs, unlike its other profiles.
+        bool indiaHaiku = modelId is "in.anthropic.claude-haiku-4-5-20251001-v1:0";
         LlmRichContentSupported richContent = ModelRichContent(modelId);
         bool claudeSampling = family != BedrockModelFamily.AnthropicClaude
             || AnthropicModelProfiles.Resolve(BedrockModelFamilies.AnthropicModelId(baseModelId), null).AllowsSampling;
@@ -92,7 +94,7 @@ internal sealed class BedrockLlmClient(
             Defaults with
             {
                 ReasoningLevels = offered,
-                SupportsJsonSchema = baseModelId is "openai.gpt-oss-20b-1:0" or "openai.gpt-oss-120b-1:0"
+                SupportsJsonSchema = !indiaHaiku && baseModelId is "openai.gpt-oss-20b-1:0" or "openai.gpt-oss-120b-1:0"
                     or "anthropic.claude-sonnet-4-6" or "anthropic.claude-opus-4-6-v1"
                     or "anthropic.claude-sonnet-4-5-20250929-v1:0"
                     or "anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -116,6 +118,11 @@ internal sealed class BedrockLlmClient(
         if (capabilities.SupportsJsonObject)
         {
             throw new NotSupportedException("Bedrock Converse does not expose JSON-object-only output enforcement.");
+        }
+        if (indiaHaiku && capabilities.SupportsJsonSchema)
+        {
+            throw new NotSupportedException(
+                "Bedrock capability overrides cannot enable JSON Schema output for the India Haiku 4.5 inference profile.");
         }
         if ((richContent.Images == LlmRichContentCarriage.Unsupported && capabilities.SupportsPromptImages)
             || (richContent.PdfDocuments == LlmRichContentCarriage.Unsupported && capabilities.SupportsPromptDocuments))

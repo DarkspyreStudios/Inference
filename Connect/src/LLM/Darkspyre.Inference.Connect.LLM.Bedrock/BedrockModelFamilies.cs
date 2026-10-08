@@ -14,20 +14,19 @@ internal enum BedrockModelFamily
 
 internal static partial class BedrockModelFamilies
 {
-    private static readonly string[] ProfilePrefixes = ["us.", "eu.", "apac.", "global."];
+    private static readonly string[] ProfilePrefixes = ["us.", "eu.", "apac.", "jp.", "au.", "in.", "global."];
+
+    /// <summary>Recognizes explicit ARN references and documented geographic/global inference profiles.</summary>
+    internal static bool IsInferenceProfile(string modelId) =>
+        modelId.StartsWith("arn:", StringComparison.Ordinal) || ProfilePrefix(modelId) is not null;
+
+    private static string? ProfilePrefix(string modelId) =>
+        ProfilePrefixes.FirstOrDefault(prefix => modelId.StartsWith(prefix, StringComparison.Ordinal));
 
     /// <summary>Classifies a model id or inference-profile id. An ARN classifies as Unknown.</summary>
     public static (BedrockModelFamily Family, string BaseModelId) Classify(string modelId)
     {
-        string baseModelId = modelId;
-        foreach (string prefix in ProfilePrefixes)
-        {
-            if (modelId.StartsWith(prefix, StringComparison.Ordinal))
-            {
-                baseModelId = modelId[prefix.Length..];
-                break;
-            }
-        }
+        string baseModelId = ProfilePrefix(modelId) is { } prefix ? modelId[prefix.Length..] : modelId;
 
         BedrockModelFamily family = baseModelId switch
         {

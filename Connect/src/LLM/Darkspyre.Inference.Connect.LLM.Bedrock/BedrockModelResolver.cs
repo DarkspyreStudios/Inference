@@ -332,12 +332,7 @@ internal sealed class BedrockModelResolver
         return types.Length > 0 && types.All(type => string.Equals(type, "PROVISIONED", StringComparison.Ordinal));
     }
 
-    internal static bool LooksLikeInferenceProfile(string modelId) =>
-        modelId.StartsWith("arn:", StringComparison.Ordinal)
-        || modelId.StartsWith("us.", StringComparison.Ordinal)
-        || modelId.StartsWith("eu.", StringComparison.Ordinal)
-        || modelId.StartsWith("apac.", StringComparison.Ordinal)
-        || modelId.StartsWith("global.", StringComparison.Ordinal);
+    internal static bool LooksLikeInferenceProfile(string modelId) => BedrockModelFamilies.IsInferenceProfile(modelId);
 
     internal static string[] PreferredProfilePrefixes(string region) =>
         region.StartsWith("us-", StringComparison.Ordinal)

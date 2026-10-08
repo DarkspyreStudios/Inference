@@ -4043,6 +4043,14 @@ Claude on Bedrock. An inference profile such as `us.anthropic.claude-sonnet-4-5-
 base model's entry. A model that is not in the table, including every non-Claude model and an ARN,
 reports null limits, which mean unknown.
 
+Explicit `us.`, `eu.`, `apac.`, `jp.`, `au.`, `in.` and `global.` inference-profile IDs share one
+recognition path. Family-specific reasoning, cache and limit lookup use their base model; native
+requests retain the selected profile ID without a foundation-model lookup. Automatic profile-selection
+preferences are unchanged. [AWS documents these geographic profile prefixes](https://docs.aws.amazon.com/bedrock/latest/userguide/models-region-compatibility.html).
+The [India Haiku 4.5 profile](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-haiku-4-5.html)
+does not support native structured output. Its schema capability is false, and an override cannot
+enable it. Explicit original-schema local validation remains available without changing the profile ID.
+
 Converse refuses nonempty connection or request `ProviderOptions` during pure request admission.
 The refusal precedes SDK acquisition, discovery, logging-control calls and resource preparation.
 Typed supported controls retain their existing Converse projection.

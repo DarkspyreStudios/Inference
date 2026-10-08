@@ -352,6 +352,86 @@ public sealed class BedrockSafetyTests
     }
 
     [Theory]
+    [InlineData("jp.", "anthropic.claude-sonnet-4-6", true)]
+    [InlineData("au.", "anthropic.claude-sonnet-4-6", true)]
+    [InlineData("in.", "anthropic.claude-haiku-4-5-20251001-v1:0", false)]
+    public async Task GeographicProfilesRetainModelFactsAndNativeRequestFields(string prefix, string baseModel, bool nativeSchema)
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => throw new NotSupportedException(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var client = new BedrockLlmClient(factory, guard, new StubConverseInvoker(), NullLogger<BedrockLlmClient>.Instance);
+        string modelId = prefix + baseModel;
+        LlmConnection connection = Connection();
+        LlmProviderCapabilities capabilities = client.GetCapabilities(connection, modelId);
+        Assert.Contains(LlmReasoningLevel.Low, capabilities.ReasoningLevels);
+        Assert.True(BedrockModelResolver.LooksLikeInferenceProfile(modelId));
+        Assert.Equal(BedrockModelLimits.Get(baseModel), BedrockModelLimits.Get(modelId));
+        Assert.Equal(nativeSchema, capabilities.SupportsJsonSchema);
+        Assert.True(capabilities.PromptCache.AcceptsHints);
+        LlmChatRequest request = Request() with
+        {
+            ModelId = modelId,
+            ReasoningLevel = LlmReasoningLevel.Low,
+            PromptCache = new() { Scope = LlmPromptCacheScope.Conversation },
+            StructuredOutput = new()
+            {
+                Name = "answer",
+                Schema = JsonElement.Parse("""{"type":"object"}"""),
+                Fallback = LlmStructuredOutputFallback.LocalValidation
+            }
+        };
+        _ = client.ValidateRequest(connection, request);
+        var enforcement = StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
+        Assert.Equal(nativeSchema ? LlmStructuredOutputEnforcement.ProviderJsonSchema
+            : LlmStructuredOutputEnforcement.LocalValidationOnly, enforcement);
+        ConverseRequest built = BedrockLlmClient.BuildRequest(connection, request, modelId, enforcement);
+        ConverseRequest expected = BedrockLlmClient.BuildRequest(connection, request with { ModelId = baseModel }, baseModel);
+        foreach (var wire in new[]
+        {
+            ConverseRequestMarshaller.Instance.Marshall(built),
+            ConverseStreamRequestMarshaller.Instance.Marshall(BedrockLlmClient.ToStreamRequest(built))
+        })
+        {
+            Assert.Equal(modelId, Assert.Single(wire.PathResources).Value);
+            using Stream body = wire.ContentStream;
+            using JsonDocument sent = JsonDocument.Parse(body);
+            Assert.Equal(BedrockDocumentJson.Write(expected.AdditionalModelRequestFields),
+                sent.RootElement.GetProperty("additionalModelRequestFields").GetRawText());
+            Assert.Equal(nativeSchema, sent.RootElement.TryGetProperty("outputConfig", out _));
+            Assert.Equal("default", sent.RootElement.GetProperty("messages")[0].GetProperty("content")[1]
+                .GetProperty("cachePoint").GetProperty("type").GetString());
+        }
+    }
+
+    [Fact]
+    public async Task IndiaHaikuCannotEnableUnsupportedNativeSchemas()
+    {
+        int acquired = 0;
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => { acquired++; throw new InvalidOperationException("SDK acquired before schema refusal"); },
+            _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker();
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = ResourceConnection(streaming: true) with
+        { CapabilityOverrides = new() { SupportsJsonSchema = true } };
+        LlmChatRequest request = Request() with
+        {
+            ModelId = "in.anthropic.claude-haiku-4-5-20251001-v1:0",
+            StructuredOutput = new() { Name = "answer", Schema = JsonElement.Parse("""{"type":"object"}""") }
+        };
+        NotSupportedException failure = await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+        });
+        Assert.Equal("Bedrock capability overrides cannot enable JSON Schema output for the India Haiku 4.5 inference profile.", failure.Message);
+        Assert.Equal(0, acquired);
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+    }
+
+    [Theory]
     [InlineData("us.anthropic.claude-sonnet-4-5-20250929-v1:0")]
     [InlineData("eu.anthropic.claude-haiku-4-5-20251001-v1:0")]
     [InlineData("global.anthropic.claude-opus-4-5-20251101-v1:0")]
