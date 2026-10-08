@@ -17,7 +17,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         ILlmContextEstimator,
         ILlmAccountUsageClient,
         IExternalLlmAuthenticationProbe,
-        IStreamingCredentialRefreshPolicy
+        IStreamingCredentialRefreshPolicy,
+        ILlmCatalogCapabilities
 {
     private const string CatalogEndpoint = "https://api.anthropic.com/v1";
     private const string AnthropicVersion = "2023-06-01";
@@ -81,12 +82,15 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     internal static LlmProviderCapabilities ResolveCapabilities(LlmConnection connection, string? modelId)
     {
         _ = ClaudeCliConfiguration.ValidateConnection(connection);
-        LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(Capabilities, connection, modelId);
+        IReadOnlySet<LlmReasoningLevel>? offered = CatalogReasoningLevels(connection, modelId)
+            ?? (modelId is "claude-sonnet-4-6" or "claude-opus-4-6"
+                or "claude-sonnet-4-6[1m]" or "claude-opus-4-6[1m]" ? Claude46ReasoningLevels : null);
+        LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(
+            Capabilities with { ReasoningLevels = offered ?? ReasoningLevels }, connection, modelId);
         return capabilities with
         {
-            ReasoningLevels = modelId is "claude-sonnet-4-6" or "claude-opus-4-6"
-                or "claude-sonnet-4-6[1m]" or "claude-opus-4-6[1m]"
-                ? capabilities.ReasoningLevels.Intersect(Claude46ReasoningLevels).ToFrozenSet()
+            ReasoningLevels = offered is not null
+                ? capabilities.ReasoningLevels.Intersect(offered).ToFrozenSet()
                 : capabilities.ReasoningLevels,
             SupportsModelListing = true,
             SupportsJsonObject = false,
@@ -111,6 +115,18 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                     PreservesOrder = true
                 }
         };
+    }
+
+    private static FrozenSet<LlmReasoningLevel>? CatalogReasoningLevels(LlmConnection connection, string? modelId)
+    {
+        if (ILlmCatalogCapabilities.EntryFor(connection, modelId) is not { ValueKind: JsonValueKind.Object } entry)
+            return null;
+        if (entry.TryGetProperty("supportsEffort", out JsonElement support) && support.ValueKind == JsonValueKind.False)
+            return FrozenSet<LlmReasoningLevel>.Empty;
+        if (!entry.TryGetProperty("supportedEffortLevels", out JsonElement levels) || levels.ValueKind != JsonValueKind.Array)
+            return null;
+        return ReasoningLevels.Where(level => levels.EnumerateArray().Any(value =>
+            value.ValueKind == JsonValueKind.String && value.GetString() == LlmReasoningEffort.Word(level))).ToFrozenSet();
     }
 
     public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(

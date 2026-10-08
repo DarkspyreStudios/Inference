@@ -77,7 +77,7 @@ internal static class ClaudeCliModelCatalog
         return models!;
     }
 
-    private static ReadOnlyCollection<LlmModel> Project(JsonElement initialization)
+    internal static ReadOnlyCollection<LlmModel> Project(JsonElement initialization)
     {
         if (initialization.ValueKind != JsonValueKind.Object
             || !initialization.TryGetProperty("models", out JsonElement models) || models.ValueKind != JsonValueKind.Array)

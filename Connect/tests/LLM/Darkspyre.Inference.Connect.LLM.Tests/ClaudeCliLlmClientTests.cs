@@ -15,6 +15,48 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ClaudeCliLlmClientTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CatalogEffortFactsControlAliasAdmissionThroughTheFacade(bool supportsEffort)
+    {
+        var process = new CatalogProcess
+        {
+            ModelInfo = JsonElement.Parse(supportsEffort
+                ? """{"value":"cli-returned-alias","displayName":"CLI model choice","supportsEffort":true,"supportedEffortLevels":["low"]}"""
+                : """{"value":"cli-returned-alias","displayName":"CLI model choice","supportsEffort":false}"""
+            )
+        };
+        var runner = new RecordingRunner(new(0,
+            """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
+            string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, process);
+        LlmConnection connection = CliConnection() with
+        { CapabilityOverrides = new() { ReasoningLevels = ClaudeCliLlmClient.ReasoningLevels } };
+        await using var service = new LlmProviderService(new ResourcePreparationTests.Source(connection), [client]);
+
+        LlmProviderCapabilities capabilities = await service.GetModelCapabilitiesAsync("connection", "cli-returned-alias");
+        Assert.True(capabilities.ReasoningLevels.SetEquals(supportsEffort ? [LlmReasoningLevel.Low] : []));
+        var request = new LlmChatRequest
+        {
+            ModelId = "cli-returned-alias",
+            Messages = [new("user", "Reply with OK.")],
+            ReasoningLevel = LlmReasoningLevel.ExtraHigh
+        };
+        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() =>
+            ReadAllAsync(service.StreamAsync("connection", request)));
+        Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
+        Assert.Empty(runner.Invocations);
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(service.StreamAsync("connection",
+            request with { ReasoningLevel = supportsEffort ? LlmReasoningLevel.Low : null }));
+        Assert.Equal(LlmCompletionStatus.Completed, Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Status);
+        Assert.Equal(1, process.Initializations);
+        IReadOnlyList<string> arguments = Assert.Single(runner.Invocations).Arguments;
+        Assert.Equal("cli-returned-alias", arguments[arguments.ToList().IndexOf("--model") + 1]);
+    }
+
+    [Theory]
     [InlineData("claude-sonnet-4-6")]
     [InlineData("claude-opus-4-6")]
     [InlineData("claude-sonnet-4-6[1m]")]
@@ -374,6 +416,9 @@ public sealed class ClaudeCliLlmClientTests
     private sealed class CatalogProcess : IClaudeCliSessionProcessFactory, IClaudeCliSessionProcess
     {
         private string? _reply;
+        internal JsonElement ModelInfo { get; init; } = JsonElement.Parse(
+            """{"value":"cli-returned-alias","displayName":"CLI model choice","unmappedOption":"preserved"}""");
+        internal int Initializations { get; private set; }
         public ClaudeCliSessionInvocation? Invocation { get; private set; }
         public Task? DisposalRelease { get; init; }
         public TaskCompletionSource DisposalEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -391,6 +436,7 @@ public sealed class ClaudeCliLlmClientTests
             JsonElement request = document.RootElement;
             Assert.Equal("control_request", request.GetProperty("type").GetString());
             Assert.Equal("initialize", request.GetProperty("request").GetProperty("subtype").GetString());
+            Initializations++;
             _reply = new JsonObject
             {
                 ["type"] = "control_response",
@@ -398,9 +444,10 @@ public sealed class ClaudeCliLlmClientTests
                 {
                     ["subtype"] = "success",
                     ["request_id"] = request.GetProperty("request_id").GetString(),
-                    ["response"] = JsonNode.Parse("""
-                        {"models":[{"value":"cli-returned-alias","displayName":"CLI model choice","unmappedOption":"preserved"}]}
-                        """)
+                    ["response"] = new JsonObject
+                    {
+                        ["models"] = new JsonArray(JsonNode.Parse(ModelInfo.GetRawText()))
+                    }
                 }
             }.ToJsonString();
             return ValueTask.CompletedTask;

@@ -4264,7 +4264,13 @@ only `Low`, `Medium`, `High` and `Maximum`, matching the
 [Claude Code effort table](https://code.claude.com/docs/en/model-config#adjust-effort-level).
 Their shared chat/native-session resolver rejects `ExtraHigh` before sending a prompt or control.
 Connection/model overrides can narrow that set but cannot widen it. Aliases and unknown model IDs
-retain their existing effort policy because the adapter does not infer their resolved model.
+without catalog effort facts retain their existing policy; the adapter does not infer their resolved model.
+Published native catalog fields `supportsEffort` and `supportedEffortLevels` take precedence over
+family defaults. Explicit false offers no selectable effort. A reported list offers only its recognized
+levels, including an explicitly empty list. Overrides can narrow but cannot widen these reported facts.
+Chat uses the existing connection/version model-list cache, shared with discovery. Native sessions
+retain optional `models` from their own initialize reply through the same catalog decoder, without
+another process or catalog query. Both lanes use the same effort resolver before prompt/control writes.
 A successful native schema result with a non-null `structured_output` also completes when its
 observed stop reason is `tool_use`. The [CLI structured-output contract](https://code.claude.com/docs/en/agent-sdk/structured-outputs)
 identifies that payload as the final structured result. Connect retains the actual stop reason.
