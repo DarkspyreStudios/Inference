@@ -51,6 +51,12 @@ complete and streamed body conversion. Malformed-response and provider stream-er
 that context for their message, nullable provider code, request ID and diagnostic body.
 Stream-error codes and messages come from the redacted native error envelope through the shared
 HTTP error reader, so named secret values are also removed from those fields.
+Anthropic Messages carries the actual sent headers through streamed and complete body conversion.
+Its protocol errors and terminal diagnostics redact the request ID and body with that context.
+Native errors retain their Anthropic type and explanatory message from the redacted envelope;
+overflow classification reads the original provider facts.
+Shared protocol errors retain JSON parsing failures with their actual line and byte positions.
+Their inner exception uses a fixed parsing message and no input path because parser text can quote secrets.
 
 Mapped task results publish after response, body and request cleanup completes; retirement begun by
 cleanup prevents late success without replacing an earlier operation failure. If an owned logger

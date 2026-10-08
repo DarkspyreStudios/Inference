@@ -369,13 +369,16 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
         HttpResponseMessage response,
         string rawBody,
         LlmCredential? credential,
-        Exception? innerException = null, IEnumerable<string>? extraSecrets = null) => new(
+        JsonException? innerException = null, IEnumerable<string>? extraSecrets = null) => new(
             message,
             Transport,
             response.StatusCode,
             requestId: ProviderHttp.ReadRequestId(response, credential, extraSecrets),
             sanitizedResponseBody: SecretRedactor.Sanitize(rawBody, credential, extraSecrets ?? []),
-            innerException: innerException);
+            // Parser text and paths can quote untrusted provider input, including secrets.
+            innerException: innerException is null ? null : new JsonException(
+                "Provider response contains invalid JSON.", path: null,
+                lineNumber: innerException.LineNumber, bytePositionInLine: innerException.BytePositionInLine));
 
     protected void EnsureTransport(LlmConnection connection)
     {

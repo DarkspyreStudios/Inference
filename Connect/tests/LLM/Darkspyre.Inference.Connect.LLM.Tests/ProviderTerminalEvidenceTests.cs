@@ -68,12 +68,14 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData(LlmTransport.XaiResponses, false, false)]
     [InlineData(LlmTransport.XaiResponses, true, false)]
     [InlineData(LlmTransport.XaiResponses, true, true)]
+    [InlineData(LlmTransport.OpenAiResponses, true, false)]
     [InlineData(LlmTransport.OpenAiResponses, true, true)]
+    [InlineData(LlmTransport.OpenAiCodex, true, false)]
     [InlineData(LlmTransport.OpenAiCodex, true, true)]
     public async Task ResponsesProtocolFailuresRedactEffectiveRequestSecrets(LlmTransport transport, bool streaming, bool providerError)
     {
         const string error = "{\"type\":\"error\",\"error\":{\"code\":\"rate_limit_test-token_header-value_default-value_provider-secret\",\"message\":\"Failure test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}}";
-        string payload = providerError ? error : "not-json";
+        string payload = providerError ? error : "not-json test-token header-value default-value";
         using var handler = new Handler(transport, streaming, streaming ? $"data: {payload}\n\n" : payload,
             requestId: "request-test-token-header-value-default-value-1");
         using var http = new HttpClient(handler);
@@ -114,6 +116,97 @@ public sealed class ProviderTerminalEvidenceTests
         foreach (string secret in new[] { "test-token", "header-value", "default-value", "provider-secret" })
             Assert.DoesNotContain(secret, failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
         Assert.DoesNotContain(observations, item => item is LlmChatCompletionEvent);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false, "malformed")]
+    [InlineData(true, "malformed")]
+    [InlineData(false, "error")]
+    [InlineData(true, "error")]
+    [InlineData(false, "complete")]
+    [InlineData(true, "complete")]
+    public async Task AnthropicBodyDiagnosticsRedactEffectiveRequestSecrets(bool streaming, string outcome)
+    {
+        const string error = "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_test-token_header-value_default-value_provider-secret\",\"message\":\"Failure test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}}";
+        const string complete = "{\"type\":\"message\",\"id\":\"message-1\",\"model\":\"claude-sonnet-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"answer\"}],\"stop_reason\":\"end_turn\",\"trace\":\"test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}";
+        const string terminal = "{\"type\":\"message_stop\",\"trace\":\"test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}";
+        string payload = outcome switch
+        {
+            "error" => error,
+            "complete" => complete,
+            _ => "not-json test-token header-value default-value"
+        };
+        string body = streaming
+            ? outcome == "complete"
+                ? "data: {\"type\":\"message_start\",\"message\":{\"id\":\"message-1\",\"model\":\"claude-sonnet-4-6\"}}\n\n"
+                    + "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"answer\"}}\n\n"
+                    + "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+                    + $"data: {terminal}\n\n"
+                : $"data: {payload}\n\n"
+            : payload;
+        using var handler = new Handler(LlmTransport.AnthropicMessages, streaming, body,
+            requestId: "request-test-token-header-value-default-value-1");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var client = new AnthropicMessagesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.AnthropicMessages,
+            Endpoint = "https://provider.example.test/v1",
+            Credential = new LlmCredential { ApiKey = "test-token" }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" },
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+        var observations = new List<LlmStreamEvent>();
+        async Task ReadAsync()
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection,
+                new() { ModelId = "claude-sonnet-4-6", Messages = [new("user", "hello")] }))
+                observations.Add(item);
+        }
+
+        string diagnostics;
+        if (outcome == "complete")
+        {
+            await ReadAsync();
+            LlmChatResult result = Assert.Single(observations.OfType<LlmChatCompletionEvent>()).Result;
+            Assert.Equal("answer", result.Text);
+            Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+            Assert.Equal("claude-sonnet-4-6", result.ModelId);
+            Assert.Equal(200, result.Diagnostics!.HttpStatusCode);
+            Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", result.Diagnostics.RequestId);
+            diagnostics = result.Diagnostics.RawFinalResponseJson!;
+        }
+        else
+        {
+            LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(ReadAsync);
+            Assert.Equal(HttpStatusCode.OK, failure.StatusCode);
+            Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+            if (outcome == "error")
+            {
+                Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+                Assert.Equal("Failure [REDACTED] [REDACTED] [REDACTED] [REDACTED]", failure.Message);
+            }
+            else
+            {
+                Assert.Null(failure.ProviderCode);
+                JsonException parsing = Assert.IsAssignableFrom<JsonException>(failure.InnerException);
+                JsonException original = Assert.ThrowsAny<JsonException>(() => JsonDocument.Parse(payload));
+                Assert.Equal(original.LineNumber, parsing.LineNumber);
+                Assert.Equal(original.BytePositionInLine, parsing.BytePositionInLine);
+                Assert.Null(parsing.Path);
+            }
+            Assert.DoesNotContain(observations, item => item is LlmChatCompletionEvent);
+            diagnostics = failure.ToString() + failure.SanitizedResponseBody;
+        }
+
+        foreach (string secret in new[] { "test-token", "header-value", "default-value", "provider-secret" })
+            Assert.DoesNotContain(secret, diagnostics, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", diagnostics, StringComparison.Ordinal);
         Assert.Equal("header-value", handler.RequestTrace);
         Assert.Equal("default-value", handler.RequestDefaultTrace);
         Assert.Equal(1, handler.Calls);
