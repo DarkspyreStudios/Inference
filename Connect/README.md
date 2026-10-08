@@ -3065,7 +3065,13 @@ returns two native choices, `grok-4.6` and `grok-4.7`. One UnitedStates/Default 
 on the listed `grok-4.6` model completes with `GROK-121-US-OK`, finish reason `completed`, and
 reported usage of 648 input and 358 output tokens. This qualifies that selected model and route,
 not every US model; a Global catalog entry does not establish access on the US route.
-On that same selected model and route, one managed turn with a three-iteration cap completes
+One genuine UnitedStates/Default nonstreaming request at source `ced2dfd` selects `grok-4.6`,
+Low reasoning and 128 requested output tokens. It returns `GROK-121-US-NONSTREAM-OK`,
+`Completed` with finish reason `completed`, and reported usage of 654 input and 137 output
+tokens, including 126 reasoning output tokens and 512 cached input tokens. The reported output
+exceeds the requested cap; this run does not qualify cap enforcement. It uses the tester's saved
+OAuth without retries, uploads, hosted tools or another route.
+A separate Global/Default turn on `grok-4.20-0309-non-reasoning` with a three-iteration cap completes
 the existing echo callback and replays its successful text result. The turn completes after two
 model steps with final answer `GROK-121-ECHO-OK`. No retry, other tool, upload or media operation
 occurs. This qualifies ordinary client-tool replay, not strict functions or hosted tools.
