@@ -278,7 +278,9 @@ internal static class XaiDocumentSearch
             return new InferenceException(inference.Code, "Grok document-search authorization or access failed.",
                 SafeProviderFailure(provider, inference, credential, secrets));
         if (error is LlmProviderException failure) return SafeProviderFailure(failure, failure, credential, secrets);
-        return new LlmProviderException("Grok document-search transport failed.", LlmTransport.XaiResponses,
+        string message = error is HttpRequestException
+            ? SecretRedactor.Sanitize(error.Message, credential, secrets) : "Grok document-search transport failed.";
+        return new LlmProviderException(message, LlmTransport.XaiResponses,
             response?.StatusCode, requestId: response is null ? null : SafeRequestId(response, credential, secrets),
             innerException: new FailureEvidence(error));
     }
@@ -288,7 +290,7 @@ internal static class XaiDocumentSearch
 
     private static LlmProviderException SafeProviderFailure(LlmProviderException error, Exception original,
         LlmCredential? credential, string[] secrets) => new(
-        "Grok document-search request failed.", LlmTransport.XaiResponses, error.StatusCode,
+        SecretRedactor.Sanitize(error.Message, credential, secrets), LlmTransport.XaiResponses, error.StatusCode,
         error.ProviderCode is { } code ? SecretRedactor.Sanitize(code, credential, secrets) : null,
         error.RequestId is null ? null : SecretRedactor.Sanitize(error.RequestId, credential, secrets), error.RetryAfter,
         innerException: new FailureEvidence(original), isContextOverflow: error.IsContextOverflow);

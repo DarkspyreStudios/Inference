@@ -1607,14 +1607,20 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task GrokSearchAndEmbeddingSendFailuresRedactEffectiveRequestHeaders(bool embedding)
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task GrokSearchAndEmbeddingSendFailuresRedactEffectiveRequestHeaders(bool embedding, bool classified)
     {
+        const string message = "Transport refused test-token header-value default-value.";
+        Exception original = classified
+            ? new LlmProviderException(message, LlmTransport.XaiResponses,
+                providerCode: "transport_test-token_header-value_default-value",
+                requestId: "request-test-token-header-value-default-value")
+            : new HttpRequestException(message);
         var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
-            sendFailure: new LlmProviderException("Transport refused test-token header-value default-value.",
-                LlmTransport.XaiResponses, providerCode: "transport_test-token_header-value_default-value",
-                requestId: "request-test-token-header-value-default-value"));
+            sendFailure: original);
         using var http = new HttpClient(handler);
         http.DefaultRequestHeaders.Add("X-Default", "default-value");
         var connection = new LlmConnection
@@ -1634,8 +1640,9 @@ public sealed class ProviderTerminalEvidenceTests
             : await Assert.ThrowsAsync<LlmProviderException>(() => XaiDocumentSearch.SearchAsync(http, connection,
                 new("reference", ["collection-1"]), () => { }, CancellationToken.None));
 
-        Assert.Equal("transport_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
-        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]", failure.RequestId);
+        Assert.Equal("Transport refused [REDACTED] [REDACTED] [REDACTED].", failure.Message);
+        Assert.Equal(classified ? "transport_[REDACTED]_[REDACTED]_[REDACTED]" : null, failure.ProviderCode);
+        Assert.Equal(classified ? "request-[REDACTED]-[REDACTED]-[REDACTED]" : null, failure.RequestId);
         Assert.Null(failure.StatusCode);
         Assert.Null(failure.SanitizedResponseBody);
         foreach (string secret in new[] { "test-token", "header-value", "default-value" })
