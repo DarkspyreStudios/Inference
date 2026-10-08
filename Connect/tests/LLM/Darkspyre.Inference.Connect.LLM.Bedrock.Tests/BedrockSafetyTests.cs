@@ -252,8 +252,10 @@ public sealed class BedrockSafetyTests
         Assert.Empty(invoker.StreamRequests);
     }
 
-    [Fact]
-    public async Task ClassifiedOverflowRedactsDiagnosticsAndPreservesTheOverflowFlag()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ClassifiedOverflowPreservesRedactedProviderDiagnosticsAndOverflowFlag(bool streaming)
     {
         await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
             _ => new StreamControl(), _ => throw new NotSupportedException());
@@ -266,7 +268,7 @@ public sealed class BedrockSafetyTests
                 new BedrockRuntimeEventStreamException("Stream failed.", sdkFailure), CancellationToken.None)
         };
         var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
-        LlmConnection connection = ResourceConnection(streaming: true);
+        LlmConnection connection = ResourceConnection(streaming);
         var events = new List<LlmStreamEvent>();
 
         LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
@@ -279,11 +281,12 @@ public sealed class BedrockSafetyTests
         Assert.Equal(HttpStatusCode.BadRequest, failure.StatusCode);
         Assert.Equal("validation-[REDACTED]", failure.ProviderCode);
         Assert.Equal("request-[REDACTED]", failure.RequestId);
-        Assert.Contains("exceeds the model context window", failure.Message, StringComparison.Ordinal);
+        Assert.Equal("Bedrock ValidationException: Input is too long: [REDACTED].", failure.Message);
         Assert.DoesNotContain("fixture-secret", failure.ToString(), StringComparison.Ordinal);
         Assert.Empty(events.OfType<LlmChatCompletionEvent>());
-        Assert.Single(invoker.StreamRequests);
-        Assert.True(invoker.Disposed);
+        Assert.Equal(streaming ? 1 : 0, invoker.StreamRequests.Count);
+        Assert.Equal(streaming ? 0 : 1, invoker.ConverseRequests.Count);
+        Assert.Equal(streaming, invoker.Disposed);
     }
 
     [Fact]

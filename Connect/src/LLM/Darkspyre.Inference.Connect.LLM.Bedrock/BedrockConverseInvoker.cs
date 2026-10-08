@@ -100,7 +100,7 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
         && LlmContextOverflow.BedrockValidation(validation.Message) ? ContextOverflow(validation) : error;
 
     private static LlmProviderException ContextOverflow(ValidationException error) => new(
-        "Bedrock rejected input that exceeds the model context window.", LlmTransport.AwsBedrockConverse,
+        $"Bedrock {error.GetType().Name}: {error.Message}", LlmTransport.AwsBedrockConverse,
         error.StatusCode, error.ErrorCode, error.RequestId, innerException: new OverflowEvidence(error),
         isContextOverflow: true);
 
