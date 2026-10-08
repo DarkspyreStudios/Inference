@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Globalization;
+using System.Net;
 using Amazon;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
@@ -20,6 +21,42 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class BedrockSafetyTests
 {
+    [Fact]
+    public async Task ModelStreamFailurePreservesSanitizedOriginalDiagnostics()
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => new StreamControl(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker
+        {
+            Failure = new ModelStreamErrorException("Stream failed.", ErrorType.Sender,
+                "ModelStreamErrorException", "request-fixture-secret", HttpStatusCode.FailedDependency)
+            {
+                OriginalMessage = "Model rejected fixture-secret input.",
+                OriginalStatusCode = 400
+            }
+        };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        var events = new List<LlmStreamEvent>();
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(ResourceConnection(streaming: true), Request()))
+                events.Add(item);
+        });
+
+        Assert.Contains("Stream failed.", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("Model rejected [REDACTED] input.", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("Original model status: 400", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(HttpStatusCode.FailedDependency, failure.StatusCode);
+        Assert.Equal("ModelStreamErrorException", failure.ProviderCode);
+        Assert.Equal("request-[REDACTED]", failure.RequestId);
+        Assert.DoesNotContain("fixture-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Empty(events.OfType<LlmChatCompletionEvent>());
+        Assert.Single(invoker.StreamRequests);
+        Assert.True(invoker.Disposed);
+    }
+
     [Theory]
     [InlineData(false, true)]
     [InlineData(true, true)]

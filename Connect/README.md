@@ -2871,6 +2871,8 @@ Gemini/Vertex, Bedrock Converse and Apple recognize their supported overflow err
 Bedrock Converse SDK failures surface the actual error kind and credential-redacted message,
 with observed status and request identity. Unrelated host failures retain the managed generic
 diagnostic; cancellation and independently failed owned cleanup remain distinct.
+Model-stream errors include the sanitized original model message and its reported status in the
+explanation. The outer HTTP status remains separate.
 xAI input overflow raises this failure instead of returning an incomplete completion; output-token
 truncation remains an incomplete completion.
 Each model step permits at most two provider-overflow pauses, including across continued segments.

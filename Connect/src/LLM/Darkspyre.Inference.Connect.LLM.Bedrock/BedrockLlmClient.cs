@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using System.Globalization;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
@@ -286,7 +287,15 @@ internal sealed class BedrockLlmClient(
         if (error is not AmazonBedrockRuntimeException aws) return error;
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         string Safe(string value) => SecretRedactor.Sanitize(value, credential, connection.AdditionalHeaders.Values);
-        return new LlmProviderException($"Bedrock {Safe(aws.GetType().Name)}: {Safe(aws.Message)}",
+        string message = Safe(aws.Message);
+        if (aws is ModelStreamErrorException stream)
+        {
+            if (stream.OriginalMessage is { Length: > 0 } originalMessage)
+                message += $" Original model error: {Safe(originalMessage)}";
+            if (stream.OriginalStatusCode is { } originalStatus)
+                message += $" Original model status: {originalStatus.ToString(CultureInfo.InvariantCulture)}.";
+        }
+        return new LlmProviderException($"Bedrock {Safe(aws.GetType().Name)}: {message}",
             LlmTransport.AwsBedrockConverse, (int)aws.StatusCode == 0 ? null : aws.StatusCode,
             aws.ErrorCode is { } code ? Safe(code) : null, aws.RequestId is { } id ? Safe(id) : null,
             innerException: new ConverseFailureEvidence(aws));
