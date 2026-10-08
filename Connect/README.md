@@ -4344,6 +4344,15 @@ Both report actual totals and leave unreported cache, reasoning, cost and hosted
 Neither call retries or copies CLI credentials. These runs qualify selected nonstreaming plain and
 schema output, not all models, caller output caps, provider tool activity, refresh or other platforms.
 
+The same public tester at source `c6edbb8` qualifies one nonstreaming native schema request on
+CLI 1.3.1 with selected model `claude-sonnet-4-6`. The unchanged closed-object schema requires
+one enum marker. The JSON-response path returns exactly
+`{"marker":"CONNECT_AGY_SONNET_JSON_121"}`, `Completed/completed`, `ProviderJsonSchema`
+enforcement and `IsValid = true`. Reported usage is 15,527 input, 205 output and 15,732 total tokens;
+cache, reasoning, cost and hosted counts remain unknown. No selectable effort is requested for
+this model. One call runs without retries or credential copying. This qualifies that schema and
+selected CLI route, not independently observed upstream identity, refresh or Windows execution.
+
 Antigravity may emit its own internal tool activity, but the CLI owns that execution. Because
 Darkspyre.Inference.Connect.LLM cannot surface the call for host authorization and result submission, this adapter reports
 `SupportsToolUse = false`. Its documented headless input protocol accepts only `text` blocks and
