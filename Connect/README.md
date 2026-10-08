@@ -3174,6 +3174,14 @@ Streaming and genuine nonstreaming requests both complete with finish reason `co
 250 input/18 output tokens for streaming and 250 input/15 output for nonstreaming.
 These two requests use only the tester's separate OAuth credential, with no retry or schema/output
 rewrite. They do not qualify regex, strict functions, other schemas/models, refresh or media.
+Two OAuth requests at production source `e3cb082` use the same selected Global/Default model
+with one strictly declared `report_marker` function, a fixed required string enum and closed
+object schema, a specific function choice and 128 requested output tokens. Streaming and genuine
+nonstreaming each return `RequiresAction` with finish reason `tool_calls`, no ordinary answer,
+314 input/18 output/332 total tokens and 192 cached input tokens. The tester exits 1 because the
+request needs caller action; this is not a transport failure. No callback or replay executes.
+These runs qualify selected-route admission of that strict descriptor and forced choice, not
+returned arguments, arbitrary strict schemas, regex guarantees or strict-function replay.
 The shared `StructuredOutput` validator builds the unchanged original schema in a fresh local
 registry for each validation. Repeated `$id` values across requests do not collide or retain request
 graphs in the global registry. Existing supplier default dialect, vocabulary and dialect registries,
