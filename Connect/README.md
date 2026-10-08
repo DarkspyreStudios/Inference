@@ -1498,7 +1498,8 @@ Embedding and document-search failure conversion uses selected and effective out
 captured when the send exits, including when it throws before returning a response. Typed provider
 and HTTP transport failures retain their redacted explanations. Reflected HttpClient-default headers
 remain redacted from messages, codes and request IDs. An absent response supplies
-no HTTP status.
+no response observation. A thrown `HttpRequestException` retains its observed status when no
+response status exists. A failure with neither source leaves the status unknown.
 
 Retirement fences new requests, cancels
 connection lookup and provider calls, and awaits all active requests before releasing its adapter references. Supplied adapters and the

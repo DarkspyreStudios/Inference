@@ -1808,7 +1808,7 @@ public sealed class ProviderTerminalEvidenceTests
             ? new LlmProviderException(message, LlmTransport.XaiResponses,
                 providerCode: "transport_test-token_header-value_default-value",
                 requestId: "request-test-token-header-value-default-value")
-            : new HttpRequestException(message);
+            : new HttpRequestException(message, null, HttpStatusCode.BadGateway);
         var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
             sendFailure: original);
         using var http = new HttpClient(handler);
@@ -1833,7 +1833,7 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.Equal("Transport refused [REDACTED] [REDACTED] [REDACTED].", failure.Message);
         Assert.Equal(classified ? "transport_[REDACTED]_[REDACTED]_[REDACTED]" : null, failure.ProviderCode);
         Assert.Equal(classified ? "request-[REDACTED]-[REDACTED]-[REDACTED]" : null, failure.RequestId);
-        Assert.Null(failure.StatusCode);
+        Assert.Equal(classified ? (HttpStatusCode?)null : HttpStatusCode.BadGateway, failure.StatusCode);
         Assert.Null(failure.SanitizedResponseBody);
         foreach (string secret in new[] { "test-token", "header-value", "default-value" })
             Assert.DoesNotContain(secret, failure.ToString(), StringComparison.Ordinal);

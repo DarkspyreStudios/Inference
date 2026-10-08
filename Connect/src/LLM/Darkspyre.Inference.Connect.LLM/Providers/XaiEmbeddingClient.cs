@@ -255,7 +255,8 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
         string message = error is HttpRequestException
             ? SecretRedactor.Sanitize(error.Message, credential, secrets) : "Grok embedding transport failed.";
         return new LlmProviderException(message, LlmTransport.XaiResponses,
-            response?.StatusCode, requestId: response is null ? null : SafeRequestId(response, credential, secrets),
+            response?.StatusCode ?? (error as HttpRequestException)?.StatusCode,
+            requestId: response is null ? null : SafeRequestId(response, credential, secrets),
             innerException: new FailureEvidence(error));
     }
 
