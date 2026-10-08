@@ -11,6 +11,52 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class ConsoleAgentDiagnosticsTests
 {
+    [Fact]
+    public void PromptShowsHostedLifecycleAndCitationsWithoutWritingThemIntoTheAnswer()
+    {
+        using var answer = new StringWriter();
+        using var diagnostics = new StringWriter();
+        LlmStreamEvent[] events =
+        [
+            new LlmHostedToolCallStartedEvent("observed-call", LlmHostedToolKind.DocumentSearch, "file_search"),
+            new LlmHostedToolCallProgressEvent("observed-call", LlmHostedToolPhase.Searching),
+            new LlmHostedToolCallCompletedEvent(new(null, LlmHostedToolKind.DocumentSearch, "file_search", "failed", null, null)),
+            new LlmCitationEvent(new("https://example.org/reference"))
+        ];
+
+        foreach (LlmStreamEvent observation in events)
+            Assert.False(Program.WritePromptEvent(observation, answer, diagnostics));
+
+        Assert.Equal(string.Empty, answer.ToString());
+        Assert.Equal(HostedDiagnostics, diagnostics.ToString());
+    }
+
+    [Fact]
+    public void AgentShowsHostedLifecycleAndCitationsWithoutWritingThemIntoTheAnswer()
+    {
+        using var answer = new StringWriter();
+        using var diagnostics = new StringWriter();
+        LlmAgentEvent[] events =
+        [
+            new LlmAgentHostedToolCallStartedEvent("session", "turn", "request", "observed-call", LlmHostedToolKind.DocumentSearch, "file_search"),
+            new LlmAgentHostedToolCallProgressEvent("session", "turn", "request", "observed-call", LlmHostedToolPhase.Searching),
+            new LlmAgentHostedToolCallCompletedEvent("session", "turn", "request", new(null, LlmHostedToolKind.DocumentSearch, "file_search", "failed", null, null)),
+            new LlmAgentCitationEvent("session", "turn", "request", new("https://example.org/reference"))
+        ];
+
+        foreach (LlmAgentEvent observation in events)
+            Program.WriteAgentEvent(observation, answer, diagnostics);
+
+        Assert.Equal(string.Empty, answer.ToString());
+        Assert.Equal(HostedDiagnostics, diagnostics.ToString());
+    }
+
+    private static string HostedDiagnostics => string.Join(Environment.NewLine,
+        "[hosted:started] id=observed-call kind=DocumentSearch name=file_search",
+        "[hosted:progress] id=observed-call phase=Searching",
+        "[hosted:completed] id=unknown kind=DocumentSearch name=file_search status=failed",
+        "[citation] https://example.org/reference", string.Empty);
+
     [Theory]
     [InlineData(XaiRegion.Global, "https://api.x.ai/v1")]
     [InlineData(XaiRegion.UnitedStates, "https://us.api.x.ai/v1")]

@@ -4316,6 +4316,11 @@ Codex uses host-owned device OAuth stored in `Darkspyre.SecureStore`; Claude and
 CLI-owned credentials. The tester also stores host-owned AWS profile/region configuration.
 Agent completion diagnostics include both status and the actual completion reason. The tester
 prints an existing completion error separately; it does not replace it with a generic status.
+Prompt and agent diagnostics display actual hosted-call starts, progress phases, terminal status
+and individual citation URLs on stderr. Model answer text remains on stdout. Both paths use the
+same formatter. Missing call identity and terminal status display as `unknown`; a terminal call
+does not imply successful tool execution. Diagnostics do not dump hosted input/output JSON or
+generated image bytes.
 
 ### Apple console harness
 

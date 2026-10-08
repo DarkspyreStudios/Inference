@@ -362,38 +362,70 @@ internal static class Program
                            request,
                            cancellationToken))
         {
-            switch (streamEvent)
+            if (streamEvent is LlmChatCompletionEvent completion)
             {
-                case LlmTextDeltaEvent text:
-                    Console.Write(text.Delta);
-                    wroteOutput = true;
-                    break;
-                case LlmStructuredOutputSnapshotEvent snapshot:
-                    Console.WriteLine($"[structured snapshot] {snapshot.Content.GetRawText()}");
-                    wroteOutput = true;
-                    break;
-                case LlmRefusalDeltaEvent refusal:
-                    Console.Error.WriteLine($"[refusal] {refusal.Delta}");
-                    break;
-                case LlmActivityEvent activity:
-                    Console.Error.WriteLine($"[activity] {activity.Activity}");
-                    break;
-                case LlmUsageDeltaEvent usage:
-                    Console.Error.WriteLine($"[usage] input={usage.Cumulative.InputTokens} output={usage.Cumulative.OutputTokens} total={usage.Cumulative.TotalTokens}");
-                    break;
-                case LlmChatCompletionEvent completion:
-                    if (wroteOutput)
-                    {
-                        Console.WriteLine();
-                    }
-                    WriteCompletion(completion.Result);
-                    exitCode = completion.Result.Status is LlmCompletionStatus.Completed or LlmCompletionStatus.Unknown ? 0 : 1;
-                    break;
+                if (wroteOutput)
+                {
+                    Console.WriteLine();
+                }
+                WriteCompletion(completion.Result);
+                exitCode = completion.Result.Status is LlmCompletionStatus.Completed or LlmCompletionStatus.Unknown ? 0 : 1;
+            }
+            else
+            {
+                wroteOutput |= WritePromptEvent(streamEvent, Console.Out, Console.Error);
             }
         }
 
         return exitCode;
     }
+
+    internal static bool WritePromptEvent(LlmStreamEvent streamEvent, TextWriter output, TextWriter diagnostics)
+    {
+        switch (streamEvent)
+        {
+            case LlmTextDeltaEvent text:
+                output.Write(text.Delta);
+                return true;
+            case LlmStructuredOutputSnapshotEvent snapshot:
+                output.WriteLine($"[structured snapshot] {snapshot.Content.GetRawText()}");
+                return true;
+            case LlmRefusalDeltaEvent refusal:
+                diagnostics.WriteLine($"[refusal] {refusal.Delta}");
+                break;
+            case LlmActivityEvent activity:
+                diagnostics.WriteLine($"[activity] {activity.Activity}");
+                break;
+            case LlmUsageDeltaEvent usage:
+                diagnostics.WriteLine($"[usage] input={usage.Cumulative.InputTokens} output={usage.Cumulative.OutputTokens} total={usage.Cumulative.TotalTokens}");
+                break;
+            case LlmHostedToolCallStartedEvent started:
+                WriteHostedStarted(started.CallId, started.Kind, started.Name, diagnostics);
+                break;
+            case LlmHostedToolCallProgressEvent progress:
+                WriteHostedProgress(progress.CallId, progress.Phase, diagnostics);
+                break;
+            case LlmHostedToolCallCompletedEvent completed:
+                WriteHostedCompleted(completed.Call, diagnostics);
+                break;
+            case LlmCitationEvent citation:
+                WriteCitation(citation.Citation, diagnostics);
+                break;
+        }
+        return false;
+    }
+
+    private static void WriteHostedStarted(string callId, LlmHostedToolKind kind, string name, TextWriter diagnostics) =>
+        diagnostics.WriteLine($"[hosted:started] id={callId} kind={kind} name={name}");
+
+    private static void WriteHostedProgress(string callId, LlmHostedToolPhase phase, TextWriter diagnostics) =>
+        diagnostics.WriteLine($"[hosted:progress] id={callId} phase={phase}");
+
+    private static void WriteHostedCompleted(LlmHostedToolCall call, TextWriter diagnostics) =>
+        diagnostics.WriteLine($"[hosted:completed] id={call.CallId ?? "unknown"} kind={call.Kind} name={call.Name} status={call.Status ?? "unknown"}");
+
+    private static void WriteCitation(LlmCitation citation, TextWriter diagnostics) =>
+        diagnostics.WriteLine($"[citation] {citation.Url}");
 
     private static async Task<int> RunAgentAsync(
         LlmProviderService llms,
@@ -456,7 +488,7 @@ internal static class Program
                            },
                            cancellationToken))
         {
-            WriteAgentEvent(agentEvent);
+            WriteAgentEvent(agentEvent, Console.Out, Console.Error);
             if (agentEvent is LlmAgentTurnCompletedEvent completed)
                 exitCode = completed.Status is LlmAgentTurnStatus.Completed or LlmAgentTurnStatus.Unknown ? 0 : 1;
         }
@@ -587,42 +619,54 @@ internal static class Program
         });
     }
 
-    private static void WriteAgentEvent(LlmAgentEvent agentEvent)
+    internal static void WriteAgentEvent(LlmAgentEvent agentEvent, TextWriter output, TextWriter diagnostics)
     {
         switch (agentEvent)
         {
             case LlmAgentTextDeltaEvent text:
-                Console.Write(text.Delta);
+                output.Write(text.Delta);
                 break;
             case LlmAgentStructuredOutputSnapshotEvent snapshot:
-                Console.WriteLine($"[structured snapshot] {snapshot.Content.GetRawText()}");
+                output.WriteLine($"[structured snapshot] {snapshot.Content.GetRawText()}");
                 break;
             case LlmAgentReasoningDeltaEvent reasoning:
-                Console.Error.Write(reasoning.Delta);
+                diagnostics.Write(reasoning.Delta);
                 break;
             case LlmAgentCitationsSnapshotEvent citations:
-                Console.Error.WriteLine($"[citations snapshot] request={citations.RequestId} count={citations.Citations.Count}");
+                diagnostics.WriteLine($"[citations snapshot] request={citations.RequestId} count={citations.Citations.Count}");
+                break;
+            case LlmAgentHostedToolCallStartedEvent started:
+                WriteHostedStarted(started.CallId, started.Kind, started.Name, diagnostics);
+                break;
+            case LlmAgentHostedToolCallProgressEvent progress:
+                WriteHostedProgress(progress.CallId, progress.Phase, diagnostics);
+                break;
+            case LlmAgentHostedToolCallCompletedEvent hosted:
+                WriteHostedCompleted(hosted.Call, diagnostics);
+                break;
+            case LlmAgentCitationEvent citation:
+                WriteCitation(citation.Citation, diagnostics);
                 break;
             case LlmAgentToolEvent tool:
-                Console.Error.WriteLine(tool.Output is null
+                diagnostics.WriteLine(tool.Output is null
                     ? $"[tool:{tool.Status}] {tool.Tool}"
                     : $"[tool:{tool.Status}] {tool.Tool} output parts={tool.Output.Parts.Count} error={tool.Output.IsError}");
                 break;
             case LlmAgentToolPresentationEvent presentation:
-                Console.Error.WriteLine($"[tool presentation] replay={presentation.IsReplay} content parts={presentation.Tool.Content.Count} locations={presentation.Tool.Locations.Count}");
+                diagnostics.WriteLine($"[tool presentation] replay={presentation.IsReplay} content parts={presentation.Tool.Content.Count} locations={presentation.Tool.Locations.Count}");
                 break;
             case LlmAgentContentObservationEvent observation:
-                Console.Error.WriteLine($"[content observation] kind={observation.Kind} mode={observation.Mode} replay={observation.IsReplay} parts={observation.Content.Count}");
+                diagnostics.WriteLine($"[content observation] kind={observation.Kind} mode={observation.Mode} replay={observation.IsReplay} parts={observation.Content.Count}");
                 break;
             case LlmAgentActivityEvent activity:
-                Console.Error.WriteLine($"[activity] {activity.Activity}");
+                diagnostics.WriteLine($"[activity] {activity.Activity}");
                 break;
             case LlmAgentWarningEvent warning:
-                Console.Error.WriteLine($"[warning] {warning.Message}");
+                diagnostics.WriteLine($"[warning] {warning.Message}");
                 break;
             case LlmAgentTurnCompletedEvent completed:
-                Console.WriteLine();
-                WriteAgentCompletion(completed, Console.Error);
+                output.WriteLine();
+                WriteAgentCompletion(completed, diagnostics);
                 break;
         }
     }
