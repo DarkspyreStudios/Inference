@@ -100,9 +100,11 @@ public sealed class ResourcePreparationTests
     [Fact]
     public async Task ImportedDeferredReceiptConsumesOnceAndReturnsTheActualChatResult()
     {
-        var handler = new ResourceResults();
+        var handler = new ResourceResults(diagnosticEchoes: true);
         using var http = new HttpClient(handler);
-        var source = new Source(ResourceResults.Connection());
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var source = new Source(ResourceResults.Connection() with
+        { AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" } });
         ILlmClient[] clients = [new XaiResponsesLlmClient(http)];
         await using var access = new LlmConnectionAccess(source, [], clients);
         await using var core = new LlmProviderService(source, clients, [], connectionAccess: access);
@@ -120,6 +122,9 @@ public sealed class ResourcePreparationTests
         Assert.Equal(LlmCompletionStatus.Completed, chat.Status);
         Assert.Equal("stop", chat.FinishReason);
         Assert.Equal(5, chat.Usage!.TotalTokens);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", chat.Diagnostics!.RequestId);
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, chat.Diagnostics.RawFinalResponseJson!, StringComparison.Ordinal);
         Assert.Empty(chat.GeneratedResources);
         Assert.Equal("original-connection", imported.Scope.Identity);
         Assert.Equal(new Uri("https://api.x.ai/v1/chat/deferred-completion/request-1"), Assert.Single(handler.Requests));
@@ -170,9 +175,11 @@ public sealed class ResourcePreparationTests
     [Fact]
     public async Task BatchChatResultsUseTheActualEnvelopeAndReturnOnlyTheRequestedPage()
     {
-        var handler = new ResourceResults(batch: true);
+        var handler = new ResourceResults(batch: true, diagnosticEchoes: true);
         using var http = new HttpClient(handler);
-        var source = new Source(ResourceResults.Connection());
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var source = new Source(ResourceResults.Connection() with
+        { AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" } });
         ILlmClient[] clients = [new XaiResponsesLlmClient(http)];
         await using var access = new LlmConnectionAccess(source, [], clients);
         await using var core = new LlmProviderService(source, clients, [], connectionAccess: access);
@@ -190,7 +197,11 @@ public sealed class ResourcePreparationTests
         Assert.Equal("observed-model", chat.ModelId);
         Assert.Equal(LlmCompletionStatus.Completed, chat.Status);
         Assert.Equal(5, chat.Usage!.TotalTokens);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", chat.Diagnostics!.RequestId);
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, chat.Diagnostics.RawFinalResponseJson!, StringComparison.Ordinal);
         Assert.Equal(InferenceFailureCode.ExecutionFailed, Assert.IsType<LlmBatchFailure>(page.Items[1]).Error.Code);
+        Assert.Equal("The row failed. [REDACTED] [REDACTED] [REDACTED]", Assert.IsType<LlmBatchFailure>(page.Items[1]).Error.Message);
         Assert.Equal(new[]
         {
             new Uri("https://api.x.ai/v1/batches/batch-1"),
@@ -861,7 +872,7 @@ public sealed class ResourcePreparationTests
         }
     }
 
-    private sealed class ResourceResults(bool batch = false, bool generatedFile = false) : HttpMessageHandler
+    private sealed class ResourceResults(bool batch = false, bool generatedFile = false, bool diagnosticEchoes = false) : HttpMessageHandler
     {
         private const string Chat = """
             {"id":"completion-1","model":"observed-model","choices":[{"index":0,
@@ -886,17 +897,30 @@ public sealed class ResourcePreparationTests
             Assert.Equal(HttpMethod.Get, request.Method);
             Assert.Equal("test-token", request.Headers.Authorization!.Parameter);
             Requests.Add(request.RequestUri!);
+            string chat = Chat;
+            if (diagnosticEchoes)
+            {
+                Assert.Equal("header-value", Assert.Single(request.Headers.GetValues("X-Trace")));
+                Assert.Equal("default-value", Assert.Single(request.Headers.GetValues("X-Default")));
+                var echoed = JsonNode.Parse(Chat)!.AsObject();
+                echoed["trace"] = "test-token header-value default-value";
+                chat = echoed.ToJsonString();
+            }
+            Task<HttpResponseMessage> Response(HttpStatusCode status, string body)
+            {
+                var response = new HttpResponseMessage(status) { Content = new StringContent(body) };
+                if (diagnosticEchoes) response.Headers.Add("x-request-id", "request-test-token-header-value-default-value-1");
+                return Task.FromResult(response);
+            }
             if (generatedFile)
             {
                 Assert.InRange(Requests.Count, 1, 2);
                 var generatedBody = JsonNode.Parse(Chat)!.AsObject();
                 generatedBody["output_files"] = new JsonArray(new JsonObject { ["file_id"] = "generated-file", ["name"] = "generated.txt" });
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
-                { Content = new StringContent(Requests.Count == 1 ? generatedBody.ToJsonString() : "generated bytes") });
+                return Response(HttpStatusCode.OK, Requests.Count == 1 ? generatedBody.ToJsonString() : "generated bytes");
             }
             if (!batch)
-                return Task.FromResult(new HttpResponseMessage(Requests.Count == 1 ? HttpStatusCode.OK : HttpStatusCode.Gone)
-                { Content = new StringContent(Requests.Count == 1 ? Chat : "{}") });
+                return Response(Requests.Count == 1 ? HttpStatusCode.OK : HttpStatusCode.Gone, Requests.Count == 1 ? chat : "{}");
             Assert.InRange(Requests.Count, 1, 2);
             string body = Requests.Count == 1
                 ? "{\"batch_id\":\"batch-1\",\"name\":\"batch\"}"
@@ -906,16 +930,16 @@ public sealed class ResourcePreparationTests
                         new JsonObject
                         {
                             ["batch_request_id"] = "row-1",
-                            ["batch_result"] = new JsonObject { ["response"] = new JsonObject { ["chat_get_completion"] = JsonNode.Parse(Chat) } }
+                            ["batch_result"] = new JsonObject { ["response"] = new JsonObject { ["chat_get_completion"] = JsonNode.Parse(chat) } }
                         },
                         new JsonObject
                         {
                             ["batch_request_id"] = "row-2",
-                            ["batch_result"] = new JsonObject { ["error"] = "The row failed." }
+                            ["batch_result"] = new JsonObject { ["error"] = diagnosticEchoes ? "The row failed. test-token header-value default-value" : "The row failed." }
                         }),
                     ["pagination_token"] = "next-cursor"
                 }.ToJsonString();
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
+            return Response(HttpStatusCode.OK, body);
         }
     }
 

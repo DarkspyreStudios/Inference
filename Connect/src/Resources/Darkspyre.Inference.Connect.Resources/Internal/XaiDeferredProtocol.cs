@@ -50,7 +50,7 @@ internal sealed class XaiDeferredProtocol(HttpClient http, LlmConnection connect
                     throw new InferenceException(InferenceFailureCode.ProtocolFailure, "xAI returned an unexpected deferred response status.");
                 string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, current).ConfigureAwait(false);
                 fence();
-                var actual = codec.DecodeCompleteResponse(body, response, connection);
+                var actual = codec.DecodeCompleteResponse(body, response, connection, observation.SecretContext);
                 observation.ObservedDeferredResult = new LlmDeferredCompleted(actual.Result);
                 fence();
                 return actual;

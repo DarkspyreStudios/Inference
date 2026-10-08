@@ -122,40 +122,63 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Theory]
-    [InlineData(false, "malformed")]
-    [InlineData(true, "malformed")]
-    [InlineData(false, "error")]
-    [InlineData(true, "error")]
-    [InlineData(false, "complete")]
-    [InlineData(true, "complete")]
-    public async Task AnthropicBodyDiagnosticsRedactEffectiveRequestSecrets(bool streaming, string outcome)
+    [InlineData(LlmTransport.AnthropicMessages, false, "malformed")]
+    [InlineData(LlmTransport.AnthropicMessages, true, "malformed")]
+    [InlineData(LlmTransport.AnthropicMessages, false, "error")]
+    [InlineData(LlmTransport.AnthropicMessages, true, "error")]
+    [InlineData(LlmTransport.AnthropicMessages, false, "complete")]
+    [InlineData(LlmTransport.AnthropicMessages, true, "complete")]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, false, "malformed")]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, true, "malformed")]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, false, "error")]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, true, "error")]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, false, "complete")]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, true, "complete")]
+    public async Task ChatBodyDiagnosticsRedactEffectiveRequestSecrets(LlmTransport transport, bool streaming, string outcome)
     {
-        const string error = "{\"type\":\"error\",\"error\":{\"type\":\"rate_limit_test-token_header-value_default-value_provider-secret\",\"message\":\"Failure test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}}";
+        bool anthropic = transport == LlmTransport.AnthropicMessages;
+        string error = new JsonObject
+        {
+            ["type"] = "error",
+            ["error"] = new JsonObject
+            {
+                [anthropic ? "type" : "code"] = "rate_limit_test-token_header-value_default-value_provider-secret",
+                ["message"] = "Failure test-token header-value default-value provider-secret",
+                ["refresh_token"] = "provider-secret"
+            }
+        }.ToJsonString();
         const string complete = "{\"type\":\"message\",\"id\":\"message-1\",\"model\":\"claude-sonnet-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"answer\"}],\"stop_reason\":\"end_turn\",\"trace\":\"test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}";
+        const string chatComplete = "{\"id\":\"message-1\",\"model\":\"reported-model\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"answer\"},\"finish_reason\":\"stop\"}],\"trace\":\"test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}";
+        const string chatChunk = "{\"id\":\"message-1\",\"model\":\"reported-model\",\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":\"stop\"}],\"trace\":\"test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}";
         const string terminal = "{\"type\":\"message_stop\",\"trace\":\"test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}";
         string payload = outcome switch
         {
             "error" => error,
-            "complete" => complete,
+            "complete" => anthropic ? complete : chatComplete,
             _ => "not-json test-token header-value default-value"
         };
-        string body = streaming
-            ? outcome == "complete"
-                ? "data: {\"type\":\"message_start\",\"message\":{\"id\":\"message-1\",\"model\":\"claude-sonnet-4-6\"}}\n\n"
+        string body = payload;
+        if (streaming)
+        {
+            if (outcome != "complete")
+                body = $"data: {payload}\n\n";
+            else if (anthropic)
+                body = "data: {\"type\":\"message_start\",\"message\":{\"id\":\"message-1\",\"model\":\"claude-sonnet-4-6\"}}\n\n"
                     + "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"answer\"}}\n\n"
                     + "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
-                    + $"data: {terminal}\n\n"
-                : $"data: {payload}\n\n"
-            : payload;
-        using var handler = new Handler(LlmTransport.AnthropicMessages, streaming, body,
+                    + $"data: {terminal}\n\n";
+            else
+                body = $"data: {chatChunk}\n\ndata: [DONE]\n\n";
+        }
+        using var handler = new Handler(transport, streaming, body,
             requestId: "request-test-token-header-value-default-value-1");
         using var http = new HttpClient(handler);
         http.DefaultRequestHeaders.Add("X-Default", "default-value");
-        var client = new AnthropicMessagesLlmClient(http);
+        ILlmClient client = anthropic ? new AnthropicMessagesLlmClient(http) : new OpenAiCompatibleChatLlmClient(http);
         var connection = new LlmConnection
         {
             Version = "1",
-            Transport = LlmTransport.AnthropicMessages,
+            Transport = transport,
             Endpoint = "https://provider.example.test/v1",
             Credential = new LlmCredential { ApiKey = "test-token" }.Serialize(),
             AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" },
@@ -165,7 +188,7 @@ public sealed class ProviderTerminalEvidenceTests
         async Task ReadAsync()
         {
             await foreach (LlmStreamEvent item in client.StreamAsync(connection,
-                new() { ModelId = "claude-sonnet-4-6", Messages = [new("user", "hello")] }))
+                new() { ModelId = anthropic ? "claude-sonnet-4-6" : "selected-model", Messages = [new("user", "hello")] }))
                 observations.Add(item);
         }
 
@@ -176,7 +199,7 @@ public sealed class ProviderTerminalEvidenceTests
             LlmChatResult result = Assert.Single(observations.OfType<LlmChatCompletionEvent>()).Result;
             Assert.Equal("answer", result.Text);
             Assert.Equal(LlmCompletionStatus.Completed, result.Status);
-            Assert.Equal("claude-sonnet-4-6", result.ModelId);
+            Assert.Equal(anthropic ? "claude-sonnet-4-6" : "reported-model", result.ModelId);
             Assert.Equal(200, result.Diagnostics!.HttpStatusCode);
             Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", result.Diagnostics.RequestId);
             diagnostics = result.Diagnostics.RawFinalResponseJson!;
@@ -952,9 +975,10 @@ public sealed class ProviderTerminalEvidenceTests
     {
         var retryAfter = TimeSpan.FromSeconds(17);
         var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
-            "{\"error\":{\"code\":\"rate_limit_test-token_provider-secret\",\"message\":\"Rate limit test-token\",\"refresh_token\":\"provider-secret\"}}",
-            HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-1");
+            "{\"error\":{\"code\":\"rate_limit_test-token_provider-secret_header-value_default-value\",\"message\":\"Rate limit test-token header-value default-value\",\"refresh_token\":\"provider-secret\"}}",
+            HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-header-value-default-value-1");
         using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
         var client = new XaiResponsesLlmClient(http);
         var source = new ResourcePreparationTests.Source(new()
         {
@@ -962,7 +986,8 @@ public sealed class ProviderTerminalEvidenceTests
             Transport = LlmTransport.XaiResponses,
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
-            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize()
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
         });
         await using var access = new LlmConnectionAccess(source, [], [client]);
         await using var core = new LlmProviderService(source, [client], [], connectionAccess: access);
@@ -973,8 +998,8 @@ public sealed class ProviderTerminalEvidenceTests
         LlmProviderException failure = Assert.IsType<LlmProviderException>(operation.InnerException);
 
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
-        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]", failure.ProviderCode);
-        Assert.Equal("request-[REDACTED]-1", failure.RequestId);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
         Assert.Equal(retryAfter, failure.RetryAfter);
         Assert.Equal(failure.RequestId, operation.Observation.RequestId);
         Assert.Equal(429, operation.Observation.HttpStatusCode);
@@ -984,6 +1009,10 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.Null(failure.SanitizedResponseBody);
         Assert.DoesNotContain("test-token", failure.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("provider-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("header-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("default-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
         Assert.Equal(1, handler.Calls);
     }
 

@@ -167,6 +167,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
+        string[] secrets = httpRequest.Headers.SelectMany(header => header.Value).ToArray();
         if (ObserveAccountUsage(response) is { } observed)
         { yield return consumption.Publish<LlmStreamEvent>(new AccountUsageObservedEvent(observed)); }
         await ProviderHttp.ThrowIfUnsuccessfulAsync(
@@ -174,13 +175,13 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             Transport,
             credential,
             "OpenAI-compatible chat request",
-            httpRequest.Headers.SelectMany(header => header.Value),
+            secrets,
             cancellationToken);
 
         if (!capabilities.SupportsStreaming)
         {
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
-            foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(body, response, request, enforcement, credential, connection, omitted, capabilities.SupportsReasoningText))
+            foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(body, response, request, enforcement, credential, connection, secrets, omitted, capabilities.SupportsReasoningText))
             {
                 yield return consumption.Publish<LlmStreamEvent>(completeEvent);
             }
@@ -222,7 +223,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                     response,
                     data,
                     credential,
-                    exception);
+                    exception, secrets);
             }
 
             using (document)
@@ -230,10 +231,10 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 JsonElement root = document.RootElement;
                 responseId ??= LlmJson.GetString(root, "id");
                 observedModel = ObservedModel.Read(root, "model", Transport, connection, credential,
-                    response.RequestMessage, observedModel);
+                    response.RequestMessage, observedModel, secrets);
                 if (LlmJson.GetObject(root, "error") is { } error)
                 {
-                    throw StreamError(error, response, data, credential);
+                    throw StreamError(error, response, data, credential, secrets);
                 }
 
                 usage = ReadUsage(root) ?? usage;
@@ -287,7 +288,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                         if (LlmJson.GetString(toolCallDelta, "id") is { Length: > 0 } incomingId)
                         {
                             if (!builder.SyntheticId && builder.Id is { } previous && previous != incomingId)
-                                throw ProtocolException("OpenAI-compatible chat changed a tool-call id mid-stream.", response, data, credential);
+                                throw ProtocolException("OpenAI-compatible chat changed a tool-call id mid-stream.", response, data, credential, extraSecrets: secrets);
                             if (!builder.SyntheticId) builder.Id = incomingId;
                         }
                         string argumentsDelta = string.Empty;
@@ -333,7 +334,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 "OpenAI-compatible chat ended without a completion marker.",
                 response,
                 lastEvent ?? string.Empty,
-                credential);
+                credential, extraSecrets: secrets);
         }
 
         LlmToolCall[] completedToolCalls = toolCalls
@@ -358,6 +359,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             response,
             lastEvent,
             credential,
+            secrets,
             connection,
             reasoning,
             omitted)));
@@ -371,10 +373,11 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         LlmStructuredOutputEnforcement? enforcement,
         LlmCredential? credential,
         LlmConnection connection,
+        IReadOnlyList<string> secrets,
         int omitted,
         bool reasoningText)
     {
-        ChatCompletionResponse decoded = DecodeCompleteResponse(body, response, connection, request, enforcement, omitted);
+        ChatCompletionResponse decoded = DecodeCompleteResponse(body, response, connection, secrets, request, enforcement, omitted);
         return [.. CompleteResponseEvents.From(decoded.Result, reasoningText ? decoded.Reasoning : [])];
     }
 
@@ -389,6 +392,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         string body,
         HttpResponseMessage response,
         LlmConnection connection,
+        IReadOnlyList<string> secrets,
         LlmChatRequest? request = null,
         LlmStructuredOutputEnforcement? enforcement = null,
         int omitted = 0)
@@ -406,7 +410,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 response,
                 body,
                 credential,
-                exception);
+                exception, secrets);
         }
 
         using (document)
@@ -414,12 +418,12 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             JsonElement root = document.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
             {
-                throw ProtocolException("OpenAI-compatible chat returned a malformed response.", response, body, credential);
+                throw ProtocolException("OpenAI-compatible chat returned a malformed response.", response, body, credential, extraSecrets: secrets);
             }
 
             if (LlmJson.GetObject(root, "error") is { } error)
             {
-                throw StreamError(error, response, body, credential);
+                throw StreamError(error, response, body, credential, secrets);
             }
 
             if (!root.TryGetProperty("choices", out JsonElement choices)
@@ -427,7 +431,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 || choices.GetArrayLength() == 0
                 || LlmJson.GetObject(choices[0], "message") is not { } message)
             {
-                throw ProtocolException("OpenAI-compatible chat returned no message.", response, body, credential);
+                throw ProtocolException("OpenAI-compatible chat returned no message.", response, body, credential, extraSecrets: secrets);
             }
 
             var toolCalls = new List<LlmToolCall>();
@@ -455,12 +459,13 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 LlmJson.GetString(message, "refusal") ?? string.Empty,
                 LlmJson.GetString(choices[0], "finish_reason"),
                 LlmJson.GetString(root, "id"),
-                ObservedModel.Read(root, "model", Transport, connection, credential, response.RequestMessage),
+                ObservedModel.Read(root, "model", Transport, connection, credential, response.RequestMessage, extraSecrets: secrets),
                 ReadUsage(root),
                 [.. toolCalls],
                 response,
                 body,
                 credential,
+                secrets,
                 connection,
                 reasoning,
                 omitted);
@@ -471,11 +476,11 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 if (root.TryGetProperty("citations", out JsonElement sources) && sources.ValueKind != JsonValueKind.Null)
                 {
                     if (sources.ValueKind != JsonValueKind.Array)
-                        throw ProtocolException("xAI chat returned invalid citations.", response, body, credential);
+                        throw ProtocolException("xAI chat returned invalid citations.", response, body, credential, extraSecrets: secrets);
                     foreach (JsonElement source in sources.EnumerateArray())
                     {
                         if (source.ValueKind != JsonValueKind.String)
-                            throw ProtocolException("xAI chat returned an invalid citation.", response, body, credential);
+                            throw ProtocolException("xAI chat returned an invalid citation.", response, body, credential, extraSecrets: secrets);
                         citations.Add(new LlmCitation(source.GetString()!));
                     }
                 }
@@ -483,13 +488,13 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 if (root.TryGetProperty("output_files", out JsonElement files) && files.ValueKind != JsonValueKind.Null)
                 {
                     if (files.ValueKind != JsonValueKind.Array)
-                        throw ProtocolException("xAI chat returned invalid generated files.", response, body, credential);
+                        throw ProtocolException("xAI chat returned invalid generated files.", response, body, credential, extraSecrets: secrets);
                     foreach (JsonElement file in files.EnumerateArray())
                     {
                         if (file.ValueKind != JsonValueKind.Object
                             || !file.TryGetProperty("file_id", out JsonElement id) || id.ValueKind != JsonValueKind.String
                             || !file.TryGetProperty("name", out JsonElement name) || name.ValueKind != JsonValueKind.String)
-                            throw ProtocolException("xAI chat returned an invalid generated file.", response, body, credential);
+                            throw ProtocolException("xAI chat returned an invalid generated file.", response, body, credential, extraSecrets: secrets);
                         outputFiles.Add(new(id.GetString()!, name.GetString()!));
                     }
                 }
@@ -511,6 +516,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         HttpResponseMessage response,
         string? rawFinal,
         LlmCredential? credential,
+        IReadOnlyList<string> secrets,
         LlmConnection connection,
         ChatReasoning reasoning,
         int omitted)
@@ -555,8 +561,8 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             StructuredOutput = validation,
             Diagnostics = new LlmProviderDiagnostics(
                 (int)response.StatusCode,
-                ProviderHttp.ReadRequestId(response),
-                rawFinal is null ? null : SecretRedactor.Sanitize(rawFinal, credential))
+                ProviderHttp.ReadRequestId(response, credential, secrets),
+                rawFinal is null ? null : SecretRedactor.Sanitize(rawFinal, credential, secrets))
         };
     }
 
@@ -913,16 +919,20 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         JsonElement error,
         HttpResponseMessage response,
         string rawEvent,
-        LlmCredential? credential) => new(
-            SecretRedactor.Sanitize(
-                LlmJson.GetString(error, "message") ?? "The provider returned a stream error.",
-                credential),
+        LlmCredential? credential,
+        IReadOnlyList<string> secrets)
+    {
+        string safe = SecretRedactor.Sanitize(rawEvent, credential, secrets);
+        (string? code, string? message, _) = ProviderHttp.ReadProviderError(safe);
+        return new(
+            message ?? "The provider returned a stream error.",
             Transport,
             response.StatusCode,
-            LlmJson.GetString(error, "code"),
-            ProviderHttp.ReadRequestId(response),
-            sanitizedResponseBody: SecretRedactor.Sanitize(rawEvent, credential),
+            code,
+            ProviderHttp.ReadRequestId(response, credential, secrets),
+            sanitizedResponseBody: safe,
             isContextOverflow: LlmContextOverflow.Chat(LlmJson.GetString(error, "code"), LlmJson.GetString(error, "message")));
+    }
 
     private sealed class ToolCallBuilder
     {

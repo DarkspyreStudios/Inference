@@ -49,10 +49,12 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
             observation.RequestDispatched = true;
             if (observation.Operation == LlmResourceOperation.GetDeferred) observation.RetrievalDispatched = true;
             response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token).ConfigureAwait(false);
+            observation.SecretContext = observation.SecretContext.Concat(connection.AdditionalHeaders.Values).Concat(secretContext ?? [])
+                .Concat(request.Headers.SelectMany(header => header.Value)).Distinct(StringComparer.Ordinal).ToArray();
             observation.ObserveResponse(response, connection);
             fence();
             await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential),
-                connection.AdditionalHeaders.Values.Concat(secretContext ?? []).ToArray(), token,
+                observation.SecretContext, token,
                 diagnosticBody: false).ConfigureAwait(false);
             fence();
             result = await read(response, token).ConfigureAwait(false);

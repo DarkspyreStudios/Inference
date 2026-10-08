@@ -57,6 +57,10 @@ Native errors retain their Anthropic type and explanatory message from the redac
 overflow classification reads the original provider facts.
 Shared protocol errors retain JSON parsing failures with their actual line and byte positions.
 Their inner exception uses a fixed parsing message and no input path because parser text can quote secrets.
+Compatible chat carries actual sent headers through streamed generation and its canonical complete decoder.
+Protocol/native errors and terminal diagnostics use that context for their safe fields and body.
+Native error codes and messages come from the same redacted-envelope reader; overflow classification
+retains the original provider facts.
 
 Mapped task results publish after response, body and request cleanup completes; retirement begun by
 cleanup prevents late success without replacing an earlier operation failure. If an owned logger
@@ -138,6 +142,9 @@ operation-created JSONL belongs only to creation from requests. Collections copy
 result bytes and opaque JSON. The owned codec rejects contradictory facts and undefined operations.
 Provider failures retain the current response's sanitized request ID in both the operation observation
 and the nested provider exception. HTTP status and retry delay remain available without response bodies.
+Batch/deferred exchanges add actual sent headers, including borrowed-client defaults, to their existing
+operation secret context before observing a response. HTTP rejection and canonical chat decoding use
+that same context; batch row errors and native field admission also use it.
 `LlmResourceOperationException` and `LlmResourceOperationCanceledException` expose a copied observation
 with fixed diagnostic text. Cancellation preserves its actual cause and token. Their constructors do
 not sanitize caller-supplied inner exceptions. Exceptions remain runtime objects, not JSON roots.
