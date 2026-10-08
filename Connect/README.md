@@ -3000,8 +3000,9 @@ one `/responses/compact` call before the model step. Known hard-window excess or
 replaces transcript state once after resource/revision admission; steering queued during compaction
 follows it. Compacted and usage events retain actual request ID, nullable dropped-message count and
 nullable usage. Compaction billing contributes to turn usage, not model iterations or context occupancy.
-Priority compaction is unsupported pending qualification and refuses before refresh, resource callbacks
-or HTTP. Ordinary Priority generation remains available and never silently downgrades its tier.
+Compaction uses the official `/responses/compact` request with `model` and `input` for either selected
+generation tier. The endpoint has no documented tier field. The selected generation tier remains unchanged;
+an unqualified compaction attempt is not refused locally. This does not claim live Priority compaction qualification.
 Compaction failures redact selected and effective outgoing header values captured after the send,
 including borrowed HttpClient defaults, from provider codes and request IDs. Raw response bodies stay withheld.
 

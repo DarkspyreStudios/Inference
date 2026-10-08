@@ -1907,6 +1907,42 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.Equal(1, handler.Calls);
     }
 
+    [Fact]
+    public async Task GrokPriorityCompactionUsesOfficialRequestWithoutChangingSelectedTier()
+    {
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            """
+            {"id":"compact-1","object":"response.compaction","model":"grok-4.6","output":[{"type":"compaction","id":"compact-1","encrypted_content":"opaque-content"}],"usage":{"input_tokens":12,"output_tokens":3,"total_tokens":15,"dropped_message_count":2}}
+            """);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        await using var files = new XaiFileClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new() { ServiceTier = XaiServiceTier.Priority },
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize()
+        };
+
+        var result = await client.CompactWithResourcesAsync(connection,
+            new() { ModelId = "grok-4.6", Messages = [new("user", "reference text")] }, files,
+            static () => { }, CancellationToken.None);
+
+        Assert.Equal("https://api.x.ai/v1/responses/compact", handler.RequestUri!.AbsoluteUri);
+        using JsonDocument sent = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Collection(sent.RootElement.EnumerateObject(),
+            property => Assert.Equal("model", property.Name), property => Assert.Equal("input", property.Name));
+        Assert.Equal("grok-4.6", sent.RootElement.GetProperty("model").GetString());
+        Assert.Contains("reference text", sent.RootElement.GetProperty("input").GetRawText(), StringComparison.Ordinal);
+        Assert.Equal(XaiServiceTier.Priority, connection.Xai.ServiceTier);
+        Assert.Equal("compact-1", result.RequestId);
+        Assert.Equal(2, result.DroppedMessageCount);
+        Assert.Equal(15, result.Usage!.TotalTokens);
+        Assert.Equal(1, handler.Calls);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -2505,6 +2541,7 @@ public sealed class ProviderTerminalEvidenceTests
         HttpMethod? expectedMethod = null, bool emptyCatalog = false, Exception? sendFailure = null) : HttpMessageHandler
     {
         internal int Calls { get; private set; }
+        internal Uri? RequestUri { get; private set; }
         internal string? RequestBody { get; private set; }
         internal string? RequestTrace { get; private set; }
         internal string? RequestDefaultTrace { get; private set; }
@@ -2512,6 +2549,7 @@ public sealed class ProviderTerminalEvidenceTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
+            RequestUri = request.RequestUri;
             if (emptyCatalog && request.Method == HttpMethod.Get)
             {
                 Assert.True(request.RequestUri!.AbsolutePath is "/v1/models" or "/v1/language-models");

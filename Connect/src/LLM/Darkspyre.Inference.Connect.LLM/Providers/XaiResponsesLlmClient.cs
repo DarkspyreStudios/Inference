@@ -156,12 +156,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
         ValidateAdditionalRequest(connection, request);
     }
 
-    internal void PreflightCompactionRequest(LlmConnection connection, LlmChatRequest request)
-    {
-        if (connection.Xai?.ServiceTier == XaiServiceTier.Priority)
-            throw new NotSupportedException("Grok Priority context compaction has not been qualified.");
+    internal void PreflightCompactionRequest(LlmConnection connection, LlmChatRequest request) =>
         PreflightManagedOpeningRequest(connection, request);
-    }
 
     [SuppressMessage("Design", "CA1031", Justification = "Attempt all owned cleanup and retain independent safe failures and actual refused owners.")]
     internal async Task<ProviderCompactionResult> CompactWithResourcesAsync(LlmConnection connection, LlmChatRequest request,
