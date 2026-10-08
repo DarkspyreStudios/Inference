@@ -154,6 +154,8 @@ and the nested provider exception. HTTP status and retry delay remain available 
 Batch/deferred exchanges add actual sent headers, including borrowed-client defaults, to their existing
 operation secret context before observing a response. HTTP rejection and canonical chat decoding use
 that same context; batch row errors and native field admission also use it.
+The exchange captures headers even when the send throws. Typed provider failures retain their
+sanitized explanation. A failed send does not manufacture a response observation.
 `LlmResourceOperationException` and `LlmResourceOperationCanceledException` expose a copied observation
 with fixed diagnostic text. Cancellation preserves its actual cause and token. Their constructors do
 not sanitize caller-supplied inner exceptions. Exceptions remain runtime objects, not JSON roots.

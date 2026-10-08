@@ -1200,6 +1200,43 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Fact]
+    public async Task GrokBatchSendFailureRedactsHeadersWithoutInventingAResponse()
+    {
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            sendFailure: new LlmProviderException("Transport refused default-value.", LlmTransport.XaiResponses,
+                providerCode: "transport_default-value"));
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var client = new XaiResponsesLlmClient(http);
+        var source = new ResourcePreparationTests.Source(new()
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize()
+        });
+        await using var access = new LlmConnectionAccess(source, [], [client]);
+        await using var core = new LlmProviderService(source, [client], [], connectionAccess: access);
+        await using var batches = new LlmResourceProviderService(access, core);
+
+        LlmResourceOperationException operation = await Assert.ThrowsAsync<LlmResourceOperationException>(() =>
+            batches.CreateAsync("connection", "batch"));
+        LlmProviderException failure = Assert.IsType<LlmProviderException>(operation.InnerException);
+
+        Assert.Equal("Transport refused [REDACTED].", failure.Message);
+        Assert.Equal("transport_[REDACTED]", failure.ProviderCode);
+        Assert.DoesNotContain("default-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.True(operation.Observation.BatchMutationDispatched);
+        Assert.False(operation.Observation.ResponseObserved);
+        Assert.Null(operation.Observation.HttpStatusCode);
+        Assert.Null(operation.Observation.RequestId);
+        Assert.Null(operation.Observation.ObservedBatch);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
     public async Task GrokBatchFailureKeepsSafeRequestIdInTheProviderErrorAndOperationReceipt()
     {
         var retryAfter = TimeSpan.FromSeconds(17);
@@ -1811,7 +1848,7 @@ public sealed class ProviderTerminalEvidenceTests
 
     private sealed class Handler(LlmTransport transport, bool streaming, string? scriptedBody = null,
         HttpStatusCode statusCode = HttpStatusCode.OK, TimeSpan? retryAfter = null, string? requestId = null,
-        HttpMethod? expectedMethod = null, bool emptyCatalog = false) : HttpMessageHandler
+        HttpMethod? expectedMethod = null, bool emptyCatalog = false, Exception? sendFailure = null) : HttpMessageHandler
     {
         internal int Calls { get; private set; }
         internal string? RequestBody { get; private set; }
@@ -1831,6 +1868,7 @@ public sealed class ProviderTerminalEvidenceTests
             RequestDefaultTrace = request.Headers.TryGetValues("X-Default", out IEnumerable<string>? defaults) ? Assert.Single(defaults) : null;
             RequestBearerParameter = request.Headers.Authorization?.Parameter;
             RequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+            if (sendFailure is not null) throw sendFailure;
             string body = scriptedBody ?? Body(transport, streaming);
             var response = new HttpResponseMessage(statusCode)
             {
