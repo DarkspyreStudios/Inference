@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -377,7 +378,7 @@ internal static class Program
                 {
                     Console.WriteLine();
                 }
-                WriteCompletion(completion.Result);
+                WriteCompletion(completion.Result, Console.Error);
                 exitCode = completion.Result.Status is LlmCompletionStatus.Completed or LlmCompletionStatus.Unknown ? 0 : 1;
             }
             else
@@ -833,20 +834,20 @@ internal static class Program
             ?? throw new ArgumentException("The request file must contain a chat request.", nameof(path));
     }
 
-    private static void WriteCompletion(LlmChatResult result)
+    internal static void WriteCompletion(LlmChatResult result, TextWriter diagnostics)
     {
         string usage = result.Usage is null
             ? "unavailable"
-            : $"{result.Usage.InputTokens ?? 0} in / {result.Usage.OutputTokens ?? 0} out";
-        Console.Error.WriteLine(
+            : $"{result.Usage.InputTokens?.ToString(CultureInfo.CurrentCulture) ?? "unknown"} in / {result.Usage.OutputTokens?.ToString(CultureInfo.CurrentCulture) ?? "unknown"} out";
+        diagnostics.WriteLine(
             $"[completed] status={result.Status} finish={result.FinishReason ?? "unknown"} usage={usage}");
         if (result.StructuredOutput is { } structured)
         {
-            Console.Error.WriteLine(
+            diagnostics.WriteLine(
                 $"[structured] enforcement={structured.Enforcement} valid={structured.IsValid}");
             foreach (string error in structured.Errors)
             {
-                Console.Error.WriteLine($"[structured] {error}");
+                diagnostics.WriteLine($"[structured] {error}");
             }
         }
     }

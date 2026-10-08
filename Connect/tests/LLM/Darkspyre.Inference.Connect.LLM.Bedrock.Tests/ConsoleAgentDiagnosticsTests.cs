@@ -11,6 +11,30 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class ConsoleAgentDiagnosticsTests
 {
+    [Theory]
+    [InlineData(true, null, null, "unknown in / unknown out")]
+    [InlineData(true, null, 0, "unknown in / 0 out")]
+    [InlineData(true, 0, null, "0 in / unknown out")]
+    [InlineData(true, 12, 34, "12 in / 34 out")]
+    [InlineData(false, null, null, "unavailable")]
+    public void CompletionUsageDistinguishesUnknownCountsFromObservedZero(
+        bool hasUsage, int? inputTokens, int? outputTokens, string expectedUsage)
+    {
+        using var diagnostics = new StringWriter();
+        var result = new LlmChatResult
+        {
+            Text = "answer",
+            Status = LlmCompletionStatus.Completed,
+            Usage = hasUsage ? new(inputTokens, outputTokens, null) : null,
+            Diagnostics = new(200, null, null)
+        };
+
+        Program.WriteCompletion(result, diagnostics);
+
+        Assert.Equal($"[completed] status=Completed finish=unknown usage={expectedUsage}{Environment.NewLine}",
+            diagnostics.ToString());
+    }
+
     [Fact]
     public async Task RequestFileRetainsTheOwnedTypedChatGraphWithReflectionDisabled()
     {

@@ -1688,6 +1688,9 @@ for a caller-directed later turn. They do not automatically retry or execute ser
 running `LlmUsageDeltaEvent` observations and is mirrored on Common's capabilities. Each observation
 replaces the previous value for the entire call. Null counts remain unknown. Duplicate observations
 are suppressed. Only completion usage is authoritative, including when it corrects an earlier value.
+ConsoleTester completion diagnostics render each unreported token count as `unknown`, preserve
+reported zero as `0`, and render an absent usage object as `unavailable`. Missing provider counts
+never appear as measured zero.
 `LlmUsage` also carries nullable `ProviderReportedCostUsd`, `HostedToolCallCount`, `HostedSourcesUsed`
 and a frozen `HostedToolCalls` map keyed by `LlmHostedToolKind`. These are independent provider facts;
 no local price calculation or named-count sum invents an unreported total. Distinct completed calls
