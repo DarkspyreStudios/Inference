@@ -135,7 +135,11 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
         if (error is InferenceException inference && inference.InnerException is LlmProviderException provider)
             return new InferenceException(inference.Code, "Resource authorization or access failed.", SafeProvider(provider, inference, observation, connection));
         if (error is LlmProviderException failure) return SafeProvider(failure, failure, observation, connection);
-        return new LlmProviderException(error is ProtocolFailure ? "xAI returned invalid resource protocol data." : "The resource transport failed.",
+        string message = error is HttpRequestException && connection is not null
+            ? SecretRedactor.Sanitize(error.Message, LlmCredential.Parse(connection.Credential),
+                connection.AdditionalHeaders.Values.Concat(observation.SecretContext))
+            : error is ProtocolFailure ? "xAI returned invalid resource protocol data." : "The resource transport failed.";
+        return new LlmProviderException(message,
             LlmTransport.XaiResponses, observation.StatusCode is { } status ? (System.Net.HttpStatusCode)status : null,
             requestId: observation.RequestId, innerException: new FailureEvidence(error, observation: observation));
     }

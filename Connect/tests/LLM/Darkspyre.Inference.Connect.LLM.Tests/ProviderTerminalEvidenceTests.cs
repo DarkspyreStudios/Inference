@@ -1199,12 +1199,18 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.Equal(1, handler.Calls);
     }
 
-    [Fact]
-    public async Task GrokBatchSendFailureRedactsHeadersWithoutInventingAResponse()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task GrokBatchSendFailureRedactsHeadersWithoutInventingAResponse(bool classified)
     {
+        Exception sendFailure = classified
+            ? new LlmProviderException("Transport refused test-token header-value default-value.", LlmTransport.XaiResponses,
+                providerCode: "transport_default-value")
+            : new HttpRequestException("Transport refused test-token header-value default-value.",
+                new IOException("Inner default-value"));
         var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
-            sendFailure: new LlmProviderException("Transport refused default-value.", LlmTransport.XaiResponses,
-                providerCode: "transport_default-value"));
+            sendFailure: sendFailure);
         using var http = new HttpClient(handler);
         http.DefaultRequestHeaders.Add("X-Default", "default-value");
         var client = new XaiResponsesLlmClient(http);
@@ -1214,7 +1220,8 @@ public sealed class ProviderTerminalEvidenceTests
             Transport = LlmTransport.XaiResponses,
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
-            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize()
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
         });
         await using var access = new LlmConnectionAccess(source, [], [client]);
         await using var core = new LlmProviderService(source, [client], [], connectionAccess: access);
@@ -1224,14 +1231,19 @@ public sealed class ProviderTerminalEvidenceTests
             batches.CreateAsync("connection", "batch"));
         LlmProviderException failure = Assert.IsType<LlmProviderException>(operation.InnerException);
 
-        Assert.Equal("Transport refused [REDACTED].", failure.Message);
-        Assert.Equal("transport_[REDACTED]", failure.ProviderCode);
-        Assert.DoesNotContain("default-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal("Transport refused [REDACTED] [REDACTED] [REDACTED].", failure.Message);
+        Assert.Equal(classified ? "transport_[REDACTED]" : null, failure.ProviderCode);
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, operation.ToString(), StringComparison.Ordinal);
         Assert.True(operation.Observation.BatchMutationDispatched);
         Assert.False(operation.Observation.ResponseObserved);
         Assert.Null(operation.Observation.HttpStatusCode);
         Assert.Null(operation.Observation.RequestId);
         Assert.Null(operation.Observation.ObservedBatch);
+        Assert.Null(failure.StatusCode);
+        Assert.Null(failure.RequestId);
+        Assert.Null(failure.SanitizedResponseBody);
+        Assert.Equal("header-value", handler.RequestTrace);
         Assert.Equal("default-value", handler.RequestDefaultTrace);
         Assert.Equal(1, handler.Calls);
     }
