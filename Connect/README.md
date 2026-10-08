@@ -4237,6 +4237,15 @@ retry a turn or fabricate a conversation identity in response to that failure.
 
 Each request runs in an empty temporary workspace with terminal sandboxing and slash-command expansion disabled. A streamed request sends its prompt as BOM-free UTF-8 through standard input. A request with `SupportsStreaming = false` is the exception: the CLI's only non-streaming form, `agy -p "<prompt>" --output-format json`, takes the prompt as a process argument, because stream-json input requires stream-json output. That prompt is visible in the local process list. It must fit in one argument: at most 131,071 UTF-8 bytes on macOS and Linux, and at most 30,000 characters on Windows, where a `.cmd` or `.bat` launcher cannot carry it at all because the prompt contains line breaks. A prompt that does not fit fails with `NotSupportedException` before the CLI starts. Native JSON Schema and the `Low`, `Medium` and `High` reasoning levels are supported. Only `agent_response` step deltas stream as answer text. A schema-backed request streams no provisional text: it returns the terminal event's canonical `structured_output` value, validated locally. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
 
+Two public ConsoleTester nonstreaming calls at source `cec838c`, installed CLI 1.3.1 and selected
+`gemini-3.8-flash-low` with Low effort complete through the CLI's JSON-response path. The plain call
+returns exactly `AGY-121-COMPLETE-OK`, `Completed/completed` and 12,657 input/56 output tokens.
+The schema call returns the required closed-object enum marker, `Completed/completed`,
+`ProviderJsonSchema` enforcement, valid output and 27,459 input/1,536 output tokens.
+Both report actual totals and leave unreported cache, reasoning, cost and hosted counts unknown.
+Neither call retries or copies CLI credentials. These runs qualify selected nonstreaming plain and
+schema output, not all models, caller output caps, provider tool activity, refresh or other platforms.
+
 Antigravity may emit its own internal tool activity, but the CLI owns that execution. Because
 Darkspyre.Inference.Connect.LLM cannot surface the call for host authorization and result submission, this adapter reports
 `SupportsToolUse = false`. Its documented headless input protocol accepts only `text` blocks and
