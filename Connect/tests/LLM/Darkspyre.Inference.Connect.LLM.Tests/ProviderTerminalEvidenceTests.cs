@@ -869,6 +869,49 @@ public sealed class ProviderTerminalEvidenceTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task GrokTokenizationFailuresRedactProtectedRequestHeaders(bool malformed)
+    {
+        var retryAfter = TimeSpan.FromSeconds(17);
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            malformed ? "{\"token_ids\":null}" :
+                "{\"error\":{\"code\":\"rate_limit_test-token_header-value_default-value\",\"message\":\"Failure header-value default-value\"}}",
+            malformed ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests, retryAfter,
+            "request-test-token-header-value-default-value-1");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            client.TokenizeAsync(connection, "selected-model", "source text"));
+
+        Assert.Equal(malformed ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        if (malformed)
+            Assert.Equal("Grok tokenization returned an invalid token sequence.", failure.Message);
+        else
+        {
+            Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+            Assert.Equal(retryAfter, failure.RetryAfter);
+        }
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task GrokSearchAndEmbeddingFailuresKeepSafeProviderCodes(bool embedding)
     {
         var retryAfter = TimeSpan.FromSeconds(17);
@@ -1182,11 +1225,13 @@ public sealed class ProviderTerminalEvidenceTests
         internal int Calls { get; private set; }
         internal string? RequestBody { get; private set; }
         internal string? RequestTrace { get; private set; }
+        internal string? RequestDefaultTrace { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
             Assert.Equal(expectedMethod ?? HttpMethod.Post, request.Method);
             RequestTrace = request.Headers.TryGetValues("X-Trace", out IEnumerable<string>? values) ? Assert.Single(values) : null;
+            RequestDefaultTrace = request.Headers.TryGetValues("X-Default", out IEnumerable<string>? defaults) ? Assert.Single(defaults) : null;
             RequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             string body = scriptedBody ?? Body(transport, streaming);
             var response = new HttpResponseMessage(statusCode)

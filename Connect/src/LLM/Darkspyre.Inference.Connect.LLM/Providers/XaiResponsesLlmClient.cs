@@ -520,7 +520,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             using HttpResponseMessage response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], cancellationToken)
+            IEnumerable<string> secrets = connection.AdditionalHeaders.Values.Concat(request.Headers.SelectMany(header => header.Value));
+            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), secrets, cancellationToken)
                 .ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
@@ -560,7 +561,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             }
 
             LlmProviderException InvalidTokens() => ProtocolException(
-                "Grok tokenization returned an invalid token sequence.", response, string.Empty, LlmCredential.Parse(connection.Credential));
+                "Grok tokenization returned an invalid token sequence.", response, string.Empty, LlmCredential.Parse(connection.Credential),
+                extraSecrets: secrets);
         }
         return consumption.Publish(result);
     }

@@ -3283,6 +3283,8 @@ refresh. The Grok adapter sends only `model` and `text` to the selected region's
 bytes. A token's bytes need not decode independently as UTF-8 and are never reconstructed from its
 display text. Missing fields and invalid integer/byte representations fail with fixed protocol errors
 without retaining raw bodies. `ConnectLlmJson.Tokenization` and `Token` own result serialization.
+HTTP rejections and malformed-token errors redact reflected credential, selected-header and effective
+outgoing-header values, including borrowed HttpClient defaults, from public diagnostics and request IDs.
 The facade drains active tokenization during retirement and rejects late results through its
 synchronous owner fence. Injected access and clients remain borrowed. Cancellation that races a
 provider failure retains the actual error as its cause. Tokenization does not count instructions,
