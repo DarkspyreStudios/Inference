@@ -3840,11 +3840,17 @@ and [Sonnet 4.6](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card
 The existing SDK marshaller is verified for both request modes. Live gpt-oss 20B and 120B Low
 ConverseStream calls in `us-east-1` return text that fails the original schema's JSON validation.
 The result retains `IsValid = false`; provider-reported completion is not a validated structured
-answer. Native structured-output qualification remains open on DSA-109. Sonnet and real nonstreaming
-structured output through Connect are unqualified. A direct AWS CLI 2.37.2 Converse call on 20B Low
+answer. Native structured-output success remains unqualified on DSA-109. Sonnet is not exercised by
+these calls. A direct AWS CLI 2.37.2 Converse call on 20B Low
 also returns malformed JSON with the same schema in `us-east-1`, without Connect or its stream parser.
 That proves a provider-facing nonstreaming failure for that request. It does not establish the cause
 of every streaming failure or qualify a native schema guarantee. Responses are not rewritten.
+The public ConsoleTester also exercises Connect's real nonstreaming Converse path on 20B Low
+against source `612d2b1`, using one short native-schema request with a 256-output-token cap.
+The provider reports `Completed`/`stop`, 80 input tokens and 47 output tokens, but its original response
+fails JSON validation with `ProviderJsonSchema` and `IsValid = false`. This is a failed structured-output
+qualification, not a truncation or successful schema guarantee. Tester exit 0 denotes provider completion;
+the separate validation result remains false. No retry, response repair or fallback occurs.
 
 Converse sends a reasoning level through `additionalModelRequestFields` for Claude, Nova 2 and the
 qualified gpt-oss models, classified from the model or inference-profile id:
