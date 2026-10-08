@@ -1247,5 +1247,10 @@ internal sealed class BedrockLlmClient(
                 $"A {connection.Transport} connection cannot use the Bedrock client.",
                 nameof(connection));
         }
+        if (connection.AdditionalHeaders.Count > 0)
+        {
+            throw new NotSupportedException(
+                "Bedrock Converse does not support custom HTTP headers. Remove AdditionalHeaders from the connection.");
+        }
     }
 }

@@ -124,6 +124,57 @@ public sealed class BedrockSafetyTests
         Assert.Empty(invoker.StreamRequests);
     }
 
+    [Theory]
+    [InlineData("stream")]
+    [InlineData("complete")]
+    [InlineData("resources")]
+    [InlineData("catalog")]
+    [InlineData("capabilities")]
+    [InlineData("estimate")]
+    [InlineData("managed")]
+    public async Task CustomHeadersRefuseBeforeSdkOrResourceEffects(string operation)
+    {
+        int acquired = 0;
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => { acquired++; throw new InvalidOperationException("SDK acquired before header refusal"); },
+            _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker();
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = ResourceConnection(streaming: operation != "complete") with
+        { AdditionalHeaders = new Dictionary<string, string> { ["X-Custom"] = "header-secret" } };
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var access = new Resources(new("workspace", "session", 1, [reference]),
+            [(reference, "reference.txt", "text/plain", "reference text"u8.ToArray())]);
+        LlmChatRequest request = Request();
+        if (operation == "resources") request = request with { Resources = access };
+        await using var providers = new LlmProviderService(new Source(connection), [client]);
+        await using var agents = new LlmAgentProviderService(new Source(connection), [new ManagedBedrockAgentClient(client, providers)]);
+        var events = new List<LlmStreamEvent>();
+
+        NotSupportedException failure = await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            switch (operation)
+            {
+                case "catalog": await client.ListModelsAsync(connection); break;
+                case "capabilities": _ = client.GetCapabilities(connection, request.ModelId); break;
+                case "estimate": _ = client.EstimateInputTokens(connection, request); break;
+                case "managed": await agents.StartSessionAsync("connection", new() { ModelId = request.ModelId }); break;
+                default:
+                    await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+                    break;
+            }
+        });
+
+        Assert.Equal("Bedrock Converse does not support custom HTTP headers. Remove AdditionalHeaders from the connection.", failure.Message);
+        Assert.DoesNotContain("header-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal(0, acquired);
+        Assert.Empty(access.Reads);
+        Assert.Empty(events);
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+    }
+
     [Fact]
     public async Task ClassifiedOverflowRedactsDiagnosticsAndPreservesTheOverflowFlag()
     {
@@ -131,15 +182,14 @@ public sealed class BedrockSafetyTests
             _ => new StreamControl(), _ => throw new NotSupportedException());
         await using var guard = new BedrockLoggingGuard();
         var sdkFailure = new Amazon.BedrockRuntime.Model.ValidationException("Input is too long: fixture-secret.", ErrorType.Sender,
-            "validation-header-secret", "request-fixture-secret", HttpStatusCode.BadRequest);
+            "validation-fixture-secret", "request-fixture-secret", HttpStatusCode.BadRequest);
         var invoker = new StubConverseInvoker
         {
             Failure = BedrockConverseInvoker.Unwrap(
                 new BedrockRuntimeEventStreamException("Stream failed.", sdkFailure), CancellationToken.None)
         };
         var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
-        LlmConnection connection = ResourceConnection(streaming: true) with
-        { AdditionalHeaders = new Dictionary<string, string> { ["X-Selected"] = "header-secret" } };
+        LlmConnection connection = ResourceConnection(streaming: true);
         var events = new List<LlmStreamEvent>();
 
         LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
@@ -154,7 +204,6 @@ public sealed class BedrockSafetyTests
         Assert.Equal("request-[REDACTED]", failure.RequestId);
         Assert.Contains("exceeds the model context window", failure.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("fixture-secret", failure.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("header-secret", failure.ToString(), StringComparison.Ordinal);
         Assert.Empty(events.OfType<LlmChatCompletionEvent>());
         Assert.Single(invoker.StreamRequests);
         Assert.True(invoker.Disposed);

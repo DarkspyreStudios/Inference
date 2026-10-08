@@ -4047,6 +4047,12 @@ Converse refuses nonempty connection or request `ProviderOptions` during pure re
 The refusal precedes SDK acquisition, discovery, logging-control calls and resource preparation.
 Typed supported controls retain their existing Converse projection.
 Managed Converse session opening uses the same pure adapter admission before model discovery.
+Converse rejects nonempty connection `AdditionalHeaders` during its shared connection admission.
+The error states: "Bedrock Converse does not support custom HTTP headers. Remove AdditionalHeaders
+from the connection." Generation, catalog discovery, capability lookup, input estimation and managed
+session opening use this check before SDK acquisition or resource preparation. Header names and
+values are not included in the error. The adapter does not forward custom headers into AWS-signed
+requests.
 
 Converse streams use the factory's existing bounded producer. Factory retirement cancels and drains
 the producer, closes owned streams and releases clients without waiting for paused callers to resume.
