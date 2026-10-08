@@ -57,14 +57,14 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
             };
             ProviderHttp.ApplyHeaders(httpRequest, connection);
             LlmCredential? credential = LlmCredential.Parse(connection.Credential);
-            string[] secrets = connection.AdditionalHeaders.Values.ToArray();
             using HttpResponseMessage response = await http.SendAsync(httpRequest, cancellationToken);
+            string[] secrets = httpRequest.Headers.SelectMany(header => header.Value).ToArray();
             await ProviderHttp.ThrowIfUnsuccessfulAsync(
                 response,
                 connection.Transport,
                 credential,
                 "Embedding request",
-                httpRequest.Headers.SelectMany(header => header.Value),
+                secrets,
                 cancellationToken);
             string raw = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             try
@@ -134,21 +134,21 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
                     Usage = new LlmEmbeddingUsage(inputTokens, totalTokens),
                     Diagnostics = new LlmProviderDiagnostics(
                         (int)response.StatusCode,
-                        ProviderHttp.ReadRequestId(response),
+                        ProviderHttp.ReadRequestId(response, credential, secrets),
                         SecretRedactor.Sanitize(raw, credential, secrets))
                 };
             }
             catch (JsonException exception)
             {
                 throw new LlmProviderException(
-                    $"Embedding response was invalid: {exception.Message}",
+                    $"Embedding response was invalid: {SecretRedactor.Sanitize(exception.Message, credential, secrets)}",
                     connection.Transport,
                     response.StatusCode,
                     "invalid_embedding_response",
-                    ProviderHttp.ReadRequestId(response),
+                    ProviderHttp.ReadRequestId(response, credential, secrets),
                     null,
                     SecretRedactor.Sanitize(raw, credential, secrets),
-                    exception);
+                    SecretRedactor.Sanitize(exception));
             }
         }
         return consumption.Publish(result);

@@ -93,6 +93,11 @@ internal static class SecretRedactor
         (credential is null ? [] : CredentialSecrets(credential)).Concat(additionalSecrets)
             .Any(secret => !string.IsNullOrWhiteSpace(secret) && value.Contains(secret, StringComparison.Ordinal));
 
+    internal static JsonException Sanitize(JsonException exception) => new(
+        // Parser text and paths can quote untrusted provider input, including secrets.
+        "Provider response contains invalid JSON.", path: null,
+        lineNumber: exception.LineNumber, bytePositionInLine: exception.BytePositionInLine);
+
     private static string ReplaceSecrets(string value, string[] secrets)
     {
         foreach (string secret in secrets)

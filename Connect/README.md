@@ -66,6 +66,10 @@ to the existing protocol-error boundary. Codex/OpenRouter account parsing uses t
 Malformed JSON and Codex's missing-catalog response retain known HTTP status and a sanitized nullable
 request ID. Parser diagnostics omit input-quoting text; OpenRouter's stream parser supplies no raw body.
 Claude's optional HTTP catalog uses this boundary without launching the CLI.
+OpenAI embedding conversion uses actual sent headers for model-identity checks, request IDs and
+diagnostic bodies. Invalid embeddings retain sanitized validation details and use the same safe
+JSON-parser projection as chat protocol errors. Successful vectors, usage and safe model identities
+remain unchanged.
 
 Mapped task results publish after response, body and request cleanup completes; retirement begun by
 cleanup prevents late success without replacing an earlier operation failure. If an owned logger
