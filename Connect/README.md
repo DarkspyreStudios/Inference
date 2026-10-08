@@ -3978,6 +3978,7 @@ reports null limits, which mean unknown.
 Converse refuses nonempty connection or request `ProviderOptions` during pure request admission.
 The refusal precedes SDK acquisition, discovery, logging-control calls and resource preparation.
 Typed supported controls retain their existing Converse projection.
+Managed Converse session opening uses the same pure adapter admission before model discovery.
 
 Converse streams use the factory's existing bounded producer. Factory retirement cancels and drains
 the producer, closes owned streams and releases clients without waiting for paused callers to resume.

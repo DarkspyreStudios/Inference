@@ -14,13 +14,12 @@ internal sealed class ManagedBedrockAgentClient(BedrockLlmClient client, LlmProv
         ArgumentNullException.ThrowIfNull(options);
         cancellationToken.ThrowIfCancellationRequested();
         options = ClientTools.Snapshot(options);
-        ProviderControlPolicy.Validate(connection, new() { ModelId = options.ModelId });
+        var capabilities = client.ValidateRequest(connection, new() { ModelId = options.ModelId });
         if (options.Context is { } context)
         {
             _ = ManagedAgentContext.ValidatePortable(context);
             if (options.CallerServices?.Resources is null) ManagedAgentContext.ValidateRuntimeResources(context);
         }
-        var capabilities = client.GetCapabilities(connection, options.ModelId);
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities.HostedTools);
         ClientTools.ValidateManagedOpening(options, capabilities,
             supportsResources: client.CanPrepareResources && capabilities.SupportsPromptDocuments);

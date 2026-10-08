@@ -375,7 +375,8 @@ internal sealed class BedrockLlmClient(
     public string? EstimateDiagnostic =>
         "Estimated with a general-purpose tokenizer; each Bedrock model counts tokens its own way.";
 
-    private LlmProviderCapabilities ValidateRequest(LlmConnection connection, LlmChatRequest request)
+    /// <summary>Admits a Converse request without acquiring an SDK client or preparing resources.</summary>
+    internal LlmProviderCapabilities ValidateRequest(LlmConnection connection, LlmChatRequest request)
     {
         EnsureTransport(connection);
         if (string.IsNullOrWhiteSpace(request.ModelId))

@@ -21,6 +21,31 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class BedrockSafetyTests
 {
+    [Fact]
+    public async Task ManagedOpeningRefusesUnmappedConnectionOptionsBeforeCatalogAcquisition()
+    {
+        int acquired = 0;
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => { acquired++; throw new InvalidOperationException("SDK acquired before opening refusal"); },
+            _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker();
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = ResourceConnection(streaming: true) with
+        { ProviderOptions = new Dictionary<string, JsonElement> { ["unsupported"] = JsonElement.Parse("true") } };
+        var source = new Source(connection);
+        await using var providers = new LlmProviderService(source, [client]);
+        await using var agents = new LlmAgentProviderService(source, [new ManagedBedrockAgentClient(client, providers)]);
+
+        NotSupportedException failure = await Assert.ThrowsAsync<NotSupportedException>(() =>
+            agents.StartSessionAsync("connection", new() { ModelId = "amazon.nova-micro-v1:0" }));
+
+        Assert.Equal("Bedrock provider request options are not yet mapped to Converse fields.", failure.Message);
+        Assert.Equal(0, acquired);
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
