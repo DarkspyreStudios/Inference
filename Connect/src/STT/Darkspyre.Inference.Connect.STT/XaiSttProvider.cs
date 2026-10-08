@@ -172,6 +172,8 @@ public sealed class XaiSttProvider : ISttProvider
             using var consumption = SdkHttpConsumption.Enter(_provider!._http, token);
             LlmConnection snapshot = await AcquireAsync(consumption.Token).ConfigureAwait(false);
             var session = await XaiSttSession.OpenAsync(_provider!._connect, snapshot, _connection!, controls, limits,
+                _provider._http.DefaultRequestHeaders.SelectMany(header => header.Value)
+                    .Concat(new[] { _provider._http.DefaultRequestHeaders.Authorization?.Parameter }.OfType<string>()),
                 () => { Fence(consumption.Token); consumption.Fence(); }, RecordCleanup, consumption.Token).ConfigureAwait(false);
             try { Fence(consumption.Token); return consumption.Publish<ISpeechTranscriptionSession>(session); }
             catch (Exception original)

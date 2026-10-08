@@ -1,4 +1,6 @@
+using System.Net.Http.Headers;
 using System.Net.WebSockets;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.STT;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.Voice.Tests;
@@ -7,6 +9,49 @@ namespace Darkspyre.Inference.Connect.STT.Tests;
 
 public sealed class XaiSttSessionTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StreamingErrorsRetainRedactedProviderExplanation(bool beforeReady)
+    {
+        using var socket = new VoiceSocket();
+        if (!beforeReady) socket.Json("""{"type":"transcript.created","id":"transcript-1"}""");
+        socket.Json("""{"type":"error","message":"Unsupported encoding: dummy-test-token refresh-secret identity-secret binding-secret family-secret default-secret bearer-default-secret."}""");
+        using var http = new HttpClient();
+        http.DefaultRequestHeaders.Add("X-Default", "default-secret");
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "bearer-default-secret");
+        await using var access = new LlmConnectionAccess(new VoiceConnectionSource(), []);
+        var binding = new XaiFamilyBinding(new("selected"), access);
+        await using ISpeechTranscriptionClient client = new XaiSttProvider(http, socket.ConnectAsync).Bind(new()
+        {
+            Transport = SttTransport.XaiStt,
+            Endpoint = new(VoiceTestData.Connection.Endpoint),
+            Xai = binding.Selection,
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Family"] = "family-secret" }
+        }, binding);
+        const string explanation = "Unsupported encoding: [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED].";
+
+        if (beforeReady)
+        {
+            InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() =>
+                client.OpenStreamAsync(new(), VoiceTestData.Limits()).WaitAsync(VoiceTestData.Timeout));
+            Assert.Equal(InferenceFailureCode.ExecutionFailed, failure.Code);
+            Assert.Equal(explanation, failure.Message);
+            return;
+        }
+
+        await using ISpeechTranscriptionSession session = await client.OpenStreamAsync(new(), VoiceTestData.Limits());
+        await using var events = session.Events.GetAsyncEnumerator();
+        Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(VoiceTestData.Timeout));
+        Assert.IsType<SpeechTranscriptCreatedEvent>(events.Current);
+        Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(VoiceTestData.Timeout));
+        var error = Assert.IsType<SpeechTranscriptErrorEvent>(events.Current);
+        Assert.Equal(InferenceFailureCode.ExecutionFailed, error.Error.Code);
+        Assert.Equal(explanation, error.Error.Message);
+        await session.FinalizeAsync();
+        Assert.Equal("finalize", VoiceTestData.Type(Assert.Single(socket.Sent).Bytes));
+    }
+
     [Theory]
     [InlineData(true, "en", "?language=en&format=true")]
     [InlineData(false, null, "?format=false")]
@@ -100,7 +145,7 @@ public sealed class XaiSttSessionTests
     private static Task<XaiSttSession> OpenAsync(VoiceSocket socket, int events = 16)
         => XaiSttSession.OpenAsync(socket.ConnectAsync, VoiceTestData.Connection,
             new() { Transport = SttTransport.XaiStt, Endpoint = new(VoiceTestData.Connection.Endpoint) },
-            new(), VoiceTestData.Limits(events), () => { }, _ => { }, default);
+            new(), VoiceTestData.Limits(events), [], () => { }, _ => { }, default);
 
     [Fact]
     public async Task ActualReadyAndDoneObservationsBoundOrderedAudioCommands()

@@ -992,6 +992,11 @@ credential; they do not reacquire it. Status 401/402 retains the shared authenti
 rules, while 400/403 cannot imply hidden body-dependent facts.
 Unobserved status remains a safe transport failure. Raw bodies, headers and transport diagnostics
 are not public errors; original transport evidence remains internal. Cancellation is not reclassified.
+Streaming synthesis and transcription preserve the provider's error explanation through the shared
+bounded redactor. Each session captures selected credentials, sent headers and borrowed-client
+defaults at opening and releases that context after its receiver drains. A pre-ready transcription
+error fails opening with the redacted explanation. An active-session error publishes that explanation
+without forcing retirement; the provider determines whether the connection stays open.
 
 `TtsProviderService` supports synchronous and asynchronous disposal. Retirement fences new facade
 calls, drains admitted synchronous setup/binding callbacks, then releases borrowed provider references.

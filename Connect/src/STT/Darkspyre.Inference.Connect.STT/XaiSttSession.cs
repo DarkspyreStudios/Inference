@@ -25,6 +25,8 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
     private readonly TaskCompletionSource _ready = Signal();
     private TaskCompletionSource _space = Signal();
     private WebSocket? _socket;
+    private LlmCredential? _credential;
+    private string[] _secrets;
     private Task _receiver = Task.CompletedTask;
     private readonly int _channels;
     private readonly bool _multichannel;
@@ -34,14 +36,17 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
     private bool _created;
     private bool _reportedError;
 
-    private XaiSttSession(WebSocket socket, SpeechStreamOptions options, InferenceStreamLimits limits)
+    private XaiSttSession(WebSocket socket, SpeechStreamOptions options, InferenceStreamLimits limits,
+        LlmCredential? credential, string[] secrets)
     {
+        _credential = credential; _secrets = secrets;
         _socket = socket; _limits = limits; _multichannel = options.Multichannel == true; _channels = _multichannel ? options.Channels!.Value : 1;
         _events = Channel.CreateBounded<(SpeechTranscriptEvent, long)>(new BoundedChannelOptions(limits.MaximumBufferedEvents)
         { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = true });
     }
     internal static async Task<XaiSttSession> OpenAsync(Func<Uri, HttpRequestMessage, LlmCredential?, Action, Action<Exception>, CancellationToken, Task<WebSocket>> connect,
         LlmConnection snapshot, SttConnection connection, SpeechStreamOptions options, InferenceStreamLimits limits,
+        IEnumerable<string> transportSecrets,
         Action openingFence, Action<Exception> recordCleanup, CancellationToken token)
     {
         WebSocket? socket = null; XaiSttSession? session = null;
@@ -51,9 +56,11 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
         try
         {
             openingFence();
-            socket = await connect(XaiSttProtocol.StreamUri(connection.Endpoint, options), headers, LlmCredential.Parse(snapshot.Credential), openingFence, recordCleanup, timeout.Token).ConfigureAwait(false);
+            LlmCredential? credential = LlmCredential.Parse(snapshot.Credential);
+            socket = await connect(XaiSttProtocol.StreamUri(connection.Endpoint, options), headers, credential, openingFence, recordCleanup, timeout.Token).ConfigureAwait(false);
             openingFence(); ArgumentNullException.ThrowIfNull(socket);
-            session = new(socket, options, limits); session._receiver = session.ReceiveAsync();
+            string[] secrets = headers.Headers.SelectMany(header => header.Value).Concat(transportSecrets).ToArray();
+            session = new(socket, options, limits, credential, secrets); session._receiver = session.ReceiveAsync();
             await session._ready.Task.WaitAsync(timeout.Token).ConfigureAwait(false); openingFence();
             return session;
         }
@@ -151,9 +158,10 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
                             XaiSttProtocol.Words(root) ?? throw XaiSttProtocol.Protocol()), token).ConfigureAwait(false);
                         break;
                     case "error":
-                        _ = XaiSttProtocol.RequiredString(root, "message"); _reportedError = true;
-                        await PublishAsync(new SpeechTranscriptErrorEvent(new(InferenceFailureCode.ExecutionFailed, null, "xAI transcription reported a failure.")), token).ConfigureAwait(false);
-                        if (!_created) throw new InferenceException(InferenceFailureCode.ExecutionFailed, "xAI transcription could not become ready.");
+                        string message = SecretRedactor.Sanitize(XaiSttProtocol.RequiredString(root, "message"), _credential, _secrets);
+                        _reportedError = true;
+                        await PublishAsync(new SpeechTranscriptErrorEvent(new(InferenceFailureCode.ExecutionFailed, null, message)), token).ConfigureAwait(false);
+                        if (!_created) throw new InferenceException(InferenceFailureCode.ExecutionFailed, message);
                         break;
                     default: throw XaiSttProtocol.Protocol();
                 }
@@ -211,6 +219,7 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
         return _lifetime.RetireAsync(async () =>
         {
             await _receiver.ConfigureAwait(false); WebSocket? socket = _socket; _socket = null;
+            _credential = null; _secrets = [];
             try { socket?.Dispose(); } catch (Exception error) { _cleanup.Add(LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: socket)); }
             _send.Dispose();
             if (_cleanup.Count == 1) ExceptionDispatchInfo.Capture(_cleanup[0]).Throw();

@@ -21,6 +21,8 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
     private readonly List<Exception> _cleanup = [];
     private TaskCompletionSource _space = NewSignal();
     private WebSocket? _socket;
+    private LlmCredential? _credential;
+    private string[] _secrets;
     private IInferenceResourceAccess? _resources;
     private readonly InferenceResourceSelectionVersion? _scope;
     private SpeechResourceWriter.Writer? _artifact;
@@ -30,15 +32,18 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
     private int _reader;
     private int _utterance;
 
-    private XaiTtsSession(WebSocket socket, InferenceStreamLimits limits, IInferenceResourceAccess? resources, InferenceResourceSelectionVersion? scope)
+    private XaiTtsSession(WebSocket socket, InferenceStreamLimits limits, IInferenceResourceAccess? resources,
+        InferenceResourceSelectionVersion? scope, LlmCredential? credential, string[] secrets)
     {
+        _credential = credential; _secrets = secrets;
         _socket = socket; _limits = limits; _resources = resources; _scope = scope;
         _events = Channel.CreateBounded<(TtsStreamEvent, long)>(new BoundedChannelOptions(limits.MaximumBufferedEvents)
         { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = true });
     }
     internal static async Task<XaiTtsSession> OpenAsync(Func<Uri, HttpRequestMessage, LlmCredential?, Action, Action<Exception>, CancellationToken, Task<WebSocket>> connect,
         LlmConnection snapshot, TtsConnection connection, TtsStreamOptions options, InferenceStreamLimits limits,
-        IInferenceResourceAccess? resources, Action openingFence, Action<Exception> recordOpeningCleanup, CancellationToken token)
+        IInferenceResourceAccess? resources, IEnumerable<string> transportSecrets,
+        Action openingFence, Action<Exception> recordOpeningCleanup, CancellationToken token)
     {
         if (limits.MaximumBufferedEvents <= 0 || limits.MaximumBufferedPayloadBytes <= 0 || limits.MaximumMessageBytes <= 0) throw XaiTtsProtocol.Invalid();
         openingFence();
@@ -49,9 +54,11 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
         WebSocket? socket = null; XaiTtsSession? session = null;
         try
         {
-            socket = await connect(XaiTtsProtocol.StreamUri(connection.Endpoint, options), headers, LlmCredential.Parse(snapshot.Credential), openingFence, recordOpeningCleanup, token).ConfigureAwait(false);
+            LlmCredential? credential = LlmCredential.Parse(snapshot.Credential);
+            socket = await connect(XaiTtsProtocol.StreamUri(connection.Endpoint, options), headers, credential, openingFence, recordOpeningCleanup, token).ConfigureAwait(false);
             openingFence(); if (socket is null) throw XaiTtsProtocol.Protocol();
-            session = new(socket, limits, resources, scope);
+            string[] secrets = headers.Headers.SelectMany(header => header.Value).Concat(transportSecrets).ToArray();
+            session = new(socket, limits, resources, scope, credential, secrets);
             if (options.Xai?.Replace is { } replacements) await session.UpdateReplacementsAsync(replacements, token).ConfigureAwait(false);
             openingFence();
             session._receiver = session.ReceiveAsync();
@@ -178,8 +185,8 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
                         foreach (var item in map.EnumerateObject()) { if (item.Value.ValueKind != JsonValueKind.String) throw XaiTtsProtocol.Protocol(); replace.Add(item.Name, item.Value.GetString()!); }
                         await PublishAsync(new TtsReplacementsUpdated(replace), token).ConfigureAwait(false); break;
                     case "error":
-                        _ = XaiTtsProtocol.RequiredString(root, "message");
-                        await PublishAsync(new TtsStreamError(new(InferenceFailureCode.ExecutionFailed, null, "xAI speech synthesis reported a failure.")), token).ConfigureAwait(false);
+                        string message = SecretRedactor.Sanitize(XaiTtsProtocol.RequiredString(root, "message"), _credential, _secrets);
+                        await PublishAsync(new TtsStreamError(new(InferenceFailureCode.ExecutionFailed, null, message)), token).ConfigureAwait(false);
                         // Published replacement errors can leave the session open. The provider owns subsequent lifecycle.
                         break;
                     default: throw XaiTtsProtocol.Protocol();
@@ -241,6 +248,7 @@ internal sealed class XaiTtsSession : ITtsStreamingSession
         {
             await _receiver.ConfigureAwait(false);
             _resources = null;
+            _credential = null; _secrets = [];
             WebSocket? socket = _socket; _socket = null;
             try { socket?.Dispose(); } catch (Exception error) { RecordCleanup(LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: socket)); }
             _send.Dispose();

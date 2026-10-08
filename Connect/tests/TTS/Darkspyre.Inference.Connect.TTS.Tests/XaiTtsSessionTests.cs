@@ -1,3 +1,5 @@
+using System.Net.Http.Headers;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.Voice.Tests;
@@ -6,6 +8,35 @@ namespace Darkspyre.Inference.Connect.TTS.Tests;
 
 public sealed class XaiTtsSessionTests
 {
+    [Fact]
+    public async Task StreamingErrorsRetainRedactedProviderExplanation()
+    {
+        using var socket = new VoiceSocket();
+        socket.Json("""{"type":"error","message":"Invalid replacements: dummy-test-token refresh-secret identity-secret binding-secret family-secret default-secret bearer-default-secret."}""");
+        using var http = new HttpClient();
+        http.DefaultRequestHeaders.Add("X-Default", "default-secret");
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "bearer-default-secret");
+        await using var access = new LlmConnectionAccess(new VoiceConnectionSource(), []);
+        var binding = new XaiFamilyBinding(new("selected"), access);
+        await using ITtsClient client = new XaiTtsProvider(http, socket.ConnectAsync).Bind(new()
+        {
+            Transport = TtsTransport.XaiTts,
+            Endpoint = new(VoiceTestData.Connection.Endpoint),
+            Xai = binding.Selection,
+            Headers = new Dictionary<string, string> { ["X-Family"] = "family-secret" }
+        }, binding);
+        await using ITtsStreamingSession session = await ((ITtsStreamingClient)client).OpenStreamAsync(
+            new(Language: "en"), VoiceTestData.Limits());
+        await using var events = session.Events.GetAsyncEnumerator();
+
+        Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(VoiceTestData.Timeout));
+        var error = Assert.IsType<TtsStreamError>(events.Current);
+        Assert.Equal(InferenceFailureCode.ExecutionFailed, error.Error.Code);
+        Assert.Equal("Invalid replacements: [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED].", error.Error.Message);
+        await session.UpdateReplacementsAsync(new Dictionary<string, string> { ["old"] = "new" });
+        Assert.Equal("session.update", VoiceTestData.Type(Assert.Single(socket.Sent).Bytes));
+    }
+
     [Fact]
     public async Task FailedUpgradeRetainsSafeRequestIdAndRetryDelay()
     {
@@ -56,7 +87,7 @@ public sealed class XaiTtsSessionTests
     private static Task<XaiTtsSession> OpenAsync(VoiceSocket socket, VoiceResources? resources = null, int events = 16)
         => XaiTtsSession.OpenAsync(socket.ConnectAsync, VoiceTestData.Connection,
             new() { Transport = TtsTransport.XaiTts, Endpoint = new(VoiceTestData.Connection.Endpoint) },
-            new(Language: "en"), VoiceTestData.Limits(events), resources, () => { }, _ => { }, default);
+            new(Language: "en"), VoiceTestData.Limits(events), resources, [], () => { }, _ => { }, default);
 
     [Fact]
     public async Task CommandsSendWithoutReaderAndActualCompletionAllowsAnotherUtterance()
