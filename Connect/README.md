@@ -4560,6 +4560,11 @@ Generation and request accounting reject nonempty connection or request `Provide
 request controls to the engine. An engine owns its capabilities; connection overrides do not change
 them. Settings cannot save these unsupported options. Model and capability discovery remain available
 so an invalid saved connection can be inspected and repaired.
+Generation validates the requested reasoning level against the selected engine's asynchronous
+capability result before enumerating its stream. Nonmutating accounting validates the same control
+against one synchronous host capability snapshot without acquiring or running an engine.
+An unsupported explicit level fails with `InvalidRequest`; accepted and omitted levels retain their
+original values in the Common request. Both paths use the shared reasoning admission validator.
 
 Agent sessions run on the managed agent lane, which executes host tools; context estimates count the
 request text with Connect's local tokenizer. Binary prompt attachments, structured tool content and
