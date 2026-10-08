@@ -3122,6 +3122,10 @@ tool search; `web_search` is a reserved hosted name.
 The client joins the generic and language listings, offers only listed language models, and reads the
 facade's published catalog. Catalog reasoning levels and image modalities override family fallbacks.
 Unknown manually entered models still permit a request without fabricated discovery evidence.
+Live ConsoleTester discovery at source `987283a` selects UnitedStates/Default and uses its existing
+saved Grok sign-in. Authentication check succeeds, and the model list returns `grok-4.6` and
+`grok-4.7` with exit code 0. This qualifies selected-route discovery after the diagnostic repair,
+not refresh/expiry, other regions or generation on every listed model.
 Two small OAuth requests against production source `e3cb082` select the discovered `grok-4.6`
 model on UnitedStates/Default, explicit `Low` reasoning and 128 requested output tokens. Both
 calculate `17 * 19`, return only `323`, and finish as `Completed` with reason `completed`.
