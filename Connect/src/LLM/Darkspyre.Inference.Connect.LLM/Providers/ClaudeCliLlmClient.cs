@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -41,6 +42,9 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High,
         LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum);
 
+    private static readonly IReadOnlySet<LlmReasoningLevel> Claude46ReasoningLevels = LlmReasoningEffort.Levels(
+        LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.Maximum);
+
     protected override LlmProviderCapabilities DefaultCapabilities => Capabilities;
 
     private static readonly LlmProviderCapabilities Capabilities = new()
@@ -80,6 +84,10 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(Capabilities, connection, modelId);
         return capabilities with
         {
+            ReasoningLevels = modelId is "claude-sonnet-4-6" or "claude-opus-4-6"
+                or "claude-sonnet-4-6[1m]" or "claude-opus-4-6[1m]"
+                ? capabilities.ReasoningLevels.Intersect(Claude46ReasoningLevels).ToFrozenSet()
+                : capabilities.ReasoningLevels,
             SupportsModelListing = true,
             SupportsJsonObject = false,
             SupportsTemperature = false,

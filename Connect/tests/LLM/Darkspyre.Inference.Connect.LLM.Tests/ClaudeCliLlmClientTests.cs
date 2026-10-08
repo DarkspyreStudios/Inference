@@ -3,6 +3,7 @@ using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -13,6 +14,52 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ClaudeCliLlmClientTests
 {
+    [Theory]
+    [InlineData("claude-sonnet-4-6")]
+    [InlineData("claude-opus-4-6")]
+    [InlineData("claude-sonnet-4-6[1m]")]
+    [InlineData("claude-opus-4-6[1m]")]
+    public async Task ExplicitClaude46ProfilesRejectExtraHighBeforeInvocation(string model)
+    {
+        var runner = new RecordingRunner(new(0,
+            """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
+            string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        LlmConnection connection = CliConnection() with
+        {
+            ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>
+            {
+                [model] = new() { ReasoningLevels = ClaudeCliLlmClient.ReasoningLevels }
+            }
+        };
+        IReadOnlySet<LlmReasoningLevel> offered = client.GetCapabilities(connection, model).ReasoningLevels;
+        Assert.True(offered.SetEquals([LlmReasoningLevel.Low, LlmReasoningLevel.Medium,
+            LlmReasoningLevel.High, LlmReasoningLevel.Maximum]));
+        var request = new LlmChatRequest
+        {
+            ModelId = model,
+            Messages = [new("user", "Reply with OK.")],
+            ReasoningLevel = LlmReasoningLevel.ExtraHigh
+        };
+
+        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() =>
+            ReadAllAsync(client.StreamAsync(connection, request)));
+        Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
+        Assert.Empty(runner.Invocations);
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection,
+            request with { ReasoningLevel = LlmReasoningLevel.Maximum }));
+        Assert.Equal(LlmCompletionStatus.Completed, Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Status);
+        IReadOnlyList<string> arguments = Assert.Single(runner.Invocations).Arguments;
+        Assert.Equal("max", arguments[arguments.ToList().IndexOf("--effort") + 1]);
+        LlmConnection narrowed = CliConnection() with
+        { CapabilityOverrides = new() { ReasoningLevels = LlmReasoningEffort.Levels(LlmReasoningLevel.Low) } };
+        Assert.True(client.GetCapabilities(narrowed, model).ReasoningLevels.SetEquals([LlmReasoningLevel.Low]));
+        Assert.Contains(LlmReasoningLevel.ExtraHigh, client.GetCapabilities(CliConnection(), "sonnet").ReasoningLevels);
+        Assert.Contains(LlmReasoningLevel.ExtraHigh, client.GetCapabilities(CliConnection(), "unrecognized-model").ReasoningLevels);
+    }
+
     [Theory]
     [InlineData(true, 0)]
     [InlineData(false, 0)]

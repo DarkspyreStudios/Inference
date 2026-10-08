@@ -4259,6 +4259,12 @@ Subscription connections use the Claude CLI's native `--json-schema` contract an
 `Medium`, `High`, `ExtraHigh` and `Maximum` reasoning levels. Darkspyre.Inference.Connect.LLM uses
 the terminal event's canonical `structured_output` value and validates it locally before returning
 completion.
+Explicit `claude-sonnet-4-6` and `claude-opus-4-6` model IDs, including their `[1m]` forms, offer
+only `Low`, `Medium`, `High` and `Maximum`, matching the
+[Claude Code effort table](https://code.claude.com/docs/en/model-config#adjust-effort-level).
+Their shared chat/native-session resolver rejects `ExtraHigh` before sending a prompt or control.
+Connection/model overrides can narrow that set but cannot widen it. Aliases and unknown model IDs
+retain their existing effort policy because the adapter does not infer their resolved model.
 A successful native schema result with a non-null `structured_output` also completes when its
 observed stop reason is `tool_use`. The [CLI structured-output contract](https://code.claude.com/docs/en/agent-sdk/structured-outputs)
 identifies that payload as the final structured result. Connect retains the actual stop reason.
