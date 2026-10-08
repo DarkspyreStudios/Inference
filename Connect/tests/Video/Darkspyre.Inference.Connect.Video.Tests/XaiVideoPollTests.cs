@@ -1,17 +1,78 @@
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Common.Video;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.Video.Internal;
+using Darkspyre.Inference.Connect.Video.Providers;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.Video.Tests;
 
 public sealed class XaiVideoPollTests
 {
+    [Fact]
+    public async Task ReflectedDefaultHeaderCannotBecomeVideoJobIdentity()
+    {
+        using var handler = new RejectedVideoHandler(false, """{"request_id":"video-header-secret"}""");
+        using var factory = new Factory(handler, "video-header-secret");
+        var services = new ServiceCollection();
+        services.AddLlmConnect(options => options.CreationMode = InferenceHttpCreationMode.BorrowHostFactory);
+        services.AddSingleton<IHttpClientFactory>(factory);
+        services.AddSingleton<ILlmConnectionSource>(new Source());
+        await using ServiceProvider container = services.BuildServiceProvider();
+        await using AsyncServiceScope scope = container.CreateAsyncScope();
+        var binding = new XaiFamilyBinding(new("selected"), scope.ServiceProvider.GetRequiredService<LlmConnectionAccess>(),
+            scope.ServiceProvider.GetRequiredService<LlmProviderService>());
+        using var transport = new XaiImagineVideoTransport();
+        var connection = new VideoConnection
+        { Transport = VideoTransport.XaiImagine, Endpoint = "https://api.x.ai/v1", Xai = binding.Selection };
+
+        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() =>
+            transport.SubmitAsync(connection, new VideoGenerationRequest
+            { ModelId = "grok-imagine-video-1.5", Prompt = "A paper boat" }, binding));
+
+        Assert.Equal(InferenceFailureCode.ProtocolFailure, failure.Code);
+        Assert.DoesNotContain("video-header-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal(1, handler.Sends);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task VideoFailuresRedactEffectiveHeadersWithoutLosingProviderFacts(bool sendFailure)
+    {
+        using var handler = new RejectedVideoHandler(sendFailure);
+        using var factory = new Factory(handler, "video-header-secret");
+        var services = new ServiceCollection();
+        services.AddLlmConnect(options => options.CreationMode = InferenceHttpCreationMode.BorrowHostFactory);
+        services.AddSingleton<IHttpClientFactory>(factory);
+        services.AddSingleton<ILlmConnectionSource>(new Source());
+        await using ServiceProvider container = services.BuildServiceProvider();
+        await using AsyncServiceScope scope = container.CreateAsyncScope();
+        var core = scope.ServiceProvider.GetRequiredService<LlmProviderService>();
+        var binding = new XaiFamilyBinding(new("selected"), scope.ServiceProvider.GetRequiredService<LlmConnectionAccess>(), core);
+        using var transport = new XaiImagineVideoTransport();
+        var connection = new VideoConnection
+        { Transport = VideoTransport.XaiImagine, Endpoint = "https://api.x.ai/v1", Xai = binding.Selection };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            transport.SubmitAsync(connection, new VideoGenerationRequest
+            { ModelId = "grok-imagine-video-1.5", Prompt = "A paper boat" }, binding));
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal("video-request-[REDACTED]-[REDACTED]", failure.RequestId);
+        Assert.Equal(TimeSpan.FromSeconds(17), failure.RetryAfter);
+        Assert.Contains("Video refused", failure.Message, StringComparison.Ordinal);
+        foreach (string secret in new[] { "video-test-token", "video-header-secret" })
+            Assert.DoesNotContain(secret, failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.Equal(1, handler.Sends);
+    }
+
     [Theory]
     [InlineData("21:9")]
     [InlineData("5:2")]
@@ -318,18 +379,43 @@ public sealed class XaiVideoPollTests
         }
     }
 
-    private sealed class Factory(HttpMessageHandler handler) : IHttpClientFactory, IDisposable
+    private sealed class Factory(HttpMessageHandler handler, string? defaultSecret = null) : IHttpClientFactory, IDisposable
     {
         public List<HttpClient> Clients { get; } = [];
         public HttpClient CreateClient(string name)
         {
             var client = new HttpClient(handler, disposeHandler: false);
+            if (defaultSecret is not null) client.DefaultRequestHeaders.Add("X-Default", defaultSecret);
             Clients.Add(client);
             return client;
         }
         public void Dispose()
         {
             foreach (HttpClient client in Clients) client.Dispose();
+        }
+    }
+
+    private sealed class RejectedVideoHandler(bool sendFailure, string? successBody = null) : HttpMessageHandler
+    {
+        public int Sends { get; private set; }
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Sends++;
+            Assert.Equal("/v1/videos/generations", request.RequestUri!.AbsolutePath);
+            Assert.Equal("video-header-secret", Assert.Single(request.Headers.GetValues("X-Default")));
+            if (successBody is not null)
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(successBody) });
+            if (sendFailure)
+                throw new LlmProviderException("Video refused video-test-token video-header-secret.", LlmTransport.XaiResponses,
+                    HttpStatusCode.TooManyRequests, "rate_limit_video-test-token_video-header-secret",
+                    "video-request-video-test-token-video-header-secret", TimeSpan.FromSeconds(17));
+            var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+            {
+                Content = new StringContent("""{"error":{"code":"rate_limit_video-test-token_video-header-secret","message":"Video refused video-test-token video-header-secret."}}""")
+            };
+            response.Headers.Add("x-request-id", "video-request-video-test-token-video-header-secret");
+            response.Headers.RetryAfter = new(TimeSpan.FromSeconds(17));
+            return Task.FromResult(response);
         }
     }
 

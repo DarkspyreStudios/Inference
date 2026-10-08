@@ -99,6 +99,8 @@ Explicit null remains null. Unknown manual models retain provider-side admission
 remain literal; the transport does not predict provider redirects or replace the selected model.
 Null original filenames remain null; an unnamed upload gets a separate local multipart label.
 Selected and Image additional headers retain their values without replacing selected authorization.
+Image sends capture their effective headers, including borrowed-client defaults, on success or failure.
+HTTP diagnostics and native output admission use that same redaction context.
 
 `SubmitAsync` returns a transport-local completed-result handle, not a provider job ID.
 Copied equal handles remain usable on that instance until retirement. `GetJobAsync` returns its
@@ -272,6 +274,9 @@ incompatibility before credential acquisition. Entered capability and submission
 the facade's synchronous retirement fence. The creator detaches that fence after the awaited
 operation and cleanup settle. Selected authorization is composed before Video additional headers;
 a collision with a selected secret header refuses before credential refresh.
+Video sends capture effective headers, including borrowed-client defaults, even when no response arrives.
+Provider error explanations, codes and request IDs use the selected credential and those headers for
+redaction. Submission and polling fields use the same context before publishing native identity or output.
 Request timeout validation follows the .NET send-through-headers timer's range; it is not a
 provider limit. Settings and direct binding enforce the same range.
 

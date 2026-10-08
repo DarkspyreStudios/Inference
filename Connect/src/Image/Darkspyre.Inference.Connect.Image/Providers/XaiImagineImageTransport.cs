@@ -361,6 +361,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
         HttpResponseMessage? response = null;
         XaiImageResult? result = null;
         var errors = new List<Exception>();
+        string[] secrets = snapshot.AdditionalHeaders.Values.Concat(connection.AdditionalHeaders.Values).ToArray();
         try
         {
             fence();
@@ -371,10 +372,10 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
             using (var headers = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
                 headers.CancelAfter(connection.RequestTimeout);
-                response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, headers.Token).ConfigureAwait(false);
+                try { response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, headers.Token).ConfigureAwait(false); }
+                finally { secrets = secrets.Concat(request.Headers.SelectMany(header => header.Value)).ToArray(); }
             }
             fence();
-            string[] secrets = snapshot.AdditionalHeaders.Values.Concat(connection.AdditionalHeaders.Values).ToArray();
             LlmCredential? credential = LlmCredential.Parse(snapshot.Credential);
             await XaiErrorClassifier.ThrowIfUnsuccessfulImageAsync(response, credential, secrets, token).ConfigureAwait(false);
             fence();
@@ -382,7 +383,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
             fence();
             result = XaiImageProtocol.Parse(text, value => value != SecretRedactor.Sanitize(value, credential, secrets), fence);
         }
-        catch (Exception error) { errors.Add(SafeFailure(error, snapshot, connection.AdditionalHeaders.Values.ToArray())); }
+        catch (Exception error) { errors.Add(SafeFailure(error, snapshot, secrets)); }
         finally
         {
             if (response is not null)
@@ -580,7 +581,10 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
                     || code is "xai_authentication_required" or "xai_entitlement_required")
                     ? SecretRedactor.Sanitize(code, LlmCredential.Parse(snapshot?.Credential),
                         (snapshot?.AdditionalHeaders.Values ?? []).Concat(additionalSecrets ?? [])) : null,
-                requestId: provider.RequestId, retryAfter: provider.RetryAfter, innerException: new ImageEvidence(provider), isContextOverflow: provider.IsContextOverflow),
+                requestId: provider.RequestId is { } id && snapshot is not null
+                    ? SecretRedactor.Sanitize(id, LlmCredential.Parse(snapshot.Credential), snapshot.AdditionalHeaders.Values.Concat(additionalSecrets ?? []))
+                    : provider.RequestId,
+                retryAfter: provider.RetryAfter, innerException: new ImageEvidence(provider), isContextOverflow: provider.IsContextOverflow),
             InferenceException inference => new InferenceException(inference.Code, "The image operation failed.", new ImageEvidence(inference)),
             _ => new InferenceException(error is JsonException ? InferenceFailureCode.ProtocolFailure : InferenceFailureCode.ExecutionFailed,
                 "The image operation failed.", new ImageEvidence(error))

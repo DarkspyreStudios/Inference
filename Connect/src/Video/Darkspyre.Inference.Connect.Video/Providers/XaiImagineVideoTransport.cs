@@ -51,7 +51,7 @@ internal sealed class XaiImagineVideoTransport : IVideoTransport, IDisposable, I
             var prepared = await PrepareAsync(connection, request, resources, bound, snapshot, fence, token).ConfigureAwait(false);
             string id = await bound.RunCatalogAsync(snapshot, fence, (http, selected, ownerFence, current) =>
                 SendAsync(http, connection, selected, HttpMethod.Post, prepared.Route, prepared.Body,
-                    (_, text) => XaiVideoProtocol.ParseSubmission(text, value => Protected(value, connection, selected)), ownerFence, current), token).ConfigureAwait(false);
+                    (_, text, secrets) => XaiVideoProtocol.ParseSubmission(text, value => Protected(value, connection, selected, secrets)), ownerFence, current), token).ConfigureAwait(false);
             fence();
             return new VideoJob(id, Scope(connection, bound));
         }, cancellationToken);
@@ -153,13 +153,13 @@ internal sealed class XaiImagineVideoTransport : IVideoTransport, IDisposable, I
     private static Task<VideoJobSnapshot> PollAsync(VideoConnection connection, VideoJob job, string route,
         XaiFamilyBinding bound, LlmConnection snapshot, Action fence, CancellationToken token)
         => bound.RunCatalogAsync(snapshot, fence, (http, selected, ownerFence, current) =>
-            SendAsync(http, connection, selected, HttpMethod.Get, route, null, (status, text) =>
+            SendAsync(http, connection, selected, HttpMethod.Get, route, null, (status, text, secrets) =>
             {
                 XaiVideoPoll poll = XaiVideoProtocol.ParsePoll(status, text,
-                    value => Protected(value, connection, selected), ownerFence);
+                    value => Protected(value, connection, selected, secrets), ownerFence);
                 InferenceResourceFailure? failure = poll.State is VideoJobState.Failed or VideoJobState.Expired
                     ? new(InferenceFailureCode.ExecutionFailed, poll.ErrorCode, poll.ErrorMessage is { } message
-                        ? SecretRedactor.Sanitize(message, LlmCredential.Parse(selected.Credential), Secrets(connection, selected))
+                        ? SecretRedactor.Sanitize(message, LlmCredential.Parse(selected.Credential), secrets)
                         : $"The provider video state is {poll.State}.") : null;
                 VideoOutput? output = null;
                 VideoJobState state = poll.State;
@@ -336,12 +336,13 @@ internal sealed class XaiImagineVideoTransport : IVideoTransport, IDisposable, I
     }
 
     private static async Task<T> SendAsync<T>(HttpClient http, VideoConnection connection, LlmConnection snapshot,
-        HttpMethod method, string route, JsonObject? body, Func<HttpStatusCode, string, T> parse, Action fence, CancellationToken token)
+        HttpMethod method, string route, JsonObject? body, Func<HttpStatusCode, string, IReadOnlyList<string>, T> parse, Action fence, CancellationToken token)
     {
         HttpRequestMessage? request = null;
         HttpResponseMessage? response = null;
         T result = default!;
         var errors = new List<Exception>();
+        string[] secrets = Secrets(connection, snapshot).ToArray();
         try
         {
             fence();
@@ -352,17 +353,18 @@ internal sealed class XaiImagineVideoTransport : IVideoTransport, IDisposable, I
             using (var headers = CancellationTokenSource.CreateLinkedTokenSource(token))
             {
                 headers.CancelAfter(connection.RequestTimeout);
-                response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, headers.Token).ConfigureAwait(false);
+                try { response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, headers.Token).ConfigureAwait(false); }
+                finally { secrets = secrets.Concat(request.Headers.SelectMany(header => header.Value)).ToArray(); }
             }
             fence();
-            await XaiErrorClassifier.ThrowIfUnsuccessfulVideoAsync(response, LlmCredential.Parse(snapshot.Credential), Secrets(connection, snapshot), token).ConfigureAwait(false);
+            await XaiErrorClassifier.ThrowIfUnsuccessfulVideoAsync(response, LlmCredential.Parse(snapshot.Credential), secrets, token).ConfigureAwait(false);
             fence();
             string text = await SdkHttpConsumption.ReadAsStringAsync(response.Content, token).ConfigureAwait(false);
             fence();
-            result = parse(response.StatusCode, text);
+            result = parse(response.StatusCode, text, secrets);
             fence();
         }
-        catch (Exception error) { errors.Add(SafeFailure(error)); }
+        catch (Exception error) { errors.Add(SafeFailure(error, snapshot, secrets)); }
         if (response is not null)
             try { response.Dispose(); }
             catch (Exception error) { errors.Add(LlmResourcePreparation.AsCleanupFailure(SafeFailure(error), refusedOwner: response)); }
@@ -376,8 +378,8 @@ internal sealed class XaiImagineVideoTransport : IVideoTransport, IDisposable, I
 
     private static IEnumerable<string> Secrets(VideoConnection connection, LlmConnection snapshot)
         => snapshot.AdditionalHeaders.Values.Concat(connection.AdditionalHeaders.Values);
-    private static bool Protected(string value, VideoConnection connection, LlmConnection snapshot)
-        => SecretRedactor.ContainsProtectedValue(value, LlmCredential.Parse(snapshot.Credential), Secrets(connection, snapshot));
+    private static bool Protected(string value, VideoConnection connection, LlmConnection snapshot, IReadOnlyList<string>? additionalSecrets = null)
+        => SecretRedactor.ContainsProtectedValue(value, LlmCredential.Parse(snapshot.Credential), Secrets(connection, snapshot).Concat(additionalSecrets ?? []));
     private static string JobRoute(string id) => "videos/" + Uri.EscapeDataString(XaiFileRequestData.Identity(id));
     private static InferenceResourceScope Scope(VideoConnection connection, XaiFamilyBinding binding)
         => new(new Uri(connection.Endpoint.TrimEnd('/') + "/videos").AbsoluteUri, binding.Selection.ConnectionId);
@@ -404,20 +406,24 @@ internal sealed class XaiImagineVideoTransport : IVideoTransport, IDisposable, I
         if (errors.Count == 1) ExceptionDispatchInfo.Throw(errors[0]);
         if (errors.Count > 1) throw new AggregateException(errors);
     }
-    private static Exception SafeFailure(Exception error) => error switch
+    private static string SafeText(string value, LlmConnection? snapshot, IReadOnlyList<string>? secrets) => snapshot is null
+        ? value : SecretRedactor.Sanitize(value, LlmCredential.Parse(snapshot.Credential), snapshot.AdditionalHeaders.Values.Concat(secrets ?? []));
+    private static Exception SafeFailure(Exception error, LlmConnection? snapshot = null, IReadOnlyList<string>? secrets = null) => error switch
     {
         VideoEvidence => error,
         { InnerException: VideoEvidence } => error,
-        AggregateException aggregate => new AggregateException("The video operation and cleanup failed.", aggregate.InnerExceptions.Select(SafeFailure)),
+        AggregateException aggregate => new AggregateException("The video operation and cleanup failed.", aggregate.InnerExceptions.Select(item => SafeFailure(item, snapshot, secrets))),
         InferenceResourceOperationException resource => RetainResource(resource, new InferenceResourceOperationException(resource.Code,
             "The video resource operation failed.", resource.Failure, new VideoEvidence(resource))),
         InferenceResourceOperationCanceledException resource => RetainResource(resource, new InferenceResourceOperationCanceledException(resource.Failure,
             resource.CancellationToken, new VideoEvidence(resource))),
         OperationCanceledException canceled => new OperationCanceledException("The video operation was interrupted.", new VideoEvidence(canceled), canceled.CancellationToken),
         InferenceException { InnerException: LlmProviderException provider } inference => new InferenceException(inference.Code,
-            inference.Message, SafeFailure(provider)),
-        LlmProviderException provider => new LlmProviderException(provider.Message, LlmTransport.XaiResponses, provider.StatusCode, provider.ProviderCode,
-            provider.RequestId, provider.RetryAfter, provider.SanitizedResponseBody, new VideoEvidence(provider), provider.IsContextOverflow),
+            "Video authorization or access failed.", SafeFailure(provider, snapshot, secrets)),
+        LlmProviderException provider => new LlmProviderException(SafeText(provider.Message, snapshot, secrets), LlmTransport.XaiResponses, provider.StatusCode,
+            provider.ProviderCode is { } code ? SafeText(code, snapshot, secrets) : null,
+            provider.RequestId is { } id ? SafeText(id, snapshot, secrets) : null, provider.RetryAfter,
+            provider.SanitizedResponseBody is { } body ? SafeText(body, snapshot, secrets) : null, new VideoEvidence(provider), provider.IsContextOverflow),
         InferenceException inference => new InferenceException(inference.Code, "The video operation failed.", new VideoEvidence(inference)),
         _ => new InferenceException(error is JsonException ? InferenceFailureCode.ProtocolFailure : InferenceFailureCode.ExecutionFailed,
             "The video operation failed.", new VideoEvidence(error))

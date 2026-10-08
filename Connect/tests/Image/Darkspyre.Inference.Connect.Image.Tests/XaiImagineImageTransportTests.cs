@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Connect.Image.Internal;
@@ -99,11 +100,47 @@ public sealed class XaiImagineImageTransportTests
     }
 
     [Fact]
+    public async Task ReflectedDefaultHeaderCannotBecomeImageModelIdentity()
+    {
+        using var handler = new RejectedImageHandler("image-test-credential",
+            """{"model":"image-header-secret","data":[{"b64_json":"AQID"}]}""");
+        using var factory = new Factory(handler, "image-header-secret");
+        var services = new ServiceCollection();
+        services.AddLlmConnect(options => options.CreationMode = InferenceHttpCreationMode.BorrowHostFactory);
+        services.AddSingleton<IHttpClientFactory>(factory);
+        services.AddSingleton<ILlmConnectionSource>(new Source("image-test-credential"));
+        await using ServiceProvider container = services.BuildServiceProvider();
+        await using AsyncServiceScope scope = container.CreateAsyncScope();
+        var binding = new XaiFamilyBinding(new("selected"), scope.ServiceProvider.GetRequiredService<LlmConnectionAccess>(),
+            scope.ServiceProvider.GetRequiredService<LlmProviderService>());
+        using var transport = new XaiImagineImageTransport();
+        var connection = new ImageConnection
+        { Transport = ImageTransport.XaiImagine, Endpoint = "https://api.x.ai/v1", Xai = binding.Selection };
+        PreparedImageTransportRequest prepared = transport.Prepare(new ImageTransportPreparationRequest
+        {
+            Workflow = new()
+            {
+                Id = "selected-model",
+                Label = "Selected model",
+                Transport = ImageTransport.XaiImagine,
+                TransportConfiguration = JsonElement.Parse("""{"model":"selected-model"}""")
+            },
+            PositivePrompt = "A caller-selected image",
+            CacheKey = string.Empty
+        });
+
+        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() => transport.SubmitAsync(connection, prepared, binding));
+        Assert.Equal(InferenceFailureCode.ProtocolFailure, failure.Code);
+        Assert.DoesNotContain("image-header-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal(1, handler.Sends);
+    }
+
+    [Fact]
     public async Task ImageFailurePreservesSanitizedRequestIdentityWithoutExposingTheBody()
     {
         const string token = "image-test-credential";
         using var handler = new RejectedImageHandler(token);
-        using var factory = new Factory(handler);
+        using var factory = new Factory(handler, "image-header-secret");
         var services = new ServiceCollection();
         services.AddLlmConnect(options => options.CreationMode = InferenceHttpCreationMode.BorrowHostFactory);
         services.AddSingleton<IHttpClientFactory>(factory);
@@ -137,11 +174,12 @@ public sealed class XaiImagineImageTransportTests
         LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
             transport.SubmitAsync(connection, prepared, binding));
 
-        Assert.Equal("image-request-[REDACTED]", failure.RequestId);
-        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal("image-request-[REDACTED]-[REDACTED]", failure.RequestId);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
         Assert.Equal(TimeSpan.FromSeconds(17), failure.RetryAfter);
         Assert.DoesNotContain(token, failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("image-header-secret", failure.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("private generated prompt", failure.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("provider-secret", failure.ToString(), StringComparison.Ordinal);
         Assert.Null(failure.SanitizedResponseBody);
@@ -174,30 +212,34 @@ public sealed class XaiImagineImageTransportTests
             CancellationToken cancellationToken = default) => throw new InvalidOperationException("The supplied credential is already fresh.");
     }
 
-    private sealed class RejectedImageHandler(string token) : HttpMessageHandler
+    private sealed class RejectedImageHandler(string token, string? successBody = null) : HttpMessageHandler
     {
         public int Sends { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Sends++;
             Assert.Equal("/v1/images/generations", request.RequestUri!.AbsolutePath);
+            Assert.Equal("image-header-secret", Assert.Single(request.Headers.GetValues("X-Default")));
+            if (successBody is not null)
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(successBody) });
             var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
             {
                 Content = new StringContent("{\"error\":{\"code\":\"rate_limit_" + token
-                    + "_provider-secret\",\"message\":\"private generated prompt and image\",\"refresh_token\":\"provider-secret\"}}")
+                    + "_provider-secret_image-header-secret\",\"message\":\"private generated prompt and image\",\"refresh_token\":\"provider-secret\"}}")
             };
-            response.Headers.Add("x-request-id", "image-request-" + token);
+            response.Headers.Add("x-request-id", "image-request-" + token + "-image-header-secret");
             response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(17));
             return Task.FromResult(response);
         }
     }
 
-    private sealed class Factory(HttpMessageHandler handler) : IHttpClientFactory, IDisposable
+    private sealed class Factory(HttpMessageHandler handler, string? defaultSecret = null) : IHttpClientFactory, IDisposable
     {
         private readonly List<HttpClient> _clients = [];
         public HttpClient CreateClient(string name)
         {
             var client = new HttpClient(handler, disposeHandler: false);
+            if (defaultSecret is not null) client.DefaultRequestHeaders.Add("X-Default", defaultSecret);
             _clients.Add(client);
             return client;
         }
