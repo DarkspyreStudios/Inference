@@ -3091,6 +3091,8 @@ The shared HTTP classifier preserves the response status, observed request ID an
 the redacted error envelope, including when a route withholds the diagnostic body. Batch and deferred
 resource failures retain that safe code. Request IDs use the same credential redactor as diagnostic
 bodies. A reported retry delay is diagnostic data, not permission to retry.
+Rejected Responses generation supplies its live outgoing headers, including borrowed-client defaults,
+alongside resolved hosted-authorization secrets to that same classifier.
 Files metadata and download failures also redact effective outgoing header values, including headers
 added by cross-family request configuration. The existing send owner supplies its actual request to
 the shared error boundary. Borrowed streams keep their existing ownership.

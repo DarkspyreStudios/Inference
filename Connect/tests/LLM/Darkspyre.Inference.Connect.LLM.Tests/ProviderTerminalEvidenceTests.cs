@@ -16,6 +16,7 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData(LlmTransport.OpenAiResponses)]
     [InlineData(LlmTransport.OpenAiCompatibleChat)]
     [InlineData(LlmTransport.AnthropicMessages)]
+    [InlineData(LlmTransport.XaiResponses)]
     public async Task HttpGenerationFailuresRedactEffectiveRequestSecrets(LlmTransport transport)
     {
         var retryAfter = TimeSpan.FromSeconds(17);
@@ -28,26 +29,30 @@ public sealed class ProviderTerminalEvidenceTests
         {
             LlmTransport.OpenAiResponses => new OpenAiResponsesLlmClient(http),
             LlmTransport.OpenAiCompatibleChat => new OpenAiCompatibleChatLlmClient(http),
+            LlmTransport.XaiResponses => new XaiResponsesLlmClient(http),
             _ => new AnthropicMessagesLlmClient(http)
         };
         var connection = new LlmConnection
         {
             Version = "1",
             Transport = transport,
-            Endpoint = "https://provider.example.test/v1",
-            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize(),
+            Endpoint = transport == LlmTransport.XaiResponses ? "https://api.x.ai/v1" : "https://provider.example.test/v1",
+            Xai = transport == LlmTransport.XaiResponses ? new() : null,
+            Credential = (transport == LlmTransport.XaiResponses
+                ? new LlmCredential { OAuth = new() { AccessToken = "test-key" } }
+                : new LlmCredential { ApiKey = "test-key" }).Serialize(),
             AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
         };
 
         LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
         {
             await foreach (LlmStreamEvent _ in client.StreamAsync(connection,
-                new() { ModelId = "selected-model", Messages = [new("user", "hello")] })) { }
+                new() { ModelId = transport == LlmTransport.XaiResponses ? "grok-4.7" : "selected-model", Messages = [new("user", "hello")] })) { }
         });
 
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
         Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
-        Assert.Contains("request request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("Failure [REDACTED] [REDACTED] [REDACTED]", failure.Message, StringComparison.Ordinal);
         Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
         Assert.Equal(retryAfter, failure.RetryAfter);
         Assert.DoesNotContain("test-key", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);

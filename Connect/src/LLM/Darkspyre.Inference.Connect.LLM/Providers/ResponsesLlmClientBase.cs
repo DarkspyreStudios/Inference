@@ -241,7 +241,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             try
             {
                 if (Transport == LlmTransport.XaiResponses)
-                    await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, credential, preparation?.Secrets ?? [], cancellationToken).ConfigureAwait(false);
+                    await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, credential,
+                        httpRequest.Headers.SelectMany(header => header.Value).Concat(preparation?.Secrets ?? []), cancellationToken).ConfigureAwait(false);
                 else
                     await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, credential, "OpenAI Responses request",
                         httpRequest.Headers.SelectMany(header => header.Value), cancellationToken).ConfigureAwait(false);
