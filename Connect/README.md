@@ -473,8 +473,21 @@ families. The tester uses its own saved OAuth credential without retries or acco
 Citations preserve first-observed annotation order and suppress terminal copies of the same
 occurrence. The adapter requests `no_inline_citations` in the existing `include` array, as the
 [Responses citation protocol](https://docs.x.ai/developers/tools/citations) specifies; it sends no
-top-level boolean for that control. Offset units are unqualified, so positions
-remain absent. Code outputs preserve actual code, logs and image URLs without fetching remote
+top-level boolean for that control. Offset units are unqualified, so positions remain absent.
+Two bounded OAuth requests against source `8db9204` use Global/Default
+`grok-4.20-0309-non-reasoning`, WebSearch restricted to `docs.x.ai`, 64 requested output tokens
+and two hosted turns. Each reports three actual terminal web calls with status `completed` and
+eleven citation occurrences. Streaming also reports three actual starts; nonstreaming invents
+none. Both return `Code Execution Tool | xAI` with separate citations and no inline citation
+links, chat status `Completed` and finish reason `completed`. Streaming reports 11905 input and
+75 output tokens; nonstreaming reports 11905 input and 135 output tokens and adds explanatory
+prose. These runs qualify the selected web-search and citation route in both modes, not exact
+title-only formatting, output-token-cap enforcement, positional offsets or other models/routes.
+The output-token discrepancy remains unresolved; controlled outgoing-request tests verify the
+requested limit is sent unchanged. The tester uses its own OAuth credential without retries or
+account/route fallback.
+
+Code outputs preserve actual code, logs and image URLs without fetching remote
 artifacts. MCP arguments, output and error remain actual JSON values, including JSON strings.
 Generated images decode bare base64 and identify JPEG/PNG from bytes. Without Resources they carry
 copied bytes. With Resources they use the existing admitted scope and staged resource writer,
