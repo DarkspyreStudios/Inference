@@ -171,7 +171,11 @@ fixed batches route and originally selected connection ID, not account or princi
 receipts can use another selected connection ID when the route matches and the current token authorizes.
 Supplied page controls are forwarded without inferred limits or automatic paging. Response counts,
 cursors and timezone-qualified timestamps retain actual observations; date-only timestamps are not
-converted to invented instants. Mutation dispatch and validated prior/returned receipts survive late
+converted to invented instants. The shared batch/metadata timestamp reader uses the BCL JSON parser
+for [xAI's Protobuf timestamps](https://github.com/xai-org/xai-proto/blob/main/proto/xai/api/v1/batch.proto).
+It accepts the provider's nine fractional digits and retains the first seven at `DateTimeOffset`'s
+100-nanosecond precision. The explicit UTC or numeric offset remains required; absent values remain null.
+Mutation dispatch and validated prior/returned receipts survive late
 cancellation and failure, with response facts belonging only to the current HTTP stage.
 Deferred submission also uses that same selected snapshot, borrowed HTTP/Files owners and canonical
 Chat Completions body. Typed controls, schema numeric guarantees, function-only tools and supplied

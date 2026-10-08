@@ -168,13 +168,14 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
 
     private static DateTimeOffset? Timestamp(JsonElement root, string name)
     {
-        string? text = OptionalString(root, name);
-        if (text is null) return null;
-        // A date alone has no observed time/zone; do not manufacture midnight from guide examples.
-        string[] formats = ["yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'",
-            "yyyy-MM-dd'T'HH:mm:sszzz", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFFzzz"];
-        return DateTimeOffset.TryParseExact(text, formats, CultureInfo.InvariantCulture,
-            DateTimeStyles.AssumeUniversal, out DateTimeOffset time) ? time : throw new JsonException();
+        JsonElement value = Property(root, name);
+        if (value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null) return null;
+        if (value.ValueKind != JsonValueKind.String) throw new JsonException();
+        string text = value.GetString()!;
+        // Require full seconds and an explicit zone: 20 characters with Z, 25 with +/-HH:mm.
+        // The JSON parser accepts provider nanoseconds at DateTimeOffset's tick precision.
+        bool hasZone = text.Length >= 20 && (text.EndsWith('Z') || text.Length >= 25 && text[^6] is '+' or '-');
+        return hasZone && value.TryGetDateTimeOffset(out DateTimeOffset time) ? time : throw new JsonException();
     }
 
 }
