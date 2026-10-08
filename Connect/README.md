@@ -3666,6 +3666,14 @@ The focused direct-Codex regression verifies the same pin on catalog, generation
 requests through the public facade. Selected catalog reasoning, summary and input-modality facts
 reach model capabilities; admitted reasoning controls reach generation. Its synthetic HTTP responses do not
 establish live subscription entitlement or endpoint acceptance.
+The existing ConsoleTester at source `3a52055` completes direct device OAuth sign-in and
+discovers seven actual models with its independent vault credential. Its selected `gpt-6-luna`
+passes all four existing protocol checks: a complete function call retains continuation state,
+the document tool result supplies its verification word, multiple assistant states replay without
+server-stored history, and an image prompt completes. The tester exits successfully with JSON
+reflection disabled and no retries. Installed Codex CLI and the adapter pin both report `0.159.3`.
+These results qualify the selected catalog/tool/content/replay routes, not every model, credential
+refresh, managed-session compaction, other platforms or complete CLI tooling parity.
 
 Upstream defines the release number in `codex-rs/Cargo.toml` under `[workspace.package]`.
 The [main-branch source](https://github.com/openai/codex/blob/2635431edbd43279a4da9c1199456758fbbc8ad3/codex-rs/Cargo.toml#L161-L162)
@@ -4753,8 +4761,8 @@ echo 'Call darkspyre_inference_connect_echo with text Hello, then reply with its
 Run the bounded live scenarios (these consume model usage):
 
 ```bash
-dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- codex-probe --provider codex --model gpt-5.5
-dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- managed-probe --provider codex --model gpt-5.5
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- codex-probe --provider codex --model gpt-6-luna
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- managed-probe --provider codex --model gpt-6-luna
 ```
 
 The first checks direct tools, attachments and state replay. The second checks the managed loop,
