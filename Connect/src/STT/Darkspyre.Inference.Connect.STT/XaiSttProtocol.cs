@@ -16,10 +16,9 @@ internal static class XaiSttProtocol
     {
         ArgumentNullException.ThrowIfNull(options);
         var snapshot = options with { KeyTerms = options.KeyTerms };
-        Validate(snapshot.SampleRate, snapshot.VadThreshold, snapshot.KeyTerms, snapshot.Channels);
+        Validate(snapshot.SampleRate, snapshot.VadThreshold, snapshot.KeyTerms, snapshot.Channels, snapshot.TextNormalization, snapshot.Language);
         if (snapshot.RawAudioFormat == SpeechAudioEncoding.Opus) throw Unsupported();
         if (snapshot.RawAudioFormat is not null && snapshot.SampleRate is null
-            || snapshot.TextNormalization == true && string.IsNullOrWhiteSpace(snapshot.Language)
             || snapshot.Multichannel == true && snapshot.RawAudioFormat is not null && snapshot.Channels is null) throw Invalid();
         return snapshot;
     }
@@ -27,18 +26,18 @@ internal static class XaiSttProtocol
     {
         ArgumentNullException.ThrowIfNull(options);
         var snapshot = options with { KeyTerms = options.KeyTerms };
-        Validate(snapshot.SampleRate, snapshot.VadThreshold, snapshot.KeyTerms, snapshot.Channels);
-        if (snapshot.TextNormalization is not null) throw Unsupported();
+        Validate(snapshot.SampleRate, snapshot.VadThreshold, snapshot.KeyTerms, snapshot.Channels, snapshot.TextNormalization, snapshot.Language);
         if (snapshot.Multichannel == true && (snapshot.Channels is null || snapshot.Encoding == SpeechAudioEncoding.Opus)) throw Invalid();
         Milliseconds(snapshot.Endpointing, 0); Milliseconds(snapshot.SmartTurnTimeout, 1);
         if (snapshot.SmartTurnThreshold is < 0 or > 1
             || snapshot.SmartTurnTimeout is not null && snapshot.SmartTurnThreshold is null) throw Invalid();
         return snapshot;
     }
-    private static void Validate(int? rate, double? vad, IReadOnlyList<string>? terms, int? channels)
+    private static void Validate(int? rate, double? vad, IReadOnlyList<string>? terms, int? channels, bool? normalize, string? language)
     {
         if (rate is { } value && !Rates.Contains(value) || vad is < 0 or > 1 || channels is < 2 or > 8
-            || terms is { Count: > 100 } || terms?.Any(string.IsNullOrWhiteSpace) == true) throw Invalid();
+            || terms is { Count: > 100 } || terms?.Any(string.IsNullOrWhiteSpace) == true
+            || normalize == true && string.IsNullOrWhiteSpace(language)) throw Invalid();
     }
     internal static void ValidateFileMetadata(string? contentType, string? fileName, SpeechTranscriptionOptions options)
     {
@@ -79,6 +78,7 @@ internal static class XaiSttProtocol
         var fields = Common(options.ModelId, options.Language, options.SampleRate, options.Diarization, options.Multichannel,
             options.Channels, options.KeyTerms, options.IncludeFillerWords, options.VadThreshold).ToList();
         if (options.Encoding is { } encoding) fields.Add(new("encoding", Encoding(encoding)));
+        if (options.TextNormalization is { } normalize) fields.Add(new("format", Boolean(normalize)));
         if (options.InterimResults is { } interim) fields.Add(new("interim_results", Boolean(interim)));
         if (Milliseconds(options.Endpointing, 0) is { } endpointing) fields.Add(new("endpointing", Number(endpointing)));
         if (options.SmartTurnThreshold is { } smart) fields.Add(new("smart_turn", Number(smart)));
@@ -125,7 +125,7 @@ internal static class XaiSttProtocol
         SupportsKeyTerms = true,
         SupportsFillerWords = true,
         SupportsVadThreshold = true,
-        SupportsTextNormalization = !streaming,
+        SupportsTextNormalization = true,
         SupportsInterimResults = streaming,
         SupportsEndpointing = streaming,
         SupportsSmartTurn = streaming,

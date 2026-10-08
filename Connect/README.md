@@ -322,8 +322,10 @@ infer audio format from filenames.
 The reusable WebSocket session waits for `transcript.created`, sends audio packets and ordered
 `finalize`/`audio.done` commands, and exposes one bounded event feed with caller-supplied limits.
 Opus packets remain indivisible; explicit accepted sample-rate controls are sent unchanged, but the
-provider ignores them for Opus. Streaming refuses the independent text-normalization control;
-language retains the provider's formatting semantics. Actual per-channel final observations remain
+provider ignores them for Opus. Streaming maps explicit text normalization to the nullable `format`
+query parameter documented in the [xAI STT reference](https://docs.x.ai/developers/rest-api-reference/inference/speech-to-text).
+Omission sends no `format` parameter. Both REST and streaming require a language when normalization
+is enabled and preserve explicit `false` without requiring one. Actual per-channel final observations remain
 ordered as received. The convenience stream owns one temporary session and its input enumerator,
 and client retirement cancels and drains that work without requiring a paused reader to resume.
 Explicitly handed-off sessions remain caller-owned. Cleanup refusals retain actual unsafe owners

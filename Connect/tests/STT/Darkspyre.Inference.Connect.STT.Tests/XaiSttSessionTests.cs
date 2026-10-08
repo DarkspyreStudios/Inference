@@ -7,6 +7,49 @@ namespace Darkspyre.Inference.Connect.STT.Tests;
 
 public sealed class XaiSttSessionTests
 {
+    [Theory]
+    [InlineData(true, "en", "?language=en&format=true")]
+    [InlineData(false, null, "?format=false")]
+    [InlineData(null, null, "")]
+    public async Task StreamingTextNormalizationPreservesExplicitAndOmittedControls(
+        bool? normalize, string? language, string query)
+    {
+        using var socket = new VoiceSocket();
+        socket.Json("""{"type":"transcript.created","id":"transcript-1"}""");
+        using var http = new HttpClient();
+        await using var access = new LlmConnectionAccess(new VoiceConnectionSource(), []);
+        var binding = new XaiFamilyBinding(new("selected"), access);
+        Uri? sentUri = null;
+        var provider = new XaiSttProvider(http, (uri, headers, credential, fence, cleanup, token) =>
+        {
+            sentUri = uri;
+            return socket.ConnectAsync(uri, headers, credential, fence, cleanup, token);
+        });
+        await using ISpeechTranscriptionClient client = provider.Bind(new()
+        {
+            Transport = SttTransport.XaiStt,
+            Endpoint = new(VoiceTestData.Connection.Endpoint),
+            Xai = binding.Selection
+        }, binding);
+
+        await using ISpeechTranscriptionSession session = await client.OpenStreamAsync(
+            new(Language: language, TextNormalization: normalize), VoiceTestData.Limits());
+
+        Assert.NotNull(sentUri);
+        Assert.Equal("/v1/stt", sentUri.AbsolutePath);
+        Assert.Equal(query, sentUri.Query);
+        Assert.True((await client.GetCapabilitiesAsync()).Streaming.SupportsTextNormalization);
+    }
+
+    [Fact]
+    public void StreamingTextNormalizationRequiresLanguage()
+    {
+        ArgumentException failure = Assert.Throws<ArgumentException>(() =>
+            XaiSttProtocol.Snapshot(new SpeechStreamOptions(TextNormalization: true)));
+
+        Assert.Equal("The xAI transcription input or controls are invalid.", failure.Message);
+    }
+
     [Fact]
     public async Task FailedUpgradeRetainsSafeRequestIdAndRetryDelay()
     {
