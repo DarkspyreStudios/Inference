@@ -969,6 +969,50 @@ public sealed class BedrockSafetyTests
     }
 
     [Theory]
+    [InlineData(LlmReasoningLevel.None, null)]
+    [InlineData(LlmReasoningLevel.Low, "low")]
+    [InlineData(LlmReasoningLevel.Medium, "medium")]
+    [InlineData(LlmReasoningLevel.High, "high")]
+    public async Task NovaLite15ReasoningUsesItsNativeFieldsWithoutNova2ControlRestrictions(
+        LlmReasoningLevel level, string? effort)
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => throw new NotSupportedException(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var client = new BedrockLlmClient(factory, guard, new StubConverseInvoker(), NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = Connection();
+        foreach (string modelId in new[] { "amazon.nova-lite-1-5-v1:0", "us.amazon.nova-lite-1-5-v1:0" })
+        {
+            Assert.Equal([LlmReasoningLevel.None, LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High],
+                client.GetCapabilities(connection, modelId).ReasoningLevels.Order());
+            LlmChatRequest request = Request(maxTokens: 40000, temperature: 0) with
+            { ModelId = modelId, ReasoningLevel = level, TopK = 0 };
+            _ = client.ValidateRequest(connection, request);
+            ConverseRequest built = BedrockLlmClient.BuildRequest(connection, request, modelId);
+            foreach (var wire in new[]
+            {
+                ConverseRequestMarshaller.Instance.Marshall(built),
+                ConverseStreamRequestMarshaller.Instance.Marshall(BedrockLlmClient.ToStreamRequest(built))
+            })
+            {
+                Assert.Equal(modelId, Assert.Single(wire.PathResources).Value);
+                using Stream body = wire.ContentStream;
+                using JsonDocument sent = JsonDocument.Parse(body);
+                JsonElement additional = sent.RootElement.GetProperty("additionalModelRequestFields");
+                JsonElement reasoning = additional.GetProperty("reasoningConfig");
+                Assert.Equal(effort is null ? "disabled" : "enabled", reasoning.GetProperty("type").GetString());
+                if (effort is null) Assert.False(reasoning.TryGetProperty("maxReasoningEffort", out _));
+                else Assert.Equal(effort, reasoning.GetProperty("maxReasoningEffort").GetString());
+                Assert.Equal(0, additional.GetProperty("inferenceConfig").GetProperty("topK").GetInt32());
+                Assert.Equal(40000, sent.RootElement.GetProperty("inferenceConfig").GetProperty("maxTokens").GetInt32());
+                Assert.Equal(0, sent.RootElement.GetProperty("inferenceConfig").GetProperty("temperature").GetDouble());
+            }
+        }
+        Assert.Empty(client.GetCapabilities(connection, "amazon.nova-lite-v1:0").ReasoningLevels);
+        Assert.Empty(client.GetCapabilities(connection, "amazon.nova-pro-v1:0").ReasoningLevels);
+    }
+
+    [Theory]
     [InlineData("openai.gpt-oss-safeguard-20b")]
     [InlineData("openai.gpt-oss-20b-2:0")]
     public void UnqualifiedGptOssIdsDoNotAcquireReasoningLevelsFromTheirPrefix(string modelId) =>

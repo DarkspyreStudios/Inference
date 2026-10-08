@@ -4085,12 +4085,13 @@ fails JSON validation with `ProviderJsonSchema` and `IsValid = false`. This is a
 qualification, not a truncation or successful schema guarantee. Tester exit 0 denotes provider completion;
 the separate validation result remains false. No retry, response repair or fallback occurs.
 
-Converse sends a reasoning level through `additionalModelRequestFields` for Claude, Nova 2 and the
-qualified gpt-oss models, classified from the model or inference-profile id:
+Converse sends a reasoning level through `additionalModelRequestFields` for Claude, Nova Lite 1.5,
+Nova 2 and the qualified gpt-oss models, classified from the model or inference-profile id:
 
 | Family | Levels | Fields |
 | --- | --- | --- |
 | Claude (`anthropic.claude-*`) | The Anthropic Messages set for the same model | `thinking` and `output_config.effort`, or a thinking budget added to `inferenceConfig.maxTokens` (8,192 when the request sets none) |
+| Nova Lite 1.5 (`amazon.nova-lite-1-5-v1:0`) | `None`, `Low`, `Medium`, `High` | `reasoningConfig` with `type: "disabled"`, or `type: "enabled"` and `maxReasoningEffort` |
 | Nova 2 (`amazon.nova-2-*`) | `None`, `Low`, `Medium`, `High` | `reasoningConfig` with `type: "disabled"`, or `type: "enabled"` and `maxReasoningEffort` |
 | gpt-oss (`openai.gpt-oss-20b-1:0`, `openai.gpt-oss-120b-1:0`) | `Low`, `Medium`, `High` | `reasoning_effort` with `low`, `medium` or `high` |
 
@@ -4098,6 +4099,12 @@ The gpt-oss controls apply to those exact base IDs after geographic-prefix remov
 unqualified gpt-oss versions, DeepSeek-R1, other models and ARNs offer no level. A capability override
 can narrow a family's set but cannot widen it. A Claude request with a level above `None` rejects temperature and forced tool
 choice, and a Nova 2 request at `High` rejects temperature and `MaxOutputTokens`, before the call.
+
+Nova Lite 1.5 uses the exact base ID in the [AWS Version 1 reasoning guide](https://docs.aws.amazon.com/nova/latest/userguide/extended-thinking.html)
+and its geographic profiles. It retains caller temperature and maximum output tokens at `High`;
+Nova 2's control restrictions do not apply to it. The existing reasoning projection merges its
+`reasoningConfig` with top-k without changing either field. Nova 1.0 models gain no reasoning levels.
+The source mapping does not establish live model availability or successful provider execution.
 
 Converse streams through ConverseStream. A connection with `SupportsStreaming = false` sends Converse
 instead. Its events then arrive after generation ends, in the order reasoning, text, tool calls, then the
@@ -4467,12 +4474,12 @@ explicit values. Vertex Gemini penalties use [-2, 2); Gemini API requires finite
 Compatible endpoint settings expose typed sampling overrides and a nullable maximum-stop count;
 zero disables stops, and blank uses detection. Raw provider options cannot inject these typed fields.
 
-Bedrock recognizes top-k for the exact Nova 1 Micro, Lite, Pro and Premier `v1:0` IDs and their
-geographic inference profiles. Both Converse transports carry it inside
+Bedrock recognizes top-k for the exact Nova 1 Micro, Lite, Pro and Premier `v1:0` IDs, Nova Lite 1.5
+`amazon.nova-lite-1-5-v1:0`, and their geographic inference profiles. Both Converse transports carry it inside
 `additionalModelRequestFields.inferenceConfig`, as the [Nova 1 Converse guide](https://docs.aws.amazon.com/nova/latest/userguide/using-converse-api.html)
 specifies. The [Nova request schema](https://docs.aws.amazon.com/nova/latest/userguide/complete-request-schema.html)
 permits zero through 128. Nova accepts zero through the shared sampling validator; other adapters
-retain its positive top-k requirement. Nova 1 classification adds no reasoning levels or fields.
+retain its positive top-k requirement. Nova 1.0 classification adds no reasoning levels or fields.
 
 ### Reasoning
 

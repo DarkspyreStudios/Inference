@@ -32,7 +32,7 @@ internal sealed class BedrockLlmClient(
     /// </summary>
     private const int ClaudeDefaultMaxOutputTokens = 8192;
 
-    private static readonly IReadOnlySet<LlmReasoningLevel> Nova2Levels = new[]
+    private static readonly IReadOnlySet<LlmReasoningLevel> NovaLevels = new[]
     {
         LlmReasoningLevel.None, LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High
     }.ToFrozenSet();
@@ -185,7 +185,8 @@ internal sealed class BedrockLlmClient(
         {
             BedrockModelFamily.AnthropicClaude => AnthropicModelProfiles.Resolve(
                 BedrockModelFamilies.AnthropicModelId(baseModelId), catalogEntry: null).ReasoningLevels,
-            BedrockModelFamily.AmazonNova2 => Nova2Levels,
+            BedrockModelFamily.AmazonNova1 when baseModelId == "amazon.nova-lite-1-5-v1:0" => NovaLevels,
+            BedrockModelFamily.AmazonNova2 => NovaLevels,
             BedrockModelFamily.OpenAiGptOss when baseModelId is "openai.gpt-oss-20b-1:0" or "openai.gpt-oss-120b-1:0" => GptOssLevels,
             _ => FrozenSet<LlmReasoningLevel>.Empty
         };
@@ -1093,6 +1094,7 @@ internal sealed class BedrockLlmClient(
                     fields["output_config"] = outputConfig;
                 }
                 return (fields, claude.MaxTokens);
+            case BedrockModelFamily.AmazonNova1 when baseModelId == "amazon.nova-lite-1-5-v1:0":
             case BedrockModelFamily.AmazonNova2:
                 fields["reasoningConfig"] = level == LlmReasoningLevel.None
                     ? new JsonObject { ["type"] = "disabled" }

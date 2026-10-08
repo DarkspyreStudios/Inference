@@ -33,7 +33,7 @@ internal static partial class BedrockModelFamilies
         {
             _ when baseModelId.StartsWith("anthropic.claude-", StringComparison.Ordinal) => BedrockModelFamily.AnthropicClaude,
             "amazon.nova-micro-v1:0" or "amazon.nova-lite-v1:0" or "amazon.nova-pro-v1:0"
-                or "amazon.nova-premier-v1:0" => BedrockModelFamily.AmazonNova1,
+                or "amazon.nova-premier-v1:0" or "amazon.nova-lite-1-5-v1:0" => BedrockModelFamily.AmazonNova1,
             _ when baseModelId.StartsWith("amazon.nova-2-", StringComparison.Ordinal) => BedrockModelFamily.AmazonNova2,
             _ when baseModelId.StartsWith("openai.gpt-oss-", StringComparison.Ordinal) => BedrockModelFamily.OpenAiGptOss,
             _ when baseModelId.StartsWith("deepseek.r1", StringComparison.Ordinal) => BedrockModelFamily.DeepSeekR1,
