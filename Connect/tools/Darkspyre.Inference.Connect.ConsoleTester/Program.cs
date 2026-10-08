@@ -52,6 +52,9 @@ internal static class Program
         services.AddSingleton<ILlmConnectionSource>(provider =>
             provider.GetRequiredService<SecureConnectionSource>());
         services.AddLlmConnect();
+        if (args[0] == "grok-probe" && args.Contains("batch-list", StringComparer.Ordinal))
+            services.AddHttpClient("XaiResponsesLlmClient")
+                .AddHttpMessageHandler(() => new GrokProbe.BatchShapeHandler(Console.Error));
         services.AddLlmConnectBedrock();
         services.AddLlmConnectVertex();
         services.AddTtsConnect();

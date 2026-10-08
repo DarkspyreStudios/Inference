@@ -4829,6 +4829,8 @@ or a fabricated pending state.
 `batch-list` reads one page with limit one. It requires an actual receipt with its observed creation
 time and reports an empty page as unqualified. It sends no generation or mutation, performs no
 cleanup, and does not infer ownership of an existing batch from its name.
+The explicit `batch-list` selection prints only the JSON types and string lengths of known receipt
+fields from that page. It prints no field values, provider body, headers, credential or URL.
 Cleanup requests cancellation only for its own receipt when the observed pending count is nonzero
 or unknown. A cancellation acknowledgement does not prove terminal cleanup. Cleanup uses the
 case's selected timeout and retains both the operation and cancellation failure if both occur.

@@ -82,6 +82,50 @@ internal static class GrokProbe
         return "one native batch receipt and its creation time parsed; one read-only page, no generation, mutation, cleanup or retry";
     }
 
+    internal sealed class BatchShapeHandler(TextWriter output) : DelegatingHandler
+    {
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+        {
+            HttpResponseMessage response = await base.SendAsync(request, token);
+            if (request.Method != HttpMethod.Get || request.RequestUri?.AbsolutePath != "/v1/batches"
+                || !response.IsSuccessStatusCode) return response;
+            try
+            {
+                byte[] body = await response.Content.ReadAsByteArrayAsync(token);
+                try
+                {
+                    using JsonDocument document = JsonDocument.Parse(body);
+                    JsonElement root = document.RootElement;
+                    output.WriteLine($"Batch shape: root={root.ValueKind}.");
+                    if (root.ValueKind != JsonValueKind.Object) return response;
+                    if (!root.TryGetProperty("batches", out JsonElement batches))
+                    { output.WriteLine("Batch shape: batches=absent."); return response; }
+                    output.WriteLine($"Batch shape: batches={batches.ValueKind}.");
+                    if (batches.ValueKind != JsonValueKind.Array || batches.GetArrayLength() == 0) return response;
+                    JsonElement first = batches[0];
+                    output.WriteLine($"Batch shape: first={first.ValueKind}.");
+                    if (first.ValueKind != JsonValueKind.Object) return response;
+                    foreach (string name in new[] { "batch_id", "name", "create_time", "expire_time", "cancel_time", "cancel_by_xai_message", "create_api_key_id", "state" })
+                        WriteKind(first, name);
+                    if (first.TryGetProperty("state", out JsonElement state) && state.ValueKind == JsonValueKind.Object)
+                        foreach (string name in new[] { "num_requests", "num_pending", "num_success", "num_error", "num_cancelled" })
+                            WriteKind(state, name);
+                }
+                catch (JsonException) { output.WriteLine("Batch shape: invalid JSON; values are withheld."); }
+                return response;
+            }
+            catch { response.Dispose(); throw; }
+        }
+
+        private void WriteKind(JsonElement owner, string name)
+        {
+            if (!owner.TryGetProperty(name, out JsonElement value))
+            { output.WriteLine($"Batch shape: {name}=absent."); return; }
+            string length = value.ValueKind == JsonValueKind.String ? $"; length={value.GetString()!.Length}" : "";
+            output.WriteLine($"Batch shape: {name}={value.ValueKind}{length}.");
+        }
+    }
+
     internal static async Task<string> BatchAsync(ILlmBatchClient batches, string connectionId, string model,
         int cleanupTimeoutSeconds, TextWriter output, CancellationToken token)
     {
