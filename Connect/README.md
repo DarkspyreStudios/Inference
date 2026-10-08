@@ -3260,7 +3260,10 @@ Streaming reports 650 input, 93 output and 92 reasoning output tokens; nonstream
 without retries, tools, app credential access or route fallback. These runs qualify selected-route
 acceptance of the Low-effort request in both modes, not every effort level, comparative reasoning
 quality, an echoed applied-effort observation or general output-token-cap enforcement.
-Image prompts require catalog image support and cannot exceed 20 MiB. Temperature and top-p follow
+Image prompts require catalog image support and cannot exceed 20 MiB. Managed agent image tool-result
+capabilities use the same selected-model catalog support as chat request projection. Tool-result
+restrictions lower image support in both capability views without disabling supported image prompts.
+Temperature and top-p follow
 the model profile; top-k, seed, penalties and string stops are unsupported on this Responses route.
 The discovered `grok-4.20-0309-non-reasoning` ID shares the existing non-reasoning sampling profile
 with its `grok-4.20-non-reasoning` alias. Catalog resolution retains temperature/top-p support

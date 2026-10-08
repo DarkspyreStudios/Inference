@@ -88,16 +88,18 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
     {
         XaiRequestHeaders.ValidateEndpoint(connection);
         XaiModelProfile profile = XaiModelProfiles.Get(connection, modelId);
+        LlmRichContentSupported richContent = DefaultCapabilities.RichContentSupported with
+        {
+            Images = modelId is null || profile.AcceptsImages ? LlmRichContentCarriage.Native : LlmRichContentCarriage.Unsupported
+        };
         LlmProviderCapabilities defaults = DefaultCapabilities with
         {
             ReasoningLevels = profile.ReasoningLevels,
             SupportsTemperature = profile.AllowsSampling,
             SupportsTopP = profile.AllowsSampling,
             SupportsPromptImages = profile.AcceptsImages,
-            RichContentSupported = DefaultCapabilities.RichContentSupported with
-            {
-                Images = modelId is null || profile.AcceptsImages ? LlmRichContentCarriage.Native : LlmRichContentCarriage.Unsupported
-            }
+            RichContentSupported = richContent,
+            Agent = DefaultCapabilities.Agent with { RichContentSupported = richContent }
         };
         LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(defaults, connection, modelId, OffersUsageDeltas);
         return capabilities with
