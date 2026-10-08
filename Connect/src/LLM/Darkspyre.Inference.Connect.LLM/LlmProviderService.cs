@@ -899,12 +899,15 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
             return Unsupported("This route does not implement nonmutating request accounting.");
         }
         ContextEstimate? used;
-        try { used = estimator.EstimateInputTokens(connection, request); }
+        try
+        {
+            used = ManagedAgentPolicy.Estimate(estimator, connection, request,
+                request.Messages.Any(message => message.OmittedAttachments.Count > 0));
+        }
         catch (NotSupportedException)
         {
             return Unsupported("This route cannot project the requested features for accounting.");
         }
-        if (request.Messages.Any(message => message.OmittedAttachments.Count > 0)) { used = null; }
         LlmModel? model = null;
         string? metadataDiagnostic = null;
         if (capabilities.SupportsModelListing)

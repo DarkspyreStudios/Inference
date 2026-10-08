@@ -1196,9 +1196,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
 
     private ContextEstimate? EstimateInputTokens(LlmAgentContext context, LlmAgentTurnRequest turn)
     {
-        ContextEstimate? used = _estimator.EstimateInputTokens(_connection, Request(context, turn));
-        // Validate the real projection first, but never count unavailable attachment bytes as free input.
-        return context.Entries.Any(entry => entry.Message.OmittedAttachments.Count > 0) ? null : used;
+        return ManagedAgentPolicy.Estimate(_estimator, _connection, Request(context, turn),
+            context.Entries.Any(entry => entry.Message.OmittedAttachments.Count > 0));
     }
 
     private LlmAgentTurnRequest FreezeTurn(LlmAgentTurnRequest turn)

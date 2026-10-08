@@ -1,3 +1,5 @@
+using Darkspyre.Inference.Common.LLM;
+
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 internal static class ManagedAgentPolicy
@@ -30,6 +32,14 @@ internal static class ManagedAgentPolicy
         {
             throw new ArgumentException("Invalid managed execution policy or context cap above the provider limit.");
         }
+    }
+
+    /// <summary>Retains Codex's projected-input approximation despite omission metadata; other routes require available bytes.</summary>
+    public static ContextEstimate? Estimate(ILlmContextEstimator estimator, LlmConnection connection,
+        LlmChatRequest request, bool hasOmittedAttachments)
+    {
+        ContextEstimate? used = estimator.EstimateInputTokens(connection, request);
+        return hasOmittedAttachments && connection.Transport != LlmTransport.OpenAiCodex ? null : used;
     }
 
     public static LlmAgentContextStatus Status(

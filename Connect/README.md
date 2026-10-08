@@ -3000,6 +3000,11 @@ and output tokens on the continuation state (`LlmContinuationState.InputTokens` 
 the estimate counts the history up to the last such state as their sum, tokenizing only what follows.
 That estimate reports `Source = Mixed`. Codex without an applicable report uses the pinned 0.159.3
 CLI's coarse encrypted-content length approximation plus actual plaintext and reports `Estimated`.
+Standalone and managed Codex accounting retain that estimate when history contains omitted-attachment
+metadata. A retained provider report covers its earlier history; without an applicable report, the
+existing plaintext/ciphertext approximation counts the actual projected request. Omission descriptors
+are not replacement attachment input and do not discard the estimate. This permits compaction
+budgeting with either `Mixed` or `Estimated` occupancy, not an exact provider admission proof.
 Any retained Codex compaction suppresses historical count anchors, including protected pre-compaction
 reports. Compaction-request usage never becomes replacement occupancy. Other providers do not inherit
 this heuristic; actual media and resources remain unknown. Hosts that keep continuation state keep the counts with it. Each

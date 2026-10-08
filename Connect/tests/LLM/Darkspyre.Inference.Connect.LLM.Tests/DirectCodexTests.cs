@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -132,6 +133,79 @@ public sealed class DirectCodexTests
         data: {"type":"response.completed","response":{"status":"completed","output":[],"id":"r"}}
 
         """;
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task CompactionAccountingRetainsCodexEstimateDespiteOmittedAttachmentHistory(bool reported, bool compacted)
+    {
+        using var handler = new Handler(request =>
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal("/backend-api/codex/models", request.RequestUri!.AbsolutePath);
+            return Json("{\"models\":[{\"slug\":\"model\",\"context_window\":272000}]}");
+        });
+        using var http = new HttpClient(handler);
+        var client = new OpenAiCodexLlmClient(http);
+        LlmConnection connection = Connection();
+        LlmContinuationState state = ProviderContinuationStateCodec.Encode(connection, "model",
+            new JsonArray(new JsonObject
+            {
+                ["type"] = compacted ? "compaction" : "reasoning",
+                ["encrypted_content"] = new string('a', 2000)
+            })) with
+        { InputTokens = reported ? 1200 : null, OutputTokens = reported ? 80 : null };
+        LlmChatMessage[] messages =
+        [
+            new("user", "Earlier question") { OmittedAttachments = [new(LlmBinaryKind.Document, "reference.txt", 0)] },
+            new("assistant", "") { ContinuationState = state },
+            new("user", "Next question")
+        ];
+        var request = new LlmChatRequest { ModelId = "model", Messages = messages, Instructions = "Answer briefly." };
+        var policy = new LlmAgentContextPolicy { ReservedOutputTokens = 8000 };
+        LlmContextMeasurementSource source = reported && !compacted
+            ? LlmContextMeasurementSource.Mixed : LlmContextMeasurementSource.Estimated;
+        ContextEstimate expected = client.EstimateInputTokens(connection, request)!.Value;
+        await using var providers = new LlmProviderService(new Source(connection), [client]);
+
+        LlmRequestAccounting full = await providers.MeasureRequestAsync("codex", request, policy);
+        LlmRequestAccounting material = await providers.MeasureRequestAsync("codex", request with { Instructions = null }, policy);
+
+        Assert.Equal(expected.Tokens, full.UsedContextTokens);
+        Assert.Equal(source, full.Source);
+        Assert.NotNull(material.UsedContextTokens);
+        Assert.Equal(full.InputBudgetTokens, material.InputBudgetTokens);
+        Assert.True(full.InputBudgetTokens - Math.Max(0, full.UsedContextTokens!.Value - material.UsedContextTokens!.Value) > 0);
+
+        var context = new LlmAgentContext
+        {
+            Revision = 7,
+            Entries = messages.Select((message, index) => new LlmAgentContextEntry("entry-" + index, "turn", message)).ToArray()
+        };
+        await using var session = await ManagedAgentSession.CreateAsync(connection, new()
+        {
+            ModelId = "model",
+            Context = context,
+            Instructions = request.Instructions,
+            ExecutionOptions = new() { ContextPolicy = policy }
+        }, [new("model", "Model") { MaxContextTokens = 272000 }], client,
+            (_, _) => throw new InvalidOperationException("Accounting must not generate a response."),
+            model => client.GetCapabilities(connection, model));
+        LlmRequestAccounting measured = await session.MeasureContextAsync(context);
+        LlmAgentContextStatus status = await session.GetContextStatusAsync();
+
+        Assert.Equal(expected.Tokens, measured.UsedContextTokens);
+        Assert.Equal(expected.Tokens, status.UsedContextTokens);
+        Assert.Equal(source, measured.Source);
+        Assert.Equal(source, status.Source);
+        Assert.Equal(7, measured.ContextRevision);
+        Assert.False(measured.NeedsCompaction);
+        Assert.Single((await session.CaptureContextAsync()).Entries[0].Message.OmittedAttachments);
+        Assert.Single(messages[0].OmittedAttachments);
+        Assert.Equal(1, handler.Calls);
+    }
 
     [Fact]
     public async Task OmitCarriesAnotherModelsToolHistoryWithoutItsStateAndReportsTheCount()
