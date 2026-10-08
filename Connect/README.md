@@ -969,8 +969,11 @@ REST synthesis and transcription failures use the shared xAI HTTP classifier. It
 includes selected-connection headers, family headers and effective outgoing request headers, including
 borrowed HttpClient defaults. Public errors retain sanitized provider codes, request IDs, actual HTTP
 status and retry delay. They do not expose reflected protected headers or the raw speech response body.
-Failed BCL WebSocket upgrades use only collected actual HTTP status: 401/402 retain the shared
-authentication/entitlement status rules, while 400/403 cannot imply hidden body-dependent facts.
+Failed BCL WebSocket upgrades retain collected actual HTTP status, sanitized request ID and delta
+retry delay. The shared classifier uses the selected credential, selected/family request headers and
+borrowed HttpClient defaults for redaction. Private opening callbacks carry the already selected
+credential; they do not reacquire it. Status 401/402 retains the shared authentication/entitlement
+rules, while 400/403 cannot imply hidden body-dependent facts.
 Unobserved status remains a safe transport failure. Raw bodies, headers and transport diagnostics
 are not public errors; original transport evidence remains internal. Cancellation is not reclassified.
 
@@ -3434,8 +3437,10 @@ The owning TTS, STT and Realtime test projects drive the production session code
 with stand-in WebSockets. They check ordered sends, actual completion observations, reusable TTS
 and Realtime sessions, bounded feeds with paused readers, resource drain and committed-audio
 recovery after cleanup failure. The test-only transport source is shared within Connect.
-The Realtime tests start at the connected session boundary. These tests do not qualify live OAuth,
-HTTP upgrade, provider entitlement, native resumption or actual speech quality.
+Each family also drives its public opening route through a real BCL ClientWebSocket with a controlled
+HTTP rejection. These checks preserve safe request ID and retry delay without publishing credentials
+or a failed-upgrade body. They do not qualify a successful live HTTP upgrade, live OAuth,
+provider entitlement, native resumption or actual speech quality.
 
 `AddRealtimeConnect()` registers `RealtimeProviderService` and `XaiRealtimeProvider`.
 Its setup catalog contains registered `IRealtimeProvider` definitions. Registration performs no

@@ -95,7 +95,7 @@ public sealed class XaiRealtimeProvider(HttpClient httpClient) : IRealtimeProvid
             OpeningFence();
             try { await socket.ConnectAsync(uri, _http!, deadline.Token).ConfigureAwait(false); }
             catch (Exception error) when (error is not OperationCanceledException)
-            { OpeningFence(); throw XaiErrorClassifier.SpeechUpgradeFailure(socket.HttpStatusCode, error); }
+            { OpeningFence(); throw XaiErrorClassifier.SpeechUpgradeFailure(socket, error, credential, headers, _http!); }
             OpeningFence();
             session = new(socket, limits, resources, scope, options,
                 (id, observedModel) => Issue(id, xai, selected, options.ModelId, observedModel), secrets,

@@ -19,10 +19,10 @@ namespace Darkspyre.Inference.Connect.STT;
 public sealed class XaiSttProvider : ISttProvider
 {
     private readonly HttpClient _http;
-    private readonly Func<Uri, HttpRequestMessage, Action, Action<Exception>, CancellationToken, Task<WebSocket>> _connect;
+    private readonly Func<Uri, HttpRequestMessage, LlmCredential?, Action, Action<Exception>, CancellationToken, Task<WebSocket>> _connect;
     public XaiSttProvider(HttpClient httpClient)
     { _http = httpClient ?? throw new ArgumentNullException(nameof(httpClient)); _connect = ConnectAsync; }
-    internal XaiSttProvider(HttpClient httpClient, Func<Uri, HttpRequestMessage, Action, Action<Exception>, CancellationToken, Task<WebSocket>> connect)
+    internal XaiSttProvider(HttpClient httpClient, Func<Uri, HttpRequestMessage, LlmCredential?, Action, Action<Exception>, CancellationToken, Task<WebSocket>> connect)
     { _http = httpClient; _connect = connect; }
     public SttTransport Transport => SttTransport.XaiStt;
     public InferenceSetupDefinition SetupDefinition { get; } = new(new("darkspyre.connect.xai.stt", "xAI transcription", InferenceImplementationKind.Connect, InferenceTask.SpeechTranscription), "Transcribe audio through the selected xAI OAuth connection.");
@@ -32,7 +32,7 @@ public sealed class XaiSttProvider : ISttProvider
         if (connection.Transport != Transport) throw XaiSttProtocol.Invalid();
         return new Client(this, connection, xai!, resources);
     }
-    private async Task<WebSocket> ConnectAsync(Uri uri, HttpRequestMessage headers, Action openingFence, Action<Exception> recordCleanup, CancellationToken token)
+    private async Task<WebSocket> ConnectAsync(Uri uri, HttpRequestMessage headers, LlmCredential? credential, Action openingFence, Action<Exception> recordCleanup, CancellationToken token)
     {
         var socket = new ClientWebSocket(); bool dispatched = false;
         try
@@ -46,7 +46,7 @@ public sealed class XaiSttProvider : ISttProvider
             Exception failure = original;
             if (original is not OperationCanceledException)
             {
-                try { openingFence(); if (dispatched) failure = XaiErrorClassifier.SpeechUpgradeFailure(socket.HttpStatusCode, original); }
+                try { openingFence(); if (dispatched) failure = XaiErrorClassifier.SpeechUpgradeFailure(socket, original, credential, headers, _http); }
                 catch (Exception refused) { failure = refused; }
             }
             try { socket.Dispose(); }
