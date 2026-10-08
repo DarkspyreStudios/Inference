@@ -4716,6 +4716,15 @@ One public nonstreaming prompt at source `d26da43`, Global/Default and
 This qualifies the selected plain complete route, not native response schemas, all models,
 credential refresh or actual account billing. The call does not retry or copy application credentials.
 
+One streamed hosted web-search request at source `4d7f4eb`, Global/Default and the same model,
+uses the existing request-file command with `docs.x.ai` as the only allowed domain. Caller budgets
+are two hosted turns and 128 output tokens. Connect surfaces one matching WebSearch start/completion,
+five citation observations and `Completed/completed`. Actual usage reports 3874 input, 49 output
+and 3923 total tokens, one WebSearch call, one total hosted call and cost of 0.0099650000 USD.
+The provider reports zero sources used separately from those five citations; the adapter reads that
+native usage field without deriving a count from citations. This qualifies the selected hosted search,
+not other hosted tools, domain-filter enforcement, output-cap enforcement, billing or every model.
+
 ```bash
 dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- grok-probe --provider grok-subscription --case strict --repeat 1 --timeout-seconds 60
 ```
