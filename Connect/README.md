@@ -785,6 +785,8 @@ HTTP chat adapters read the returned `model`. Gemini and Vertex Gemini read the 
 `modelVersion` unchanged as the model identity, without deriving a separate revision from its name.
 Missing observations remain unknown. Conflicting observations within one HTTP response, malformed
 values and protected credential/header values refuse publication through a fixed safe error.
+The shared model-observation reader includes actual sent headers, including borrowed-client defaults,
+as well as selected credentials and explicit operation context. Gemini and Vertex use this same reader.
 Claude streaming reads the most recent actual main assistant message or message-start observation;
 init selections, subagent messages and aggregate usage keys do not supply identity. Its non-streaming
 terminal format and the current Apple, Antigravity and Bedrock protocols report no model identity.

@@ -1394,6 +1394,46 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Theory]
+    [InlineData(LlmTransport.GoogleGeminiApi, false)]
+    [InlineData(LlmTransport.GoogleVertexAi, false)]
+    [InlineData(LlmTransport.GoogleGeminiApi, true)]
+    [InlineData(LlmTransport.GoogleVertexAi, true)]
+    public async Task GoogleModelObservationsRefuseEffectiveHeaderSecrets(LlmTransport transport, bool borrowedBearer)
+    {
+        const string body = "data: {\"modelVersion\":\"model-default-value\",\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"answer\"}]}}]}\n\n";
+        using var handler = new Handler(transport, streaming: true, body);
+        using var http = new HttpClient(handler);
+        if (borrowedBearer) http.DefaultRequestHeaders.Authorization = new("Bearer", "default-value");
+        else http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        await using var authentication = new VertexAuthentication();
+        ILlmClient client = transport == LlmTransport.GoogleGeminiApi
+            ? new GeminiApiLlmClient(http) : new VertexLlmClient(http, authentication);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = transport,
+            Endpoint = transport == LlmTransport.GoogleGeminiApi ? GeminiApiLlmClient.DefaultEndpoint : VertexEndpoints.BaseEndpoint,
+            Vertex = transport == LlmTransport.GoogleVertexAi ? new() { AuthenticationMode = LlmGoogleAuthenticationMode.ApiKey } : null,
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
+        };
+        var events = new List<LlmStreamEvent>();
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection, new()
+            {
+                ModelId = transport == LlmTransport.GoogleGeminiApi ? "gemini-3-flash-preview" : "google/gemini-3-flash-preview",
+                Messages = [new("user", "hello")]
+            })) events.Add(item);
+        });
+
+        Assert.Equal(transport, failure.Transport);
+        Assert.DoesNotContain("default-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.Empty(events);
+        Assert.Equal("default-value", borrowedBearer ? handler.RequestBearerParameter : handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
     [InlineData(LlmTransport.GoogleGeminiApi)]
     [InlineData(LlmTransport.GoogleVertexAi)]
     public async Task GeminiTerminalUsageReplacesEarlierCountsWithoutCarryingStaleSubsets(LlmTransport transport)
@@ -1609,12 +1649,14 @@ public sealed class ProviderTerminalEvidenceTests
         internal string? RequestBody { get; private set; }
         internal string? RequestTrace { get; private set; }
         internal string? RequestDefaultTrace { get; private set; }
+        internal string? RequestBearerParameter { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
             Assert.Equal(expectedMethod ?? HttpMethod.Post, request.Method);
             RequestTrace = request.Headers.TryGetValues("X-Trace", out IEnumerable<string>? values) ? Assert.Single(values) : null;
             RequestDefaultTrace = request.Headers.TryGetValues("X-Default", out IEnumerable<string>? defaults) ? Assert.Single(defaults) : null;
+            RequestBearerParameter = request.Headers.Authorization?.Parameter;
             RequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             string body = scriptedBody ?? Body(transport, streaming);
             var response = new HttpResponseMessage(statusCode)
