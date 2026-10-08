@@ -3206,11 +3206,12 @@ routes retain only the named JSON error explanation; unrelated fields and unstru
 not promoted to diagnostics. An absent named explanation keeps the route's fixed rejection label.
 Batch and deferred resource failures retain that safe code and explanation. Request IDs use the
 same credential redactor as diagnostic bodies. A reported retry delay is diagnostic data, not permission to retry.
-Grok catalog send failures use the selected credential and actual outgoing headers for redaction,
+Grok catalog and tokenization send failures share the same `XaiErrorClassifier` projection.
+They use the selected credential and actual outgoing headers for redaction,
 including borrowed-client defaults. Typed failures retain their redacted explanation, provider code,
 request ID, status, retry delay and overflow flag. Transport failures expose a redacted explanation;
 their original exception remains internal. A failed send does not manufacture a response observation
-or trigger another catalog request.
+or trigger another request.
 Resource operation wrapping retains the boundary-owned protocol explanation and sanitized HTTP
 failure message. It withholds provider response bodies. An unowned provider message without the
 selected connection's secret context remains generic.
@@ -3440,6 +3441,9 @@ display text. Missing fields and invalid integer/byte representations fail with 
 without retaining raw bodies. `ConnectLlmJson.Tokenization` and `Token` own result serialization.
 HTTP rejections and malformed-token errors redact reflected credential, selected-header and effective
 outgoing-header values, including borrowed HttpClient defaults, from public diagnostics and request IDs.
+Send failures retain the redacted explanation and actual typed failure facts through the same boundary
+as catalog sends. The original exception graph stays private; a missing response does not acquire
+invented status, request ID or retry observations. No send is retried.
 The facade drains active tokenization during retirement and rejects late results through its
 synchronous owner fence. Injected access and clients remain borrowed. Cancellation that races a
 provider failure retains the actual error as its cause. Tokenization does not count instructions,

@@ -505,6 +505,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
     protected override void ApplyRequestHeaders(HttpRequestMessage message, LlmConnection connection, LlmChatRequest request) =>
         XaiRequestHeaders.Apply(message, connection, message.Method == HttpMethod.Post && GetCapabilities(connection, request.ModelId).SupportsStreaming);
 
+    [SuppressMessage("Design", "CA1031", Justification = "The HTTP send boundary redacts diagnostics and keeps original failures as private evidence.")]
     public async Task<LlmTokenization> TokenizeAsync(LlmConnection connection, string modelId, string text,
         CancellationToken cancellationToken = default)
     {
@@ -520,8 +521,17 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             // Plain text and model identity are opaque data; changing either changes the provider's tokens.
             var payload = new JsonObject { ["model"] = modelId, ["text"] = text };
             request.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
-            using HttpResponseMessage response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
-                .ConfigureAwait(false);
+            HttpResponseMessage sent;
+            try
+            {
+                sent = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception error)
+            {
+                string[] appliedHeaders = connection.AdditionalHeaders.Values.Concat(request.Headers.SelectMany(header => header.Value)).ToArray();
+                throw XaiErrorClassifier.HttpSendFailure(error, LlmCredential.Parse(connection.Credential), appliedHeaders);
+            }
+            using HttpResponseMessage response = sent;
             cancellationToken.ThrowIfCancellationRequested();
             IEnumerable<string> secrets = connection.AdditionalHeaders.Values.Concat(request.Headers.SelectMany(header => header.Value));
             await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), secrets, cancellationToken)

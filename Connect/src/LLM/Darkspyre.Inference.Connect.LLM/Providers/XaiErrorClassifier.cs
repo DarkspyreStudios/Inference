@@ -76,6 +76,31 @@ public static class XaiErrorClassifier
             diagnosticCode: safeCode);
     }
 
+    internal static Exception HttpSendFailure(Exception original, LlmCredential? credential, string[] secrets)
+    {
+        string Safe(string value) => SecretRedactor.Sanitize(value, credential, secrets);
+        var evidence = new SendEvidence(original);
+        return original switch
+        {
+            AggregateException aggregate => new AggregateException("Grok HTTP request failed.",
+                aggregate.InnerExceptions.Select(error => HttpSendFailure(error, credential, secrets))),
+            OperationCanceledException canceled => new OperationCanceledException("Grok HTTP request was interrupted.", evidence, canceled.CancellationToken),
+            InferenceException inference => new InferenceException(inference.Code, Safe(inference.Message),
+                inference.InnerException is { } cause ? HttpSendFailure(cause, credential, secrets) : evidence),
+            LlmProviderException provider => new LlmProviderException(Safe(provider.Message), LlmTransport.XaiResponses,
+                provider.StatusCode, provider.ProviderCode is { } code ? Safe(code) : null,
+                provider.RequestId is { } id ? Safe(id) : null, provider.RetryAfter,
+                provider.SanitizedResponseBody is { } body ? Safe(body) : null, evidence, provider.IsContextOverflow),
+            _ => new LlmProviderException(Safe(original.Message), LlmTransport.XaiResponses,
+                (original as HttpRequestException)?.StatusCode, innerException: evidence)
+        };
+    }
+
+    private sealed class SendEvidence(Exception original) : Exception("Grok HTTP send failed.")
+    {
+        internal Exception Original { get; } = original;
+    }
+
     internal static Exception SpeechUpgradeFailure(ClientWebSocket socket, Exception original,
         LlmCredential? credential, HttpRequestMessage request, HttpClient http)
     {

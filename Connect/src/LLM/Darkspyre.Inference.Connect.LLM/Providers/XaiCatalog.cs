@@ -42,7 +42,7 @@ internal static class XaiCatalog
             catch (Exception error)
             {
                 string[] secrets = connection.AdditionalHeaders.Values.Concat(request.Headers.SelectMany(header => header.Value)).ToArray();
-                throw SendFailure(error, LlmCredential.Parse(connection.Credential), secrets);
+                throw XaiErrorClassifier.HttpSendFailure(error, LlmCredential.Parse(connection.Credential), secrets);
             }
             Fence();
             string[] appliedHeaderValues = connection.AdditionalHeaders.Values.Concat(request.Headers.SelectMany(header => header.Value)).ToArray();
@@ -88,31 +88,6 @@ internal static class XaiCatalog
             ? new OperationCanceledException("Grok catalog cleanup was interrupted.", evidence, canceled.CancellationToken)
             : evidence;
         return LlmResourcePreparation.AsCleanupFailure(safe, refusedOwner: refusedOwner);
-    }
-
-    private static Exception SendFailure(Exception original, LlmCredential? credential, string[] secrets)
-    {
-        string Safe(string value) => SecretRedactor.Sanitize(value, credential, secrets);
-        var evidence = new SendEvidence(original);
-        return original switch
-        {
-            AggregateException aggregate => new AggregateException("Grok catalog request failed.",
-                aggregate.InnerExceptions.Select(error => SendFailure(error, credential, secrets))),
-            OperationCanceledException canceled => new OperationCanceledException("Grok catalog request was interrupted.", evidence, canceled.CancellationToken),
-            InferenceException inference => new InferenceException(inference.Code, Safe(inference.Message),
-                inference.InnerException is { } cause ? SendFailure(cause, credential, secrets) : evidence),
-            LlmProviderException provider => new LlmProviderException(Safe(provider.Message), LlmTransport.XaiResponses,
-                provider.StatusCode, provider.ProviderCode is { } code ? Safe(code) : null,
-                provider.RequestId is { } id ? Safe(id) : null, provider.RetryAfter,
-                provider.SanitizedResponseBody is { } body ? Safe(body) : null, evidence, provider.IsContextOverflow),
-            _ => new LlmProviderException(Safe(original.Message), LlmTransport.XaiResponses,
-                (original as HttpRequestException)?.StatusCode, innerException: evidence)
-        };
-    }
-
-    private sealed class SendEvidence(Exception original) : Exception("Grok catalog HTTP send failed.")
-    {
-        internal Exception Original { get; } = original;
     }
 
     // Preserve the actual failure without exporting untrusted diagnostics through InnerException.
