@@ -255,8 +255,10 @@ internal static class XaiSchemaLimits
         return true;
     }
 
-    private static bool ValidAnchor(string value) => value.Length > 0 && (char.IsAsciiLetter(value[0]) || value[0] == '_')
-        && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
+    private static bool ValidAnchor(string value, bool legacyFragment = false) => value.Length > 0
+        && (char.IsAsciiLetter(value[0]) || !legacyFragment && value[0] == '_')
+        && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.'
+            || legacyFragment && character == ':');
 
     private static bool ProvesObject(JsonElement schema, SchemaIndex index, Dictionary<JsonElement, bool> proofs)
     {
@@ -340,14 +342,22 @@ internal static class XaiSchemaLimits
                 {
                     if (id.ValueKind != JsonValueKind.String || !Uri.TryCreate(baseUri, id.GetString(), out Uri? selected))
                         return Reject(SchemaDisposition.InvalidSchema);
-                    if (selected.Fragment.Length > 1) Disposition = SchemaDisposition.OutsideGuarantee;
-                    baseUri = selected;
-                    origin = origin == ResourceOrigin.Absolute || Uri.TryCreate(id.GetString(), UriKind.Absolute, out _)
-                        ? ResourceOrigin.Absolute : ResourceOrigin.Relative;
-                    string key = ResourceKey(baseUri);
-                    if (_resources.TryGetValue(key, out SchemaResource? existing) && !existing.Schema.Equals(schema))
-                        Disposition = SchemaDisposition.OutsideGuarantee;
-                    else _resources[key] = new(schema, origin);
+                    string identity = id.GetString()!;
+                    if (draft == SchemaDraft.Draft7 && identity.StartsWith('#') && ValidAnchor(identity[1..], legacyFragment: true))
+                    {
+                        if (!_anchors.TryAdd(selected.AbsoluteUri, schema)) Disposition = SchemaDisposition.OutsideGuarantee;
+                    }
+                    else
+                    {
+                        if (selected.Fragment.Length > 1) Disposition = SchemaDisposition.OutsideGuarantee;
+                        baseUri = selected;
+                        origin = origin == ResourceOrigin.Absolute || Uri.TryCreate(identity, UriKind.Absolute, out _)
+                            ? ResourceOrigin.Absolute : ResourceOrigin.Relative;
+                        string key = ResourceKey(baseUri);
+                        if (_resources.TryGetValue(key, out SchemaResource? existing) && !existing.Schema.Equals(schema))
+                            Disposition = SchemaDisposition.OutsideGuarantee;
+                        else _resources[key] = new(schema, origin);
+                    }
                 }
                 if (!ignoresSiblings && draft is SchemaDraft.Draft202012 or SchemaDraft.RetainSiblings
                     && schema.TryGetProperty("$anchor", out JsonElement anchor))

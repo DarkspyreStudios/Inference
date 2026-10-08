@@ -3343,10 +3343,10 @@ Response schemas outside native admission retain explicit original-schema local 
 functions stay unchanged. The deferred/batch Chat codec uses this same strict-function entry and
 response enforcement owner; its separate wire builder and decoder remain separate.
 Its operation-local index resolves pointers against the
-selected schema resource, honors embedded `$id` bases and Draft 2020-12 `$anchor` names, and admits
-only indexed schema targets. Definition containers are inspected without applying unused constraints
+selected schema resource, honors embedded `$id` bases, Draft-07 plain fragment IDs and Draft 2020-12
+`$anchor` names, and admits only indexed schema targets. Definition containers are inspected without applying unused constraints
 to the emitted instance. Shared targets are not cycles. Unknown dialects, unresolved resources,
-literal targets, cycles, dynamic references and unproven nonempty `$id` fragments remain outside
+literal targets, cycles, dynamic references and undefined nonempty `$id` fragment forms remain outside
 guarantees. An absolute reference requires an actual declared absolute identity; the internal
 resolution base supplies no caller-visible identity. The index never fetches a resource or
 registers a schema globally. Draft-07 references ignore sibling assertions. Their own `$ref` values
@@ -3354,8 +3354,11 @@ must be strings; non-string values fail before dispatch even with local fallback
 Draft 2020-12 and undeclared default-profile references retain sibling assertions.
 Active `$id` values must parse as string URI references. Active `$anchor` values must be strings
 with the dialect's ASCII anchor-name syntax. Those failures use the invalid-keyword error before
-dispatch, including local fallback. The index keeps nonempty `$id` fragments and duplicate identities
-outside native guarantees.
+dispatch, including local fallback. Draft-07 fragment-only IDs use that dialect's letter-first
+plain-name syntax, including colons, as defined by [Draft-07 Core](https://json-schema.org/draft-07/draft-handrews-json-schema-01#rfc.section.8.2.3).
+Their aliases share the existing anchor map and leave the
+containing resource and base URI unchanged. The index keeps undefined nonempty `$id` fragments
+and duplicate identities outside native guarantees.
 Those unproven identities do not stop the index's keyword and container checks. Malformed values
 detected by those checks still fail before dispatch when local fallback is selected.
 Schema declarations must parse as absolute URIs. Active ordinary and dynamic references must parse
@@ -3375,8 +3378,8 @@ intersections and object-only unions. Scalar, nullable/mixed and untyped roots d
 object proof merely because the schema document is a JSON object or contains `properties`.
 Draft-07 `$ref` siblings cannot supply that proof. This is not a general satisfiability analysis.
 Local validation uses the original schema and reports invalid output without
-rewriting it or retrying. Legacy fragment-ID resolution, complete dialect-specific keyword shapes
-and complete regex classification or original-dialect ECMA regex evaluation remain incomplete.
+rewriting it or retrying. Complete dialect-specific keyword shapes and complete regex classification
+or original-dialect ECMA regex evaluation remain incomplete.
 Live Global/Default qualification on `grok-4.20-0309-non-reasoning` covers one unchanged object
 schema with required string `marker`, enum `GROK-121-SCHEMA-OK` and `additionalProperties:false`.
 Streaming and genuine nonstreaming requests both complete with finish reason `completed`,

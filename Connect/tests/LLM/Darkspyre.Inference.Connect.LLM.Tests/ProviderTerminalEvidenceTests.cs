@@ -799,7 +799,15 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}", true)]
     [InlineData("{\"$ref\":\"#/$defs/input\",\"$defs\":{\"input\":{\"type\":\"object\"}}}", true)]
     [InlineData("{\"anyOf\":[{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}}},{\"type\":\"object\",\"properties\":{\"b\":{\"type\":\"integer\"}}}]}", true)]
-    public async Task GrokStrictToolsRequireProvenObjectRootsWithoutChangingNonStrictTools(string schema, bool guaranteed)
+    public Task GrokStrictToolsRequireProvenObjectRootsWithoutChangingNonStrictTools(string schema, bool guaranteed) =>
+        CheckStrictObjectAdmission(schema, guaranteed);
+
+    [Fact]
+    public Task GrokStrictToolObjectProofResolvesDraft7FragmentId() => CheckStrictObjectAdmission("""
+        {"$schema":"http://json-schema.org/draft-07/schema#","$ref":"#input","definitions":{"input":{"$id":"#input","type":"object","properties":{"value":{"type":"string"}}}}}
+        """, guaranteed: true);
+
+    private static async Task CheckStrictObjectAdmission(string schema, bool guaranteed)
     {
         const string body = """
             {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}
@@ -864,6 +872,36 @@ public sealed class ProviderTerminalEvidenceTests
             {"$id":"https://schemas.example.test/root","type":"object","$defs":{"item":{"$anchor":"content","type":"string","maxLength":1}},"properties":{"value":{"$ref":"#content"},"other":{"$ref":"https://schemas.example.test/root#/$defs/item"}}}
             """);
         await CheckReferenceAdmission(schema, guaranteed: true);
+    }
+
+    [Theory]
+    [InlineData(1, true)]
+    [InlineData(4096, false)]
+    public async Task GrokReferenceGuaranteeResolvesDraft7FragmentIds(int maximum, bool guaranteed)
+    {
+        JsonNode schema = JsonNode.Parse("""
+            {"$schema":"http://json-schema.org/draft-07/schema#","$id":"https://schemas.example.test/root","type":"object","definitions":{"item":{"$id":"#item:part","type":"string"}},"properties":{"value":{"$ref":"#item:part"},"other":{"$ref":"https://schemas.example.test/root#/definitions/item"}}}
+            """)!;
+        schema["definitions"]!["item"]!["maxLength"] = maximum;
+        JsonElement original = JsonElement.Parse(schema.ToJsonString());
+        var output = new LlmStructuredOutputRequest { Name = "answer", Schema = original };
+        Assert.True(StructuredOutput.Validate("{\"value\":\"x\"}", output, LlmStructuredOutputEnforcement.LocalValidationOnly).IsValid);
+        Assert.False(StructuredOutput.Validate(new JsonObject { ["value"] = new string('x', maximum + 1) }.ToJsonString(),
+            output, LlmStructuredOutputEnforcement.LocalValidationOnly).IsValid);
+        await CheckReferenceAdmission(original, guaranteed);
+    }
+
+    [Theory]
+    [InlineData("""{"item":{"$id":"#_item","type":"string"}}""")]
+    [InlineData("""{"item":{"$id":"nested#item","type":"string"}}""")]
+    [InlineData("""{"item":{"$id":"#item","type":"string"},"duplicate":{"$id":"#item","type":"number"}}""")]
+    public Task GrokDraft7FragmentIdAdmissionKeepsUndefinedAndDuplicateIdentitiesUnproven(string definitions)
+    {
+        JsonNode schema = JsonNode.Parse("""
+            {"$schema":"http://json-schema.org/draft-07/schema#","$id":"https://schemas.example.test/root","type":"object","properties":{"value":{"$ref":"#/definitions/item"}}}
+            """)!;
+        schema["definitions"] = JsonNode.Parse(definitions);
+        return CheckReferenceAdmission(JsonElement.Parse(schema.ToJsonString()), guaranteed: false);
     }
 
     [Theory]
