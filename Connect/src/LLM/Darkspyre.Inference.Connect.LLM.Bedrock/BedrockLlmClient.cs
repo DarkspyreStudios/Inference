@@ -140,7 +140,7 @@ internal sealed class BedrockLlmClient(
 
     private static LlmRichContentSupported ModelRichContent(string? modelId) =>
         BedrockModelFamilies.Classify(modelId ?? string.Empty).BaseModelId is
-            "amazon.nova-micro-v1:0" or "openai.gpt-oss-20b-1:0" or "openai.gpt-oss-120b-1:0"
+            "amazon.nova-micro-v1:0" or "openai.gpt-oss-20b-1:0" or "openai.gpt-oss-120b-1:0" or "deepseek.r1-v1:0"
             ? RichContentRoutes.BedrockConverse with
             {
                 Images = LlmRichContentCarriage.Unsupported,

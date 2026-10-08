@@ -476,7 +476,16 @@ public sealed class BedrockSafetyTests
     [InlineData("us.amazon.nova-micro-v1:0")]
     [InlineData("openai.gpt-oss-20b-1:0")]
     [InlineData("openai.gpt-oss-120b-1:0")]
-    public async Task TextOnlyModelsConvertToolDocumentsAndRefusePromptDocumentsBeforeEffects(string modelId)
+    public Task TextOnlyModelsConvertToolDocumentsAndRefusePromptDocumentsBeforeEffects(string modelId) =>
+        AssertTextOnlyMediaAsync(modelId);
+
+    [Theory]
+    [InlineData("deepseek.r1-v1:0")]
+    [InlineData("us.deepseek.r1-v1:0")]
+    public Task DeepSeekR1ConvertsToolDocumentsAndRefusesPromptMediaBeforeEffects(string modelId) =>
+        AssertTextOnlyMediaAsync(modelId);
+
+    private static async Task AssertTextOnlyMediaAsync(string modelId)
     {
         await using var factory = new BedrockClientFactory(_ => throw new InvalidOperationException("Unexpected SDK acquisition"),
             _ => throw new InvalidOperationException("Unexpected SDK acquisition"),
