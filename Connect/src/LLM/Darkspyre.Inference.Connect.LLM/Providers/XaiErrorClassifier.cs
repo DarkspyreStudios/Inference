@@ -130,7 +130,7 @@ public static class XaiErrorClassifier
             using JsonDocument document = JsonDocument.Parse(body);
             JsonElement root = document.RootElement;
             JsonElement error = LlmJson.GetObject(root, "error") ?? root;
-            return (LlmJson.GetString(root, "error") ?? LlmJson.GetString(error, "code"),
+            return (LlmJson.GetString(error, "code") ?? LlmJson.GetString(root, "error"),
                 LlmJson.GetString(error, "message") ?? LlmJson.GetString(root, "error_description")
                 ?? LlmJson.GetString(root, "error"));
         }

@@ -3007,6 +3007,9 @@ The shared HTTP classifier preserves the response status, observed request ID an
 the redacted error envelope, including when a route withholds the diagnostic body. Batch and deferred
 resource failures retain that safe code. Request IDs use the same credential redactor as diagnostic
 bodies. A reported retry delay is diagnostic data, not permission to retry.
+An explicit error-envelope `code` takes precedence over a string `error` message. OAuth envelopes
+without a separate code retain their string error code. Flat model/access failures preserve
+`not-found` as the provider code and retain the redacted explanatory message separately.
 Named authentication and entitlement failures clear the setup device attempt without saving a credential.
 Device-grant `access_denied` and `expired_token` failures retain their actual status and code,
 the redacted request ID and any observed delta retry delay. These failures end the sign-in attempt;

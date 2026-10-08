@@ -560,6 +560,43 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Fact]
+    public async Task GrokFlatModelAccessFailureKeepsItsCodeSeparateFromTheRedactedMessage()
+    {
+        const string body = """
+            {"code":"not-found","error":"The model requested-model does not exist or your team test-token does not have access to it."}
+            """;
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming: true, body,
+            HttpStatusCode.NotFound, requestId: "request-1");
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://us.api.x.ai/v1",
+            Xai = new() { Region = XaiRegion.UnitedStates },
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize()
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, new()
+            {
+                ModelId = "requested-model",
+                Messages = [new("user", "hello")]
+            })) { }
+        });
+
+        Assert.Equal("not-found", failure.ProviderCode);
+        Assert.Equal(HttpStatusCode.NotFound, failure.StatusCode);
+        Assert.Equal("request-1", failure.RequestId);
+        Assert.Contains("does not have access", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("test-token", failure.ToString(), StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
     public async Task GrokBatchFailureKeepsSafeRequestIdInTheProviderErrorAndOperationReceipt()
     {
         var retryAfter = TimeSpan.FromSeconds(17);
