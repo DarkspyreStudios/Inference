@@ -169,6 +169,10 @@ internal static class XaiSchemaLimits
             case "prefixItems":
                 return SchemaDisposition.Guaranteed;
             case "$dynamicRef":
+                return value.ValueKind == JsonValueKind.String ? SchemaDisposition.OutsideGuarantee : SchemaDisposition.InvalidSchema;
+            case "$dynamicAnchor":
+                return value.ValueKind == JsonValueKind.String && ValidAnchor(value.GetString()!)
+                    ? SchemaDisposition.OutsideGuarantee : SchemaDisposition.InvalidSchema;
             case "$recursiveRef":
             case "not":
             case "if":
@@ -251,6 +255,9 @@ internal static class XaiSchemaLimits
         return true;
     }
 
+    private static bool ValidAnchor(string value) => value.Length > 0 && (char.IsAsciiLetter(value[0]) || value[0] == '_')
+        && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
+
     private static bool ProvesObject(JsonElement schema, SchemaIndex index, Dictionary<JsonElement, bool> proofs)
     {
         SchemaLocation location = index.Locations[schema];
@@ -312,7 +319,8 @@ internal static class XaiSchemaLimits
                 SchemaDraft draft = next.Draft;
                 if (schema.TryGetProperty("$schema", out JsonElement declaration))
                 {
-                    if (declaration.ValueKind != JsonValueKind.String) return Reject(SchemaDisposition.InvalidSchema);
+                    if (declaration.ValueKind != JsonValueKind.String
+                        || !Uri.TryCreate(declaration.GetString(), UriKind.Absolute, out _)) return Reject(SchemaDisposition.InvalidSchema);
                     draft = declaration.GetString() switch
                     {
                         "http://json-schema.org/draft-07/schema" or "http://json-schema.org/draft-07/schema#" => SchemaDraft.Draft7,
@@ -404,8 +412,12 @@ internal static class XaiSchemaLimits
                             Add(value, property.Name == "additionalProperties");
                             break;
                     }
-                    if ((!ignoresSiblings || property.Name == "$ref") && ClassifyKeyword(property, draft) == SchemaDisposition.InvalidSchema)
-                        return Reject(SchemaDisposition.InvalidSchema);
+                    if (!ignoresSiblings || property.Name == "$ref")
+                    {
+                        if (ClassifyKeyword(property, draft) == SchemaDisposition.InvalidSchema
+                            || property.Name is "$ref" or "$dynamicRef" && !Uri.TryCreate(value.GetString(), UriKind.RelativeOrAbsolute, out _))
+                            return Reject(SchemaDisposition.InvalidSchema);
+                    }
                 }
                 Locations.Add(schema, new(baseUri, draft, applied));
 
@@ -442,8 +454,6 @@ internal static class XaiSchemaLimits
 
         private static string ResourceKey(Uri address) => new UriBuilder(address) { Fragment = string.Empty }.Uri.AbsoluteUri;
 
-        private static bool ValidAnchor(string value) => value.Length > 0 && (char.IsAsciiLetter(value[0]) || value[0] == '_')
-            && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
     }
 
     private static bool DisjointTypes(JsonElement branches)

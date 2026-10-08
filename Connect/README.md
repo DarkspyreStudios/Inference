@@ -3358,6 +3358,11 @@ dispatch, including local fallback. The index keeps nonempty `$id` fragments and
 outside native guarantees.
 Those unproven identities do not stop the index's keyword and container checks. Malformed values
 detected by those checks still fail before dispatch when local fallback is selected.
+Schema declarations must parse as absolute URIs. Active ordinary and dynamic references must parse
+as string URI references. Active dynamic anchors use the same name check as ordinary anchors.
+These checks follow [JSON Schema Core](https://json-schema.org/draft/2020-12/json-schema-core).
+Valid dynamic values remain outside native guarantees. Draft-07 keeps its dynamic-keyword payloads
+inactive; the preflight does not resolve dynamic references or select a supplier dialect.
 The same admission owner treats `not`, conditionals and
 multi-branch `allOf` as outside native guarantees. xAI gives `oneOf` the same meaning as `anyOf`;
 native admission requires pairwise-disjoint explicit simple types on non-reference branches,

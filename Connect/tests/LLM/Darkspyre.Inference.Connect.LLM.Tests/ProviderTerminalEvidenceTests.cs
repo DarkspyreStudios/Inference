@@ -616,6 +616,21 @@ public sealed class ProviderTerminalEvidenceTests
     public Task GrokUnprovenIdentitiesDoNotSkipKeywordValidation(string schema, bool malformed) => malformed
         ? CheckInvalidSchemaAdmission(schema) : CheckReferenceAdmission(JsonElement.Parse(schema), guaranteed: false);
 
+    [Theory]
+    [InlineData("""{"$schema":"relative-schema"}""", true)]
+    [InlineData("""{"$schema":"http://["}""", true)]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"http://["}""", true)]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$dynamicRef":17}""", true)]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$dynamicRef":"http://["}""", true)]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$dynamicAnchor":17}""", true)]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$dynamicAnchor":"bad anchor"}""", true)]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$dynamicRef":"#target"}""", false)]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$dynamicAnchor":"target"}""", false)]
+    [InlineData("""{"$schema":"http://json-schema.org/draft-07/schema#","$dynamicRef":17}""", false)]
+    [InlineData("""{"$schema":"http://json-schema.org/draft-07/schema#","$dynamicAnchor":17}""", false)]
+    public Task GrokCoreIdentityAdmissionKeepsMalformedAndUnprovenValuesDistinct(string schema, bool malformed) => malformed
+        ? CheckInvalidSchemaAdmission(schema) : CheckReferenceAdmission(JsonElement.Parse(schema), guaranteed: false);
+
     private static async Task CheckInvalidSchemaAdmission(string schema)
     {
         const string body = """
