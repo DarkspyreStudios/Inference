@@ -85,14 +85,8 @@ internal static class ProbeRunner
                 {
                     state = "FAIL";
                     failed++;
-                    detail = error switch
-                    {
-                        OperationCanceledException when deadline.IsCancellationRequested => "case deadline exceeded",
-                        ProbeFailure assertion => assertion.Message,
-                        InferenceException inference => Program.FormatInferenceFailure(inference),
-                        LlmProviderException provider => Program.FormatProviderFailure(provider),
-                        _ => $"{error.GetType().Name} (provider details omitted)"
-                    };
+                    detail = error is OperationCanceledException && deadline.IsCancellationRequested
+                        ? "case deadline exceeded" : FailureDetail(error);
                 }
                 output.WriteLine($"{state} {iteration}/{options.Repeat} {test.Name} ({clock.Elapsed.TotalSeconds:F2}s): {detail}");
                 output.Flush();
@@ -101,4 +95,13 @@ internal static class ProbeRunner
         output.WriteLine($"Summary: passed={passed} failed={failed} skipped={skipped}");
         return failed > 0 ? 1 : skipped > 0 ? 3 : 0;
     }
+
+    internal static string FailureDetail(Exception error) => error switch
+    {
+        AggregateException aggregate => string.Join("; ", aggregate.InnerExceptions.Select(FailureDetail)),
+        ProbeFailure assertion => assertion.Message,
+        InferenceException inference => Program.FormatInferenceFailure(inference),
+        LlmProviderException provider => Program.FormatProviderFailure(provider),
+        _ => $"{error.GetType().Name} (provider details omitted)"
+    };
 }

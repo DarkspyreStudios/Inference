@@ -114,10 +114,12 @@ internal sealed record ConsoleInvocation(
         ConsoleTesterProvider provider = providers.Resolve(providerId);
         if (xaiRegion is not null && provider.Transport != LlmTransport.XaiResponses)
             throw new ArgumentException("--xai-region requires the Grok provider.", nameof(args));
-        if (xaiRegion is not null && args[0] is not ("status" or "models" or "prompt" or "agent" or "login" or "usage"))
+        if (xaiRegion is not null && args[0] is not ("status" or "models" or "prompt" or "agent" or "login" or "usage" or "grok-probe"))
             throw new ArgumentException("--xai-region is valid only for connection commands.", nameof(args));
         if (nonStreaming && args[0] != "prompt")
             throw new ArgumentException("--non-streaming is valid only for prompt.", nameof(args));
+        if (args[0] == "grok-probe" && provider.Transport != LlmTransport.XaiResponses)
+            throw new ArgumentException("grok-probe requires --provider grok-subscription.", nameof(args));
         if (provider.Transport == LlmTransport.AwsBedrockAgentCore
             && args[0] != "setup" && string.IsNullOrWhiteSpace(harnessArn))
         {

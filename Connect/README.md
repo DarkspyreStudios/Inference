@@ -4681,6 +4681,26 @@ its existing completion check.
 The tester does not print inner exceptions, response bodies or stack traces. Local request refusals
 retain their explanation, including the reasoning levels the selected model accepts.
 
+`grok-probe --provider grok-subscription` explicitly checks `strict`, `files`, or both with
+`--case all`. It uses the existing probe model/repeat/deadline options and typed `--xai-region`.
+Strict checks use one original closed object schema, validate the returned required enum argument,
+permit at most two managed model iterations and require the successful callback's unique result
+as the completed answer. This is not qualification of arbitrary strict schemas or regex guarantees.
+Files checks upload one synthetic UTF-8 file with a requested one-hour expiry, get its identity,
+check one newest-files page, download and compare its exact original bytes, and delete only the
+ID returned by that upload. Cleanup uses a separate wait with the case's selected deadline and
+preserves independent operation and cleanup failures. An upload without a returned receipt leaves
+remote creation unknown; no guessed ID, filename search deletion, retry or rollback is performed.
+The checks use the existing agent and Files facades and do not copy application credentials.
+
+```bash
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- grok-probe --provider grok-subscription --case strict --repeat 1 --timeout-seconds 60
+```
+
+```bash
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- grok-probe --provider grok-subscription --case files --repeat 1 --timeout-seconds 60
+```
+
 Claude uses the same commands with `--provider claude`:
 
 ```bash

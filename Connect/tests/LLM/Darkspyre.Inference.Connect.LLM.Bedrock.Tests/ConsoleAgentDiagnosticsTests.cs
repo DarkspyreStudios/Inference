@@ -11,6 +11,120 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 
 public sealed class ConsoleAgentDiagnosticsTests
 {
+    [Fact]
+    public void StrictProbeChecksTheOriginalRequiredEnumAndClosedObject()
+    {
+        LlmAgentToolDefinition tool = GrokProbe.CreateStrictTool();
+        Assert.True(tool.Strict);
+        Assert.Equal("marker", Assert.Single(tool.InputSchema.GetProperty("required").EnumerateArray()).GetString());
+        Assert.False(tool.InputSchema.GetProperty("additionalProperties").GetBoolean());
+        Assert.Equal("CONNECT_STRICT_ARGUMENT_OK", Assert.Single(tool.InputSchema.GetProperty("properties")
+            .GetProperty("marker").GetProperty("enum").EnumerateArray()).GetString());
+        GrokProbe.ValidateStrictArguments(JsonElement.Parse("""{"marker":"CONNECT_STRICT_ARGUMENT_OK"}"""));
+        Assert.Throws<ProbeFailure>(() => GrokProbe.ValidateStrictArguments(
+            JsonElement.Parse("""{"marker":"wrong"}""")));
+        Assert.Throws<ProbeFailure>(() => GrokProbe.ValidateStrictArguments(
+            JsonElement.Parse("""{"marker":"CONNECT_STRICT_ARGUMENT_OK","extra":true}""")));
+    }
+
+    [Fact]
+    public void GrokProbeUsesTheSelectedRegionAndRefusesAnotherProvider()
+    {
+        using var http = new HttpClient();
+        var providers = new ConsoleTesterProviders([new XaiResponsesLlmClient(http), new OpenAiResponsesLlmClient(http)]);
+        ConsoleInvocation invocation = ConsoleInvocation.Parse(
+            ["grok-probe", "--provider", "grok-subscription", "--case", "files", "--xai-region", "UnitedStates"], providers);
+
+        Assert.Equal("https://us.api.x.ai/v1", Assert.IsType<XaiConnectionOptions>(invocation.Xai).GetEndpoint());
+        Assert.Equal(["--case", "files"], invocation.CommandArguments);
+        Assert.Throws<ArgumentException>(() => ConsoleInvocation.Parse(
+            ["grok-probe", "--provider", "openai-api-key"], providers));
+    }
+
+    [Fact]
+    public async Task FilesProbeComparesOriginalBytesAndDeletesOnlyItsOwnUpload()
+    {
+        var files = new SyntheticFiles();
+        using var output = new StringWriter();
+
+        string result = await GrokProbe.FilesAsync(files, "connection", 5, output, CancellationToken.None);
+
+        Assert.Contains("original download verified", result, StringComparison.Ordinal);
+        Assert.Equal("created-file", Assert.Single(files.DeletedIds));
+        Assert.NotNull(files.Bytes);
+        Assert.Contains("Synthetic file deletion confirmed.", output.ToString(), StringComparison.Ordinal);
+
+        var corrupted = new SyntheticFiles { CorruptDownload = true };
+        ProbeFailure mismatch = await Assert.ThrowsAsync<ProbeFailure>(() =>
+            GrokProbe.FilesAsync(corrupted, "connection", 5, output, CancellationToken.None));
+        Assert.Contains("bytes do not match", mismatch.Message, StringComparison.Ordinal);
+        Assert.Equal("created-file", Assert.Single(corrupted.DeletedIds));
+    }
+
+    [Fact]
+    public async Task FilesProbeRetainsOperationAndCleanupFailuresWithoutDeletingOtherFiles()
+    {
+        var operation = new IOException("Download failed.");
+        var cleanup = new IOException("Deletion failed.");
+        var files = new SyntheticFiles { DownloadFailure = operation, DeleteFailure = cleanup };
+        using var output = new StringWriter();
+
+        AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() =>
+            GrokProbe.FilesAsync(files, "connection", 5, output, CancellationToken.None));
+
+        Assert.Equal([operation, cleanup], failure.InnerExceptions);
+        Assert.Equal("created-file", Assert.Single(files.DeletedIds));
+        Assert.Contains("Synthetic file cleanup failed: IOException", output.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("deletion confirmed", output.ToString(), StringComparison.Ordinal);
+    }
+
+    private sealed class SyntheticFiles : ILlmFileClient
+    {
+        private LlmProviderFile? _created;
+        public byte[]? Bytes { get; private set; }
+        public List<string> DeletedIds { get; } = [];
+        public Exception? DownloadFailure { get; init; }
+        public Exception? DeleteFailure { get; init; }
+        public bool CorruptDownload { get; init; }
+
+        public async Task<LlmProviderFile> UploadAsync(string connectionId, Stream source, string fileName,
+            LlmFileUploadOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            Assert.Equal(TimeSpan.FromHours(1), options?.ExpiresAfter);
+            using var content = new MemoryStream();
+            await source.CopyToAsync(content, cancellationToken);
+            Bytes = content.ToArray();
+            _created = new("created-file", fileName, Bytes.Length, DateTimeOffset.UtcNow, null);
+            return _created;
+        }
+
+        public Task<LlmProviderFile> GetAsync(string connectionId, string fileId,
+            CancellationToken cancellationToken = default) => Task.FromResult(_created!);
+
+        public Task<LlmFilePage> ListAsync(string connectionId, LlmFileListRequest request,
+            CancellationToken cancellationToken = default) => Task.FromResult(new LlmFilePage(
+                [new("unrelated-file", "existing.txt", 1, DateTimeOffset.UtcNow, null), _created!], null, true));
+
+        public async Task<ResourceDownloadReceipt> DownloadAsync(string connectionId, string fileId,
+            Stream destination, LlmFileDownloadOptions? options = null, CancellationToken cancellationToken = default)
+        {
+            if (DownloadFailure is not null) throw DownloadFailure;
+            Assert.Equal(LlmFileContentFormat.Original, options?.Format);
+            byte[] content = Bytes!.ToArray();
+            if (CorruptDownload) content[0] ^= 1;
+            await destination.WriteAsync(content, cancellationToken);
+            return new(Bytes!.Length, "text/plain", Bytes.Length);
+        }
+
+        public Task<LlmFileDeletion> DeleteAsync(string connectionId, string fileId,
+            CancellationToken cancellationToken = default)
+        {
+            DeletedIds.Add(fileId);
+            return DeleteFailure is not null ? Task.FromException<LlmFileDeletion>(DeleteFailure)
+                : Task.FromResult(new LlmFileDeletion(fileId, true));
+        }
+    }
+
     [Theory]
     [InlineData(true, null, null, "unknown in / unknown out")]
     [InlineData(true, null, 0, "unknown in / 0 out")]
