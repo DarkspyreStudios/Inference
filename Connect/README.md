@@ -4739,6 +4739,12 @@ recall. Cancellation reaches the first text delta, surfaces caller cancellation 
 session disposal. These three turn attempts qualify the named cases, not credential refresh, remote
 work termination, every model or other CLI platforms.
 
+The same resume case at source `ef626b8` passes on Antigravity CLI 1.3.1 with
+`claude-sonnet-4-6`. Two completed turns retain the exact conversation ID across process replacement
+and recall the synthetic marker. The case passes in 18.23 seconds with two turn attempts, no retry
+and no skipped prerequisite. This qualifies that selected model's native resume, not GPT-OSS
+capacity, every model, OAuth refresh or other platforms.
+
 The existing `agent` command at source `7a2204d`, installed Claude CLI 2.1.289, `sonnet` and
 Low effort completes one document tool-result turn in an empty scratch working directory.
 The attachment callback completes with two output parts and no tool error. The final answer is
