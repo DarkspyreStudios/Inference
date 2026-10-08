@@ -4570,6 +4570,13 @@ Accounting reports an unsupported temperature request as unsupported instead of 
 estimate. Generation uses the same output-limit validator as the HTTP adapters before calling the
 engine stream. `Unsupported` refuses an explicit cap; `Unknown` permits an attempt without changing
 the enforcement fact. Accepted temperature and output-cap values pass unchanged to Common.
+One private SelfHost request validator also uses the shared prompt-attachment, tool-use and
+structured-output checks for generation and accounting. Unsupported tools, declared unsupported
+strict input schemas, unsupported prompt media and an unavailable requested schema guarantee refuse
+before calling the engine stream. Accounting reports these requests as unsupported, not measurable.
+Explicit structured-output fallback uses the existing enforcement resolver; the original schema and
+request are not rewritten. Supported media that the local tokenizer cannot measure still report
+unknown occupancy. This admission does not qualify an engine's native enforcement or media handling.
 
 Agent sessions run on the managed agent lane, which executes host tools; context estimates count the
 request text with Connect's local tokenizer. Binary prompt attachments, structured tool content and

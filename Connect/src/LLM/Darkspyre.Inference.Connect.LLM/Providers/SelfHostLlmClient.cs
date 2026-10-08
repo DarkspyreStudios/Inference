@@ -64,11 +64,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ClientTools.Validate(request, GetCapabilities(connection, request.ModelId).SupportsShellTools);
         CommonLlm.ILlmInference engine = await host.GetInferenceAsync(connection.Endpoint, cancellationToken).ConfigureAwait(false);
         var capabilities = ToConnect(await engine.GetCapabilitiesAsync(request.ModelId, cancellationToken).ConfigureAwait(false));
-        LlmClientBase.ValidateSampling(request, capabilities);
-        LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
-        LlmClientBase.ValidateOutputLimit(request, capabilities);
-        HostedTools.Validate(request, capabilities);
-        ClientTools.Validate(request, capabilities.SupportsShellTools);
+        ValidateEngineRequest(request, capabilities);
         await foreach (CommonLlm.LlmStreamEvent item in engine.StreamAsync(ToCommon(request), cancellationToken).ConfigureAwait(false))
         {
             // Common's events pass through; only the completion carries Connect's result.
@@ -83,10 +79,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ArgumentNullException.ThrowIfNull(request);
         ValidateOptions(connection, request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
-        HostedTools.Validate(request, capabilities);
-        ClientTools.Validate(request, capabilities.SupportsShellTools);
-        LlmClientBase.ValidateSampling(request, capabilities);
-        LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
+        ValidateEngineRequest(request, capabilities);
         if (request.Messages.Any(message => message.Attachments.Count > 0
             || ClientTools.Functions(message.ToolResults).Any(result => result.Output.StructuredContent is not null
                 || result.Output.Parts.Any(part => part is not CommonLlm.LlmToolOutputText))))
@@ -106,6 +99,20 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
             text.Append('\n').Append(tool.Name).Append(tool.Description).Append(tool.InputSchema.GetRawText());
         }
         return new ContextEstimate(LocalTokenCount.Count(text.ToString()));
+    }
+
+    private static void ValidateEngineRequest(LlmChatRequest request, LlmProviderCapabilities capabilities)
+    {
+        LlmClientBase.ValidateSampling(request, capabilities);
+        LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
+        LlmClientBase.ValidateOutputLimit(request, capabilities);
+        HostedTools.Validate(request, capabilities);
+        ClientTools.Validate(request, capabilities.SupportsShellTools);
+        LlmClientBase.ValidatePromptAttachments(request, capabilities);
+        LlmClientBase.ValidateToolUse(request, capabilities);
+        StructuredOutput.ValidateRequest(request);
+        if (request.StructuredOutput is { } structured)
+            _ = StructuredOutput.ResolveEnforcement(structured, capabilities);
     }
 
     private static void ValidateOptions(LlmConnection connection, LlmChatRequest request)

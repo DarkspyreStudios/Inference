@@ -9,6 +9,77 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class SelfHostCatalogTests
 {
     [Theory]
+    [InlineData("tools", false)]
+    [InlineData("tools", true)]
+    [InlineData("strict", false)]
+    [InlineData("strict", true)]
+    [InlineData("image", false)]
+    [InlineData("image", true)]
+    [InlineData("schema", false)]
+    [InlineData("schema", true)]
+    public async Task UnsupportedContentRefusesBeforeGenerationOrAccounting(string feature, bool accounting)
+    {
+        var engine = new Engine
+        {
+            Capabilities = new()
+            {
+                SupportsToolUse = feature == "strict",
+                Tools = new() { StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported }
+            }
+        };
+        await using var service = new LlmProviderService(new Source(), [new SelfHostLlmClient(new Host(engine))]);
+        var request = new LlmChatRequest
+        {
+            ModelId = "model",
+            Messages = [new("user", "hello")
+            {
+                Attachments = feature == "image"
+                    ? [new LlmAttachment
+                    {
+                        Kind = LlmBinaryKind.Image, FileName = "image.png", MediaType = "image/png",
+                        Data = new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a }
+                    }] : []
+            }],
+            Tools = feature is "tools" or "strict"
+                ? [new LlmToolDefinition
+                {
+                    Name = "echo", InputSchema = JsonElement.Parse("{\"type\":\"object\"}"),
+                    Strict = feature == "strict"
+                }] : [],
+            StructuredOutput = feature == "schema" ? new()
+            { Name = "answer", Schema = JsonElement.Parse("{\"type\":\"object\"}") } : null
+        };
+        if (accounting)
+        {
+            LlmRequestAccounting measurement = await service.MeasureRequestAsync("connection", request);
+            Assert.False(measurement.IsSupported);
+            Assert.Null(measurement.UsedContextTokens);
+        }
+        else
+            await Assert.ThrowsAsync<NotSupportedException>(() => service.CompleteAsync("connection", request));
+        Assert.Null(engine.LastRequest);
+
+        LlmChatRequest admitted = request with
+        {
+            Messages = [new("user", "hello")],
+            Tools = feature == "strict"
+                ? [Assert.IsType<LlmToolDefinition>(Assert.Single(request.Tools)) with { Strict = false }] : [],
+            StructuredOutput = feature == "schema"
+                ? request.StructuredOutput! with { Fallback = LlmStructuredOutputFallback.LocalValidation } : null
+        };
+        LlmChatResult result = await service.CompleteAsync("connection", admitted);
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("engine answer", result.Text);
+        if (feature == "strict")
+            Assert.False(Assert.IsType<LlmToolDefinition>(Assert.Single(engine.LastRequest!.Tools)).Strict);
+        if (feature == "schema")
+        {
+            Assert.Equal(LlmStructuredOutputFallback.LocalValidation, engine.LastRequest!.StructuredOutput!.Fallback);
+            Assert.Equal(request.StructuredOutput!.Schema.GetRawText(), engine.LastRequest.StructuredOutput.Schema.GetRawText());
+        }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task TemperatureAdmissionUsesTheEngineSupportFlag(bool supported)
@@ -126,7 +197,11 @@ public sealed class SelfHostCatalogTests
     [InlineData("tool-json")]
     public async Task AccountingDoesNotReportTextOnlyUsageForUnmeasuredContent(string content)
     {
-        var engine = new Engine { Models = [new("model", "Model") { MaxContextTokens = 4096 }] };
+        var engine = new Engine
+        {
+            Models = [new("model", "Model") { MaxContextTokens = 4096 }],
+            Capabilities = new() { SupportsModelListing = true, SupportsPromptImages = true, SupportsToolUse = true }
+        };
         await using var service = new LlmProviderService(new Source(), [new SelfHostLlmClient(new Host(engine))]);
         var message = new LlmChatMessage("user", "Read this content");
         message = content != "image" ? message with
