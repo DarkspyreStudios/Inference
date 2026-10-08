@@ -92,6 +92,38 @@ public sealed class XaiVideoPollTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void UnknownVideoResolutionSupportAllowsNativeAttempt(bool firstFrame)
+    {
+        var image = new UrlMediaSource(new("https://media.example.test/image"));
+        var request = new VideoGenerationRequest
+        {
+            ModelId = "future-video-model",
+            Prompt = "A paper boat",
+            ResolutionHeight = 1080,
+            FirstFrame = firstFrame ? image : null
+        };
+
+        (string route, JsonObject body) = XaiVideoProtocol.Build(request, source =>
+        {
+            Assert.Same(image, source);
+            return new() { ["url"] = image.Url.OriginalString };
+        }, static () => { });
+
+        Assert.Equal("videos/generations", route);
+        Assert.Equal("1080p", body["resolution"]!.GetValue<string>());
+        Assert.Equal(request.ModelId, body["model"]!.GetValue<string>());
+        Assert.Equal(firstFrame, body.ContainsKey("image"));
+        if (firstFrame) Assert.Equal(image.Url.OriginalString, body["image"]!["url"]!.GetValue<string>());
+        Assert.Null(XaiVideoProtocol.Capabilities(request.ModelId).ResolutionHeights);
+
+        request = request with { ModelId = "grok-imagine-video" };
+        Assert.Throws<NotSupportedException>(() => XaiVideoProtocol.Build(request,
+            _ => throw new InvalidOperationException("Unsupported resolution reached source resolution."), static () => { }));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public void LiteHighResolutionPreservesNativeBody(bool firstFrame)
     {
         var image = new UrlMediaSource(new("https://media.example.test/image"));
