@@ -12,6 +12,54 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 public sealed class ConsoleAgentDiagnosticsTests
 {
     [Fact]
+    public async Task RequestFileRetainsTheOwnedTypedChatGraphWithReflectionDisabled()
+    {
+        Assert.False(JsonSerializer.IsReflectionEnabledByDefault);
+        string directory = Directory.CreateTempSubdirectory("inference-console-request-").FullName;
+        try
+        {
+            string path = Path.Combine(directory, "request.json");
+            var expected = new LlmChatRequest
+            {
+                ModelId = "selected-model",
+                Messages = [new("user", "Use the selected hosted tools.")],
+                Temperature = 0.4,
+                TopP = 0.8,
+                MaxOutputTokens = 64,
+                MaxHostedTurns = 2,
+                HostedTools = [new LlmCodeExecutionTool(), new XaiXSearchTool(AllowedHandles: ["selected-handle"])]
+            };
+            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(expected, ConnectLlmJson.ChatRequest));
+
+            LlmChatRequest actual = await Program.ReadChatRequestAsync(path, CancellationToken.None);
+
+            Assert.Equal(expected.ModelId, actual.ModelId);
+            Assert.Equal(expected.Messages.Select(message => (message.Role, message.Content)),
+                actual.Messages.Select(message => (message.Role, message.Content)));
+            Assert.Equal(expected.Temperature, actual.Temperature);
+            Assert.Equal(expected.TopP, actual.TopP);
+            Assert.Equal(expected.MaxOutputTokens, actual.MaxOutputTokens);
+            Assert.Equal(expected.MaxHostedTurns, actual.MaxHostedTurns);
+            Assert.Collection(actual.HostedTools,
+                tool => Assert.IsType<LlmCodeExecutionTool>(tool),
+                tool => Assert.Equal("selected-handle", Assert.Single(Assert.IsType<XaiXSearchTool>(tool).AllowedHandles!)));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void FullRequestModeDoesNotMergeInlineOptionsOrBecomeAnAgentOption()
+    {
+        Assert.Throws<ArgumentException>(() => Program.ParsePromptOptions(
+            ["--request", "request.json", "--model", "another-model"], "default-model"));
+        Assert.Throws<ArgumentException>(() => Program.ParsePromptOptions(
+            ["--request", "request.json"], "default-model", allowModelIterationLimit: true));
+    }
+
+    [Fact]
     public void PromptShowsHostedLifecycleAndCitationsWithoutWritingThemIntoTheAnswer()
     {
         using var answer = new StringWriter();

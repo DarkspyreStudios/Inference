@@ -4325,6 +4325,12 @@ and individual citation URLs on stderr. Model answer text remains on stdout. Bot
 same formatter. Missing call identity and terminal status display as `unknown`; a terminal call
 does not imply successful tool execution. Diagnostics do not dump hosted input/output JSON or
 generated image bytes.
+`prompt --request <file>` loads a complete `LlmChatRequest` using `ConnectLlmJson.ChatRequest`
+instead of reading stdin. The file supplies model, messages, supported controls and ordered hosted
+descriptors. It cannot be combined with inline model, effort, schema or attachment options and is
+not an `agent` option. Credentials, region and streaming selection remain on the selected connection.
+Owned JSON converters reject live resource and authorization services; the tester does not reconstruct
+them from data. The normal prompt/attachment mode uses the same request facade unchanged.
 
 ### Apple console harness
 
