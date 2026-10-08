@@ -761,6 +761,77 @@ public sealed class BedrockSafetyTests
         AssertTextOnlyMediaAsync(modelId);
 
     [Theory]
+    [InlineData("deepseek.r1-v1:0", false)]
+    [InlineData("deepseek.r1-v1:0", true)]
+    [InlineData("us.deepseek.r1-v1:0", false)]
+    [InlineData("us.deepseek.r1-v1:0", true)]
+    public async Task DeepSeekR1RefusesNativeToolsAndHistoryBeforeSdkAcquisition(string modelId, bool history)
+    {
+        int acquired = 0;
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => { acquired++; throw new InvalidOperationException("SDK acquired before tool refusal"); },
+            _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker();
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmChatRequest request = history
+            ? Request(messages:
+            [
+                new("user", "Read the reference"),
+                new("assistant", string.Empty) { ToolCalls = [new LlmToolCall("read-1", "read", "{}")] },
+                new("user", string.Empty) { ToolResults = [new LlmToolResult("read-1", new() { Parts = [new LlmToolOutputText("reference")] })] }
+            ])
+            with
+            { ModelId = modelId }
+            : Request() with
+            {
+                ModelId = modelId,
+                Tools = [new LlmToolDefinition { Name = "read", InputSchema = JsonElement.Parse("""{"type":"object"}""") }]
+            };
+        NotSupportedException failure = await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(ResourceConnection(streaming: true), request)) { }
+        });
+        Assert.Equal("The selected connection does not support host-executed tools.", failure.Message);
+        LlmProviderCapabilities capabilities = client.GetCapabilities(Connection(), modelId);
+        Assert.False(capabilities.SupportsToolUse);
+        Assert.False(capabilities.SupportsAgentToolUse);
+        Assert.Empty(capabilities.Tools.ChoiceModes);
+        Assert.True(capabilities.SupportsAgentSessions);
+        _ = client.ValidateRequest(Connection(), Request() with { ModelId = modelId });
+        Assert.Equal(0, acquired);
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeepSeekR1CannotEnableNativeToolsThroughOverrides(bool perModel)
+    {
+        int acquired = 0;
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => { acquired++; throw new InvalidOperationException("SDK acquired before override refusal"); },
+            _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker();
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        const string modelId = "us.deepseek.r1-v1:0";
+        var overrides = new LlmCapabilityOverrides { SupportsToolUse = true };
+        LlmConnection connection = perModel
+            ? ResourceConnection(streaming: true) with { ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides> { [modelId] = overrides } }
+            : ResourceConnection(streaming: true) with { CapabilityOverrides = overrides };
+        NotSupportedException failure = await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, Request() with { ModelId = modelId })) { }
+        });
+        Assert.Equal("Bedrock capability overrides cannot enable native tool use for DeepSeek-R1.", failure.Message);
+        Assert.Equal(0, acquired);
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+    }
+
+    [Theory]
     [InlineData("deepseek.r1-v1:0")]
     [InlineData("us.deepseek.r1-v1:0")]
     public Task DeepSeekR1ConvertsToolDocumentsAndRefusesPromptMediaBeforeEffects(string modelId) =>

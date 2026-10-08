@@ -2721,8 +2721,8 @@ The exact Bedrock IDs `amazon.nova-micro-v1:0`, `openai.gpt-oss-20b-1:0`,
 `openai.gpt-oss-120b-1:0` and `deepseek.r1-v1:0` declare no prompt image or document input. The existing
 recognized inference-profile prefixes retain their base model's declaration. Capability overrides cannot
 enable those unsupported inputs.
-Chat and managed-agent tool results carry UTF-8 documents through the shared labelled-text projection;
-PDF and image tool parts remain unsupported. The native request builder reads the same model declaration
+For tool-capable models, chat and managed-agent tool results carry UTF-8 documents through the shared
+labelled-text projection; PDF and image tool parts remain unsupported. The native request builder reads the same model declaration
 as capabilities. Nova Lite and other model declarations remain unchanged. The console tester offers a
 document-only tool when text-document carriage is available without native image carriage.
 The published model cards identify their text-only inputs:
@@ -2731,8 +2731,12 @@ The published model cards identify their text-only inputs:
 [gpt-oss 120B](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-oss-120b.html) and
 [DeepSeek-R1](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-deepseek-deepseek-r1.html).
 DeepSeek-R1's [Converse contract](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-deepseek.html)
-accepts text content. Its prompt-media refusal and text tool-document projection are verified offline;
-native DeepSeek tool replay remains unverified.
+accepts text content. Its prompt-media refusal is verified offline. The exact `deepseek.r1-v1:0`
+identity and its recognized inference profiles report native tool use as unavailable, as documented
+by [AWS](https://docs.aws.amazon.com/bedrock/latest/userguide/working-with-models-not-yet-optimized.html).
+Tool definitions and structured tool history refuse before SDK acquisition. Capability overrides
+cannot enable this native lane. Managed sessions remain available without host tools. Connect adds
+no prompt-based tool emulation.
 
 The text renderings are fixed. A resource link becomes `[Resource link: name] uri`. An embedded text
 resource becomes `[Resource: uri]` followed by its text. A text document becomes `[File: name]`
