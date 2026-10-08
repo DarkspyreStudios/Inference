@@ -3106,6 +3106,14 @@ tool search; `web_search` is a reserved hosted name.
 The client joins the generic and language listings, offers only listed language models, and reads the
 facade's published catalog. Catalog reasoning levels and image modalities override family fallbacks.
 Unknown manually entered models still permit a request without fabricated discovery evidence.
+Two small OAuth requests against production source `e3cb082` select the discovered `grok-4.6`
+model on UnitedStates/Default, explicit `Low` reasoning and 128 requested output tokens. Both
+calculate `17 * 19`, return only `323`, and finish as `Completed` with reason `completed`.
+Streaming reports 650 input, 93 output and 92 reasoning output tokens; nonstreaming reports
+650 input, 86 output and 85 reasoning output tokens. The tester uses its own saved credential
+without retries, tools, app credential access or route fallback. These runs qualify selected-route
+acceptance of the Low-effort request in both modes, not every effort level, comparative reasoning
+quality, an echoed applied-effort observation or general output-token-cap enforcement.
 Image prompts require catalog image support and cannot exceed 20 MiB. Temperature and top-p follow
 the model profile; top-k, seed, penalties and string stops are unsupported on this Responses route.
 The discovered `grok-4.20-0309-non-reasoning` ID shares the existing non-reasoning sampling profile
