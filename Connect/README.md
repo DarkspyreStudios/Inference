@@ -4443,8 +4443,9 @@ dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- login --
 
 Claude subscription prompts require the official Claude CLI to be installed and signed in. The
 tester creates an `AnthropicClaudeCli` connection with `Credential = null`; Darkspyre.Inference.Connect.LLM does not read
-or store the CLI credential. Enter `sonnet`, `opus`, another alias, or an exact model ID manually
-because the tester does not configure the optional HTTP catalog credential.
+or store the CLI credential. `models --provider claude` discovers native choices through the CLI's
+initialization response without an HTTP catalog credential or generation prompt. A prompt accepts
+`sonnet`, `opus`, another returned choice, or a manually entered exact model ID.
 
 `claude-probe` uses the shared native CLI probe for `resume` and `cancel`. Resume disposes the
 first session and requires a completed second turn in the same conversation with exact marker
