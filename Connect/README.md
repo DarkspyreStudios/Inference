@@ -3352,6 +3352,9 @@ Active vocabulary names must parse as absolute URIs, and active `prefixItems` ar
 as specified by [Draft 2020-12 Core](https://json-schema.org/draft/2020-12/json-schema-core).
 Invalid shapes use the existing invalid-keyword error before dispatch, including with local validation
 selected. This check does not normalize vocabulary names or interpret their declarations.
+Active `contentSchema` values enter the same schema-position worklist for shape validation, but they
+do not become assertions on the outer instance. Their valid payloads remain outside native guarantees.
+Draft-07 retains `contentSchema` as inactive literal data.
 Draft-07 `dependencies` validates property-dependency arrays and indexes schema dependencies through
 the same position-aware worklist. Dependencies remain outside native guarantees. Unknown declared
 dialects remain unproven without applying a known dialect's keyword-container shapes. This boundary

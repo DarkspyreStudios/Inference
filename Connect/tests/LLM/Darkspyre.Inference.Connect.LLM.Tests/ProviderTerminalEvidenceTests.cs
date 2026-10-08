@@ -1029,6 +1029,22 @@ public sealed class ProviderTerminalEvidenceTests
             : CheckOriginalSchemaValidation(JsonElement.Parse(schema.ToJsonString()), validOutput: true, "1");
     }
 
+    [Theory]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "7", true)]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "[{}]", true)]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "{\"required\":7}", true)]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "{\"prefixItems\":[]}", true)]
+    [InlineData("http://json-schema.org/draft-07/schema#", "7", false)]
+    [InlineData("http://json-schema.org/draft-07/schema#", "{\"required\":7}", false)]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "false", false)]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "{\"type\":\"string\"}", false)]
+    public Task GrokContentSchemaShapeFollowsDeclaredDialect(string dialect, string content, bool malformed)
+    {
+        var schema = new JsonObject { ["$schema"] = dialect, ["type"] = "object", ["contentSchema"] = JsonNode.Parse(content) };
+        return malformed ? CheckInvalidSchemaAdmission(schema.ToJsonString())
+            : CheckOriginalSchemaValidation(JsonElement.Parse(schema.ToJsonString()), validOutput: true, "1");
+    }
+
     private static async Task CheckOriginalSchemaValidation(JsonElement schema, bool validOutput, string outputValue)
     {
         JsonNode body = JsonNode.Parse("""

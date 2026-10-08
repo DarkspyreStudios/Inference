@@ -289,7 +289,7 @@ internal static class XaiSchemaLimits
     {
         SchemaDraft.Draft7 => name is "$defs" or "prefixItems" or "dependentSchemas" or "dependentRequired"
             or "unevaluatedItems" or "unevaluatedProperties" or "$anchor" or "$dynamicAnchor"
-            or "$dynamicRef" or "$vocabulary" or "deprecated",
+            or "$dynamicRef" or "$vocabulary" or "deprecated" or "contentSchema",
         SchemaDraft.Draft202012 => name is "additionalItems" or "dependencies",
         _ => false
     };
@@ -387,6 +387,9 @@ internal static class XaiSchemaLimits
                                 }
                                 else Add(dependency.Value);
                             }
+                            break;
+                        case "contentSchema":
+                            pending.Push((value, baseUri, draft, origin, false));
                             break;
                         case "$defs":
                         case "definitions":
