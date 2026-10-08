@@ -2715,6 +2715,11 @@ Each model step permits at most two provider-overflow pauses, including across c
 A third overflow ends the run with `ProviderFailure` and
 "The context could not be reduced enough for this step." A completed model step resets the count.
 
+An unclassified managed-run exception emits a `LlmAgentWarningEvent` with its runtime type and
+managed stack frames before the generic failure completion. The diagnostic omits exception messages,
+source-file paths and provider payloads. Agent DS records this warning in the application log,
+not in the conversation.
+
 Paused continuation retains protected records exactly or reduces only their function tool-output
 parts. A reduction keeps the same ordered part count and replaces each part with text. Replacement
 text cannot exceed the original text part's length, including any recovery notice. Binary and

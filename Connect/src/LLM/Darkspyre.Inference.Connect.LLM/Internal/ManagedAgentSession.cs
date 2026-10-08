@@ -854,9 +854,15 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         }
         catch (Exception error)
         {
-            // Host exceptions/opaque provider payloads are not exposed as diagnostics or context.
+            // Unclassified exception messages and opaque provider payloads stay out of diagnostics and context.
             try
             {
+                if (error is not LlmProviderException)
+                {
+                    // Runtime type and managed frames contain no exception messages or provider payloads.
+                    await writer.WriteAsync(new LlmAgentWarningEvent(ThreadId, run.Id,
+                        $"Managed execution exception: {error.GetType().FullName}\n{new System.Diagnostics.StackTrace(error, fNeedFileInfo: false)}"), token);
+                }
                 await writer.WriteAsync(new LlmAgentTurnCompletedEvent(ThreadId, run.Id, LlmAgentCompletionReason.ProviderFailure,
                     error is LlmProviderException provider ? provider.Message : "Managed execution failed; inspect the host operation boundary."), token);
             }
