@@ -4271,6 +4271,15 @@ levels, including an explicitly empty list. Overrides can narrow but cannot wide
 Chat uses the existing connection/version model-list cache, shared with discovery. Native sessions
 retain optional `models` from their own initialize reply through the same catalog decoder, without
 another process or catalog query. Both lanes use the same effort resolver before prompt/control writes.
+The public console tester at source `e66ab01`, installed Claude CLI 2.1.289 and selected `sonnet`
+completes one Low-effort chat call with the exact synthetic marker `CONNECT_CLAUDE_CATALOG_121`.
+It reports `Completed`, `end_turn`, 567 input, 22 output and 589 total tokens. Cache observations
+report zero cached input and 565 cache-write input tokens; reasoning and cost remain unknown.
+The existing native resume case passes in 5.64 seconds with two turn attempts and no skips.
+Both turns complete, and a replacement process resumes the exact conversation ID and recalls
+the synthetic marker. These three turn attempts use the existing CLI sign-in without copying
+credentials or retrying. The results qualify the selected alias's catalog-backed chat and native
+initialization/resume paths, not every model, effort level, credential refresh or platform.
 A successful native schema result with a non-null `structured_output` also completes when its
 observed stop reason is `tool_use`. The [CLI structured-output contract](https://code.claude.com/docs/en/agent-sdk/structured-outputs)
 identifies that payload as the final structured result. Connect retains the actual stop reason.
