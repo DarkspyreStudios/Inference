@@ -495,6 +495,95 @@ public sealed class BedrockSafetyTests
     }
 
     [Theory]
+    [InlineData("us.amazon.nova-micro-v1:0")]
+    [InlineData("eu.amazon.nova-lite-v1:0")]
+    [InlineData("amazon.nova-pro-v1:0")]
+    [InlineData("jp.amazon.nova-2-lite-v1:0")]
+    public async Task DocumentedNovaModelsRefuseStrictToolsBeforeSdkAcquisition(string modelId)
+    {
+        int acquired = 0;
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => { acquired++; throw new InvalidOperationException("SDK acquired before strict tool refusal"); },
+            _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker();
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmChatRequest request = Request() with
+        {
+            ModelId = modelId,
+            Tools = [new LlmToolDefinition { Name = "notes", Strict = true, InputSchema = JsonElement.Parse("""{"type":"object"}""") }]
+        };
+        NotSupportedException failure = await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(ResourceConnection(streaming: true), request)) { }
+        });
+        Assert.Equal("The selected route cannot enforce strict tool input schemas.", failure.Message);
+        Assert.Equal(LlmStrictInputSchemaSupport.Unsupported, client.GetCapabilities(Connection(), modelId).Tools.StrictInputSchema);
+        Assert.True(Assert.IsType<LlmToolDefinition>(Assert.Single(request.Tools)).Strict);
+        Assert.Equal(0, acquired);
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+    }
+
+    [Fact]
+    public async Task DocumentedNovaCannotEnableUnsupportedNativeSchemas()
+    {
+        int acquired = 0;
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => { acquired++; throw new InvalidOperationException("SDK acquired before schema refusal"); },
+            _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker();
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmChatRequest request = Request() with
+        {
+            ModelId = "us.amazon.nova-micro-v1:0",
+            StructuredOutput = new() { Name = "answer", Schema = JsonElement.Parse("""{"type":"object"}""") }
+        };
+        LlmConnection connection = ResourceConnection(streaming: true) with
+        { CapabilityOverrides = new() { SupportsJsonSchema = true } };
+        NotSupportedException failure = await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+        });
+        Assert.Equal("Bedrock capability overrides cannot enable JSON Schema output for this Nova model.", failure.Message);
+        Assert.Equal(0, acquired);
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+    }
+
+    [Theory]
+    [InlineData("us.amazon.nova-micro-v1:0")]
+    [InlineData("eu.amazon.nova-lite-v1:0")]
+    [InlineData("amazon.nova-pro-v1:0")]
+    [InlineData("jp.amazon.nova-2-lite-v1:0")]
+    public async Task DocumentedNovaOrdinaryToolsRetainOriginalSchemas(string modelId)
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => throw new NotSupportedException(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var client = new BedrockLlmClient(factory, guard, new StubConverseInvoker(), NullLogger<BedrockLlmClient>.Instance);
+        JsonElement schema = JsonElement.Parse("""{"type":"object","properties":{"text":{"type":"string","maxLength":100}},"required":["text"]}""");
+        LlmChatRequest request = Request() with
+        { ModelId = modelId, Tools = [new LlmToolDefinition { Name = "notes", InputSchema = schema }] };
+        _ = client.ValidateRequest(Connection(), request);
+        ConverseRequest built = BedrockLlmClient.BuildRequest(Connection(), request, modelId);
+        foreach (var wire in new[]
+        {
+            ConverseRequestMarshaller.Instance.Marshall(built),
+            ConverseStreamRequestMarshaller.Instance.Marshall(BedrockLlmClient.ToStreamRequest(built))
+        })
+        {
+            Assert.Equal(modelId, Assert.Single(wire.PathResources).Value);
+            using Stream body = wire.ContentStream;
+            using JsonDocument sent = JsonDocument.Parse(body);
+            JsonElement specification = sent.RootElement.GetProperty("toolConfig").GetProperty("tools")[0].GetProperty("toolSpec");
+            Assert.False(specification.TryGetProperty("strict", out _));
+            Assert.Equal(schema.GetRawText(), specification.GetProperty("inputSchema").GetProperty("json").GetRawText());
+        }
+    }
+
+    [Theory]
     [InlineData("us.anthropic.claude-sonnet-4-5-20250929-v1:0")]
     [InlineData("eu.anthropic.claude-haiku-4-5-20251001-v1:0")]
     [InlineData("global.anthropic.claude-opus-4-5-20251101-v1:0")]

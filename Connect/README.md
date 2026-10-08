@@ -3949,8 +3949,18 @@ content; use `Attachments`. Claude materializes MCP document resources through i
 ## AWS Bedrock AgentCore Harness transport
 
 Converse sends a tool's `strict` flag only when `LlmToolDefinition.Strict` is true. Models without
-strict schemas, such as Amazon Nova, reject the field even when it is false; a strict tool on such a
-model fails with Bedrock's own error.
+strict schemas reject the field even when it is false. The exact base IDs
+`amazon.nova-micro-v1:0`, `amazon.nova-lite-v1:0`, `amazon.nova-pro-v1:0` and `amazon.nova-2-lite-v1:0`
+report Unsupported strict tool-input schemas and false native JSON Schema support after geographic-prefix
+normalization. Explicit strict tools fail before SDK acquisition through the shared tool validator.
+Overrides cannot enable native JSON Schema output for these models. Ordinary tools retain the original
+input schema and omit the strict flag in both Converse request modes. This follows the model-card
+restrictions for [Micro](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-micro.html),
+[Lite](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-lite.html),
+[Pro](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-pro.html) and
+[Nova 2 Lite](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.html), with
+[strict tool use included in structured outputs](https://docs.aws.amazon.com/bedrock/latest/userguide/structured-output.html).
+Other Nova versions and ARNs do not inherit this restriction merely from their name.
 
 Converse and ConverseStream send native response schemas through the SDK's
 `outputConfig.textFormat` with type `json_schema`. The original schema string, name and description
@@ -3962,8 +3972,8 @@ The exact IDs `openai.gpt-oss-20b-1:0`, `openai.gpt-oss-120b-1:0`,
 `anthropic.claude-sonnet-4-6`, `anthropic.claude-opus-4-6-v1`,
 `anthropic.claude-sonnet-4-5-20250929-v1:0`, `anthropic.claude-haiku-4-5-20251001-v1:0` and
 `anthropic.claude-opus-4-5-20251101-v1:0` advertise AWS-documented native schema support. Existing
-`us.`, `eu.`, `apac.` and `global.` prefix normalization applies. Other IDs and ARNs require an explicit schema capability
-override for a native attempt. An override can disable native enforcement on a known model.
+geographic-prefix normalization applies. IDs without a pinned support fact and ARNs require an explicit
+schema capability override for a native attempt. An override can disable native enforcement on a known model.
 Without native support, only an explicit `LocalValidation` fallback permits structured output;
 that request carries no native output configuration. JSON-object-only enforcement is unavailable.
 Provider schema compilation failures propagate without schema rewriting, retry or automatic fallback.
@@ -4071,8 +4081,8 @@ enable it. Explicit original-schema local validation remains available without c
 Its strict tool-input schema capability is Unsupported. An explicit strict tool fails with "The selected
 route cannot enforce strict tool input schemas." before SDK acquisition or resource preparation.
 [Strict tool use is a structured-output mechanism](https://docs.aws.amazon.com/bedrock/latest/userguide/structured-output.html).
-Ordinary tools remain available with their original input schemas and no strict flag. Other Converse
-models retain Unknown strict tool-input schema support.
+Ordinary tools remain available with their original input schemas and no strict flag. Converse models
+without a pinned strict-schema fact report Unknown support.
 
 Converse refuses nonempty connection or request `ProviderOptions` during pure request admission.
 The refusal precedes SDK acquisition, discovery, logging-control calls and resource preparation.

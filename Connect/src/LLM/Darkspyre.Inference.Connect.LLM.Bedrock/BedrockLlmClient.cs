@@ -87,6 +87,8 @@ internal sealed class BedrockLlmClient(
         (BedrockModelFamily family, string baseModelId) = BedrockModelFamilies.Classify(modelId ?? string.Empty);
         // The India Haiku 4.5 profile does not support structured outputs, unlike its other profiles.
         bool indiaHaiku = modelId is "in.anthropic.claude-haiku-4-5-20251001-v1:0";
+        bool novaWithoutStructuredOutput = baseModelId is "amazon.nova-micro-v1:0" or "amazon.nova-lite-v1:0"
+            or "amazon.nova-pro-v1:0" or "amazon.nova-2-lite-v1:0";
         LlmRichContentSupported richContent = ModelRichContent(modelId);
         bool claudeSampling = family != BedrockModelFamily.AnthropicClaude
             || AnthropicModelProfiles.Resolve(BedrockModelFamilies.AnthropicModelId(baseModelId), null).AllowsSampling;
@@ -94,7 +96,7 @@ internal sealed class BedrockLlmClient(
             Defaults with
             {
                 ReasoningLevels = offered,
-                Tools = indiaHaiku ? Defaults.Tools with
+                Tools = indiaHaiku || novaWithoutStructuredOutput ? Defaults.Tools with
                 { StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported } : Defaults.Tools,
                 SupportsJsonSchema = !indiaHaiku && baseModelId is "openai.gpt-oss-20b-1:0" or "openai.gpt-oss-120b-1:0"
                     or "anthropic.claude-sonnet-4-6" or "anthropic.claude-opus-4-6-v1"
@@ -125,6 +127,11 @@ internal sealed class BedrockLlmClient(
         {
             throw new NotSupportedException(
                 "Bedrock capability overrides cannot enable JSON Schema output for the India Haiku 4.5 inference profile.");
+        }
+        if (novaWithoutStructuredOutput && capabilities.SupportsJsonSchema)
+        {
+            throw new NotSupportedException(
+                "Bedrock capability overrides cannot enable JSON Schema output for this Nova model.");
         }
         if ((richContent.Images == LlmRichContentCarriage.Unsupported && capabilities.SupportsPromptImages)
             || (richContent.PdfDocuments == LlmRichContentCarriage.Unsupported && capabilities.SupportsPromptDocuments))
