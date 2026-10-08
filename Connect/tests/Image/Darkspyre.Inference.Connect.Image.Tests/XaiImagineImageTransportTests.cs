@@ -3,6 +3,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.Image;
+using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Connect.Image.Internal;
 using Darkspyre.Inference.Connect.Image.Providers;
 using Darkspyre.Inference.Connect.LLM;
@@ -12,6 +13,33 @@ namespace Darkspyre.Inference.Connect.Image.Tests;
 
 public sealed class XaiImagineImageTransportTests
 {
+    [Fact]
+    public void SingleReferenceEditingPreservesExplicitAspectRatio()
+    {
+        var workflow = new ImageWorkflow
+        {
+            Id = "selected-workflow",
+            Label = "Selected workflow",
+            Transport = ImageTransport.XaiImagine,
+            TransportConfiguration = JsonElement.Parse("""{"model":"grok-imagine-image-2.0","aspect_ratio":"16:9"}""")
+        };
+        const string url = "https://example.com/reference.png";
+        var request = new ImageGenerationRequest
+        {
+            ModelId = workflow.Id,
+            Prompt = "Add a red square",
+            References = [new UrlMediaSource(new(url))]
+        };
+
+        XaiImageProtocol.Validate(request, workflow);
+        (string route, JsonObject body) = XaiImageProtocol.Build(request, workflow, [new JsonObject { ["url"] = url }]);
+
+        Assert.Equal("images/edits", route);
+        Assert.Equal("16:9", body["aspect_ratio"]!.GetValue<string>());
+        Assert.Equal(url, body["image"]!["url"]!.GetValue<string>());
+        Assert.False(body.ContainsKey("images"));
+    }
+
     [Theory]
     [InlineData("grok-imagine-image-2.0", "medium")]
     [InlineData("caller-selected-image-model", "medium")]

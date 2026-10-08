@@ -2146,7 +2146,11 @@ generation/edit/extension bodies. They retain ordered references, explicit false
 submission IDs and one-poll status/model/output observations without requested-model or MIME
 fallbacks. The image codec copies ordered native `url` or `file_id` objects without inferred IDs or
 metadata. It validates HTTP(S) provider-fetch URL data without fetching content and preserves
-single-image edit `aspect_ratio: null`. Storage and nullable usage facts use finite owned projections
+explicit `aspect_ratio` values, including null, for single-reference and multi-reference edits.
+The [REST edit schema](https://docs.x.ai/developers/rest-api-reference/inference/images) and
+[official SDK request builder](https://github.com/xai-org/xai-sdk-python/blob/main/src/xai_sdk/image.py)
+admit this control alongside a single reference. The codec does not infer resulting dimensions.
+Storage and nullable usage facts use finite owned projections
 rather than raw response DTOs. These codecs alone perform no HTTP, upload, credential acquisition or receipt authorization.
 The Image and Video transports consume these codecs through the selected core and Files owner.
 Their registration does not establish OAuth entitlement or runtime qualification. Synchronous media
