@@ -175,6 +175,8 @@ converted to invented instants. The shared batch/metadata timestamp reader uses 
 for [xAI's Protobuf timestamps](https://github.com/xai-org/xai-proto/blob/main/proto/xai/api/v1/batch.proto).
 It accepts the provider's nine fractional digits and retains the first seven at `DateTimeOffset`'s
 100-nanosecond precision. The explicit UTC or numeric offset remains required; absent values remain null.
+The same reader accepts observed nonnegative 64-bit counts as JSON integers or quoted decimal
+strings, matching the provider's `int64` wire type. It does not pass counts through floating point.
 Mutation dispatch and validated prior/returned receipts survive late
 cancellation and failure, with response facts belonging only to the current HTTP stage.
 Deferred submission also uses that same selected snapshot, borrowed HTTP/Files owners and canonical

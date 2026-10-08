@@ -163,6 +163,8 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
     {
         { ValueKind: JsonValueKind.Undefined or JsonValueKind.Null } => null,
         { ValueKind: JsonValueKind.Number } value when value.TryGetInt64(out long count) && count >= 0 => count,
+        { ValueKind: JsonValueKind.String } value when long.TryParse(value.GetString(), NumberStyles.None,
+            CultureInfo.InvariantCulture, out long count) && count >= 0 => count,
         _ => throw new JsonException()
     };
 
