@@ -43,7 +43,7 @@ public sealed record LlmChatRequest
     /// <summary>Nucleus sampling in (0, 1]. Null leaves the provider default.</summary>
     public double? TopP { get; init; }
 
-    /// <summary>Sample from the K most likely tokens; positive. Null leaves the provider default.</summary>
+    /// <summary>Sample from the K most likely tokens. Null leaves the provider default; zero requires model support.</summary>
     public int? TopK { get; init; }
 
     /// <summary>A non-negative sampling seed. Determinism is not guaranteed.</summary>

@@ -4105,6 +4105,9 @@ and its geographic profiles. It retains caller temperature and maximum output to
 Nova 2's control restrictions do not apply to it. The existing reasoning projection merges its
 `reasoningConfig` with top-k without changing either field. Nova 1.0 models gain no reasoning levels.
 The source mapping does not establish live model availability or successful provider execution.
+The configured AWS connection rejects both `amazon.nova-lite-1-5-v1:0` and
+`us.amazon.nova-lite-1-5-v1:0` with `ValidationException` and "The provided model identifier is invalid."
+Neither identity is live-qualified. This does not establish availability on another connection or region.
 
 Converse streams through ConverseStream. A connection with `SupportsStreaming = false` sends Converse
 instead. Its events then arrive after generation ends, in the order reasoning, text, tool calls, then the
