@@ -4640,6 +4640,12 @@ descriptors. It cannot be combined with inline model, effort, schema or attachme
 not an `agent` option. Credentials, region and streaming selection remain on the selected connection.
 Owned JSON converters reject live resource and authorization services; the tester does not reconstruct
 them from data. The normal prompt/attachment mode uses the same request facade unchanged.
+The attachment-tool enum adds primitive string nodes through `JsonArray.Add(JsonNode)`. An explicit
+node conversion prevents overload resolution from selecting the generic, trim-unsafe serializer.
+The tool's required `kind` property and supported image/document values remain unchanged.
+The self-contained macOS ARM64 tester currently reaches assembly trimming but fails with `IL2104`
+for `Google.Apis.Core` 1.76.0 and `Newtonsoft.Json` 13.0.4. Warnings remain errors. This result does
+not qualify a trimmed executable, NativeAOT, every Connect family or release archives.
 
 ### Apple console harness
 

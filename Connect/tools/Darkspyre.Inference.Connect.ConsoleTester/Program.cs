@@ -567,8 +567,8 @@ internal static class Program
     internal static LlmAgentToolDefinition CreateAttachmentTool(bool supportsDocuments, bool supportsImages = true)
     {
         var kinds = new JsonArray();
-        if (supportsImages) kinds.Add(JsonValue.Create("image"));
-        if (supportsDocuments) kinds.Add(JsonValue.Create("document"));
+        if (supportsImages) kinds.Add((JsonNode?)JsonValue.Create("image"));
+        if (supportsDocuments) kinds.Add((JsonNode?)JsonValue.Create("document"));
         var schemaObject = new JsonObject
         {
             ["type"] = "object",
