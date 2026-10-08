@@ -1355,6 +1355,9 @@ stream-json content blocks. Its shared tool-output projection supplies text to t
 and appends native image/document blocks after the transcript and prompt attachments. Capability
 restrictions apply to that projection. The plain-text nonstreaming lane refuses resource-bound
 requests before resource callbacks.
+The focused resource tests supply Claude's catalog initialization reply before exercising chat through
+the facade. They check the actual chat input's document bytes and logical selection, and catalog
+process retirement. They do not launch the installed CLI or qualify a live provider.
 Native Claude Start, Resume and Fork borrow `CallerServices.Resources`. Opening validates the
 Workspace/Session selection snapshot before starting the CLI. Imported history stays logical until
 the first prompt; that prompt materializes the opening history and current input together. Later

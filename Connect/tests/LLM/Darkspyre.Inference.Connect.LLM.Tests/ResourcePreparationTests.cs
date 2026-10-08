@@ -480,12 +480,14 @@ public sealed class ResourcePreparationTests
         var handler = new Documents();
         using var http = new HttpClient(handler);
         var runner = new CliDocuments();
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        var catalog = new CatalogProcess();
+        var client = new ClaudeCliLlmClient(http, runner, catalog);
         await using var providers = new LlmProviderService(new Source(InlineConnection("claude-cli")), [client]);
         var events = new List<LlmStreamEvent>();
         await foreach (LlmStreamEvent item in providers.StreamAsync("connection", request with { Resources = access })) events.Add(item);
 
         Assert.Equal("answer", Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Text);
+        Assert.True(catalog.Disposed);
         ClaudeCliInvocation invocation = Assert.Single(runner.Invocations);
         Assert.Contains("stream-json", invocation.Arguments);
         using JsonDocument input = JsonDocument.Parse(invocation.StandardInput!);
@@ -698,6 +700,54 @@ public sealed class ResourcePreparationTests
     {
         public Task<IClaudeCliSessionProcess> StartAsync(ClaudeCliSessionInvocation invocation, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
+    }
+
+    private sealed class CatalogProcess : IClaudeCliSessionProcessFactory, IClaudeCliSessionProcess
+    {
+        private string? _reply;
+        public bool Disposed { get; private set; }
+
+        public Task<IClaudeCliSessionProcess> StartAsync(ClaudeCliSessionInvocation invocation, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IClaudeCliSessionProcess>(this);
+
+        public ValueTask WriteLineAsync(string line, CancellationToken cancellationToken = default)
+        {
+            using JsonDocument document = JsonDocument.Parse(line);
+            JsonElement request = document.RootElement;
+            Assert.Equal("control_request", request.GetProperty("type").GetString());
+            Assert.Equal("initialize", request.GetProperty("request").GetProperty("subtype").GetString());
+            _reply = new JsonObject
+            {
+                ["type"] = "control_response",
+                ["response"] = new JsonObject
+                {
+                    ["subtype"] = "success",
+                    ["request_id"] = request.GetProperty("request_id").GetString(),
+                    ["response"] = new JsonObject
+                    {
+                        ["models"] = new JsonArray(new JsonObject
+                        { ["value"] = InlineModel("claude-cli"), ["displayName"] = "Claude Sonnet" })
+                    }
+                }
+            }.ToJsonString();
+            return ValueTask.CompletedTask;
+        }
+
+        public ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken = default)
+        {
+            string? reply = _reply;
+            _reply = null;
+            return ValueTask.FromResult(reply);
+        }
+
+        public Task<ClaudeCliProcessResult> WaitForExitAsync(CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Catalog discovery must consume the initialization reply.");
+
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class Documents(Exception? failure = null, string destination = "anthropic", bool streaming = true) : HttpMessageHandler
