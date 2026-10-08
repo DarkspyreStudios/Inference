@@ -8,6 +8,100 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class SelfHostCatalogTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TemperatureAdmissionUsesTheEngineSupportFlag(bool supported)
+    {
+        var engine = new Engine { Capabilities = new() { SupportsTemperature = supported } };
+        await using var service = new LlmProviderService(new Source(), [new SelfHostLlmClient(new Host(engine))]);
+        ILlmInference inference = service.Bind("connection");
+        LlmRequestAccounting measurement = await service.MeasureRequestAsync("connection", new()
+        { ModelId = "model", Messages = [new("user", "hello")], Temperature = 0.4 });
+        Assert.Equal(supported, measurement.IsSupported);
+        Assert.Null(engine.LastRequest);
+        if (!supported)
+        {
+            Assert.Null(measurement.UsedContextTokens);
+            InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() => inference.CompleteAsync(new()
+            { ModelId = "model", Messages = [new("user", "hello")], Temperature = 0.4 }));
+            Assert.Equal(InferenceFailureCode.UnsupportedFeature, failure.Code);
+            Assert.Null(engine.LastRequest);
+        }
+        LlmInferenceResult result = await inference.CompleteAsync(new()
+        { ModelId = "model", Messages = [new("user", "hello")], Temperature = supported ? 0.4 : null });
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("engine answer", result.Text);
+        Assert.Equal(supported ? 0.4 : (double?)null, engine.LastRequest!.Temperature);
+    }
+
+    [Theory]
+    [InlineData(LlmOutputLimitEnforcement.Unsupported)]
+    [InlineData(LlmOutputLimitEnforcement.Unknown)]
+    [InlineData(LlmOutputLimitEnforcement.ProviderEnforced)]
+    public async Task OutputCapAdmissionPreservesTheEngineEnforcementFact(LlmOutputLimitEnforcement enforcement)
+    {
+        var engine = new Engine { Capabilities = new() { OutputLimitEnforcement = enforcement } };
+        await using var service = new LlmProviderService(new Source(), [new SelfHostLlmClient(new Host(engine))]);
+        ILlmInference inference = service.Bind("connection");
+        bool supported = enforcement != LlmOutputLimitEnforcement.Unsupported;
+        LlmRequestAccounting measurement = await service.MeasureRequestAsync("connection", new()
+        { ModelId = "model", Messages = [new("user", "hello")], MaxOutputTokens = 16 });
+        Assert.Equal(supported, measurement.IsSupported);
+        Assert.Equal(enforcement, measurement.OutputLimitEnforcement);
+        Assert.Null(engine.LastRequest);
+        if (!supported)
+        {
+            InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() => inference.CompleteAsync(new()
+            { ModelId = "model", Messages = [new("user", "hello")], MaxOutputTokens = 16 }));
+            Assert.Equal(InferenceFailureCode.UnsupportedFeature, failure.Code);
+            Assert.Null(engine.LastRequest);
+        }
+        LlmInferenceResult result = await inference.CompleteAsync(new()
+        { ModelId = "model", Messages = [new("user", "hello")], MaxOutputTokens = supported ? 16 : null });
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("engine answer", result.Text);
+        Assert.Equal(supported ? 16 : (int?)null, engine.LastRequest!.MaxOutputTokens);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnsupportedReasoningRefusesBeforeGenerationOrAccounting(bool accounting)
+    {
+        var engine = new Engine
+        {
+            Capabilities = new() { ReasoningLevels = LlmReasoningEffort.Levels(LlmReasoningLevel.Low) }
+        };
+        await using var service = new LlmProviderService(new Source(), [new SelfHostLlmClient(new Host(engine))]);
+        ILlmInference inference = service.Bind("connection");
+
+        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(async () =>
+        {
+            if (accounting)
+                await service.MeasureRequestAsync("connection", new()
+                { ModelId = "model", Messages = [new("user", "hello")], ReasoningLevel = LlmReasoningLevel.High });
+            else
+                await inference.CompleteAsync(new()
+                { ModelId = "model", Messages = [new("user", "hello")], ReasoningLevel = LlmReasoningLevel.High });
+        });
+        Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
+        Assert.Null(engine.LastRequest);
+
+        LlmRequestAccounting measurement = await service.MeasureRequestAsync("connection", new()
+        { ModelId = "model", Messages = [new("user", "hello")], ReasoningLevel = LlmReasoningLevel.Low });
+        Assert.True(measurement.IsSupported);
+        Assert.True(measurement.UsedContextTokens > 0);
+        Assert.Null(engine.LastRequest);
+
+        LlmInferenceResult result = await inference.CompleteAsync(new()
+        { ModelId = "model", Messages = [new("user", "hello")], ReasoningLevel = LlmReasoningLevel.Low });
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("engine answer", result.Text);
+        Assert.Equal(LlmReasoningLevel.Low, engine.LastRequest!.ReasoningLevel);
+        Assert.Equal("model", engine.LastRequest.ModelId);
+    }
+
     [Fact]
     public async Task ExplicitRefreshReplacesTheKeptEngineCatalogAndTheConnectCatalog()
     {
@@ -70,30 +164,41 @@ public sealed class SelfHostCatalogTests
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
-    private sealed class Host(ILlmInference engine) : ILlmSelfHost
+    private sealed class Host(Engine engine) : ILlmSelfHost
     {
         public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<LlmSelfHostEngine>>([new("engine", "Engine")]);
         public Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default) =>
-            Task.FromResult(engine);
+            Task.FromResult<ILlmInference>(engine);
         public Task<IEmbeddingInference> GetEmbeddingInferenceAsync(string engineId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
-        public LlmCapabilities? GetCapabilities(string engineId, string? modelId) => new() { SupportsModelListing = true, SupportsPromptImages = true };
+        public LlmCapabilities? GetCapabilities(string engineId, string? modelId) =>
+            engine.Capabilities;
     }
 
     private sealed class Engine : ILlmInference
     {
         private IReadOnlyList<LlmModelInfo>? _kept;
         public IReadOnlyList<LlmModelInfo> Models { get; set; } = [];
+        public LlmCapabilities Capabilities { get; init; } = new() { SupportsModelListing = true, SupportsPromptImages = true };
+        public LlmInferenceRequest? LastRequest { get; private set; }
         public InferenceImplementationDescriptor Descriptor { get; } = new("engine", "Engine",
             InferenceImplementationKind.Tensor, InferenceTask.TextGeneration);
         public Task<LlmCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new LlmCapabilities { SupportsModelListing = true, SupportsPromptImages = true });
+            Task.FromResult(Capabilities);
         public Task<IReadOnlyList<LlmModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(_kept ??= Models);
         public Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(_kept = Models);
-        public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmInferenceRequest request, CancellationToken cancellationToken = default) =>
-            throw new NotSupportedException();
+        public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmInferenceRequest request, CancellationToken cancellationToken = default)
+        {
+            LastRequest = request;
+            return LlmInferenceExtensions.CompleteAsStreamAsync(new()
+            {
+                Text = "engine answer",
+                Status = LlmCompletionStatus.Completed,
+                Provenance = new() { ImplementationId = "engine", ModelId = request.ModelId }
+            }, cancellationToken);
+        }
     }
 }

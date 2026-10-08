@@ -140,28 +140,9 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
                 $"{ProviderDefinition.DisplayName} has no non-streaming request, so streaming cannot be turned off for this connection.");
         }
 
-        if (request.Temperature is not null && !capabilities.SupportsTemperature)
-        {
-            throw new NotSupportedException("The selected connection does not support temperature.");
-        }
-
-        if (request.Temperature is double temperature && !double.IsFinite(temperature))
-        {
-            throw new ArgumentOutOfRangeException(nameof(request), "Temperature must be finite.");
-        }
-
-        if (request.MaxOutputTokens is <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(request), "Maximum output tokens must be positive.");
-        }
-
         ValidateSampling(request, capabilities);
         LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
-        if (request.MaxOutputTokens is not null
-            && capabilities.OutputLimitEnforcement == Common.LLM.LlmOutputLimitEnforcement.Unsupported)
-        {
-            throw new NotSupportedException("This route cannot enforce MaxOutputTokens; an output reserve is budgeting only.");
-        }
+        ValidateOutputLimit(request, capabilities);
 
         StructuredOutput.ValidateRequest(request);
 
@@ -178,6 +159,10 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
 
     internal static void ValidateSampling(LlmChatRequest request, LlmProviderCapabilities capabilities)
     {
+        if (request.Temperature is not null && !capabilities.SupportsTemperature)
+        { throw new NotSupportedException("The selected connection does not support temperature."); }
+        if (request.Temperature is double temperature && !double.IsFinite(temperature))
+        { throw new ArgumentOutOfRangeException(nameof(request), "Temperature must be finite."); }
         if (capabilities.MaxStopSequences < 0)
         { throw new ArgumentOutOfRangeException(nameof(capabilities), "The stop-sequence limit cannot be negative."); }
         if (request.TopP is not null && !capabilities.SupportsTopP)
@@ -204,6 +189,15 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
         { throw new ArgumentException("Stop sequences must contain non-empty strings.", nameof(request)); }
         if (request.StopSequences.Count > capabilities.MaxStopSequences)
         { throw new NotSupportedException($"The selected model accepts at most {capabilities.MaxStopSequences} stop sequences."); }
+    }
+
+    internal static void ValidateOutputLimit(LlmChatRequest request, LlmProviderCapabilities capabilities)
+    {
+        if (request.MaxOutputTokens is <= 0)
+        { throw new ArgumentOutOfRangeException(nameof(request), "Maximum output tokens must be positive."); }
+        if (request.MaxOutputTokens is not null
+            && capabilities.OutputLimitEnforcement == Common.LLM.LlmOutputLimitEnforcement.Unsupported)
+        { throw new NotSupportedException("This route cannot enforce MaxOutputTokens; an output reserve is budgeting only."); }
     }
 
     internal static void ValidatePromptAttachments(

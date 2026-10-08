@@ -4271,6 +4271,15 @@ levels, including an explicitly empty list. Overrides can narrow but cannot wide
 Chat uses the existing connection/version model-list cache, shared with discovery. Native sessions
 retain optional `models` from their own initialize reply through the same catalog decoder, without
 another process or catalog query. Both lanes use the same effort resolver before prompt/control writes.
+The public console tester at source `e66ab01`, installed Claude CLI 2.1.289 and selected `sonnet`
+completes one Low-effort chat call with the exact synthetic marker `CONNECT_CLAUDE_CATALOG_121`.
+It reports `Completed`, `end_turn`, 567 input, 22 output and 589 total tokens. Cache observations
+report zero cached input and 565 cache-write input tokens; reasoning and cost remain unknown.
+The existing native resume case passes in 5.64 seconds with two turn attempts and no skips.
+Both turns complete, and a replacement process resumes the exact conversation ID and recalls
+the synthetic marker. These three turn attempts use the existing CLI sign-in without copying
+credentials or retrying. The results qualify the selected alias's catalog-backed chat and native
+initialization/resume paths, not every model, effort level, credential refresh or platform.
 A successful native schema result with a non-null `structured_output` also completes when its
 observed stop reason is `tool_use`. The [CLI structured-output contract](https://code.claude.com/docs/en/agent-sdk/structured-outputs)
 identifies that payload as the final structured result. Connect retains the actual stop reason.
@@ -4551,6 +4560,16 @@ Generation and request accounting reject nonempty connection or request `Provide
 request controls to the engine. An engine owns its capabilities; connection overrides do not change
 them. Settings cannot save these unsupported options. Model and capability discovery remain available
 so an invalid saved connection can be inspected and repaired.
+Generation validates the requested reasoning level against the selected engine's asynchronous
+capability result before enumerating its stream. Nonmutating accounting validates the same control
+against one synchronous host capability snapshot without acquiring or running an engine.
+An unsupported explicit level fails with `InvalidRequest`; accepted and omitted levels retain their
+original values in the Common request. Both paths use the shared reasoning admission validator.
+The shared sampling validator checks temperature support and finiteness for both SelfHost paths.
+Accounting reports an unsupported temperature request as unsupported instead of producing a text
+estimate. Generation uses the same output-limit validator as the HTTP adapters before calling the
+engine stream. `Unsupported` refuses an explicit cap; `Unknown` permits an attempt without changing
+the enforcement fact. Accepted temperature and output-cap values pass unchanged to Common.
 
 Agent sessions run on the managed agent lane, which executes host tools; context estimates count the
 request text with Connect's local tokenizer. Binary prompt attachments, structured tool content and

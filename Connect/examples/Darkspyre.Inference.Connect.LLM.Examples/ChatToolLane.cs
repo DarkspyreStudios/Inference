@@ -60,7 +60,9 @@ public static class ChatToolLane
 
             LlmToolResult[] toolResults =
             [
-                .. result.ToolCalls.Select(WeatherTool.Execute)
+                .. result.ToolCalls.Select(call => call is LlmToolCall function
+                    ? WeatherTool.Execute(function)
+                    : throw new NotSupportedException("The weather example cannot execute shell tool calls."))
             ];
             messages.Add(new LlmChatMessage("assistant", result.Text)
             {

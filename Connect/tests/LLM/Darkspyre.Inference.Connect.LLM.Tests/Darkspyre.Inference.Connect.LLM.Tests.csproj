@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <Compile Include="..\..\..\examples\Darkspyre.Inference.Connect.LLM.Examples\WeatherTool.cs" Link="Examples\WeatherTool.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -65,6 +65,8 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         CommonLlm.ILlmInference engine = await host.GetInferenceAsync(connection.Endpoint, cancellationToken).ConfigureAwait(false);
         var capabilities = ToConnect(await engine.GetCapabilitiesAsync(request.ModelId, cancellationToken).ConfigureAwait(false));
         LlmClientBase.ValidateSampling(request, capabilities);
+        LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
+        LlmClientBase.ValidateOutputLimit(request, capabilities);
         HostedTools.Validate(request, capabilities);
         ClientTools.Validate(request, capabilities.SupportsShellTools);
         await foreach (CommonLlm.LlmStreamEvent item in engine.StreamAsync(ToCommon(request), cancellationToken).ConfigureAwait(false))
@@ -80,9 +82,11 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(request);
         ValidateOptions(connection, request);
-        HostedTools.Validate(request, GetCapabilities(connection, request.ModelId));
-        ClientTools.Validate(request, GetCapabilities(connection, request.ModelId).SupportsShellTools);
-        LlmClientBase.ValidateSampling(request, GetCapabilities(connection, request.ModelId));
+        LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        HostedTools.Validate(request, capabilities);
+        ClientTools.Validate(request, capabilities.SupportsShellTools);
+        LlmClientBase.ValidateSampling(request, capabilities);
+        LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
         if (request.Messages.Any(message => message.Attachments.Count > 0
             || ClientTools.Functions(message.ToolResults).Any(result => result.Output.StructuredContent is not null
                 || result.Output.Parts.Any(part => part is not CommonLlm.LlmToolOutputText))))

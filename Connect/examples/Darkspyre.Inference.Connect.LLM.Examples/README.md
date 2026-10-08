@@ -29,6 +29,11 @@ the host's chat loop on top of an agent session.
 All eight entry points use the same deterministic `get_weather` fixture from
 [`WeatherTool.cs`](WeatherTool.cs). That file shows both public tool-definition types, strict
 argument validation, cancellation, success results, and error results.
+The schema is parsed from JSON, and dynamic results use `JsonObject`. The fixture requires no
+reflection-based serialization. The existing LLM tool-output tests compile this same sample source
+and check its schema, successful weather result and both error-result paths with reflection disabled.
+The chat lane executes function members of the typed tool-call union. A shell call fails explicitly;
+this weather fixture has no shell executor.
 
 [`AttachmentToolResults.cs`](AttachmentToolResults.cs) shows the shared attachment contract for both
 lanes. A tool supplies only `LlmBinaryKind.Image` or `LlmBinaryKind.Document`, a filename,
