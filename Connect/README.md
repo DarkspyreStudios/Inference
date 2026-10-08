@@ -4107,11 +4107,13 @@ requests.
 Converse streams use the factory's existing bounded producer. Factory retirement cancels and drains
 the producer, closes owned streams and releases clients without waiting for paused callers to resume.
 Actual cleanup failures remain visible to retirement callers.
-Converse HTTP and AWS service failures retain credential-redacted explanations and observed status,
-code and request IDs through the existing failure classifier. Raw exception graphs remain private.
+Converse HTTP, AWS service, SDK client and unmodeled event-stream failures retain credential-redacted
+explanations through the existing failure classifier. Service failures retain observed status, code
+and request IDs. The stream reader unwraps recognized service, client and HTTP causes; HTTP causes
+retain their observed status. Raw exception graphs remain private.
 Logging-verification refusal keeps its `InvalidOperationException` and exposes its classified safe
-cause; no generation request follows that refusal. A transport failure supplies no invented provider
-code, request ID or retry delay.
+cause; no generation request follows that refusal. A transport, SDK client or unmodeled stream failure
+supplies no invented status, provider code, request ID or retry delay.
 
 Converse also runs on the host-owned managed agent runtime. `AddLlmConnectBedrock()` registers an
 `ILlmAgentClient` for `AwsBedrockConverse`; each model step is one Converse request, and the host runs

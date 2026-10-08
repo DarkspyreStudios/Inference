@@ -318,7 +318,8 @@ internal sealed class BedrockLlmClient(
             return new InvalidOperationException(SecretRedactor.Sanitize(wrapped.Message,
                 LlmCredential.Parse(connection.Credential), connection.AdditionalHeaders.Values), classifiedCause);
         }
-        if (error is not Amazon.Runtime.AmazonServiceException && error is not HttpRequestException
+        if (error is not Amazon.Runtime.AmazonServiceException && error is not Amazon.Runtime.AmazonClientException
+            && error is not BedrockRuntimeEventStreamException && error is not HttpRequestException
             && error is not LlmProviderException { Transport: LlmTransport.AwsBedrockConverse }) return error;
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         string Safe(string value) => SecretRedactor.Sanitize(value, credential, connection.AdditionalHeaders.Values);
@@ -332,6 +333,9 @@ internal sealed class BedrockLlmClient(
                 classified.RetryAfter,
                 classified.SanitizedResponseBody is { } classifiedBody ? Safe(classifiedBody) : null,
                 new ConverseFailureEvidence(classified), classified.IsContextOverflow);
+        if (error is Amazon.Runtime.AmazonClientException or BedrockRuntimeEventStreamException)
+            return new LlmProviderException($"Bedrock {Safe(error.GetType().Name)}: {Safe(error.Message)}",
+                LlmTransport.AwsBedrockConverse, innerException: new ConverseFailureEvidence(error));
         var aws = (Amazon.Runtime.AmazonServiceException)error;
         string message = Safe(aws.Message);
         if (aws is ModelStreamErrorException stream)

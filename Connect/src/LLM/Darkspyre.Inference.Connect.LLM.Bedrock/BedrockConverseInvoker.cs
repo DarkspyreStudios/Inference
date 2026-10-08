@@ -87,12 +87,14 @@ internal sealed class BedrockConverseInvoker(BedrockClientFactory factory) : IBe
     }
 
     /// <summary>
-    /// Classifies the SDK's actual input overflow after cancellation, and preserves other typed stream failures.
+    /// Classifies the SDK's actual input overflow after cancellation, and unwraps recognized service,
+    /// client and HTTP failures for the adapter's diagnostic boundary.
     /// </summary>
     internal static Exception Unwrap(BedrockRuntimeEventStreamException exception, CancellationToken cancellationToken) =>
         cancellationToken.IsCancellationRequested
             ? new OperationCanceledException(cancellationToken)
-            : Classify(exception.InnerException as AmazonBedrockRuntimeException ?? (Exception)exception);
+            : Classify(exception.InnerException is AmazonBedrockRuntimeException
+                or Amazon.Runtime.AmazonClientException or HttpRequestException ? exception.InnerException : exception);
 
     private static Exception Classify(Exception error) => error is ValidationException validation
         && LlmContextOverflow.BedrockValidation(validation.Message) ? ContextOverflow(validation) : error;

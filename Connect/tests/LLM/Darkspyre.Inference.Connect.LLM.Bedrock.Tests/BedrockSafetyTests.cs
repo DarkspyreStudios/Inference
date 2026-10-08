@@ -278,6 +278,46 @@ public sealed class BedrockSafetyTests
         Assert.Equal(streaming ? 1 : 0, invoker.StreamRequests.Count);
     }
 
+    [Theory]
+    [InlineData("client", false)]
+    [InlineData("client", true)]
+    [InlineData("event", true)]
+    [InlineData("wrapped-http", true)]
+    public async Task SdkClientAndEventFailuresRetainSafeDiagnostics(string kind, bool streaming)
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => new StreamControl(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        Exception original = kind switch
+        {
+            "client" => new AmazonClientException("SDK client failed for fixture-secret.", new IOException("Private SDK graph fixture-key.")),
+            "event" => new BedrockRuntimeEventStreamException("SDK stream failed for fixture-secret.", new IOException("Private SDK graph fixture-key.")),
+            _ => BedrockConverseInvoker.Unwrap(new BedrockRuntimeEventStreamException("Stream wrapper fixture-key.",
+                new HttpRequestException("HTTP stream failed for fixture-secret.", new IOException("Private SDK graph fixture-key."), HttpStatusCode.ServiceUnavailable)),
+                CancellationToken.None)
+        };
+        var invoker = new StubConverseInvoker { Failure = original };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        var events = new List<LlmStreamEvent>();
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(ResourceConnection(streaming), Request())) events.Add(item);
+        });
+        string explanation = kind switch { "client" => "SDK client", "event" => "SDK stream", _ => "HTTP stream" };
+        Assert.Contains($"{explanation} failed for [REDACTED].", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(LlmTransport.AwsBedrockConverse, failure.Transport);
+        Assert.Equal(kind == "wrapped-http" ? HttpStatusCode.ServiceUnavailable : (HttpStatusCode?)null, failure.StatusCode);
+        Assert.Null(failure.ProviderCode);
+        Assert.Null(failure.RequestId);
+        Assert.Null(failure.RetryAfter);
+        Assert.DoesNotContain("fixture-key", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("fixture-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("Private SDK graph", failure.ToString(), StringComparison.Ordinal);
+        Assert.Empty(events.OfType<LlmChatCompletionEvent>());
+        Assert.Equal(streaming ? 0 : 1, invoker.ConverseRequests.Count);
+        Assert.Equal(streaming ? 1 : 0, invoker.StreamRequests.Count);
+    }
+
     [Fact]
     public async Task LoggingVerificationRefusalRetainsSafeAwsCauseWithoutSendingGeneration()
     {
