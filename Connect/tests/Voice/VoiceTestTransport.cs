@@ -36,6 +36,7 @@ internal static class VoiceTestData
         Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
         Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]", failure.RequestId);
         Assert.Equal(TimeSpan.FromSeconds(17), failure.RetryAfter);
+        Assert.Equal("Grok request failed (429): Speech model unavailable: [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED].", failure.Message);
         foreach (string value in new[] { "private speech source", "dummy-test-token", "binding-secret", "family-secret", "default-secret", "provider-secret" })
             Assert.DoesNotContain(value, failure.ToString(), StringComparison.Ordinal);
     }
@@ -85,7 +86,7 @@ internal sealed class RejectedVoiceHttp(string path) : HttpMessageHandler
         var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
         {
             Content = new StringContent("""
-                {"error":{"code":"rate_limit_dummy-test-token_binding-secret_family-secret_default-secret_provider-secret","message":"private speech source","refresh_token":"provider-secret"}}
+                {"error":{"code":"rate_limit_dummy-test-token_binding-secret_family-secret_default-secret_provider-secret","message":"Speech model unavailable: dummy-test-token binding-secret family-secret default-secret provider-secret.","refresh_token":"provider-secret"},"input":"private speech source"}
                 """)
         };
         response.Headers.Add("x-request-id", "request-binding-secret-family-secret-default-secret");

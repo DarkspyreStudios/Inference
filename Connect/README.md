@@ -994,6 +994,8 @@ REST synthesis and transcription failures use the shared xAI HTTP classifier. It
 includes selected-connection headers, family headers and effective outgoing request headers, including
 borrowed HttpClient defaults. Public errors retain sanitized provider codes, request IDs, actual HTTP
 status and retry delay. They do not expose reflected protected headers or the raw speech response body.
+Structured HTTP rejections retain the redacted named error explanation. Unrelated response fields
+and unstructured bodies remain withheld; an absent explanation keeps the fixed speech rejection label.
 REST HTTP transport failures retain their bounded, credential-and-header-redacted explanation,
 `HttpRequestError` and any reported status. Both speech adapters use the same boundary. Original
 exception evidence stays private; its raw message and inner graph are not diagnostic output.
@@ -3199,9 +3201,11 @@ entitlement failure (`AccessDenied`). Unknown 403 responses remain provider erro
 403 matching is not implemented or live-qualified. Errors never trigger a retry or refresh.
 The shared HTTP classifier preserves the response status, observed request ID and delta
 `Retry-After` across its resource and authentication routes. Ordinary provider error codes come from
-the redacted error envelope, including when a route withholds the diagnostic body. Batch and deferred
-resource failures retain that safe code. Request IDs use the same credential redactor as diagnostic
-bodies. A reported retry delay is diagnostic data, not permission to retry.
+the redacted error envelope, including when a route withholds the diagnostic body. Body-withholding
+routes retain only the named JSON error explanation; unrelated fields and unstructured bodies are
+not promoted to diagnostics. An absent named explanation keeps the route's fixed rejection label.
+Batch and deferred resource failures retain that safe code and explanation. Request IDs use the
+same credential redactor as diagnostic bodies. A reported retry delay is diagnostic data, not permission to retry.
 Grok catalog send failures use the selected credential and actual outgoing headers for redaction,
 including borrowed-client defaults. Typed failures retain their redacted explanation, provider code,
 request ID, status, retry delay and overflow flag. Transport failures expose a redacted explanation;

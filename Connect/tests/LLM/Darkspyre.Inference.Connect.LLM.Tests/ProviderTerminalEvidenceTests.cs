@@ -13,6 +13,56 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ProviderTerminalEvidenceTests
 {
     [Theory]
+    [InlineData("speech")]
+    [InlineData("image")]
+    [InlineData("embedding")]
+    [InlineData("search")]
+    [InlineData("files")]
+    public async Task GrokBodyWithholdingRetainsOnlyTheRedactedNamedExplanation(string route)
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Content = new StringContent("""
+                {"error":{"code":"limit_provider-secret","message":"Model unavailable: provider-secret.","refresh_token":"provider-secret"},"input":"private input"}
+                """)
+        };
+        response.Headers.Add("x-request-id", "request-1");
+        response.Headers.RetryAfter = new(TimeSpan.FromSeconds(17));
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => route switch
+        {
+            "speech" => XaiErrorClassifier.ThrowIfUnsuccessfulSpeechAsync(response, null, [], default),
+            "image" => XaiErrorClassifier.ThrowIfUnsuccessfulImageAsync(response, null, [], default),
+            "embedding" => XaiErrorClassifier.ThrowIfUnsuccessfulEmbeddingAsync(response, default),
+            "search" => XaiErrorClassifier.ThrowIfUnsuccessfulDocumentSearchAsync(response, default),
+            _ => XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, null, [], default, diagnosticBody: false)
+        });
+
+        Assert.Equal("Grok request failed (429): Model unavailable: [REDACTED].", failure.Message);
+        Assert.Equal("Model unavailable: [REDACTED].", failure.SanitizedResponseBody);
+        Assert.Equal("limit_[REDACTED]", failure.ProviderCode);
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("request-1", failure.RequestId);
+        Assert.Equal(TimeSpan.FromSeconds(17), failure.RetryAfter);
+        Assert.DoesNotContain("private input", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("provider-secret", failure.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("private speech source")]
+    [InlineData("{\"input\":\"private speech source\"}")]
+    public async Task GrokBodyWithholdingDoesNotPromoteUnstructuredBodiesToExplanations(string body)
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.BadRequest) { Content = new StringContent(body) };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            XaiErrorClassifier.ThrowIfUnsuccessfulSpeechAsync(response, null, [], default));
+
+        Assert.Equal("Grok request failed (400): Provider rejected the speech request.", failure.Message);
+        Assert.DoesNotContain("private speech source", failure.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task GrokVisibleOutputCapDoesNotPromiseATotalOutputCeiling(bool streaming)
@@ -1336,7 +1386,7 @@ public sealed class ProviderTerminalEvidenceTests
 
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
         Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
-        Assert.Equal("Grok request failed (429): Provider rejected the Files request.", failure.Message);
+        Assert.Equal("Grok request failed (429): Rate limit [REDACTED] [REDACTED] [REDACTED]", failure.Message);
         Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
         Assert.Equal(retryAfter, failure.RetryAfter);
         Assert.Equal(failure.RequestId, operation.Observation.RequestId);
