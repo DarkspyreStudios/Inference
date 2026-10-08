@@ -3109,6 +3109,13 @@ Draft-07 `$ref` siblings cannot supply that proof. This is not a general satisfi
 Local validation uses the original schema and reports invalid output without
 rewriting it or retrying. Legacy fragment-ID resolution, complete dialect-specific keyword shapes
 and complete regex classification or original-dialect ECMA regex evaluation remain incomplete.
+Live Global/Default qualification on `grok-4.20-0309-non-reasoning` covers one unchanged object
+schema with required string `marker`, enum `GROK-121-SCHEMA-OK` and `additionalProperties:false`.
+Streaming and genuine nonstreaming requests both complete with finish reason `completed`,
+`ProviderJsonSchema` enforcement and valid output containing that marker. Reported usage is
+250 input/18 output tokens for streaming and 250 input/15 output for nonstreaming.
+These two requests use only the tester's separate OAuth credential, with no retry or schema/output
+rewrite. They do not qualify regex, strict functions, other schemas/models, refresh or media.
 The shared `StructuredOutput` validator builds the unchanged original schema in a fresh local
 registry for each validation. Repeated `$id` values across requests do not collide or retain request
 graphs in the global registry. Existing supplier default dialect, vocabulary and dialect registries,
