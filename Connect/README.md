@@ -3233,6 +3233,19 @@ The request supplies 128 output tokens and two hosted turns, uses only the teste
 credential, and performs no retry or account/route fallback. This qualifies these reported
 normalized facts on the selected route, not subscription billing, raw-provider equality, every
 category's nonzero mapping, headers, document-counter pairing or nonstreaming accounting.
+One streaming OAuth image-generation request at production source `0dacacd` on Global/Default
+`grok-4.7` reports a native start, `Generating` progress, a completed hosted call and ordinary
+answer `OK`. One genuine nonstreaming request at `a6f7b5f` reports a completed hosted call and
+108,299 typed image bytes. Both use Low reasoning, 256 requested output tokens, one hosted turn
+and explicit Generate action, without input resources or another image request. Both chat results
+are `Completed` with finish reason `completed` and report one ImageGeneration call, one total hosted
+call, zero other named hosted calls and zero sources. Nonstreaming usage reports 5,493 input,
+128 output, 5,621 total, 1,664 cached input and 81 reasoning tokens, unknown cache-write tokens
+and provider-reported USD cost `0.0531477200`. The streaming run establishes lifecycle delivery;
+its formatter does not report payload presence. The nonstreaming run establishes typed payload
+delivery, not decoded pixels, dimensions, streaming byte delivery or Session/Workspace commit.
+Neither run writes image bytes to a file or log, retries, changes account/route or establishes
+separate subscription billing from the reported cost.
 
 `LlmChatRequest.ProviderControls`, its Common request projection and `LlmAgentTurnRequest`
 carry `XaiMultiAgentControls`. An absent control inherits `XaiConnectionOptions.MultiAgent`;
@@ -3248,7 +3261,8 @@ through tool iterations; Connect and batch Resources metadata preserve the fixed
 `AddLlmConnect` registers the Grok provider, authenticator, Responses client and managed agent through
 the same finite SDK HTTP pipelines. Provider discovery performs no OAuth or model requests.
 `AddLlmConnectXai` uses the same registration path; calling it again does not duplicate Grok services.
-Registration is not live qualification; OAuth and provider qualification remain `NotRun`.
+Registration alone does not qualify OAuth refresh or every provider capability. The selected live
+qualifications above do not change registration behavior.
 `LlmModelListCache` owns generic and lazy listings for all four model families. Agent counts are distinct from reasoning levels.
 The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/pricing).
 
