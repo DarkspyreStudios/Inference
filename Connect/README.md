@@ -4453,7 +4453,7 @@ Nonstandard extension options retain request-over-connection precedence.
 | OpenAI Responses | `top_p` on sampling-capable profiles; reasoning models require `ReasoningLevel.None` |
 | OpenAI-compatible Chat | `top_p`, `seed`, penalties in [-2, 2], up to four `stop` strings; `top_k` requires a known endpoint override |
 | Anthropic and Vertex Claude | Profile-owned temperature/top-p/top-k, `stop_sequences` without an invented Connect limit; thinking permits top-p from 0.95 to 1 and no top-k |
-| Bedrock Converse | `inferenceConfig.topP` and `stopSequences`; Claude `top_k`, Nova 2 `inferenceConfig.topK` up to 128, merged with reasoning fields; stop limit 2500, or 10 for DeepSeek R1 |
+| Bedrock Converse | `inferenceConfig.topP` and `stopSequences`; Claude `top_k`, Nova 1 and Nova 2 `inferenceConfig.topK` from 0 to 128, merged with reasoning fields; stop limit 2500, or 10 for DeepSeek R1 |
 | AgentCore | `BedrockModelConfig.TopP` on an explicit Bedrock model ID; the harness-default route cannot carry it |
 | Gemini API and Vertex Gemini | `generationConfig` sampling fields and penalties, up to five stops; Gemini API top-k requires a catalog default, Vertex uses its shared model profile |
 | Apple Foundation Models | Top-p or top-k random mode with optional seed; seed alone selects top-p 1; no stops or penalties |
@@ -4466,6 +4466,13 @@ Gemini Flash 3.6 and later ignore temperature/top-p/top-k and reject penalties, 
 explicit values. Vertex Gemini penalties use [-2, 2); Gemini API requires finite penalties.
 Compatible endpoint settings expose typed sampling overrides and a nullable maximum-stop count;
 zero disables stops, and blank uses detection. Raw provider options cannot inject these typed fields.
+
+Bedrock recognizes top-k for the exact Nova 1 Micro, Lite, Pro and Premier `v1:0` IDs and their
+geographic inference profiles. Both Converse transports carry it inside
+`additionalModelRequestFields.inferenceConfig`, as the [Nova 1 Converse guide](https://docs.aws.amazon.com/nova/latest/userguide/using-converse-api.html)
+specifies. The [Nova request schema](https://docs.aws.amazon.com/nova/latest/userguide/complete-request-schema.html)
+permits zero through 128. Nova accepts zero through the shared sampling validator; other adapters
+retain its positive top-k requirement. Nova 1 classification adds no reasoning levels or fields.
 
 ### Reasoning
 

@@ -114,7 +114,7 @@ internal sealed class BedrockLlmClient(
                 PromptCache = BedrockPromptCache.Capabilities(modelId ?? string.Empty),
                 SupportsTemperature = claudeSampling,
                 SupportsTopP = claudeSampling,
-                SupportsTopK = family == BedrockModelFamily.AmazonNova2
+                SupportsTopK = family is BedrockModelFamily.AmazonNova1 or BedrockModelFamily.AmazonNova2
                     || family == BedrockModelFamily.AnthropicClaude && claudeSampling,
                 MaxStopSequences = family == BedrockModelFamily.DeepSeekR1 ? 10 : 2500
             }, connection, modelId) with
@@ -153,7 +153,7 @@ internal sealed class BedrockLlmClient(
                 "Bedrock capability overrides cannot offer a reasoning level the model family does not accept.");
         }
         if ((!claudeSampling && (capabilities.SupportsTemperature || capabilities.SupportsTopP))
-            || capabilities.SupportsTopK && !(family == BedrockModelFamily.AmazonNova2
+            || capabilities.SupportsTopK && !(family is BedrockModelFamily.AmazonNova1 or BedrockModelFamily.AmazonNova2
                 || family == BedrockModelFamily.AnthropicClaude && claudeSampling)
             || capabilities.MaxStopSequences > (family == BedrockModelFamily.DeepSeekR1 ? 10 : 2500))
         {
@@ -451,17 +451,18 @@ internal sealed class BedrockLlmClient(
         }
 
         LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
-        LlmClientBase.ValidateSampling(request, capabilities);
+        BedrockModelFamily family = BedrockModelFamilies.Classify(request.ModelId).Family;
+        bool nova = family is BedrockModelFamily.AmazonNova1 or BedrockModelFamily.AmazonNova2;
+        LlmClientBase.ValidateSampling(request, capabilities, allowZeroTopK: nova);
         if (request.Temperature is { } temperature && (!double.IsFinite(temperature) || temperature is < 0 or > 1))
         { throw new ArgumentOutOfRangeException(nameof(request), "Converse temperature must be finite and between 0 and 1."); }
-        BedrockModelFamily family = BedrockModelFamilies.Classify(request.ModelId).Family;
         if (family == BedrockModelFamily.AnthropicClaude)
         {
             AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(
             BedrockModelFamilies.AnthropicModelId(BedrockModelFamilies.Classify(request.ModelId).BaseModelId), null));
         }
-        if (family == BedrockModelFamily.AmazonNova2 && request.TopK > 128)
-        { throw new ArgumentOutOfRangeException(nameof(request), "Nova 2 top-k cannot exceed 128."); }
+        if (nova && request.TopK > 128)
+        { throw new ArgumentOutOfRangeException(nameof(request), "Nova top-k cannot exceed 128."); }
         if (family == BedrockModelFamily.AmazonNova2
             && request.ReasoningLevel == LlmReasoningLevel.High
             && (request.Temperature is not null || request.MaxOutputTokens is not null || request.TopP is not null || request.TopK is not null))

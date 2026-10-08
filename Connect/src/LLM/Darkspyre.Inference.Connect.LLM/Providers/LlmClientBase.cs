@@ -157,7 +157,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
 
     protected virtual void ValidateAdditionalRequest(LlmConnection connection, LlmChatRequest request) { }
 
-    internal static void ValidateSampling(LlmChatRequest request, LlmProviderCapabilities capabilities)
+    internal static void ValidateSampling(LlmChatRequest request, LlmProviderCapabilities capabilities, bool allowZeroTopK = false)
     {
         if (request.Temperature is not null && !capabilities.SupportsTemperature)
         { throw new NotSupportedException("The selected connection does not support temperature."); }
@@ -171,8 +171,8 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
         { throw new ArgumentOutOfRangeException(nameof(request), "TopP must be finite and in (0, 1]."); }
         if (request.TopK is not null && !capabilities.SupportsTopK)
         { throw new NotSupportedException("The selected model does not support top-k."); }
-        if (request.TopK is <= 0)
-        { throw new ArgumentOutOfRangeException(nameof(request), "TopK must be positive."); }
+        if (request.TopK is < 0 || request.TopK == 0 && !allowZeroTopK)
+        { throw new ArgumentOutOfRangeException(nameof(request), allowZeroTopK ? "TopK must be non-negative." : "TopK must be positive."); }
         if (request.Seed is not null && !capabilities.SupportsSeed)
         { throw new NotSupportedException("The selected model does not support a sampling seed."); }
         if (request.Seed is < 0)

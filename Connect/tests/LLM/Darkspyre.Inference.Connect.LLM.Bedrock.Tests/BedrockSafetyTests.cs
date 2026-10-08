@@ -22,6 +22,83 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 public sealed class BedrockSafetyTests
 {
     [Theory]
+    [InlineData("amazon.nova-micro-v1:0")]
+    [InlineData("amazon.nova-lite-v1:0")]
+    [InlineData("amazon.nova-pro-v1:0")]
+    [InlineData("amazon.nova-premier-v1:0")]
+    [InlineData("us.amazon.nova-lite-v1:0")]
+    [InlineData("amazon.nova-2-lite-v1:0")]
+    public async Task NovaTopKReachesBothConverseTransportsWithoutAddingReasoning(string modelId)
+    {
+        foreach (bool streaming in new[] { false, true })
+        {
+            foreach (int topK in new[] { 0, 128 })
+            {
+                await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+                    _ => new StreamControl(), _ => throw new NotSupportedException());
+                await using var guard = new BedrockLoggingGuard();
+                var invoker = new StubConverseInvoker
+                {
+                    Response = StubConverseInvoker.Converse([new() { Text = "answer" }], "end_turn", null),
+                    Events = [new ContentBlockDeltaEvent { ContentBlockIndex = 0, Delta = new() { Text = "answer" } },
+                        new MessageStopEvent { StopReason = new("end_turn") }]
+                };
+                var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+                Assert.True(client.GetCapabilities(ResourceConnection(streaming), modelId).SupportsTopK);
+                LlmConnection connection = ResourceConnection(streaming) with
+                { CapabilityOverrides = new() { SupportsStreaming = streaming, SupportsTopK = true } };
+                if (modelId != "amazon.nova-2-lite-v1:0")
+                    Assert.Empty(client.GetCapabilities(connection, modelId).ReasoningLevels);
+                LlmChatRequest request = Request() with { ModelId = modelId, TopK = topK };
+                await using var providers = new LlmProviderService(new Source(connection), [client]);
+                var events = new List<LlmStreamEvent>();
+                await foreach (LlmStreamEvent item in providers.StreamAsync("connection", request)) events.Add(item);
+                var wire = streaming
+                    ? ConverseStreamRequestMarshaller.Instance.Marshall(Assert.Single(invoker.StreamRequests))
+                    : ConverseRequestMarshaller.Instance.Marshall(Assert.Single(invoker.ConverseRequests));
+                Assert.Equal(modelId, Assert.Single(wire.PathResources).Value);
+                using Stream body = wire.ContentStream;
+                using JsonDocument sent = JsonDocument.Parse(body);
+                JsonElement additional = sent.RootElement.GetProperty("additionalModelRequestFields");
+                JsonElement config = additional.GetProperty("inferenceConfig");
+                Assert.Equal(topK, config.GetProperty("topK").GetInt32());
+                Assert.False(config.TryGetProperty("reasoningConfig", out _));
+                Assert.False(additional.TryGetProperty("top_k", out _));
+                LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+                Assert.Equal("answer", result.Text);
+                Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+                Assert.Equal(topK, request.TopK);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("amazon.nova-lite-v1:0", -1)]
+    [InlineData("amazon.nova-lite-v1:0", 129)]
+    [InlineData("anthropic.claude-haiku-4-5-20251001-v1:0", 0)]
+    public async Task TopKBoundsRefuseBeforeConverseAcquisition(string modelId, int topK)
+    {
+        foreach (bool streaming in new[] { false, true })
+        {
+            int acquired = 0;
+            await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+                _ => { acquired++; throw new InvalidOperationException("SDK acquired before top-k refusal"); },
+                _ => throw new NotSupportedException());
+            await using var guard = new BedrockLoggingGuard();
+            var invoker = new StubConverseInvoker();
+            var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(async () =>
+            {
+                await foreach (LlmStreamEvent _ in client.StreamAsync(ResourceConnection(streaming),
+                    Request() with { ModelId = modelId, TopK = topK })) { }
+            });
+            Assert.Equal(0, acquired);
+            Assert.Empty(invoker.ConverseRequests);
+            Assert.Empty(invoker.StreamRequests);
+        }
+    }
+
+    [Theory]
     [InlineData(false, "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0", false)]
     [InlineData(true, "arn:aws:bedrock:us-east-1::foundation-model/amazon.nova-micro-v1:0", false)]
     [InlineData(false, null, false)]
