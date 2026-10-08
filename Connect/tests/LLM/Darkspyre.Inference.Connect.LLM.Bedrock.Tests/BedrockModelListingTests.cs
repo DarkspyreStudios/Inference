@@ -54,9 +54,68 @@ public sealed class BedrockModelListingTests
     }
 
     [Theory]
+    [InlineData("acquisition", "client")]
+    [InlineData("profiles", "client")]
+    [InlineData("foundations", "client")]
+    [InlineData("availability", "client")]
+    [InlineData("acquisition", "http")]
+    [InlineData("profiles", "http")]
+    [InlineData("foundations", "http")]
+    [InlineData("availability", "http")]
+    [InlineData("acquisition", "service")]
+    [InlineData("profiles", "service")]
+    [InlineData("foundations", "service")]
+    [InlineData("availability", "service")]
+    public async Task UnmodeledCatalogFailuresRetainSafeDiagnosticsAndLogOnce(string stage, string kind)
+    {
+        const string message = "Catalog request failed for fixture-key and fixture-secret.";
+        var cause = new IOException("Private catalog graph fixture-secret.");
+        Exception original = kind switch
+        {
+            "client" => new AmazonClientException(message, cause),
+            "http" => new HttpRequestException(message, cause, HttpStatusCode.BadGateway),
+            _ => new AmazonServiceException(message, cause, ErrorType.Sender,
+                "error-fixture-secret", "request-fixture-secret", HttpStatusCode.ServiceUnavailable)
+        };
+        var logger = new Logger();
+        using var control = new Control([Model(Nova, "ON_DEMAND")], [], _ => Subscribed())
+        {
+            FailureStage = stage,
+            Failure = original
+        };
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            ListModelsAsync(control, logger, stage == "acquisition" ? original : null));
+        Assert.Contains("Catalog request failed for [REDACTED] and [REDACTED].", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(LlmTransport.AwsBedrockConverse, failure.Transport);
+        Assert.Equal(kind == "service" ? HttpStatusCode.ServiceUnavailable
+            : kind == "http" ? HttpStatusCode.BadGateway : (HttpStatusCode?)null, failure.StatusCode);
+        Assert.Equal(kind == "service" ? "error-[REDACTED]" : null, failure.ProviderCode);
+        Assert.Equal(kind == "service" ? "request-[REDACTED]" : null, failure.RequestId);
+        Assert.Null(failure.RetryAfter);
+        Assert.Equal(LogLevel.Warning, Assert.Single(logger.Levels));
+        string logged = Assert.Single(logger.Messages);
+        Assert.Contains(failure.Message, logged, StringComparison.Ordinal);
+        foreach (string secret in new[] { "fixture-key", "fixture-secret", "Private catalog" })
+        {
+            Assert.DoesNotContain(secret, failure.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain(secret, logged, StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ConcurrentAvailabilityFailuresRemainVisibleWhenDiagnosticLoggingAlsoFails(bool loggingFails)
+    public Task ConcurrentAvailabilityFailuresRemainVisibleWhenDiagnosticLoggingAlsoFails(bool loggingFails) =>
+        CheckConcurrentAvailabilityFailures("service", loggingFails);
+
+    [Theory]
+    [InlineData("client", false)]
+    [InlineData("http", false)]
+    [InlineData("client", true)]
+    public Task ConcurrentUnmodeledAvailabilityFailuresRetainEveryObservedError(string kind, bool loggingFails) =>
+        CheckConcurrentAvailabilityFailures(kind, loggingFails);
+
+    private static async Task CheckConcurrentAvailabilityFailures(string kind, bool loggingFails)
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -69,8 +128,14 @@ public sealed class BedrockModelListingTests
             {
                 if (Interlocked.Increment(ref requests) == 2) entered.TrySetResult();
                 await release.Task;
-                throw new AmazonBedrockException("Access denied for bedrock:GetFoundationModelAvailability using fixture-secret.", ErrorType.Sender,
-                    "AccessDeniedException", "request-" + id, HttpStatusCode.Forbidden);
+                string message = "Access denied for bedrock:GetFoundationModelAvailability using fixture-secret. Model " + id;
+                throw kind switch
+                {
+                    "client" => new AmazonClientException(message),
+                    "http" => new HttpRequestException(message, null, HttpStatusCode.BadGateway),
+                    _ => new AmazonBedrockException(message, ErrorType.Sender,
+                        "AccessDeniedException", "request-" + id, HttpStatusCode.Forbidden)
+                };
             }
         };
         Task<IReadOnlyList<LlmModel>> listing = ListModelsAsync(control, logger);
@@ -90,12 +155,17 @@ public sealed class BedrockModelListingTests
         var causes = Assert.IsType<AggregateException>(failure).Flatten().InnerExceptions;
         LlmProviderException[] providerFailures = [.. causes.OfType<LlmProviderException>()];
         Assert.Equal(2, providerFailures.Length);
-        Assert.Equal(new[] { "request-" + Opus, "request-" + Sonnet },
-            providerFailures.Select(error => error.RequestId).Order(StringComparer.Ordinal));
+        if (kind == "service")
+            Assert.Equal(new[] { "request-" + Opus, "request-" + Sonnet },
+                providerFailures.Select(error => error.RequestId).Order(StringComparer.Ordinal));
+        else Assert.All(providerFailures, error => Assert.Null(error.RequestId));
+        Assert.Contains(providerFailures, error => error.Message.EndsWith(Opus, StringComparison.Ordinal));
+        Assert.Contains(providerFailures, error => error.Message.EndsWith(Sonnet, StringComparison.Ordinal));
         Assert.All(providerFailures, error =>
         {
-            Assert.Equal(HttpStatusCode.Forbidden, error.StatusCode);
-            Assert.Equal("AccessDeniedException", error.ProviderCode);
+            Assert.Equal(kind == "service" ? HttpStatusCode.Forbidden
+                : kind == "http" ? HttpStatusCode.BadGateway : (HttpStatusCode?)null, error.StatusCode);
+            Assert.Equal(kind == "service" ? "AccessDeniedException" : null, error.ProviderCode);
             Assert.Contains("Access denied for bedrock:GetFoundationModelAvailability using [REDACTED].", error.Message, StringComparison.Ordinal);
             Assert.DoesNotContain("fixture-secret", error.ToString(), StringComparison.Ordinal);
         });
@@ -112,11 +182,12 @@ public sealed class BedrockModelListingTests
     private static async Task<string[]> ListAsync(Control control, Logger? logger = null) =>
         [.. (await ListModelsAsync(control, logger)).Select(model => model.Id)];
 
-    private static async Task<IReadOnlyList<LlmModel>> ListModelsAsync(Control control, Logger? logger = null)
+    private static async Task<IReadOnlyList<LlmModel>> ListModelsAsync(Control control, Logger? logger = null,
+        Exception? acquisitionFailure = null)
     {
         await using var factory = new BedrockClientFactory(
             _ => throw new NotSupportedException(),
-            _ => control,
+            _ => acquisitionFailure is { } failure ? throw failure : control,
             _ => throw new NotSupportedException());
         await using var guard = new BedrockLoggingGuard();
         var client = new BedrockLlmClient(factory, guard, new StubConverseInvoker(), logger ?? new Logger());
@@ -163,14 +234,18 @@ public sealed class BedrockModelListingTests
         : AmazonBedrockClient(new BasicAWSCredentials("fixture-key", "fixture-secret"), RegionEndpoint.USEast1)
     {
         internal Func<string, Task<GetFoundationModelAvailabilityResponse>>? CheckAvailability { get; init; }
+        internal string? FailureStage { get; init; }
+        internal Exception? Failure { get; init; }
 
         public override Task<ListFoundationModelsResponse> ListFoundationModelsAsync(
             ListFoundationModelsRequest request, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ListFoundationModelsResponse { ModelSummaries = models });
+            FailureStage == "foundations" ? Task.FromException<ListFoundationModelsResponse>(Failure!)
+                : Task.FromResult(new ListFoundationModelsResponse { ModelSummaries = models });
 
         public override Task<ListInferenceProfilesResponse> ListInferenceProfilesAsync(
             ListInferenceProfilesRequest request, CancellationToken cancellationToken = default)
         {
+            if (FailureStage == "profiles") return Task.FromException<ListInferenceProfilesResponse>(Failure!);
             if (request.NextToken is null)
                 return Task.FromResult(new ListInferenceProfilesResponse
                 {
@@ -184,7 +259,8 @@ public sealed class BedrockModelListingTests
 
         public override Task<GetFoundationModelAvailabilityResponse> GetFoundationModelAvailabilityAsync(
             GetFoundationModelAvailabilityRequest request, CancellationToken cancellationToken = default) =>
-            CheckAvailability?.Invoke(request.ModelId) ?? Task.FromResult(availability(request.ModelId));
+            CheckAvailability?.Invoke(request.ModelId) ?? (FailureStage == "availability"
+                ? Task.FromException<GetFoundationModelAvailabilityResponse>(Failure!) : Task.FromResult(availability(request.ModelId)));
     }
 
     private sealed class Logger : ILogger<BedrockLlmClient>

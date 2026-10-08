@@ -1584,8 +1584,15 @@ Model discovery preserves every successful catalog lane, including an empty resp
 logs a warning through the standard host logger. Two failed lanes also log an error and return ordered
 safe failures, not an empty catalog. An optional resolution failure logs a warning and retains the exact
 requested model ID for invocation. Diagnostics contain fixed operations, observed status and protected
-SDK error-code/request-ID fields, never raw exceptions or provider content. A refused logging sink
+SDK error-code/request-ID fields, never raw exception graphs or unredacted provider content. A refused logging sink
 preserves the discovery failure and the separate logging failure behind safe diagnostics.
+Uncaught SDK client, service and HTTP failures during client acquisition, catalog listing or
+availability checks fail the listing and log one credential-safe warning per observed failure. Concurrent
+availability failures use the existing error queue and retain every observed SDK/HTTP failure, including
+when diagnostic logging also fails. Discovery uses the shared
+Bedrock failure classifier with the captured connection. Actual explanations and observed status,
+code and request ID remain available; missing metadata remains null. These failures add no catalog
+fallback or retry. Modeled lane failures retain the partial-catalog behavior described above.
 
 Clients use a private default AWS credential resolver and SDK-client-local HTTP caches. Retiring
 the SDK owner disposes the resolver and the SDK pipelines' HTTP pools. Runtime and AgentCore HTTP

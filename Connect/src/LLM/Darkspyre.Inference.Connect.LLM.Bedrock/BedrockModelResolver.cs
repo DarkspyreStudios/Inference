@@ -21,7 +21,7 @@ internal sealed class BedrockModelResolver
         string region,
         string requestedModelId,
         ILogger<BedrockLlmClient> logger,
-        LlmCredential credential,
+        LlmConnection connection,
         CancellationToken cancellationToken)
     {
         control.ThrowIfCanceled();
@@ -60,7 +60,7 @@ internal sealed class BedrockModelResolver
         }
         catch (AmazonBedrockException error)
         {
-            _ = Warn(logger, credential, "ResolveModel", error);
+            _ = Warn(logger, connection, "ResolveModel", error);
             control.ThrowIfCanceled();
             return requestedModelId;
         }
@@ -78,7 +78,7 @@ internal sealed class BedrockModelResolver
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
         string region,
         ILogger<BedrockLlmClient> logger,
-        LlmCredential credential,
+        LlmConnection connection,
         CancellationToken cancellationToken)
     {
         control.ThrowIfCanceled();
@@ -91,7 +91,7 @@ internal sealed class BedrockModelResolver
         }
         catch (AmazonBedrockException error)
         {
-            failures.Add(Warn(logger, credential, "ListInferenceProfiles", error, failures));
+            failures.Add(Warn(logger, connection, "ListInferenceProfiles", error, failures));
             control.ThrowIfCanceled();
         }
 
@@ -107,7 +107,7 @@ internal sealed class BedrockModelResolver
         }
         catch (AmazonBedrockException error)
         {
-            failures.Add(Warn(logger, credential, "ListFoundationModels", error, failures));
+            failures.Add(Warn(logger, connection, "ListFoundationModels", error, failures));
             control.ThrowIfCanceled();
         }
 
@@ -121,7 +121,7 @@ internal sealed class BedrockModelResolver
 
         Dictionary<string, bool>? callable = foundations is null
             ? null
-            : await CheckAvailabilityAsync(control, foundations, logger, credential, cancellationToken);
+            : await CheckAvailabilityAsync(control, foundations, logger, connection, cancellationToken);
         var byId = new Dictionary<string, LlmModel>(StringComparer.Ordinal);
         foreach (InferenceProfileSummary profile in profiles ?? [])
         {
@@ -167,11 +167,11 @@ internal sealed class BedrockModelResolver
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
         List<FoundationModelSummary> foundations,
         ILogger<BedrockLlmClient> logger,
-        LlmCredential credential,
+        LlmConnection connection,
         CancellationToken cancellationToken)
     {
         var callable = new ConcurrentDictionary<string, bool>(StringComparer.Ordinal);
-        var errors = new ConcurrentQueue<AmazonBedrockException>();
+        var errors = new ConcurrentQueue<Exception>();
         await Parallel.ForEachAsync(
             foundations.Select(model => model.ModelId).Distinct(StringComparer.Ordinal),
             new ParallelOptions { MaxDegreeOfParallelism = AvailabilityConcurrency, CancellationToken = cancellationToken },
@@ -192,7 +192,7 @@ internal sealed class BedrockModelResolver
                     callable[modelId] = availability.AgreementAvailability?.Status == AgreementStatus.AVAILABLE
                         && availability.AuthorizationStatus == AuthorizationStatus.AUTHORIZED;
                 }
-                catch (AmazonBedrockException error)
+                catch (Exception error) when (error is Amazon.Runtime.AmazonServiceException or Amazon.Runtime.AmazonClientException or HttpRequestException)
                 {
                     errors.Enqueue(error);
                 }
@@ -201,9 +201,9 @@ internal sealed class BedrockModelResolver
         if (!errors.IsEmpty)
         {
             var failures = new List<Exception>();
-            foreach (AmazonBedrockException error in errors)
+            foreach (Exception error in errors)
             {
-                try { failures.Add(Warn(logger, credential, "GetFoundationModelAvailability", error)); }
+                try { failures.Add(Warn(logger, connection, "GetFoundationModelAvailability", error)); }
                 catch (AggregateException diagnosticFailure) { failures.AddRange(diagnosticFailure.InnerExceptions); }
             }
             if (failures.Count == 1) throw failures[0];
@@ -290,18 +290,15 @@ internal sealed class BedrockModelResolver
         return profiles;
     }
 
-    private static LlmProviderException Warn(ILogger<BedrockLlmClient> logger, LlmCredential credential,
-        string operation, AmazonBedrockException error, IReadOnlyList<Exception>? earlierFailures = null)
+    /// <summary>Logs and returns the shared credential-safe Bedrock diagnostic, retaining an independent logging failure.</summary>
+    internal static LlmProviderException Warn(ILogger<BedrockLlmClient> logger, LlmConnection connection,
+        string operation, Exception error, IReadOnlyList<Exception>? earlierFailures = null)
     {
-        System.Net.HttpStatusCode? status = (int)error.StatusCode == 0 ? null : error.StatusCode;
-        string? code = error.ErrorCode is null ? null : SecretRedactor.Sanitize(error.ErrorCode, credential);
-        string? requestId = error.RequestId is null ? null : SecretRedactor.Sanitize(error.RequestId, credential);
-        string reason = SecretRedactor.Sanitize(error.Message, credential);
-        var failure = new LlmProviderException($"Bedrock model discovery request failed: {reason}",
-            LlmTransport.AwsBedrockConverse, status, code, requestId, innerException: new SdkEvidence(error));
+        var failure = (LlmProviderException)BedrockLlmClient.ClassifyFailure(error, connection);
         try
         {
-            DiscoveryFailed(logger, operation, status is null ? null : (int?)status.Value, code, requestId, reason, null);
+            DiscoveryFailed(logger, operation, failure.StatusCode is { } status ? (int?)status : null,
+                failure.ProviderCode, failure.RequestId, failure.Message, null);
         }
         catch (Exception loggingFailure)
         {
@@ -309,11 +306,6 @@ internal sealed class BedrockModelResolver
                 [.. earlierFailures ?? [], failure, new LoggingEvidence(loggingFailure)]);
         }
         return failure;
-    }
-
-    private sealed class SdkEvidence(AmazonBedrockException original) : Exception("Bedrock model discovery failed.")
-    {
-        internal AmazonBedrockException Original { get; } = original;
     }
 
     private sealed class LoggingEvidence(Exception original) : Exception("Bedrock diagnostic logging failed.")

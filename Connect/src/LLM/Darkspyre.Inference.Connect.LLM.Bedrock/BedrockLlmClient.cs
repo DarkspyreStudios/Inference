@@ -260,7 +260,7 @@ internal sealed class BedrockLlmClient(
             aws.Region!,
             request.ModelId,
             logger,
-            LlmCredential.Parse(connection.Credential)!,
+            connection,
             cancellationToken);
         await loggingGuard.EnsureLoggingDisabledAsync(
             control,
@@ -718,15 +718,22 @@ internal sealed class BedrockLlmClient(
     {
         EnsureTransport(connection);
         LlmAwsCredentials aws = RequireAws(connection);
-        using BedrockClientFactory.Lease<Amazon.Bedrock.AmazonBedrockClient> control = factory.Control(aws, cancellationToken);
-        IReadOnlyList<LlmModel> models = await BedrockModelResolver.ListAsync(
-            control,
-            aws.Region!,
-            logger,
-            LlmCredential.Parse(connection.Credential)!,
-            control.Token);
-        control.ThrowIfCanceled();
-        return models;
+        try
+        {
+            using BedrockClientFactory.Lease<Amazon.Bedrock.AmazonBedrockClient> control = factory.Control(aws, cancellationToken);
+            IReadOnlyList<LlmModel> models = await BedrockModelResolver.ListAsync(
+                control,
+                aws.Region!,
+                logger,
+                connection,
+                control.Token);
+            control.ThrowIfCanceled();
+            return models;
+        }
+        catch (Exception error) when (error is Amazon.Runtime.AmazonServiceException or Amazon.Runtime.AmazonClientException or HttpRequestException)
+        {
+            throw BedrockModelResolver.Warn(logger, connection, "ListModels", error);
+        }
     }
 
     public void ValidateCompaction(LlmConnection connection, LlmChatRequest before, LlmChatRequest after)
