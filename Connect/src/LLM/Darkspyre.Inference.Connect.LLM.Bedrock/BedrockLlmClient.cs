@@ -94,6 +94,8 @@ internal sealed class BedrockLlmClient(
             Defaults with
             {
                 ReasoningLevels = offered,
+                Tools = indiaHaiku ? Defaults.Tools with
+                { StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported } : Defaults.Tools,
                 SupportsJsonSchema = !indiaHaiku && baseModelId is "openai.gpt-oss-20b-1:0" or "openai.gpt-oss-120b-1:0"
                     or "anthropic.claude-sonnet-4-6" or "anthropic.claude-opus-4-6-v1"
                     or "anthropic.claude-sonnet-4-5-20250929-v1:0"

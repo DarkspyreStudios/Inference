@@ -4057,6 +4057,11 @@ preferences are unchanged. [AWS documents these geographic profile prefixes](htt
 The [India Haiku 4.5 profile](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-haiku-4-5.html)
 does not support native structured output. Its schema capability is false, and an override cannot
 enable it. Explicit original-schema local validation remains available without changing the profile ID.
+Its strict tool-input schema capability is Unsupported. An explicit strict tool fails with "The selected
+route cannot enforce strict tool input schemas." before SDK acquisition or resource preparation.
+[Strict tool use is a structured-output mechanism](https://docs.aws.amazon.com/bedrock/latest/userguide/structured-output.html).
+Ordinary tools remain available with their original input schemas and no strict flag. Other Converse
+models retain Unknown strict tool-input schema support.
 
 Converse refuses nonempty connection or request `ProviderOptions` during pure request admission.
 The refusal precedes SDK acquisition, discovery, logging-control calls and resource preparation.

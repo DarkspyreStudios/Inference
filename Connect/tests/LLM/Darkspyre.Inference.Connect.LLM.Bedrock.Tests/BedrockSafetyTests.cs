@@ -431,6 +431,69 @@ public sealed class BedrockSafetyTests
         Assert.Empty(invoker.StreamRequests);
     }
 
+    [Fact]
+    public async Task IndiaHaikuRefusesStrictToolsBeforeSdkAcquisition()
+    {
+        int acquired = 0;
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => { acquired++; throw new InvalidOperationException("SDK acquired before strict tool refusal"); },
+            _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker();
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        var tool = new LlmToolDefinition
+        {
+            Name = "notes",
+            Strict = true,
+            InputSchema = JsonElement.Parse("""{"type":"object","properties":{"text":{"type":"string"}},"required":["text"],"additionalProperties":false}""")
+        };
+        LlmChatRequest request = Request() with
+        { ModelId = "in.anthropic.claude-haiku-4-5-20251001-v1:0", Tools = [tool] };
+        NotSupportedException failure = await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(ResourceConnection(streaming: true), request)) { }
+        });
+        Assert.Equal("The selected route cannot enforce strict tool input schemas.", failure.Message);
+        Assert.Equal(LlmStrictInputSchemaSupport.Unsupported,
+            client.GetCapabilities(Connection(), request.ModelId).Tools.StrictInputSchema);
+        Assert.True(tool.Strict);
+        Assert.Same(tool, Assert.Single(request.Tools));
+        Assert.Equal(0, acquired);
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.Empty(invoker.StreamRequests);
+    }
+
+    [Fact]
+    public async Task IndiaHaikuOrdinaryToolsRetainOriginalSchemasWithoutStrictEnforcement()
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => throw new NotSupportedException(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var client = new BedrockLlmClient(factory, guard, new StubConverseInvoker(), NullLogger<BedrockLlmClient>.Instance);
+        JsonElement schema = JsonElement.Parse("""{"type":"object","properties":{"text":{"type":"string","maxLength":100}},"required":["text"]}""");
+        LlmChatRequest request = Request() with
+        {
+            ModelId = "in.anthropic.claude-haiku-4-5-20251001-v1:0",
+            Tools = [new LlmToolDefinition { Name = "notes", InputSchema = schema }]
+        };
+        _ = client.ValidateRequest(Connection(), request);
+        ConverseRequest built = BedrockLlmClient.BuildRequest(Connection(), request, request.ModelId);
+        foreach (var wire in new[]
+        {
+            ConverseRequestMarshaller.Instance.Marshall(built),
+            ConverseStreamRequestMarshaller.Instance.Marshall(BedrockLlmClient.ToStreamRequest(built))
+        })
+        {
+            Assert.Equal(request.ModelId, Assert.Single(wire.PathResources).Value);
+            using Stream body = wire.ContentStream;
+            using JsonDocument sent = JsonDocument.Parse(body);
+            JsonElement specification = sent.RootElement.GetProperty("toolConfig").GetProperty("tools")[0].GetProperty("toolSpec");
+            Assert.Equal("notes", specification.GetProperty("name").GetString());
+            Assert.False(specification.TryGetProperty("strict", out _));
+            Assert.Equal(schema.GetRawText(), specification.GetProperty("inputSchema").GetProperty("json").GetRawText());
+        }
+    }
+
     [Theory]
     [InlineData("us.anthropic.claude-sonnet-4-5-20250929-v1:0")]
     [InlineData("eu.anthropic.claude-haiku-4-5-20251001-v1:0")]
