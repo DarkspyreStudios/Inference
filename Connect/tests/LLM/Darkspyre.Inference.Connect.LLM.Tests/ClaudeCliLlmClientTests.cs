@@ -50,6 +50,51 @@ public sealed class ClaudeCliLlmClientTests
         Assert.Single(runner.Invocations);
     }
 
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    public async Task SuccessfulSchemaToolStopRequiresTheNativeStructuredPayload(bool streaming, bool nativePayload)
+    {
+        const string answer = """{"marker":"fixture"}""";
+        string output = new JsonObject
+        {
+            ["type"] = "result",
+            ["subtype"] = "success",
+            ["is_error"] = false,
+            ["stop_reason"] = "tool_use",
+            ["result"] = answer,
+            ["structured_output"] = nativePayload ? JsonNode.Parse(answer) : null
+        }.ToJsonString();
+        var runner = new RecordingRunner(new(0, output, string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        LlmConnection connection = CliConnection() with { CapabilityOverrides = new() { SupportsStreaming = streaming } };
+        var request = new LlmChatRequest
+        {
+            ModelId = "claude-test",
+            Messages = [new("user", "Return the marker")],
+            StructuredOutput = new()
+            {
+                Name = "marker",
+                Schema = JsonElement.Parse("""
+                    {"type":"object","properties":{"marker":{"type":"string"}},"required":["marker"],"additionalProperties":false}
+                    """)
+            }
+        };
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection, request));
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+
+        Assert.Equal(nativePayload ? LlmCompletionStatus.Completed : LlmCompletionStatus.Unknown, result.Status);
+        Assert.Equal("tool_use", result.FinishReason);
+        Assert.Equal(answer, result.Text);
+        Assert.True(result.StructuredOutput!.IsValid);
+        Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, result.StructuredOutput.Enforcement);
+        Assert.Single(runner.Invocations);
+    }
+
     [Fact]
     public async Task AccountUsageFailurePreservesSanitizedResultDetail()
     {

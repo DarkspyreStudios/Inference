@@ -370,7 +370,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         bool completed = string.Equals(terminal.Subtype, "success", StringComparison.Ordinal)
             && (finishReason is null
                 || string.Equals(finishReason, "end_turn", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(finishReason, "stop_sequence", StringComparison.OrdinalIgnoreCase));
+                || string.Equals(finishReason, "stop_sequence", StringComparison.OrdinalIgnoreCase)
+                || terminal.HasStructuredOutput && string.Equals(finishReason, "tool_use", StringComparison.OrdinalIgnoreCase));
         LlmStructuredOutputValidation? validation = request.StructuredOutput is null
             ? null
             : refused
@@ -724,11 +725,13 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         }
 
         string text = LlmJson.GetString(root, "result") ?? string.Empty;
+        bool hasStructuredOutput = false;
         if (preferStructuredOutput
             && root.TryGetProperty("structured_output", out JsonElement structuredOutput)
             && structuredOutput.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
         {
             text = structuredOutput.GetRawText();
+            hasStructuredOutput = true;
         }
         bool isError = root.TryGetProperty("is_error", out JsonElement error)
             && error.ValueKind == JsonValueKind.True;
@@ -737,6 +740,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             null,
             new ClaudeTerminalResult(
                 text,
+                hasStructuredOutput,
                 isError,
                 LlmJson.GetString(root, "subtype"),
                 LlmJson.GetString(root, "stop_reason"),
@@ -881,6 +885,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     private sealed record ClaudeTerminalResult(
         string Text,
+        bool HasStructuredOutput,
         bool IsError,
         string? Subtype,
         string? StopReason,

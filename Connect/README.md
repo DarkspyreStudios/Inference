@@ -4137,6 +4137,11 @@ Subscription connections use the Claude CLI's native `--json-schema` contract an
 `Medium`, `High`, `ExtraHigh` and `Maximum` reasoning levels. Darkspyre.Inference.Connect.LLM uses
 the terminal event's canonical `structured_output` value and validates it locally before returning
 completion.
+A successful native schema result with a non-null `structured_output` also completes when its
+observed stop reason is `tool_use`. The [CLI structured-output contract](https://code.claude.com/docs/en/agent-sdk/structured-outputs)
+identifies that payload as the final structured result. Connect retains the actual stop reason.
+JSON in ordinary result text without that native payload does not turn an unresolved tool stop
+into completion. Error, refusal, incomplete and unknown-stop handling remains unchanged.
 
 ### Model discovery
 
