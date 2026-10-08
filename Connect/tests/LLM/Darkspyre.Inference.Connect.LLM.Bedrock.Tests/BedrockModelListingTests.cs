@@ -71,6 +71,38 @@ public sealed class BedrockModelListingTests
         Assert.Equal((1_000_000L, 128_000L), (model.MaxContextTokens, model.MaxOutputTokens));
     }
 
+    [Theory]
+    [InlineData("amazon.nova-micro-v1:0", 128_000L, 5_000L)]
+    [InlineData("amazon.nova-lite-v1:0", 300_000L, 5_000L)]
+    [InlineData("amazon.nova-pro-v1:0", 300_000L, 5_000L)]
+    [InlineData("amazon.nova-2-lite-v1:0", 1_000_000L, null)]
+    [InlineData("openai.gpt-oss-20b-1:0", 128_000L, 16_000L)]
+    [InlineData("openai.gpt-oss-120b-1:0", 128_000L, 16_000L)]
+    public async Task PublishedNonClaudeLimitsReachCatalogWithoutInferringOtherIdentities(
+        string modelId, long context, long? output)
+    {
+        string profileId = (modelId.StartsWith("openai.", StringComparison.Ordinal) ? "us-gov." : "us.") + modelId;
+        string arn = "arn:aws:bedrock:us-east-1:123456789012:application-inference-profile/custom-profile";
+        string unknown = modelId + "-future";
+        var control = new Control([Model(modelId, "ON_DEMAND"), Model(unknown, "ON_DEMAND")],
+            [Profile(profileId, modelId), Profile(arn, modelId)], availability: _ => Subscribed());
+
+        IReadOnlyList<LlmModel> models = await ListModelsAsync(control);
+
+        Assert.Equal(4, models.Count);
+        foreach (string id in new[] { modelId, profileId })
+        {
+            LlmModel model = Assert.Single(models, model => model.Id == id);
+            Assert.Equal((context, output), (model.MaxContextTokens, model.MaxOutputTokens));
+        }
+        foreach (string id in new[] { arn, unknown })
+        {
+            LlmModel model = Assert.Single(models, model => model.Id == id);
+            Assert.Null(model.MaxContextTokens);
+            Assert.Null(model.MaxOutputTokens);
+        }
+    }
+
     [Fact]
     public async Task ProfilesFromEveryPageAreListed()
     {

@@ -4165,9 +4165,31 @@ alongside actual status, code and request ID. Raw SDK exception graphs remain pr
 
 Bedrock's catalog requests report no model sizes. Each listed model carries the context window and
 maximum output of its base model from `BedrockModelLimits`, a table of the limits Anthropic publishes for
-Claude on Bedrock. An inference profile such as `us.anthropic.claude-sonnet-4-5-20250929-v1:0` takes its
-base model's entry. A model that is not in the table, including every non-Claude model and an ARN,
-reports null limits, which mean unknown.
+Claude on Bedrock and AWS publishes for exact Nova and gpt-oss IDs. An inference profile such as
+`us.anthropic.claude-sonnet-4-5-20250929-v1:0` takes its base model's entry. Geographic Nova and gpt-oss
+profiles use the same lookup. A model that is not in the table, or an ARN, reports null limits, which
+mean unknown. A related name or unlisted version does not inherit another model's limits.
+
+| Exact Bedrock base ID | Published Context Tokens | Published Maximum Output Tokens |
+| --- | --- | --- |
+| `amazon.nova-micro-v1:0` | 128,000 | 5,000 |
+| `amazon.nova-lite-v1:0` | 300,000 | 5,000 |
+| `amazon.nova-pro-v1:0` | 300,000 | 5,000 |
+| `amazon.nova-2-lite-v1:0` | 1,000,000 | Unknown |
+| `openai.gpt-oss-20b-1:0` | 128,000 | 16,000 |
+| `openai.gpt-oss-120b-1:0` | 128,000 | 16,000 |
+
+These values follow AWS's model cards for [Micro](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-micro.html),
+[Lite](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-lite.html),
+[Pro](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-pro.html),
+[Nova 2 Lite](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-amazon-nova-2-lite.html),
+[gpt-oss 20B](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-oss-20b.html) and
+[120B](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-oss-120b.html).
+The [OpenAI parameter table](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-openai.html)
+also states the 128,000-token context window. Nova 2 Lite's output stays null because its model card
+states 64K while its [Converse guide](https://docs.aws.amazon.com/nova/latest/nova2-userguide/using-converse-api.html)
+states 65,000. These are published catalog facts, not measurements of provider-enforced limits or
+claims of account access. Native requests retain their selected model or profile ID.
 
 Explicit `us.`, `us-gov.`, `eu.`, `apac.`, `jp.`, `au.`, `in.` and `global.` inference-profile IDs share one
 recognition path. Family-specific reasoning, cache and limit lookup use their base model; native
