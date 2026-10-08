@@ -4242,7 +4242,10 @@ returned aliases stay aliases, and an empty list stays empty. The owned temporar
 retired before options are published. Manual model selection remains available. A host can
 explicitly attach the optional browser-authorized catalog OAuth credential to use the existing
 paged HTTP catalog instead. Prompts, CLI readiness, usage and agent tools ignore that credential.
-Installed CLI initialization compatibility remains a separate qualification requirement.
+Installed Claude CLI 2.1.289 lists twelve native choices through the public tester with its existing
+sign-in, including `default`, `opus`, `fable`, `sonnet` and `haiku`. This qualifies native listing
+without a generation prompt or HTTP catalog credential. Refresh, generation on every returned model
+and other-platform initialization remain separate qualification requirements.
 The focused chat-adapter tests use a process stand-in to check returned alias/metadata preservation,
 the no-catalog-OAuth route and cancellation while process retirement drains. These checks use no
 installed CLI or provider calls.
