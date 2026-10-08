@@ -4722,6 +4722,16 @@ One public nonstreaming prompt at source `d26da43`, Global/Default and
 This qualifies the selected plain complete route, not native response schemas, all models,
 credential refresh or actual account billing. The call does not retry or copy application credentials.
 
+At source `990ae40`, the public request-file command checks one original closed object schema with a
+required string enum on the same Global/Default model. Streaming and native nonstreaming each return
+the exact `CONNECT_GROK_SCHEMA_121` marker, `Completed/completed` and
+`ProviderJsonSchema` with `IsValid = true`. The cap is 128 visible output tokens. Streaming reports
+259 input, 15 output and 274 total tokens, with 192 cached input tokens and cost of 0.0001596500 USD.
+Nonstreaming reports 259 input, 12 output and 271 total tokens, with 256 cached input tokens and cost
+of 0.0000849500 USD. Both report zero reasoning tokens. This qualifies that schema and selected route,
+not arbitrary schemas, regex guarantees, cap enforcement, credential refresh or actual billing.
+The calls use the tester's saved OAuth without retries or application credential copies.
+
 One streamed hosted web-search request at source `4d7f4eb`, Global/Default and the same model,
 uses the existing request-file command with `docs.x.ai` as the only allowed domain. Caller budgets
 are two hosted turns and 128 output tokens. Connect surfaces one matching WebSearch start/completion,
