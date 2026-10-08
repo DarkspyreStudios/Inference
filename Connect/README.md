@@ -3988,6 +3988,12 @@ Claude subscription account usage runs the CLI-owned `/usage` command separately
 quota windows plus approximate local request/session activity. It only needs the CLI login, not the
 separate model-catalog OAuth credential. API-key connections do not advertise account usage because
 Anthropic does not expose the subscription report through the Messages API.
+The public account-usage path is live-qualified against source `0dacacd` and installed Claude CLI
+2.1.289 with its existing sign-in. The standalone `/usage` report returns three quota windows and
+four approximate local activity metrics. Used fractions, complementary remaining fractions,
+model-specific labels and reported reset times survive normalization; actual zero stays zero.
+Unreported plan, credits, absolute limits and observation provenance remain unknown. This read-only
+check does not qualify passive response observations, refresh, other versions or target platforms.
 
 Native chat-style tools are enabled for API-key connections. Claude subscription chat requests remain
 isolated one-shot generations, report `SupportsToolUse = false`, and launch the CLI with tools disabled.
@@ -4319,6 +4325,12 @@ Account-usage and process-exit failures use the same bounded terminal-error proj
 native sessions. A JSON diagnostic inside the native error string is redacted before composition.
 The actual usage or exit error code remains unchanged. Raw terminal envelopes are not used in place
 of an available safe terminal error.
+The public account-usage path is live-qualified against source `0dacacd` and installed Antigravity
+1.3.1 with its existing sign-in. Its standalone `/usage` report returns two weekly model-group
+quota windows. Remaining percentages and reset timestamps match the native tab-separated report;
+the complementary used fractions are derived from those percentages. Unreported plan, credits,
+absolute limits, activity metrics and observation provenance are not manufactured. This read-only
+check does not qualify passive generation observations, refresh or other CLI versions/platforms.
 
 ## Apple Foundation Models on device
 
