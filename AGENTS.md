@@ -1,6 +1,6 @@
 # Darkspyre.Inference
 
-This repository builds the `Darkspyre.Inference.*` library family: four NuGet packages released together on the private DarkspyreStudios feed. Every Darkspyre rule lives in `~/.agents/`: AGENTS.md, CommonLaws.md, CommonDesign.md and workflow.md. Temporary restrictions are in `~/.agent-ds/current-restrictions.md`. This file holds only what is specific to Inference.
+This repository builds the `Darkspyre.Inference.*` library family: four NuGet packages released together on the private DarkspyreStudios feed. Every Darkspyre rule lives in `~/.agents/`: AGENTS.md, CommonLaws.md and CommonDesign.md. Temporary restrictions are in `~/.agent-ds/current-restrictions.md`. This file holds only what is specific to Inference.
 
 | Item | Value |
 | --- | --- |
@@ -115,7 +115,7 @@ Run Connect commands from `Connect/` so its `global.json` selects the SDK.
 
 ## Testing
 
-These add to the Testing section of `~/.agents/workflow.md`:
+These add to the Testing section of `~/.agents/AGENTS.md`:
 
 - Paid or metered model calls are never development or commit gates.
 - A conditional live experiment reports that it was skipped when its service or credential is absent. It never returns silently and appears to pass.
