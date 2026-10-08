@@ -3404,17 +3404,21 @@ native admission requires pairwise-disjoint explicit simple types on non-referen
 including nullable type arrays. A `$ref` sibling type is not proof of exclusivity in Draft-07.
 `number` overlaps `integer`. Unproven exclusivity requires explicit local validation for responses
 and refuses explicitly strict tools before effects. Non-strict tools retain their original schema
-and strictness. Explicitly strict function roots also require a proven object type after local
-reference resolution. The same traversal records object proofs for referenced targets, single-branch
-intersections and object-only unions. Scalar, nullable/mixed and untyped roots do not acquire an
+and strictness. Explicitly strict function roots require a proven object type. A root `$ref` refuses
+before dispatch, even when its target proves an object type. Local references below the root remain
+subject to the existing guarantee analysis. The same traversal records object proofs for referenced
+targets, single-branch intersections and object-only unions. Scalar, nullable/mixed and untyped roots do not acquire an
 object proof merely because the schema document is a JSON object or contains `properties`.
 Draft-07 `$ref` siblings cannot supply that proof. This is not a general satisfiability analysis.
 The local object proof does not establish native strict-tool root acceptance. On UnitedStates/Default
 `grok-4.6`, a strict tool rooted at `$ref` receives HTTP 400 with `invalid-argument` and
 `invalid_client_tool_schema`: "tool parameter root must be an object type (root schema is a $ref)".
-The current preflight admits a proven referenced-object root; this native route is not qualified.
+The preflight reports: "Grok does not accept a strict tool schema with a root $ref. Use an explicit object root."
+Non-strict tools and response-schema references retain their original handling.
 Local validation uses the original schema and reports invalid output without
-rewriting it or retrying. Complete dialect-specific keyword shapes and complete regex classification
+rewriting it or retrying. Unknown regex semantics add no refusal to an explicitly opted-in local-validation
+attempt. The evaluator reports its actual validation result or error, without a full ECMA-equivalence claim.
+Complete dialect-specific keyword shapes and complete regex classification
 or original-dialect ECMA regex evaluation remain incomplete.
 Live UnitedStates/Default qualification at source `4f17955` covers one genuine nonstreaming
 `grok-4.6` response with a Draft-07 fragment-ID reference, closed object and required enum marker.

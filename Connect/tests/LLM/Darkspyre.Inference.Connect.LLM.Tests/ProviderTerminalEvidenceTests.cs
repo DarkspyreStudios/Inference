@@ -797,15 +797,17 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData("{\"anyOf\":[{\"type\":\"object\"},{\"type\":\"string\"}]}", false)]
     [InlineData("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"$ref\":\"#/definitions/input\",\"definitions\":{\"input\":{\"type\":\"string\"}}}", false)]
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}", true)]
-    [InlineData("{\"$ref\":\"#/$defs/input\",\"$defs\":{\"input\":{\"type\":\"object\"}}}", true)]
+    [InlineData("{\"$ref\":\"#/$defs/input\",\"$defs\":{\"input\":{\"type\":\"object\"}}}", false)]
+    [InlineData("{\"type\":\"object\",\"$ref\":\"#/$defs/input\",\"$defs\":{\"input\":{\"type\":\"object\"}}}", false)]
+    [InlineData("{\"type\":\"object\",\"$ref\":\"https://schemas.example.test/input\"}", false)]
     [InlineData("{\"anyOf\":[{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}}},{\"type\":\"object\",\"properties\":{\"b\":{\"type\":\"integer\"}}}]}", true)]
     public Task GrokStrictToolsRequireProvenObjectRootsWithoutChangingNonStrictTools(string schema, bool guaranteed) =>
         CheckStrictObjectAdmission(schema, guaranteed);
 
     [Fact]
-    public Task GrokStrictToolObjectProofResolvesDraft7FragmentId() => CheckStrictObjectAdmission("""
+    public Task GrokStrictToolRejectsDraft7FragmentRootWithoutChangingNonStrictTools() => CheckStrictObjectAdmission("""
         {"$schema":"http://json-schema.org/draft-07/schema#","$ref":"#input","definitions":{"input":{"$id":"#input","type":"object","properties":{"value":{"type":"string"}}}}}
-        """, guaranteed: true);
+        """, guaranteed: false);
 
     private static async Task CheckStrictObjectAdmission(string schema, bool guaranteed)
     {
@@ -828,10 +830,12 @@ public sealed class ProviderTerminalEvidenceTests
         var request = new LlmChatRequest { ModelId = "selected-model", Messages = [new("user", "hello")], Tools = [tool] };
         if (!guaranteed)
         {
-            await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            NotSupportedException failure = await Assert.ThrowsAsync<NotSupportedException>(async () =>
             {
                 await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
             });
+            if (tool.InputSchema.TryGetProperty("$ref", out _))
+                Assert.Equal("Grok does not accept a strict tool schema with a root $ref. Use an explicit object root.", failure.Message);
             Assert.Equal(0, handler.Calls);
         }
         else

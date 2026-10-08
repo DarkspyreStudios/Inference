@@ -23,6 +23,8 @@ internal static class XaiSchemaLimits
     {
         SchemaDisposition disposition = Analyze(schema, requireObjectRoot: true);
         RefuseInvalid(disposition);
+        if (schema.ValueKind == JsonValueKind.Object && schema.TryGetProperty("$ref", out _))
+            throw new NotSupportedException("Grok does not accept a strict tool schema with a root $ref. Use an explicit object root.");
         if (disposition != SchemaDisposition.Guaranteed)
             throw new NotSupportedException("A strict Grok tool schema is outside the supported native guarantees. The schema is not weakened or sent as non-strict.");
     }
