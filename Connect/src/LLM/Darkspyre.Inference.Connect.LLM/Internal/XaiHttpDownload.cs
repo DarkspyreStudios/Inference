@@ -30,7 +30,7 @@ internal sealed class XaiHttpDownload
     [SuppressMessage("Design", "CA1031", Justification = "Failed opening retains the original failure and each actual cleanup failure before releasing admitted owners.")]
     internal static async Task<XaiHttpDownload> OpenAsync(HttpClient http, Uri uri,
         Action<HttpRequestMessage>? configure, TimeSpan timeout, Action fence,
-        Func<HttpResponseMessage, CancellationToken, Task> validate, CancellationToken token,
+        Func<HttpRequestMessage, HttpResponseMessage, CancellationToken, Task> validate, CancellationToken token,
         Action? dispatched = null, Action<HttpResponseMessage>? observed = null,
         Action<Exception>? recordCleanup = null, Action? releaseAfterDrain = null)
     {
@@ -51,7 +51,7 @@ internal sealed class XaiHttpDownload
             }
             observed?.Invoke(download._response);
             download.Fence();
-            await validate(download._response, download.Token).ConfigureAwait(false);
+            await validate(download._request, download._response, download.Token).ConfigureAwait(false);
             download.Fence();
             download.ContentType = download._response.Content.Headers.ContentType?.ToString();
             download.DeclaredLength = download._response.Content.Headers.ContentLength;

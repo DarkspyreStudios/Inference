@@ -820,6 +820,53 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Theory]
+    [InlineData("download")]
+    [InlineData("configured-download")]
+    [InlineData("configured-metadata")]
+    public async Task GrokFileReadFailuresRedactTheEffectiveRequestHeaders(string route)
+    {
+        var retryAfter = TimeSpan.FromSeconds(17);
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            "{\"error\":{\"code\":\"rate_limit_test-token_header-value_provider-secret\",\"refresh_token\":\"provider-secret\"}}",
+            HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-header-value-1", HttpMethod.Get);
+        using var http = new HttpClient(handler);
+        await using var files = new XaiFileClient(http);
+        using var destination = new MemoryStream();
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = route == "download" ? new Dictionary<string, string> { ["X-Trace"] = "header-value" } : []
+        };
+        void Configure(HttpRequestMessage request) => request.Headers.Add("X-Trace", "header-value");
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            if (route == "download")
+                await files.DownloadAsync(connection, "file-1", destination, null, () => { }, CancellationToken.None);
+            else if (route == "configured-download")
+                await files.OpenDownloadAsync(connection, "file-1", Timeout.InfiniteTimeSpan, () => { }, CancellationToken.None, Configure);
+            else
+                await files.GetAsync(connection, "file-1", () => { }, CancellationToken.None, configureHeaders: Configure);
+        });
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        Assert.Equal(retryAfter, failure.RetryAfter);
+        Assert.DoesNotContain("test-token", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("header-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("provider-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal(1, handler.Calls);
+        Assert.True(destination.CanWrite);
+        Assert.Equal(0, destination.Length);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task GrokSearchAndEmbeddingFailuresKeepSafeProviderCodes(bool embedding)
@@ -1129,14 +1176,17 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     private sealed class Handler(LlmTransport transport, bool streaming, string? scriptedBody = null,
-        HttpStatusCode statusCode = HttpStatusCode.OK, TimeSpan? retryAfter = null, string? requestId = null) : HttpMessageHandler
+        HttpStatusCode statusCode = HttpStatusCode.OK, TimeSpan? retryAfter = null, string? requestId = null,
+        HttpMethod? expectedMethod = null) : HttpMessageHandler
     {
         internal int Calls { get; private set; }
         internal string? RequestBody { get; private set; }
+        internal string? RequestTrace { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
-            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal(expectedMethod ?? HttpMethod.Post, request.Method);
+            RequestTrace = request.Headers.TryGetValues("X-Trace", out IEnumerable<string>? values) ? Assert.Single(values) : null;
             RequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             string body = scriptedBody ?? Body(transport, streaming);
             var response = new HttpResponseMessage(statusCode)

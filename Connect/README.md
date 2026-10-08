@@ -3070,6 +3070,11 @@ The shared HTTP classifier preserves the response status, observed request ID an
 the redacted error envelope, including when a route withholds the diagnostic body. Batch and deferred
 resource failures retain that safe code. Request IDs use the same credential redactor as diagnostic
 bodies. A reported retry delay is diagnostic data, not permission to retry.
+Files metadata and download failures also redact effective outgoing header values, including headers
+added by cross-family request configuration. The existing send owner supplies its actual request to
+the shared error boundary. Borrowed streams keep their existing ownership.
+Focused coverage checks reflected header values in provider codes and request IDs on ordinary
+downloads, configured downloads and configured metadata reads while retaining status and retry facts.
 An explicit error-envelope `code` takes precedence over a string `error` message. OAuth envelopes
 without a separate code retain their string error code. Flat model/access failures preserve
 `not-found` as the provider code and retain the redacted explanatory message separately.

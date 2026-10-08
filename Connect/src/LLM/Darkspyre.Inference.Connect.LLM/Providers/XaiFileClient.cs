@@ -41,7 +41,7 @@ internal sealed partial class XaiFileClient(HttpClient http) : IDisposable, IAsy
                 if (expiry is { } seconds) multipart.Add(new StringContent(seconds.ToString(CultureInfo.InvariantCulture)), "expires_after");
                 upload = new UploadContent(source, () => Check(fence, cancellationToken), cancellationToken);
                 multipart.Add(upload, "file", fileName);
-            }, response => ReadAsync(connection, response, root =>
+            }, (request, response) => ReadAsync(connection, request, response, root =>
             {
                 LlmProviderFile observed = ReadFile(root);
                 onObserved?.Invoke(observed);
@@ -161,8 +161,10 @@ internal sealed partial class XaiFileClient(HttpClient http) : IDisposable, IAsy
                 request.Headers.Accept.Clear();
                 request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(accept));
             }, requestTimeout ?? Timeout.InfiniteTimeSpan, CombinedFence,
-                (response, current) => XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response,
-                    LlmCredential.Parse(connection.Credential), [], current, diagnosticBody: false),
+                (request, response, current) => XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response,
+                    LlmCredential.Parse(connection.Credential),
+                    connection.AdditionalHeaders.Values.Concat(request.Headers.SelectMany(header => header.Value)),
+                    current, diagnosticBody: false),
                 operation.Token, dispatched, observed, RetainCleanup, operation.Dispose).ConfigureAwait(false);
         }
         catch (XaiHttpDownload.OpenFailure error)
@@ -188,13 +190,13 @@ internal sealed partial class XaiFileClient(HttpClient http) : IDisposable, IAsy
         {
             configureHeaders?.Invoke(request);
             if (body is not null) request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-        }, response => ReadAsync(connection, response, parse, fence, cancellationToken), fence, cancellationToken,
+        }, (request, response) => ReadAsync(connection, request, response, parse, fence, cancellationToken), fence, cancellationToken,
             requestTimeout: requestTimeout).ConfigureAwait(false);
         return consumption.Publish(result);
     }
 
     private async Task<T> ExchangeAsync<T>(LlmConnection connection, HttpMethod method, string path,
-        Action<HttpRequestMessage> configure, Func<HttpResponseMessage, Task<T>> read, Action fence, CancellationToken token,
+        Action<HttpRequestMessage> configure, Func<HttpRequestMessage, HttpResponseMessage, Task<T>> read, Action fence, CancellationToken token,
         Action? onDispatched = null, Action<HttpResponseMessage>? onResponse = null, TimeSpan? requestTimeout = null)
     {
         HttpRequestMessage? request = null;
@@ -216,7 +218,7 @@ internal sealed partial class XaiFileClient(HttpClient http) : IDisposable, IAsy
             }
             onResponse?.Invoke(response);
             Check(fence, token);
-            result = await read(response).ConfigureAwait(false);
+            result = await read(request, response).ConfigureAwait(false);
             Check(fence, token);
         }
         catch (Exception error) { failures.Add(error); }
@@ -236,11 +238,12 @@ internal sealed partial class XaiFileClient(HttpClient http) : IDisposable, IAsy
     internal sealed class ExchangeFailure(IEnumerable<Exception> failures)
         : AggregateException("Grok resource operation and cleanup failed.", failures);
 
-    private async Task<T> ReadAsync<T>(LlmConnection connection, HttpResponseMessage response,
+    private async Task<T> ReadAsync<T>(LlmConnection connection, HttpRequestMessage request, HttpResponseMessage response,
         Func<JsonElement, T> parse, Action fence, CancellationToken token, IReadOnlyList<string>? secretContext = null)
     {
         await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential),
-            connection.AdditionalHeaders.Values.Concat(secretContext ?? []).ToArray(), token, diagnosticBody: false).ConfigureAwait(false);
+            connection.AdditionalHeaders.Values.Concat(request.Headers.SelectMany(header => header.Value))
+                .Concat(secretContext ?? []).ToArray(), token, diagnosticBody: false).ConfigureAwait(false);
         Check(fence, token);
         string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, token).ConfigureAwait(false);
         Check(fence, token);
