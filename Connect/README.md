@@ -4296,6 +4296,15 @@ with one enum value and forbids additional properties. Streaming and nonstreamin
 tokens for streaming and 1153 input/69 output tokens for nonstreaming. This qualifies the selected
 simple schema and effort request, not every schema, model, applied effort, OAuth refresh or platform.
 Connect reads no CLI credentials and performs no fallback or schema rewrite.
+The public tester at source `8bb83b8`, installed Claude CLI 2.1.289 and selected `sonnet`
+also completes one nonstreaming Low-effort request through chat's catalog-admission path.
+The unchanged closed-object schema requires exactly the enum marker
+`CONNECT_CLAUDE_CATALOG_SCHEMA_121`. The returned object satisfies that original schema;
+the terminal result reports `Completed`, `tool_use` and valid `ProviderJsonSchema` enforcement.
+Actual usage is 1179 input, 78 output and 1257 total tokens, with zero cached input and
+1177 cache-write input tokens. Reasoning and cost are unreported. One tester call uses the
+existing sign-in without a Connect retry, credential copying or schema fallback. This qualifies
+the selected catalog-backed complete route, not every model, schema, refresh or platform.
 
 ### Model discovery
 
