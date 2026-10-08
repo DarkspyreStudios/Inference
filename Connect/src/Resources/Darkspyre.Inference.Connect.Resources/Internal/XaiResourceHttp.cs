@@ -136,7 +136,10 @@ internal sealed class XaiResourceHttp(HttpClient http, LlmConnection connection,
 
     private static LlmProviderException SafeProvider(LlmProviderException provider, Exception original, Observation observation,
         LlmConnection? connection) => new(
-        "The resource request failed.", LlmTransport.XaiResponses, provider.StatusCode,
+        connection is not null ? SecretRedactor.Sanitize(provider.Message, LlmCredential.Parse(connection.Credential),
+            connection.AdditionalHeaders.Values.Concat(observation.SecretContext))
+            : provider.InnerException is FailureEvidence ? provider.Message : "The resource request failed.",
+        LlmTransport.XaiResponses, provider.StatusCode,
         provider.ProviderCode is { } code && (connection is not null || provider.InnerException is FailureEvidence
             || code is "xai_authentication_required" or "xai_entitlement_required")
             ? SecretRedactor.Sanitize(code, LlmCredential.Parse(connection?.Credential),

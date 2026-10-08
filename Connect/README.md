@@ -3145,6 +3145,9 @@ The shared HTTP classifier preserves the response status, observed request ID an
 the redacted error envelope, including when a route withholds the diagnostic body. Batch and deferred
 resource failures retain that safe code. Request IDs use the same credential redactor as diagnostic
 bodies. A reported retry delay is diagnostic data, not permission to retry.
+Resource operation wrapping retains the boundary-owned protocol explanation and sanitized HTTP
+failure message. It withholds provider response bodies. An unowned provider message without the
+selected connection's secret context remains generic.
 Rejected Responses generation supplies its live outgoing headers, including borrowed-client defaults,
 alongside resolved hosted-authorization secrets to that same classifier.
 Files metadata and download failures also redact effective outgoing header values, including headers
@@ -4826,6 +4829,13 @@ the tester does not poll or retry. A completed response must retain the exact ma
 Resource failures report actual typed HTTP/request facts and safe typed causes. Arbitrary cause
 messages remain omitted. Missing authentication skips the case; provider access failures remain
 visible failures and do not become passes. These checks reuse existing facades and add no SDK contract.
+
+Live Global/Default checks at source `1ced77f` use the tester's saved OAuth without another sign-in
+or a retry. TTS passes in 16.25 seconds after listing actual voices and returning 61,004 WAV bytes.
+Batch creation returns HTTP 200 but fails before a batch receipt is parsed. Remote creation remains
+unknown; no repeat creation or guessed cleanup occurs. The deferred check receives an actual receipt
+and one retrieval returns typed pending in 1.37 seconds. It reports `SKIP`, not completed generation.
+These observations do not qualify batch results, deferred completion, STT or Realtime.
 
 Live Global/Default qualification at source `1418ba1` passes both cases with the tester's
 existing OAuth credential and no retries. The strict case selects

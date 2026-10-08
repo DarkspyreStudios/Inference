@@ -1080,6 +1080,36 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Fact]
+    public async Task GrokBatchProtocolFailureKeepsItsOwnedExplanationAfterOperationWrapping()
+    {
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            "{\"name\":\"batch\"}", HttpStatusCode.OK, requestId: "protocol-request");
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var source = new ResourcePreparationTests.Source(new()
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize()
+        });
+        await using var access = new LlmConnectionAccess(source, [], [client]);
+        await using var core = new LlmProviderService(source, [client], [], connectionAccess: access);
+        await using var batches = new LlmResourceProviderService(access, core);
+
+        LlmResourceOperationException operation = await Assert.ThrowsAsync<LlmResourceOperationException>(() =>
+            batches.CreateAsync("connection", "batch"));
+        LlmProviderException failure = Assert.IsType<LlmProviderException>(operation.InnerException);
+        Assert.Equal("xAI returned invalid resource protocol data.", failure.Message);
+        Assert.Equal(200, operation.Observation.HttpStatusCode);
+        Assert.Equal("protocol-request", failure.RequestId);
+        Assert.True(operation.Observation.BatchMutationDispatched);
+        Assert.Null(operation.Observation.ObservedBatch);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
     public async Task GrokBatchFailureKeepsSafeRequestIdInTheProviderErrorAndOperationReceipt()
     {
         var retryAfter = TimeSpan.FromSeconds(17);
@@ -1108,6 +1138,7 @@ public sealed class ProviderTerminalEvidenceTests
 
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
         Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal("Grok request failed (429): Provider rejected the Files request.", failure.Message);
         Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
         Assert.Equal(retryAfter, failure.RetryAfter);
         Assert.Equal(failure.RequestId, operation.Observation.RequestId);
