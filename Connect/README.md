@@ -4693,6 +4693,16 @@ preserves independent operation and cleanup failures. An upload without a return
 remote creation unknown; no guessed ID, filename search deletion, retry or rollback is performed.
 The checks use the existing agent and Files facades and do not copy application credentials.
 
+Live Global/Default qualification at source `1418ba1` passes both cases with the tester's
+existing OAuth credential and no retries. The strict case selects
+`grok-4.20-0309-non-reasoning`, validates its original argument, completes one callback and returns
+the exact unique callback result in 3.17 seconds. Two distinct model-step observations total
+676 input, 45 output and 721 tokens, with provider-reported cost of 0.0006215000 USD.
+That cost observation does not establish the account's actual billing. The Files case completes
+in 2.13 seconds, verifies all 89 original bytes and confirms deletion of its exact upload.
+These results do not qualify arbitrary strict schemas, regex semantics, public URLs, every page,
+expiry enforcement, cross-provider resource transfer or credential refresh.
+
 ```bash
 dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- grok-probe --provider grok-subscription --case strict --repeat 1 --timeout-seconds 60
 ```
