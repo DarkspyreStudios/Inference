@@ -69,7 +69,7 @@ public sealed class BedrockModelListingTests
             {
                 if (Interlocked.Increment(ref requests) == 2) entered.TrySetResult();
                 await release.Task;
-                throw new AmazonBedrockException("Private provider diagnostics.", ErrorType.Sender,
+                throw new AmazonBedrockException("Access denied for bedrock:GetFoundationModelAvailability using fixture-secret.", ErrorType.Sender,
                     "AccessDeniedException", "request-" + id, HttpStatusCode.Forbidden);
             }
         };
@@ -96,10 +96,16 @@ public sealed class BedrockModelListingTests
         {
             Assert.Equal(HttpStatusCode.Forbidden, error.StatusCode);
             Assert.Equal("AccessDeniedException", error.ProviderCode);
-            Assert.DoesNotContain("Private provider diagnostics", error.ToString(), StringComparison.Ordinal);
+            Assert.Contains("Access denied for bedrock:GetFoundationModelAvailability using [REDACTED].", error.Message, StringComparison.Ordinal);
+            Assert.DoesNotContain("fixture-secret", error.ToString(), StringComparison.Ordinal);
         });
         Assert.Equal(loggingFails ? 3 : 2, causes.Count);
         Assert.Equal(2, logger.Levels.Count(level => level == LogLevel.Warning));
+        Assert.All(logger.Messages, message =>
+        {
+            Assert.Contains("Access denied for bedrock:GetFoundationModelAvailability using [REDACTED].", message, StringComparison.Ordinal);
+            Assert.DoesNotContain("fixture-secret", message, StringComparison.Ordinal);
+        });
         Assert.Equal(2, requests);
     }
 
@@ -184,6 +190,7 @@ public sealed class BedrockModelListingTests
     private sealed class Logger : ILogger<BedrockLlmClient>
     {
         internal List<LogLevel> Levels { get; } = [];
+        internal List<string> Messages { get; } = [];
         internal Exception? NextWarningFailure { get; set; }
 
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
@@ -196,6 +203,7 @@ public sealed class BedrockModelListingTests
             lock (Levels)
             {
                 Levels.Add(logLevel);
+                Messages.Add(formatter(state, exception));
                 if (logLevel == LogLevel.Warning && NextWarningFailure is { } failure)
                 {
                     NextWarningFailure = null;

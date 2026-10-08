@@ -3970,6 +3970,8 @@ request fails, for example with `AccessDenied`, listing stops admitting more che
 the checks already in flight. Each failed request logs one warning. A single failure stays a single
 provider exception; multiple failures remain together in an aggregate. A failed logging sink does
 not skip another request's failure or diagnostic attempt.
+Catalog failures and their structured warnings preserve the credential-redacted AWS explanation
+alongside actual status, code and request ID. Raw SDK exception graphs remain private evidence.
 
 Bedrock's catalog requests report no model sizes. Each listed model carries the context window and
 maximum output of its base model from `BedrockModelLimits`, a table of the limits Anthropic publishes for

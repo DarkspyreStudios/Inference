@@ -8,9 +8,9 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock;
 
 internal sealed class BedrockModelResolver
 {
-    private static readonly Action<ILogger, string, int?, string?, string?, Exception?> DiscoveryFailed =
-        LoggerMessage.Define<string, int?, string?, string?>(LogLevel.Warning, new EventId(1, "DiscoveryFailed"),
-            "Bedrock {Operation} failed. StatusCode={StatusCode} ErrorCode={ErrorCode} RequestId={RequestId}");
+    private static readonly Action<ILogger, string, int?, string?, string?, string, Exception?> DiscoveryFailed =
+        LoggerMessage.Define<string, int?, string?, string?, string>(LogLevel.Warning, new EventId(1, "DiscoveryFailed"),
+            "Bedrock {Operation} failed. StatusCode={StatusCode} ErrorCode={ErrorCode} RequestId={RequestId} Reason={Reason}");
     private static readonly Action<ILogger, Exception?> ListingFailed =
         LoggerMessage.Define(LogLevel.Error, new EventId(2, "ListingFailed"),
             "Bedrock model listing failed after both catalog requests failed.");
@@ -296,11 +296,12 @@ internal sealed class BedrockModelResolver
         System.Net.HttpStatusCode? status = (int)error.StatusCode == 0 ? null : error.StatusCode;
         string? code = error.ErrorCode is null ? null : SecretRedactor.Sanitize(error.ErrorCode, credential);
         string? requestId = error.RequestId is null ? null : SecretRedactor.Sanitize(error.RequestId, credential);
-        var failure = new LlmProviderException("Bedrock model discovery request failed.",
+        string reason = SecretRedactor.Sanitize(error.Message, credential);
+        var failure = new LlmProviderException($"Bedrock model discovery request failed: {reason}",
             LlmTransport.AwsBedrockConverse, status, code, requestId, innerException: new SdkEvidence(error));
         try
         {
-            DiscoveryFailed(logger, operation, status is null ? null : (int?)status.Value, code, requestId, null);
+            DiscoveryFailed(logger, operation, status is null ? null : (int?)status.Value, code, requestId, reason, null);
         }
         catch (Exception loggingFailure)
         {
