@@ -3184,6 +3184,11 @@ The shared HTTP classifier preserves the response status, observed request ID an
 the redacted error envelope, including when a route withholds the diagnostic body. Batch and deferred
 resource failures retain that safe code. Request IDs use the same credential redactor as diagnostic
 bodies. A reported retry delay is diagnostic data, not permission to retry.
+Grok catalog send failures use the selected credential and actual outgoing headers for redaction,
+including borrowed-client defaults. Typed failures retain their redacted explanation, provider code,
+request ID, status, retry delay and overflow flag. Transport failures expose a redacted explanation;
+their original exception remains internal. A failed send does not manufacture a response observation
+or trigger another catalog request.
 Resource operation wrapping retains the boundary-owned protocol explanation and sanitized HTTP
 failure message. It withholds provider response bodies. An unowned provider message without the
 selected connection's secret context remains generic.
