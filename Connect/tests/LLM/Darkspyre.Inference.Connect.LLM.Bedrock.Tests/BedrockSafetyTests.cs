@@ -303,6 +303,50 @@ public sealed class BedrockSafetyTests
     }
 
     [Theory]
+    [InlineData("us.anthropic.claude-sonnet-4-5-20250929-v1:0")]
+    [InlineData("eu.anthropic.claude-haiku-4-5-20251001-v1:0")]
+    [InlineData("global.anthropic.claude-opus-4-5-20251101-v1:0")]
+    [InlineData("anthropic.claude-opus-4-6-v1")]
+    public async Task DocumentedClaudeModelsAdmitNativeSchemasWithoutOverrides(string modelId)
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => throw new NotSupportedException(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var client = new BedrockLlmClient(factory, guard, new StubConverseInvoker(), NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = Connection();
+        LlmChatRequest request = Request() with
+        {
+            ModelId = modelId,
+            StructuredOutput = new()
+            {
+                Name = "answer",
+                Schema = JsonElement.Parse("""{"type":"object","properties":{"word":{"type":"string"}},"required":["word"],"additionalProperties":false}""")
+            }
+        };
+
+        LlmProviderCapabilities capabilities = client.ValidateRequest(connection, request);
+        Assert.True(capabilities.SupportsJsonSchema);
+        LlmStructuredOutputEnforcement enforcement = StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
+        Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, enforcement);
+        ConverseRequest built = BedrockLlmClient.BuildRequest(connection, request, modelId, enforcement);
+        foreach (Stream body in new[]
+        {
+            ConverseRequestMarshaller.Instance.Marshall(built).ContentStream,
+            ConverseStreamRequestMarshaller.Instance.Marshall(BedrockLlmClient.ToStreamRequest(built)).ContentStream
+        })
+        {
+            using (body)
+            using (JsonDocument sent = JsonDocument.Parse(body))
+            {
+                JsonElement format = sent.RootElement.GetProperty("outputConfig").GetProperty("textFormat");
+                Assert.Equal("json_schema", format.GetProperty("type").GetString());
+                Assert.Equal(request.StructuredOutput.Schema.GetRawText(),
+                    format.GetProperty("structure").GetProperty("jsonSchema").GetProperty("schema").GetString());
+            }
+        }
+    }
+
+    [Theory]
     [InlineData("", "{}", false)]
     [InlineData("answer", "[]", false)]
     [InlineData("answer", "{}", true)]

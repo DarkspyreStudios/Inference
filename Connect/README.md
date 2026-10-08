@@ -3919,9 +3919,11 @@ are unchanged. The completion records `ProviderJsonSchema` only when that config
 local validation still checks the original response against the original schema. The shared shape
 guard rejects an empty name or a non-object schema before resource reads or SDK acquisition.
 
-The exact IDs `openai.gpt-oss-20b-1:0`, `openai.gpt-oss-120b-1:0` and
-`anthropic.claude-sonnet-4-6` advertise native schema support from their AWS model cards. Existing
-geographic-prefix normalization applies. Other IDs and ARNs require an explicit schema capability
+The exact IDs `openai.gpt-oss-20b-1:0`, `openai.gpt-oss-120b-1:0`,
+`anthropic.claude-sonnet-4-6`, `anthropic.claude-opus-4-6-v1`,
+`anthropic.claude-sonnet-4-5-20250929-v1:0`, `anthropic.claude-haiku-4-5-20251001-v1:0` and
+`anthropic.claude-opus-4-5-20251101-v1:0` advertise AWS-documented native schema support. Existing
+`us.`, `eu.`, `apac.` and `global.` prefix normalization applies. Other IDs and ARNs require an explicit schema capability
 override for a native attempt. An override can disable native enforcement on a known model.
 Without native support, only an explicit `LocalValidation` fallback permits structured output;
 that request carries no native output configuration. JSON-object-only enforcement is unavailable.
@@ -3929,11 +3931,11 @@ Provider schema compilation failures propagate without schema rewriting, retry o
 See [AWS structured output](https://docs.aws.amazon.com/bedrock/latest/userguide/structured-output.html),
 [gpt-oss 20B](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-oss-20b.html),
 [gpt-oss 120B](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-openai-gpt-oss-120b.html)
-and [Sonnet 4.6](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-sonnet-4-6.html).
+and [Claude structured output support](https://docs.aws.amazon.com/bedrock/latest/userguide/claude-messages-structured-outputs.html).
 The existing SDK marshaller is verified for both request modes. Live gpt-oss 20B and 120B Low
 ConverseStream calls in `us-east-1` return text that fails the original schema's JSON validation.
 The result retains `IsValid = false`; provider-reported completion is not a validated structured
-answer. Native structured-output success remains unqualified on DSA-109. Sonnet is not exercised by
+answer. Native structured-output success remains unqualified on DSA-109. Claude models are not exercised by
 these calls. A direct AWS CLI 2.37.2 Converse call on 20B Low
 also returns malformed JSON with the same schema in `us-east-1`, without Connect or its stream parser.
 That proves a provider-facing nonstreaming failure for that request. It does not establish the cause

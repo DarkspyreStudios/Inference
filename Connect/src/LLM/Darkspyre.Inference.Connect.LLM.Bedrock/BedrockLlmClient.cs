@@ -93,7 +93,10 @@ internal sealed class BedrockLlmClient(
             {
                 ReasoningLevels = offered,
                 SupportsJsonSchema = baseModelId is "openai.gpt-oss-20b-1:0" or "openai.gpt-oss-120b-1:0"
-                    or "anthropic.claude-sonnet-4-6",
+                    or "anthropic.claude-sonnet-4-6" or "anthropic.claude-opus-4-6-v1"
+                    or "anthropic.claude-sonnet-4-5-20250929-v1:0"
+                    or "anthropic.claude-haiku-4-5-20251001-v1:0"
+                    or "anthropic.claude-opus-4-5-20251101-v1:0",
                 SupportsPromptImages = richContent.Images == LlmRichContentCarriage.Native,
                 SupportsPromptDocuments = richContent.PdfDocuments == LlmRichContentCarriage.Native,
                 RichContentSupported = richContent,
