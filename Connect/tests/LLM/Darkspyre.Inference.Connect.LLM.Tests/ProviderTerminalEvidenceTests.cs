@@ -959,9 +959,10 @@ public sealed class ProviderTerminalEvidenceTests
     {
         var retryAfter = TimeSpan.FromSeconds(17);
         var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
-            "{\"error\":{\"code\":\"rate_limit_test-token_header-value_provider-secret\",\"refresh_token\":\"provider-secret\"}}",
-            HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-header-value-1");
+            "{\"error\":{\"code\":\"rate_limit_test-token_header-value_default-value_provider-secret\",\"refresh_token\":\"provider-secret\"}}",
+            HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-header-value-default-value-1");
         using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
         var connection = new LlmConnection
         {
             Version = "1",
@@ -980,13 +981,16 @@ public sealed class ProviderTerminalEvidenceTests
                 new("reference", ["collection-1"]), () => { }, CancellationToken.None));
 
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
-        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
-        Assert.Equal("request-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
         Assert.Equal(retryAfter, failure.RetryAfter);
         Assert.Null(failure.SanitizedResponseBody);
         Assert.DoesNotContain("test-token", failure.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("header-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("default-value", failure.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("provider-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
         Assert.Equal(1, handler.Calls);
     }
 

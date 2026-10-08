@@ -1417,6 +1417,8 @@ retains actual refused owners behind safe diagnostics. Provider failures retain 
 request ID, status and retry delay without exposing the response body. The adapter is not registered. Subscription
 OAuth, model entitlement, preview format and the published input-schema/example disagreement remain
 unqualified; no default embedding model or working xAI availability is advertised.
+Embedding and document-search failure conversion uses selected and effective outgoing header values
+captured after the send. Reflected HttpClient-default headers remain redacted from codes and request IDs.
 
 Retirement fences new requests, cancels
 connection lookup and provider calls, and awaits all active requests before releasing its adapter references. Supplied adapters and the
