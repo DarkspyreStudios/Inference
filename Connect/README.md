@@ -4582,8 +4582,11 @@ request are not rewritten. Supported media that the local tokenizer cannot measu
 unknown occupancy. This admission does not qualify an engine's native enforcement or media handling.
 
 Agent sessions run on the managed agent lane, which executes host tools; context estimates count the
-request text with Connect's local tokenizer. Binary prompt attachments, structured tool content and
-non-text tool parts make the local measurement unknown. Known model limits remain available;
+request text with Connect's local tokenizer. Binary prompt attachments, structured tool content,
+non-text tool parts and supported shell tools or history make the local measurement unknown.
+Shell admission still uses the engine's capabilities and the existing ordered-history validator;
+the local estimator does not project typed shell input through function-only helpers.
+Known model limits remain available;
 accounting neither runs the engine nor reports a text-only number as complete input usage.
 Connect references Common only, never the engine library.
 The settings offer an **Engine** choice listed from the host's engines and a **Model** choice listed

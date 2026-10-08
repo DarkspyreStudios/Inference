@@ -195,35 +195,57 @@ public sealed class SelfHostCatalogTests
     [InlineData("image")]
     [InlineData("tool-binary")]
     [InlineData("tool-json")]
+    [InlineData("shell-tool")]
+    [InlineData("shell-history")]
     public async Task AccountingDoesNotReportTextOnlyUsageForUnmeasuredContent(string content)
     {
         var engine = new Engine
         {
             Models = [new("model", "Model") { MaxContextTokens = 4096 }],
-            Capabilities = new() { SupportsModelListing = true, SupportsPromptImages = true, SupportsToolUse = true }
+            Capabilities = new()
+            { SupportsModelListing = true, SupportsPromptImages = true, SupportsToolUse = true, SupportsShellTools = true }
         };
         await using var service = new LlmProviderService(new Source(), [new SelfHostLlmClient(new Host(engine))]);
         var message = new LlmChatMessage("user", "Read this content");
-        message = content != "image" ? message with
+        message = content.StartsWith("tool-", StringComparison.Ordinal) ? message with
         {
             ToolResults = [new LlmToolResult("call", content == "tool-json"
                 ? new() { StructuredContent = JsonElement.Parse("{\"answer\":42}") }
                 : new() { Parts = [new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", new byte[] { 1, 2, 3 }, "image.png")] })]
-        } : message with
+        } : content == "image" ? message with
         {
             Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "image.png", MediaType = "image/png", Data = new byte[] { 1, 2, 3 } }]
-        };
-        LlmRequestAccounting result = await service.MeasureRequestAsync("connection", new()
+        } : message;
+        var request = new LlmChatRequest
         {
             ModelId = "model",
-            Messages = content == "image" ? [message]
-                : [new("assistant", string.Empty) { ToolCalls = [new LlmToolCall("call", "create", "{}")] }, message]
-        });
+            Tools = content == "shell-tool" ? [new LlmShellTool([])] : [],
+            Messages = content == "shell-history"
+                ? [new("assistant", string.Empty) { ToolCalls = [new LlmShellCall("shell-1", ["pwd"], null, null)] },
+                    message with { ToolResults = [new LlmShellCallResult("shell-1", [new("workspace", string.Empty, new LlmShellExitedOutcome(0))])] }]
+                : content.StartsWith("tool-", StringComparison.Ordinal)
+                    ? [new("assistant", string.Empty) { ToolCalls = [new LlmToolCall("call", "create", "{}")] }, message]
+                    : [message]
+        };
+        LlmRequestAccounting result = await service.MeasureRequestAsync("connection", request);
         Assert.True(result.IsSupported);
         Assert.Null(result.UsedContextTokens);
         Assert.Null(result.AvailableInputTokens);
         Assert.Null(result.NeedsCompaction);
         Assert.Equal(4096, result.ModelMaxContextTokens);
+        Assert.Null(engine.LastRequest);
+
+        if (content.StartsWith("shell-", StringComparison.Ordinal))
+        {
+            LlmChatResult generated = await service.CompleteAsync("connection", request);
+            Assert.Equal(LlmCompletionStatus.Completed, generated.Status);
+            if (content == "shell-tool") Assert.IsType<LlmShellTool>(Assert.Single(engine.LastRequest!.Tools));
+            else
+            {
+                Assert.Equal("pwd", Assert.Single(Assert.IsType<LlmShellCall>(Assert.Single(engine.LastRequest!.Messages[0].ToolCalls)).Commands));
+                Assert.Equal("workspace", Assert.Single(Assert.IsType<LlmShellCallResult>(Assert.Single(engine.LastRequest.Messages[1].ToolResults)).Output).Stdout);
+            }
+        }
 
         LlmRequestAccounting text = await service.MeasureRequestAsync("connection", new()
         { ModelId = "model", Messages = [new("user", "Only text")] });

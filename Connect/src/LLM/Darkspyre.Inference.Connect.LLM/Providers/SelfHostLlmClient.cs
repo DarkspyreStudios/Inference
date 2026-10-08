@@ -80,7 +80,10 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ValidateOptions(connection, request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateEngineRequest(request, capabilities);
-        if (request.Messages.Any(message => message.Attachments.Count > 0
+        if (request.Tools.Any(tool => tool is CommonLlm.LlmShellTool)
+            || request.Messages.Any(message => message.Attachments.Count > 0
+            || message.ToolCalls.Any(call => call is CommonLlm.LlmShellCall)
+            || message.ToolResults.Any(result => result is CommonLlm.LlmShellCallResult)
             || ClientTools.Functions(message.ToolResults).Any(result => result.Output.StructuredContent is not null
                 || result.Output.Parts.Any(part => part is not CommonLlm.LlmToolOutputText))))
             return null;
