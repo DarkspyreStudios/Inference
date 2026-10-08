@@ -1,6 +1,7 @@
 using System.Collections.Frozen;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.LLM.Examples;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -8,6 +9,34 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ToolOutputProjectorTests
 {
+    [Theory]
+    [InlineData("{\"city\":\"Chicago\"}", false)]
+    [InlineData("{\"city\":\"Oslo\"}", true)]
+    [InlineData("not-json", true)]
+    public void WeatherFixtureSchemaAndResultsDoNotRequireReflection(string arguments, bool error)
+    {
+        LlmToolDefinition definition = WeatherTool.ChatDefinition;
+        Assert.True(definition.Strict);
+        Assert.False(definition.InputSchema.GetProperty("additionalProperties").GetBoolean());
+        Assert.Equal("city", Assert.Single(definition.InputSchema.GetProperty("required").EnumerateArray()).GetString());
+        Assert.Equal(definition.InputSchema.GetRawText(), WeatherTool.AgentDefinition.InputSchema.GetRawText());
+
+        LlmToolResult result = WeatherTool.Execute(new("call-1", definition.Name, arguments));
+        Assert.Equal("call-1", result.ToolCallId);
+        Assert.Equal(error, result.Output.IsError);
+        string text = Assert.IsType<LlmToolOutputText>(Assert.Single(result.Output.Parts)).Text;
+        using JsonDocument output = JsonDocument.Parse(text);
+        if (!error)
+        {
+            Assert.Equal("Chicago", output.RootElement.GetProperty("city").GetString());
+            Assert.Equal(72, output.RootElement.GetProperty("temperature_f").GetInt32());
+            Assert.Equal("clear", output.RootElement.GetProperty("conditions").GetString());
+        }
+        else
+            Assert.Equal(arguments == "not-json" ? "Invalid get_weather arguments." : "No fixture data is available.",
+                output.RootElement.GetProperty("error").GetString());
+    }
+
     private static readonly byte[] Png = [0x89, 0x50, 0x4e, 0x47];
 
     private static readonly LlmRichContentSupported AllNative = new()

@@ -1,24 +1,14 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Examples;
 
 internal static class WeatherTool
 {
-    private static readonly JsonElement InputSchema = JsonSerializer.SerializeToElement(new
-    {
-        type = "object",
-        properties = new
-        {
-            city = new
-            {
-                type = "string",
-                description = "City name, for example Chicago."
-            }
-        },
-        required = new[] { "city" },
-        additionalProperties = false
-    });
+    private static readonly JsonElement InputSchema = JsonElement.Parse("""
+        {"type":"object","properties":{"city":{"type":"string","description":"City name, for example Chicago."}},"required":["city"],"additionalProperties":false}
+        """);
 
     public static LlmToolDefinition ChatDefinition => new()
     {
@@ -47,7 +37,7 @@ internal static class WeatherTool
         {
             return new LlmToolResult(
                 call.Id,
-                LlmToolOutput.FromText(JsonSerializer.Serialize(new { error = "Invalid get_weather arguments." }), isError: true));
+                LlmToolOutput.FromText("""{"error":"Invalid get_weather arguments."}""", isError: true));
         }
     }
 
@@ -90,12 +80,12 @@ internal static class WeatherTool
             _ => null
         };
         return temperature is null
-            ? (JsonSerializer.Serialize(new { city, error = "No fixture data is available." }), false)
-            : (JsonSerializer.Serialize(new
+            ? (new JsonObject { ["city"] = city, ["error"] = "No fixture data is available." }.ToJsonString(), false)
+            : (new JsonObject
             {
-                city,
-                temperature_f = temperature,
-                conditions = "clear"
-            }), true);
+                ["city"] = city,
+                ["temperature_f"] = temperature,
+                ["conditions"] = "clear"
+            }.ToJsonString(), true);
     }
 }
