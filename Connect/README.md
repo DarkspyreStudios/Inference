@@ -92,6 +92,11 @@ model in `TransportConfiguration`; discovery does not gate a manual model.
 Generation and editing use one synchronous JSON request. The transport accepts up to ten outputs
 and five ordered references, including explicit duplicates. Binary and logical references upload
 through the same Files owner. Imported native file IDs receive a selected-token metadata check.
+The canonical request codec refuses non-null `quality` for the known `grok-imagine-image`,
+`grok-imagine-image-quality` and `grok-imagine-image-pro` slugs before uploads or HTTP.
+[xAI documents this control for `grok-imagine-image-2.0` only](https://docs.x.ai/developers/model-capabilities/images/generation#quality).
+Explicit null remains null. Unknown manual models retain provider-side admission. Model slugs
+remain literal; the transport does not predict provider redirects or replace the selected model.
 Null original filenames remain null; an unnamed upload gets a separate local multipart label.
 Selected and Image additional headers retain their values without replacing selected authorization.
 

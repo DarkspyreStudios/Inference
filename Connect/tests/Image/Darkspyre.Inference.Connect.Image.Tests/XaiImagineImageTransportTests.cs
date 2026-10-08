@@ -1,7 +1,9 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.Image;
+using Darkspyre.Inference.Connect.Image.Internal;
 using Darkspyre.Inference.Connect.Image.Providers;
 using Darkspyre.Inference.Connect.LLM;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,6 +12,64 @@ namespace Darkspyre.Inference.Connect.Image.Tests;
 
 public sealed class XaiImagineImageTransportTests
 {
+    [Theory]
+    [InlineData("grok-imagine-image-2.0", "medium")]
+    [InlineData("caller-selected-image-model", "medium")]
+    [InlineData("grok-imagine-image", null)]
+    public void QualityAdmissionPreservesModernManualAndNullControls(string model, string? quality)
+    {
+        var workflow = new ImageWorkflow
+        {
+            Id = "selected-workflow",
+            Label = "Selected workflow",
+            Transport = ImageTransport.XaiImagine,
+            TransportConfiguration = JsonElement.Parse(new JsonObject
+            {
+                ["model"] = model,
+                ["quality"] = quality
+            }.ToJsonString())
+        };
+
+        var request = new ImageGenerationRequest { ModelId = workflow.Id, Prompt = "A red square" };
+        XaiImageProtocol.Validate(request, workflow);
+        (string route, JsonObject body) = XaiImageProtocol.Build(request, workflow, []);
+
+        Assert.Equal("images/generations", route);
+        Assert.Equal(model, body["model"]!.GetValue<string>());
+        Assert.True(body.ContainsKey("quality"));
+        Assert.Equal(quality, body["quality"]?.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData("grok-imagine-image")]
+    [InlineData("grok-imagine-image-quality")]
+    [InlineData("grok-imagine-image-pro")]
+    public void KnownOlderModelsRefuseExplicitQualityBeforePreparingARequest(string model)
+    {
+        var workflow = new ImageWorkflow
+        {
+            Id = "selected-workflow",
+            Label = "Selected workflow",
+            Transport = ImageTransport.XaiImagine,
+            TransportConfiguration = JsonElement.Parse(new JsonObject
+            {
+                ["model"] = model,
+                ["quality"] = "medium"
+            }.ToJsonString())
+        };
+        var request = new ImageGenerationRequest { ModelId = workflow.Id, Prompt = "A red square" };
+
+        NotSupportedException validation = Assert.Throws<NotSupportedException>(() => XaiImageProtocol.Validate(request, workflow));
+        Assert.Contains("quality", validation.Message, StringComparison.Ordinal);
+        using var transport = new XaiImagineImageTransport();
+        Assert.Throws<NotSupportedException>(() => transport.Prepare(new ImageTransportPreparationRequest
+        {
+            Workflow = workflow,
+            PositivePrompt = request.Prompt,
+            CacheKey = string.Empty
+        }));
+    }
+
     [Fact]
     public async Task ImageFailurePreservesSanitizedRequestIdentityWithoutExposingTheBody()
     {

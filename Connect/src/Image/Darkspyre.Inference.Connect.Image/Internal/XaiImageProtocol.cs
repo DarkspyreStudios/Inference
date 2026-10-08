@@ -87,9 +87,10 @@ internal static class XaiImageProtocol
             throw new NotSupportedException("The supplied image sampling control has no xAI mapping.");
         JsonElement configuration = controls.Workflow.TransportConfiguration;
         if (configuration.ValueKind != JsonValueKind.Object) throw new ArgumentException("An xAI image workflow requires native model controls.", nameof(controls));
+        string model = XaiMediaData.RequiredString(configuration, "model", static _ => false);
         var body = new JsonObject
         {
-            ["model"] = XaiMediaData.RequiredString(configuration, "model", static _ => false),
+            ["model"] = model,
             ["prompt"] = controls.Prompt,
             ["n"] = controls.Count,
             ["response_format"] = "b64_json"
@@ -105,7 +106,12 @@ internal static class XaiImageProtocol
                     RequireChoice(property.Value, ["1:1", "3:4", "4:3", "9:16", "16:9", "2:3", "3:2", "9:19.5", "19.5:9", "9:20", "20:9", "1:2", "2:1", "21:9", "5:2", "auto"]);
                     break;
                 case "resolution": RequireChoice(property.Value, ["1k", "1.5k", "2k"]); break;
-                case "quality": RequireChoice(property.Value, ["low", "medium", "auto"]); break;
+                case "quality":
+                    RequireChoice(property.Value, ["low", "medium", "auto"]);
+                    if (property.Value.ValueKind != JsonValueKind.Null
+                        && model is "grok-imagine-image" or "grok-imagine-image-quality" or "grok-imagine-image-pro")
+                        throw new NotSupportedException("The selected image model does not support the quality control.");
+                    break;
                 case "user":
                     if (property.Value.ValueKind is not (JsonValueKind.String or JsonValueKind.Null)) throw InvalidControl();
                     break;
