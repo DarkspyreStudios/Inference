@@ -67,11 +67,12 @@ internal sealed class BedrockModelResolver
     }
 
     /// <summary>
-    /// Lists the models the account can call, each under an identifier it can invoke. A foundation model is
+    /// Lists models the account can attempt, each under an identifier it can invoke. A foundation model is
     /// listed by its model ID only when it supports on-demand inference; a model that runs only through an
     /// inference profile appears through the system inference profiles that include it. Models whose
     /// availability check reports no agreement or no authorization are omitted, and so are profiles whose
-    /// models are all such models. A failed availability check fails the listing with that request's error.
+    /// models are all such models. Missing or unrecognized availability remains unknown and keeps the model.
+    /// A failed availability check fails the listing with that request's error.
     /// Each model carries the context and output limits of its base model from <see cref="BedrockModelLimits"/>.
     /// </summary>
     public static async Task<IReadOnlyList<LlmModel>> ListAsync(
@@ -119,7 +120,7 @@ internal sealed class BedrockModelResolver
             throw new AggregateException("Bedrock model listing failed.", failures);
         }
 
-        Dictionary<string, bool>? callable = foundations is null
+        Dictionary<string, bool?>? callable = foundations is null
             ? null
             : await CheckAvailabilityAsync(control, foundations, logger, connection, cancellationToken);
         var byId = new Dictionary<string, LlmModel>(StringComparer.Ordinal);
@@ -137,7 +138,7 @@ internal sealed class BedrockModelResolver
         foreach (FoundationModelSummary model in foundations ?? [])
         {
             if (callable is null
-                || (callable[model.ModelId] && !IsProfileOnly(model.InferenceTypesSupported)))
+                || (callable[model.ModelId] is not false && !IsProfileOnly(model.InferenceTypesSupported)))
             {
                 byId.TryAdd(
                     model.ModelId,
@@ -161,16 +162,17 @@ internal sealed class BedrockModelResolver
 
     /// <summary>
     /// Returns, per foundation model ID, whether the account holds an available agreement and authorization
-    /// for it. Each failed availability request is logged once and preserved in the listing failure.
+    /// for it, lacks a known prerequisite, or has unknown availability. Each failed availability request
+    /// is logged once and preserved in the listing failure.
     /// </summary>
-    private static async Task<Dictionary<string, bool>> CheckAvailabilityAsync(
+    private static async Task<Dictionary<string, bool?>> CheckAvailabilityAsync(
         BedrockClientFactory.Lease<AmazonBedrockClient> control,
         List<FoundationModelSummary> foundations,
         ILogger<BedrockLlmClient> logger,
         LlmConnection connection,
         CancellationToken cancellationToken)
     {
-        var callable = new ConcurrentDictionary<string, bool>(StringComparer.Ordinal);
+        var callable = new ConcurrentDictionary<string, bool?>(StringComparer.Ordinal);
         var errors = new ConcurrentQueue<Exception>();
         await Parallel.ForEachAsync(
             foundations.Select(model => model.ModelId).Distinct(StringComparer.Ordinal),
@@ -189,8 +191,12 @@ internal sealed class BedrockModelResolver
                             new GetFoundationModelAvailabilityRequest { ModelId = modelId },
                             token);
                     control.ThrowIfCanceled();
-                    callable[modelId] = availability.AgreementAvailability?.Status == AgreementStatus.AVAILABLE
-                        && availability.AuthorizationStatus == AuthorizationStatus.AUTHORIZED;
+                    AgreementStatus? agreement = availability.AgreementAvailability?.Status;
+                    AuthorizationStatus? authorization = availability.AuthorizationStatus;
+                    callable[modelId] = authorization == AuthorizationStatus.NOT_AUTHORIZED
+                        || agreement == AgreementStatus.NOT_AVAILABLE || agreement == AgreementStatus.PENDING
+                        || agreement == AgreementStatus.ERROR ? false
+                        : agreement == AgreementStatus.AVAILABLE && authorization == AuthorizationStatus.AUTHORIZED ? true : null;
                 }
                 catch (Exception error) when (error is Amazon.Runtime.AmazonServiceException or Amazon.Runtime.AmazonClientException or HttpRequestException)
                 {
@@ -210,18 +216,18 @@ internal sealed class BedrockModelResolver
             throw new AggregateException("Bedrock model availability checks failed.", failures);
         }
 
-        return new Dictionary<string, bool>(callable, StringComparer.Ordinal);
+        return new Dictionary<string, bool?>(callable, StringComparer.Ordinal);
     }
 
     /// <summary>
     /// A profile is uncallable when it names at least one model and every named model was checked and is
-    /// not callable. A model that was not checked keeps the profile.
+    /// not callable. An unchecked model or unknown availability keeps the profile.
     /// </summary>
-    private static bool AllModelsUncallable(InferenceProfileSummary profile, Dictionary<string, bool> callable)
+    private static bool AllModelsUncallable(InferenceProfileSummary profile, Dictionary<string, bool?> callable)
     {
         List<InferenceProfileModel> models = profile.Models ?? [];
         return models.Count > 0 && models.All(model =>
-            callable.TryGetValue(ModelIdFromArn(model.ModelArn), out bool available) && !available);
+            callable.TryGetValue(ModelIdFromArn(model.ModelArn), out bool? available) && available is false);
     }
 
     private static bool IsProfileOnly(IEnumerable<string>? inferenceTypes)

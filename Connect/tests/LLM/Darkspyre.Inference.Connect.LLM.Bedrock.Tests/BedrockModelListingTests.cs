@@ -24,6 +24,33 @@ public sealed class BedrockModelListingTests
         Assert.Equal(new[] { Nova }, await ListAsync(control));
     }
 
+    [Theory]
+    [InlineData(null, null, true)]
+    [InlineData(null, "AUTHORIZED", true)]
+    [InlineData("AVAILABLE", null, true)]
+    [InlineData("FUTURE_STATUS", "AUTHORIZED", true)]
+    [InlineData("AVAILABLE", "FUTURE_STATUS", true)]
+    [InlineData("FUTURE_STATUS", "NOT_AUTHORIZED", false)]
+    [InlineData("NOT_AVAILABLE", "FUTURE_STATUS", false)]
+    [InlineData("PENDING", "AUTHORIZED", false)]
+    [InlineData("ERROR", "AUTHORIZED", false)]
+    [InlineData("AVAILABLE", "AUTHORIZED", true)]
+    public async Task UnknownAvailabilityRetainsModelsAndProfilesUnlessAnotherFactDeniesAccess(
+        string? agreement, string? authorization, bool listed)
+    {
+        InferenceProfileSummary profile = Profile("us." + Nova, Nova);
+        profile.Models.Add(new() { ModelArn = "arn:aws:bedrock:us-east-1::foundation-model/" + Opus });
+        var control = new Control(
+            [Model(Nova, "ON_DEMAND"), Model(Opus, "ON_DEMAND")], [profile],
+            availability: id => id == Opus ? Unsubscribed() : new()
+            {
+                AgreementAvailability = agreement is null ? null : new() { Status = AgreementStatus.FindValue(agreement) },
+                AuthorizationStatus = authorization is null ? null : AuthorizationStatus.FindValue(authorization)
+            });
+
+        Assert.Equal(listed ? new[] { Nova, "us." + Nova } : [], await ListAsync(control));
+    }
+
     [Fact]
     public async Task ProfileOnlyModelAppearsOnlyThroughItsProfiles()
     {

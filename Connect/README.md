@@ -4120,8 +4120,9 @@ histories retain their existing compaction behavior. Tool-result reductions afte
 remain permitted.
 An explicit idle `ReplaceContextAsync` can start a fresh context without the old provider state.
 
-Converse model listing returns the models the account can call, each under an identifier it can
-invoke. It omits a foundation model whose only inference type is `PROVISIONED`, such as
+Converse model listing returns models the account can attempt, each under an identifier it can
+invoke. Listing is not proof of entitlement. It omits a foundation model whose only inference type is
+`PROVISIONED`, such as
 `amazon.nova-lite-v1:0:300k`. Such a model runs only through purchased provisioned throughput, so a
 connection cannot invoke it by model ID.
 
@@ -4130,9 +4131,13 @@ foundation-model profile resolution use the complete catalog from the same helpe
 
 For every other foundation model, listing calls `GetFoundationModelAvailability`, at most eight at a
 time. A model is callable when its agreement status is `AVAILABLE` and its authorization status is
-`AUTHORIZED`. A model that is not callable is omitted, and so is a system inference profile whose
-models are all not callable. A callable model that supports `ON_DEMAND` is listed by its model ID. A
-callable model that supports only `INFERENCE_PROFILE` is not listed by its model ID; it appears
+`AUTHORIZED`. Known agreement statuses `PENDING`, `NOT_AVAILABLE` and `ERROR`, or authorization
+`NOT_AUTHORIZED`, keep their existing exclusion. Missing or unrecognized status fields remain unknown;
+they do not hide a model unless another known field excludes it. The private availability map retains
+that uncertainty. A system profile is omitted only when every named model has a known exclusion.
+Unknown or unchecked model availability keeps the profile selectable, without a verified-access claim.
+A retained model that supports `ON_DEMAND` is listed by its model ID. A retained model that supports
+only `INFERENCE_PROFILE` is not listed by its model ID; it appears
 through the region's system inference profiles that include it, such as `us.` and `global.` profiles.
 The connection's credentials need `bedrock:GetFoundationModelAvailability`. When any availability
 request fails, for example with `AccessDenied`, listing stops admitting more checks and waits for
