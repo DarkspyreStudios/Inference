@@ -4142,6 +4142,14 @@ observed stop reason is `tool_use`. The [CLI structured-output contract](https:/
 identifies that payload as the final structured result. Connect retains the actual stop reason.
 JSON in ordinary result text without that native payload does not turn an unresolved tool stop
 into completion. Error, refusal, incomplete and unknown-stop handling remains unchanged.
+Live qualification against source `0dacacd` uses installed Claude CLI 2.1.289, its existing sign-in,
+the `sonnet` alias and explicit Low effort. One unchanged object schema requires a string marker
+with one enum value and forbids additional properties. Streaming and nonstreaming both return
+`{"marker":"CLAUDE-121-SCHEMA-OK"}`, status `Completed`, finish reason `tool_use` and
+`ProviderJsonSchema` validation with `IsValid = true`. Reported usage is 1149 input/69 output
+tokens for streaming and 1153 input/69 output tokens for nonstreaming. This qualifies the selected
+simple schema and effort request, not every schema, model, applied effort, OAuth refresh or platform.
+Connect reads no CLI credentials and performs no fallback or schema rewrite.
 
 ### Model discovery
 
