@@ -61,6 +61,30 @@ public sealed class XaiTtsSessionTests
     }
 
     [Fact]
+    public async Task RestTransportFailureRetainsRedactedExplanationAndErrorKind()
+    {
+        using var handler = new FailedVoiceHttp("/v1/tts");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-secret");
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "bearer-default-secret");
+        await using var access = new LlmConnectionAccess(new VoiceConnectionSource(), []);
+        var binding = new XaiFamilyBinding(new("selected"), access);
+        await using ITtsClient client = new XaiTtsProvider(http).Bind(new()
+        {
+            Transport = TtsTransport.XaiTts,
+            Endpoint = new(VoiceTestData.Connection.Endpoint),
+            Xai = binding.Selection,
+            Headers = new Dictionary<string, string> { ["X-Family"] = "family-secret" }
+        }, binding);
+
+        HttpRequestException failure = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            client.SpeakAsync(new() { Text = "speech", Language = "en" }));
+
+        VoiceTestData.AssertTransportFailure(failure);
+        Assert.Equal(1, handler.Sends);
+    }
+
+    [Fact]
     public async Task RestFailurePreservesSafeEvidenceWithoutExposingProtectedHeaders()
     {
         using var handler = new RejectedVoiceHttp("/v1/tts");

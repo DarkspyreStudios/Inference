@@ -87,13 +87,22 @@ public static class XaiErrorClassifier
         using var response = new HttpResponseMessage(status);
         if (socket.HttpResponseHeaders is { } headers)
             foreach (var header in headers) response.Headers.TryAddWithoutValidation(header.Key, header.Value);
-        string[] secrets = request.Headers.SelectMany(header => header.Value)
-            .Concat(http.DefaultRequestHeaders.SelectMany(header => header.Value))
-            .Concat(new[] { request.Headers.Authorization?.Parameter, http.DefaultRequestHeaders.Authorization?.Parameter }.OfType<string>())
-            .ToArray();
+        string[] secrets = SpeechHttpSecrets(request, http);
         return Classify(status, null, null, "Provider rejected the speech request.", evidence,
             ProviderHttp.ReadRequestId(response, credential, secrets), response.Headers.RetryAfter?.Delta);
     }
+
+    internal static HttpRequestException SpeechHttpFailure(HttpRequestException original,
+        LlmCredential? credential, HttpRequestMessage request, HttpClient http) => new(
+        original.HttpRequestError,
+        SecretRedactor.Sanitize(original.Message, credential, SpeechHttpSecrets(request, http)),
+        new SpeechTransportEvidence(original), original.StatusCode);
+
+    private static string[] SpeechHttpSecrets(HttpRequestMessage request, HttpClient http) =>
+        request.Headers.SelectMany(header => header.Value)
+            .Concat(http.DefaultRequestHeaders.SelectMany(header => header.Value))
+            .Concat(new[] { request.Headers.Authorization?.Parameter, http.DefaultRequestHeaders.Authorization?.Parameter }.OfType<string>())
+            .ToArray();
 
     private static Exception Classify(HttpStatusCode status, string? code, string? message, string safe,
         Exception? evidence = null, string? requestId = null, TimeSpan? retryAfter = null, string? diagnosticCode = null)
@@ -130,7 +139,7 @@ public static class XaiErrorClassifier
             status, code, requestId, retryAfter, sanitizedResponseBody: safe, innerException: evidence,
             isContextOverflow: isContextOverflow);
 
-    private sealed class SpeechTransportEvidence(Exception original) : Exception("The speech transport reported an opening failure.")
+    private sealed class SpeechTransportEvidence(Exception original) : Exception("The speech transport reported a failure.")
     {
         internal Exception Original { get; } = original;
     }

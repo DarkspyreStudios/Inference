@@ -994,6 +994,9 @@ REST synthesis and transcription failures use the shared xAI HTTP classifier. It
 includes selected-connection headers, family headers and effective outgoing request headers, including
 borrowed HttpClient defaults. Public errors retain sanitized provider codes, request IDs, actual HTTP
 status and retry delay. They do not expose reflected protected headers or the raw speech response body.
+REST HTTP transport failures retain their bounded, credential-and-header-redacted explanation,
+`HttpRequestError` and any reported status. Both speech adapters use the same boundary. Original
+exception evidence stays private; its raw message and inner graph are not diagnostic output.
 Failed BCL WebSocket upgrades retain collected actual HTTP status, sanitized request ID and delta
 retry delay. The shared classifier uses the selected credential, selected/family request headers and
 borrowed HttpClient defaults for redaction. Private opening callbacks carry the already selected

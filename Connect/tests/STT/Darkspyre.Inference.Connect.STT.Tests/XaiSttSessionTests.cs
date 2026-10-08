@@ -150,6 +150,30 @@ public sealed class XaiSttSessionTests
     }
 
     [Fact]
+    public async Task RestTransportFailureRetainsRedactedExplanationAndErrorKind()
+    {
+        using var handler = new FailedVoiceHttp("/v1/stt");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-secret");
+        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "bearer-default-secret");
+        await using var access = new LlmConnectionAccess(new VoiceConnectionSource(), []);
+        var binding = new XaiFamilyBinding(new("selected"), access);
+        await using ISpeechTranscriptionClient client = new XaiSttProvider(http).Bind(new()
+        {
+            Transport = SttTransport.XaiStt,
+            Endpoint = new(VoiceTestData.Connection.Endpoint),
+            Xai = binding.Selection,
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Family"] = "family-secret" }
+        }, binding);
+
+        HttpRequestException failure = await Assert.ThrowsAsync<HttpRequestException>(() =>
+            client.TranscribeAsync(new BinarySpeechInput("audio/wav", new byte[] { 1, 2, 3 }, "speech.wav"), new()));
+
+        VoiceTestData.AssertTransportFailure(failure);
+        Assert.Equal(1, handler.Sends);
+    }
+
+    [Fact]
     public async Task RestFailurePreservesSafeEvidenceWithoutExposingProtectedHeaders()
     {
         using var handler = new RejectedVoiceHttp("/v1/stt");

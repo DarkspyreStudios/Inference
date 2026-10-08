@@ -154,6 +154,8 @@ public sealed class XaiSttProvider : ISttProvider
                     timeout.Token).ConfigureAwait(false); fence();
                 result = await read(response, timeout.Token).ConfigureAwait(false); fence();
             }
+            catch (HttpRequestException error)
+            { errors.Add(XaiErrorClassifier.SpeechHttpFailure(error, LlmCredential.Parse(snapshot.Credential), request, _provider!._http)); }
             catch (Exception error) { errors.Add(error); }
             try { response?.Dispose(); } catch (Exception error) { var cleanup = LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: response); RecordCleanup(cleanup); errors.Add(cleanup); }
             try { request.Dispose(); } catch (Exception error) { var cleanup = LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: request); RecordCleanup(cleanup); errors.Add(cleanup); }

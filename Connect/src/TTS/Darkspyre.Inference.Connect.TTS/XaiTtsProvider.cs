@@ -182,6 +182,8 @@ public sealed class XaiTtsProvider : ITtsProvider
                 result = await read(response, timeout.Token).ConfigureAwait(false); CombinedFence();
             }
             catch (JsonException) { errors.Add(XaiTtsProtocol.Protocol()); }
+            catch (HttpRequestException error)
+            { errors.Add(XaiErrorClassifier.SpeechHttpFailure(error, LlmCredential.Parse(snapshot.Credential), request, http ?? _provider!._http)); }
             catch (Exception error) { errors.Add(error); }
             try { response?.Dispose(); } catch (Exception error) { var cleanup = LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: response); RecordCleanup(cleanup); errors.Add(cleanup); }
             try { request.Dispose(); } catch (Exception error) { var cleanup = LlmResourcePreparation.AsCleanupFailure(error, refusedOwner: request); RecordCleanup(cleanup); errors.Add(cleanup); }

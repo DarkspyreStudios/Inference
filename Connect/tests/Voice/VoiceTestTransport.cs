@@ -39,6 +39,15 @@ internal static class VoiceTestData
         foreach (string value in new[] { "private speech source", "dummy-test-token", "binding-secret", "family-secret", "default-secret", "provider-secret" })
             Assert.DoesNotContain(value, failure.ToString(), StringComparison.Ordinal);
     }
+    internal static void AssertTransportFailure(HttpRequestException failure)
+    {
+        Assert.Equal(HttpRequestError.ConnectionError, failure.HttpRequestError);
+        Assert.Null(failure.StatusCode);
+        Assert.Equal("Speech connection reset: [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED] [REDACTED].", failure.Message);
+        Assert.NotNull(failure.InnerException);
+        foreach (string value in new[] { "private transport cause", "dummy-test-token", "refresh-secret", "identity-secret", "binding-secret", "family-secret", "default-secret", "bearer-default-secret" })
+            Assert.DoesNotContain(value, failure.ToString(), StringComparison.Ordinal);
+    }
     internal static string Type(byte[] bytes)
     {
         using JsonDocument json = JsonDocument.Parse(bytes);
@@ -104,6 +113,24 @@ internal sealed class RejectedVoiceUpgrade(string path) : HttpMessageHandler
         response.Headers.Add("x-request-id", "upgrade-dummy-test-token-binding-secret-family-secret-default-secret-refresh-secret-identity-secret");
         response.Headers.RetryAfter = new(TimeSpan.FromSeconds(17));
         return Task.FromResult(response);
+    }
+}
+
+internal sealed class FailedVoiceHttp(string path) : HttpMessageHandler
+{
+    internal int Sends { get; private set; }
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        Sends++;
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal(path, request.RequestUri!.AbsolutePath);
+        Assert.Equal("dummy-test-token", request.Headers.Authorization!.Parameter);
+        Assert.Equal("binding-secret", Assert.Single(request.Headers.GetValues("X-Binding")));
+        Assert.Equal("family-secret", Assert.Single(request.Headers.GetValues("X-Family")));
+        Assert.Equal("default-secret", Assert.Single(request.Headers.GetValues("X-Default")));
+        throw new HttpRequestException(HttpRequestError.ConnectionError,
+            "Speech connection reset: dummy-test-token refresh-secret identity-secret binding-secret family-secret default-secret bearer-default-secret.",
+            new IOException("private transport cause dummy-test-token"));
     }
 }
 
