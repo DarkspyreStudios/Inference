@@ -47,7 +47,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
-        OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
+        // The native cap excludes reasoning and function tokens; it does not bound total output.
+        OutputLimitEnforcement = LlmOutputLimitEnforcement.Unknown,
         SupportsStreaming = true,
         SupportsStreamingUsage = true,
         SupportsReasoningText = true,

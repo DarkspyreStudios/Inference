@@ -13,6 +13,53 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ProviderTerminalEvidenceTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GrokVisibleOutputCapDoesNotPromiseATotalOutputCeiling(bool streaming)
+    {
+        const string response = """
+            {"id":"response-1","model":"grok-4.6","status":"completed","output":[{"type":"message","id":"message-1","role":"assistant","content":[{"type":"output_text","text":"answer"}]}],"usage":{"input_tokens":654,"output_tokens":137,"total_tokens":791,"output_tokens_details":{"reasoning_tokens":126}}}
+            """;
+        string body = streaming ? $"data: {{\"type\":\"response.completed\",\"response\":{response}}}\n\n" : response;
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming, body, emptyCatalog: true);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+        await using var service = new LlmProviderService(new ResourcePreparationTests.Source(connection), [client]);
+        var request = new LlmChatRequest
+        {
+            ModelId = "grok-4.6",
+            MaxOutputTokens = 128,
+            Messages = [new("user", "hello")]
+        };
+
+        LlmRequestAccounting accounting = await service.MeasureRequestAsync("connection", request,
+            new() { ReservedOutputTokens = 64 });
+        Assert.Equal(LlmOutputLimitEnforcement.Unknown, accounting.OutputLimitEnforcement);
+        Assert.Equal(64, accounting.ReservedOutputTokens);
+        var facade = new ConnectLlmInference(service, "connection");
+        Assert.Equal(LlmOutputLimitEnforcement.Unknown,
+            (await facade.GetCapabilitiesAsync(request.ModelId)).OutputLimitEnforcement);
+
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in service.StreamAsync("connection", request)) events.Add(item);
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("answer", result.Text);
+        Assert.Equal(new LlmUsage(654, 137, 791) { ReasoningOutputTokens = 126 }, result.Usage);
+        using var sent = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(128, sent.RootElement.GetProperty("max_output_tokens").GetInt32());
+    }
+
+    [Theory]
     [InlineData(LlmTransport.OpenAiResponses)]
     [InlineData(LlmTransport.OpenAiCompatibleChat)]
     [InlineData(LlmTransport.AnthropicMessages)]
@@ -1643,7 +1690,7 @@ public sealed class ProviderTerminalEvidenceTests
 
     private sealed class Handler(LlmTransport transport, bool streaming, string? scriptedBody = null,
         HttpStatusCode statusCode = HttpStatusCode.OK, TimeSpan? retryAfter = null, string? requestId = null,
-        HttpMethod? expectedMethod = null) : HttpMessageHandler
+        HttpMethod? expectedMethod = null, bool emptyCatalog = false) : HttpMessageHandler
     {
         internal int Calls { get; private set; }
         internal string? RequestBody { get; private set; }
@@ -1653,6 +1700,11 @@ public sealed class ProviderTerminalEvidenceTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
+            if (emptyCatalog && request.Method == HttpMethod.Get)
+            {
+                Assert.True(request.RequestUri!.AbsolutePath is "/v1/models" or "/v1/language-models");
+                return new(HttpStatusCode.OK) { Content = new StringContent("{\"data\":[],\"models\":[]}", Encoding.UTF8, "application/json") };
+            }
             Assert.Equal(expectedMethod ?? HttpMethod.Post, request.Method);
             RequestTrace = request.Headers.TryGetValues("X-Trace", out IEnumerable<string>? values) ? Assert.Single(values) : null;
             RequestDefaultTrace = request.Headers.TryGetValues("X-Default", out IEnumerable<string>? defaults) ? Assert.Single(defaults) : null;

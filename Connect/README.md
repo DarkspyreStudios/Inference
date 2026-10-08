@@ -2804,7 +2804,12 @@ input budget, and preserves `LlmContextMeasurementSource`. Neither `IsSupported`
 OpenAI Responses, Anthropic Messages and Bedrock Converse advertise `ProviderEnforced`; direct Codex,
 Claude CLI and Antigravity advertise `Unsupported`. Generic compatible endpoints and the custom
 AgentCore harness remain `Unknown`: forwarding a field is not evidence of enforcement. A reserve
-does not enforce `MaxOutputTokens`. Bounded summarization must reject an unsupported or unverifiable
+does not enforce `MaxOutputTokens`. Grok Responses also reports `Unknown` for total-output enforcement.
+Its native `max_output_tokens` limits visible output only, excluding reasoning and function tokens,
+as the [xAI Responses reference](https://docs.x.ai/developers/rest-api-reference/inference/responses.md)
+documents. Connect forwards the requested cap unchanged and retains complete provider usage.
+Accounting does not treat that visible-only cap as a qualified total-output reserve.
+Bounded summarization must reject an unsupported or unverifiable
 route, not switch models or silently omit its cap. No new inference retries or compaction orchestration
 are introduced by these APIs.
 
@@ -3105,7 +3110,8 @@ One genuine UnitedStates/Default nonstreaming request at source `ced2dfd` select
 Low reasoning and 128 requested output tokens. It returns `GROK-121-US-NONSTREAM-OK`,
 `Completed` with finish reason `completed`, and reported usage of 654 input and 137 output
 tokens, including 126 reasoning output tokens and 512 cached input tokens. The reported output
-exceeds the requested cap; this run does not qualify cap enforcement. It uses the tester's saved
+includes reasoning that the native visible-output cap excludes. This count is not evidence of a
+visible-cap violation and does not qualify total-output enforcement. It uses the tester's saved
 OAuth without retries, uploads, hosted tools or another route.
 A separate Global/Default turn on `grok-4.20-0309-non-reasoning` with a three-iteration cap completes
 the existing echo callback and replays its successful text result. The turn completes after two
