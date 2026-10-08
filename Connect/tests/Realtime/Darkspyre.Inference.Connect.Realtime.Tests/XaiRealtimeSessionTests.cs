@@ -1,4 +1,6 @@
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Realtime;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM;
@@ -32,14 +34,51 @@ public sealed class XaiRealtimeSessionTests
     }
 
     private static readonly string[] RepeatedCommands = ["session.update", "input_audio_buffer.append", "input_audio_buffer.commit", "response.create", "response.create"];
-    private static async Task<IRealtimeVoiceSession> OpenAsync(VoiceSocket socket, VoiceResources? resources = null, int events = 16)
+    private static async Task<IRealtimeVoiceSession> OpenAsync(VoiceSocket socket, VoiceResources? resources = null, int events = 16, string[]? secrets = null)
     {
         var config = new RealtimeSessionConfig { TurnDetection = new RealtimeManualTurnDetection() };
         var session = new XaiRealtimeSession(socket, VoiceTestData.Limits(events), resources,
             resources is null ? null : new(resources.WorkspaceId, resources.SessionId, 0), config,
-            (_, _) => throw new InvalidOperationException("This test does not issue resumption receipts."), [], (_, _) => { }, _ => { }, null);
+            (_, _) => throw new InvalidOperationException("This test does not issue resumption receipts."), secrets ?? [], (_, _) => { }, _ => { }, null);
         await session.InitializeAsync(await XaiRealtimeProtocol.UpdateAsync(config, () => { }, default), default);
         return session;
+    }
+
+    [Theory]
+    [InlineData("error", false)]
+    [InlineData("response.mcp_call.failed", false)]
+    [InlineData("mcp_list_tools.failed", true)]
+    public async Task ProviderErrorDetailsSurviveWithSessionSecretsRedacted(string stage, bool stringError)
+    {
+        using var socket = new VoiceSocket();
+        await using IRealtimeVoiceSession session = await OpenAsync(socket,
+            secrets: ["access-token", "refresh-token", "header-secret", "tool-secret"]);
+        const string detail = "Unsupported voice: access-token refresh-token header-secret tool-secret";
+        string error = stringError ? JsonValue.Create(detail)!.ToJsonString()
+            : $$"""{"code":"invalid_voice","message":"{{detail}}","param":"voice","event_id":"client-1"}""";
+        socket.Json($$"""{"type":"{{stage}}","event_id":"server-1","error":{{error}}}""");
+
+        await using var events = session.Events.GetAsyncEnumerator();
+        Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(VoiceTestData.Timeout));
+        InferenceResourceFailure failure;
+        if (stage == "error")
+        {
+            var observed = Assert.IsType<RealtimeErrorEvent>(events.Current);
+            failure = observed.Error;
+            Assert.Equal("voice", observed.Parameter);
+            Assert.Equal("client-1", observed.RelatedClientEventId);
+        }
+        else
+        {
+            var observed = Assert.IsType<RealtimeHostedObservationEvent>(events.Current);
+            failure = Assert.IsType<InferenceResourceFailure>(observed.Error);
+            Assert.Equal(stage, observed.Stage);
+        }
+        Assert.Equal("server-1", events.Current.Identity.EventId);
+        Assert.Equal(stringError ? null : "invalid_voice", failure.ProviderCode);
+        Assert.Equal("Unsupported voice: [REDACTED] [REDACTED] [REDACTED] [REDACTED]", failure.Message);
+        await session.CreateResponseAsync();
+        Assert.False(socket.Disposed);
     }
 
     [Fact]

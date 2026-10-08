@@ -38,7 +38,7 @@ internal static class XaiRealtimeReader
         }
         void Check(string value) { if (SecretRedactor.ContainsProtectedValue(value, null, secrets)) throw XaiRealtimeProtocol.Malformed(); }
     }
-    internal static RealtimeEvent? Parse(JsonElement root)
+    internal static RealtimeEvent? Parse(JsonElement root, string[] secrets)
     {
         string type = Required(root, "type");
         switch (type)
@@ -103,7 +103,8 @@ internal static class XaiRealtimeReader
             case "response.mcp_call.in_progress":
             case "response.mcp_call.completed":
             case "response.mcp_call.failed":
-                return new RealtimeHostedObservationEvent(Identity(root), type, LlmHostedToolKind.RemoteMcp, Error: Error(root, "error"));
+                return new RealtimeHostedObservationEvent(Identity(root), type, LlmHostedToolKind.RemoteMcp,
+                    Error: Error(root, "error", secrets, "xAI hosted realtime work reported a failure."));
             case "response.mcp_call_arguments.delta":
             case "response.mcp_call_arguments.done":
                 bool argumentsFinal = type.EndsWith("done", StringComparison.Ordinal);
@@ -111,7 +112,7 @@ internal static class XaiRealtimeReader
                     Required(root, argumentsFinal ? "arguments" : "delta"), argumentsFinal);
             case "error":
                 JsonElement error = Object(root, "error");
-                return new RealtimeErrorEvent(Identity(root), new(InferenceFailureCode.ExecutionFailed, SafeCode(String(error, "code")), "xAI realtime reported a failure."),
+                return new RealtimeErrorEvent(Identity(root), Error(root, "error", secrets, "xAI realtime reported a failure.")!,
                     SafeCode(String(error, "param")), String(error, "event_id"));
             default: return null;
         }
@@ -154,10 +155,17 @@ internal static class XaiRealtimeReader
         try { return Convert.FromBase64String(raw); } catch (FormatException) { throw XaiRealtimeProtocol.Malformed(); }
     }
     private static string? SafeCode(string? value) => value is not null && value.Length <= 128 && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-' or '.') ? value : null;
-    private static InferenceResourceFailure? Error(JsonElement root, string name)
+    private static InferenceResourceFailure? Error(JsonElement root, string name, string[] secrets, string fallback)
     {
         if (!Value(root, name, out JsonElement value)) return null;
-        return new(InferenceFailureCode.ExecutionFailed, value.ValueKind == JsonValueKind.Object ? SafeCode(String(value, "code")) : null, "xAI hosted realtime work reported a failure.");
+        string? message = value.ValueKind switch
+        {
+            JsonValueKind.Object => String(value, "message"),
+            JsonValueKind.String => value.GetString(),
+            _ => null
+        };
+        return new(InferenceFailureCode.ExecutionFailed, value.ValueKind == JsonValueKind.Object ? SafeCode(String(value, "code")) : null,
+            message is null ? fallback : SecretRedactor.Sanitize(message, null, secrets));
     }
     private static Dictionary<string, string>? Map(JsonElement root, string name)
     {

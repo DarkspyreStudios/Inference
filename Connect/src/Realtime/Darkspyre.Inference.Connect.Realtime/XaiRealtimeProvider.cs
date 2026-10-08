@@ -85,7 +85,9 @@ public sealed class XaiRealtimeProvider(HttpClient httpClient) : IRealtimeProvid
                 if (!headers.Headers.TryAddWithoutValidation(pair.Key, pair.Value)) throw XaiRealtimeProtocol.Invalid();
             var credential = LlmCredential.Parse(selected.Credential);
             var secrets = headers.Headers.SelectMany(pair => pair.Value).Concat(new[] { credential?.OAuth?.AccessToken, credential?.OAuth?.RefreshToken, credential?.OAuth?.IdToken }
-                .OfType<string>()).Concat(toolSecrets).Where(value => value.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
+                .OfType<string>()).Concat(_http!.DefaultRequestHeaders.SelectMany(pair => pair.Value))
+                .Concat(new[] { _http.DefaultRequestHeaders.Authorization?.Parameter }.OfType<string>())
+                .Concat(toolSecrets).Where(value => value.Length > 0).Distinct(StringComparer.Ordinal).ToArray();
             socket = new ClientWebSocket(); socket.Options.CollectHttpResponseDetails = true;
             foreach (var pair in headers.Headers) socket.Options.SetRequestHeader(pair.Key, string.Join(", ", pair.Value));
             var query = new List<string>();

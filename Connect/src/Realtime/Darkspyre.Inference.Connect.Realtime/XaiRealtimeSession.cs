@@ -253,7 +253,7 @@ internal sealed class XaiRealtimeSession : IRealtimeVoiceSession
                     }
                     else
                     {
-                        try { observation = XaiRealtimeReader.Parse(root); if (observation is not null) XaiRealtimeReader.ValidateMetadata(root, secrets); }
+                        try { observation = XaiRealtimeReader.Parse(root, secrets); if (observation is not null) XaiRealtimeReader.ValidateMetadata(root, secrets); }
                         catch (Exception error) when (error is JsonException or ArgumentException or InvalidOperationException or OverflowException)
                         { throw XaiRealtimeProtocol.Malformed(); }
                     }

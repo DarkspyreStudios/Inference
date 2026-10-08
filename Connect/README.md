@@ -3575,6 +3575,14 @@ remote completion permits queued observations to drain, including when reading b
 Caller-canceled enumeration exits without waiting for session cleanup; disposal still reports the
 settled session outcome.
 
+Realtime and hosted-tool error observations retain supplied provider explanations through the
+existing bounded secret redactor. The session protects opening OAuth credentials, explicit and
+HTTP-default header values, and resolved hosted-tool authorization values. Later tool updates add
+their protected values before dispatch. Missing explanations retain the generic diagnostic;
+error codes, parameters and event identities keep their existing identity policy. This follows the
+[xAI voice error event](https://docs.x.ai/developers/rest-api-reference/inference/voice), which carries
+a code and message without normally retiring the session.
+
 Explicit `session.update` model selectors follow the published WebSocket schema. An attempted
 routing change invalidates the original opening receipt proof before acknowledgment, including
 receipts issued afterward. A bounded set of attempted selectors classifies subsequent actual
