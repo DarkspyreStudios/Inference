@@ -1469,7 +1469,9 @@ request ID, status and retry delay without exposing the response body. The adapt
 OAuth, model entitlement, preview format and the published input-schema/example disagreement remain
 unqualified; no default embedding model or working xAI availability is advertised.
 Embedding and document-search failure conversion uses selected and effective outgoing header values
-captured after the send. Reflected HttpClient-default headers remain redacted from codes and request IDs.
+captured when the send exits, including when it throws before returning a response. Reflected
+HttpClient-default headers remain redacted from codes and request IDs. An absent response supplies
+no HTTP status.
 
 Retirement fences new requests, cancels
 connection lookup and provider calls, and awaits all active requests before releasing its adapter references. Supplied adapters and the

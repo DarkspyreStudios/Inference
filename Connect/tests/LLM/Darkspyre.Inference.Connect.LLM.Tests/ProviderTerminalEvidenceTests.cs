@@ -1496,6 +1496,45 @@ public sealed class ProviderTerminalEvidenceTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task GrokSearchAndEmbeddingSendFailuresRedactEffectiveRequestHeaders(bool embedding)
+    {
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            sendFailure: new LlmProviderException("Transport refused test-token header-value default-value.",
+                LlmTransport.XaiResponses, providerCode: "transport_test-token_header-value_default-value",
+                requestId: "request-test-token-header-value-default-value"));
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" },
+            Catalog = []
+        };
+
+        LlmProviderException failure = embedding
+            ? await Assert.ThrowsAsync<LlmProviderException>(() => new XaiEmbeddingClient(http).EmbedAsync(connection,
+                new() { ModelId = "requested-model", Inputs = ["reference"] }))
+            : await Assert.ThrowsAsync<LlmProviderException>(() => XaiDocumentSearch.SearchAsync(http, connection,
+                new("reference", ["collection-1"]), () => { }, CancellationToken.None));
+
+        Assert.Equal("transport_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]", failure.RequestId);
+        Assert.Null(failure.StatusCode);
+        Assert.Null(failure.SanitizedResponseBody);
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task GrokSearchAndEmbeddingFailuresKeepSafeProviderCodes(bool embedding)
     {
         var retryAfter = TimeSpan.FromSeconds(17);

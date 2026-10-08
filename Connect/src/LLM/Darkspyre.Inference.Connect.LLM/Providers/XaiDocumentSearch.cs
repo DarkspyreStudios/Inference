@@ -39,9 +39,15 @@ internal static class XaiDocumentSearch
             XaiRequestHeaders.Apply(message, connection, false);
             message.Content = RequestJson.Content(payload);
             Fence();
-            response = await http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, consumption.Token).ConfigureAwait(false);
+            try
+            {
+                response = await http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, consumption.Token).ConfigureAwait(false);
+            }
+            finally
+            {
+                secrets = connection.AdditionalHeaders.Values.Concat(message.Headers.SelectMany(header => header.Value)).ToArray();
+            }
             Fence();
-            secrets = connection.AdditionalHeaders.Values.Concat(message.Headers.SelectMany(header => header.Value)).ToArray();
             await XaiErrorClassifier.ThrowIfUnsuccessfulDocumentSearchAsync(response, consumption.Token).ConfigureAwait(false);
             Fence();
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, consumption.Token).ConfigureAwait(false);
