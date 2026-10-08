@@ -83,16 +83,16 @@ internal static class ProviderHttp
         bool overflow = LlmContextOverflow.Http(transport, actualCode, actualType, actualMessage);
         string sanitized = SecretRedactor.Sanitize(body, credential);
         (string? code, string? providerMessage, _) = ReadProviderError(sanitized);
-        string requestId = ReadRequestId(response) ?? "unknown";
+        string? requestId = ReadRequestId(response, credential);
         string summary = string.IsNullOrWhiteSpace(providerMessage) ? sanitized : providerMessage;
-        string message = $"{operation} failed ({(int)response.StatusCode}, request {requestId}): {summary}";
+        string message = $"{operation} failed ({(int)response.StatusCode}, request {requestId ?? "unknown"}): {summary}";
 
         throw new LlmProviderException(
             message,
             transport,
             response.StatusCode,
             code,
-            ReadRequestId(response),
+            requestId,
             response.Headers.RetryAfter?.Delta,
             sanitized,
             isContextOverflow: overflow);
@@ -106,7 +106,8 @@ internal static class ProviderHttp
             if (response.Headers.TryGetValues(headerName, out IEnumerable<string>? values))
             {
                 string? id = values.FirstOrDefault();
-                return id is not null && extraSecrets is not null ? SecretRedactor.Sanitize(id, credential, extraSecrets) : id;
+                return id is not null && (credential is not null || extraSecrets is not null)
+                    ? SecretRedactor.Sanitize(id, credential, extraSecrets ?? []) : id;
             }
         }
 

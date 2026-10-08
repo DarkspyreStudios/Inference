@@ -13,6 +13,47 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ProviderTerminalEvidenceTests
 {
     [Theory]
+    [InlineData(LlmTransport.OpenAiResponses)]
+    [InlineData(LlmTransport.OpenAiCompatibleChat)]
+    [InlineData(LlmTransport.AnthropicMessages)]
+    public async Task HttpGenerationFailuresRedactCredentialEchoesFromRequestIds(LlmTransport transport)
+    {
+        var retryAfter = TimeSpan.FromSeconds(17);
+        using var handler = new Handler(transport, streaming: false,
+            "{\"error\":{\"code\":\"rate_limit_test-key_provider-secret\",\"message\":\"Failure test-key\",\"refresh_token\":\"provider-secret\"}}",
+            HttpStatusCode.TooManyRequests, retryAfter, "request-test-key-1");
+        using var http = new HttpClient(handler);
+        ILlmClient client = transport switch
+        {
+            LlmTransport.OpenAiResponses => new OpenAiResponsesLlmClient(http),
+            LlmTransport.OpenAiCompatibleChat => new OpenAiCompatibleChatLlmClient(http),
+            _ => new AnthropicMessagesLlmClient(http)
+        };
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = transport,
+            Endpoint = "https://provider.example.test/v1",
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection,
+                new() { ModelId = "selected-model", Messages = [new("user", "hello")] })) { }
+        });
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-1", failure.RequestId);
+        Assert.Contains("request request-[REDACTED]-1", failure.Message, StringComparison.Ordinal);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal(retryAfter, failure.RetryAfter);
+        Assert.DoesNotContain("test-key", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("provider-secret", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task GrokRequestsNoInlineCitationsThroughThePublishedIncludeList(bool streaming)
