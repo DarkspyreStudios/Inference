@@ -3204,6 +3204,10 @@ The shared HTTP classifier preserves the response status, observed request ID an
 the redacted error envelope, including when a route withholds the diagnostic body. Body-withholding
 routes retain only the named JSON error explanation; unrelated fields and unstructured bodies are
 not promoted to diagnostics. An absent named explanation keeps the route's fixed rejection label.
+Context-compaction rejection uses this body-withholding policy. Its wrapper retains the redacted
+named explanation and actual status, code, request ID, retry delay and overflow flag, without exporting
+the response body or original exception graph. Malformed successful compaction responses retain
+their fixed protocol failure message.
 Batch and deferred resource failures retain that safe code and explanation. Request IDs use the
 same credential redactor as diagnostic bodies. A reported retry delay is diagnostic data, not permission to retry.
 Grok catalog and tokenization send failures share the same `XaiErrorClassifier` projection.

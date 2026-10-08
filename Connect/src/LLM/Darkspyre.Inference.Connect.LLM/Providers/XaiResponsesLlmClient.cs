@@ -211,7 +211,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             secrets = connection.AdditionalHeaders.Values.Concat(message.Headers.SelectMany(header => header.Value)).ToArray();
             try
             {
-                await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, credential, secrets, consumption.Token).ConfigureAwait(false);
+                await XaiErrorClassifier.ThrowIfUnsuccessfulCompactionAsync(response, credential, secrets, consumption.Token).ConfigureAwait(false);
             }
             catch (LlmProviderException error) { classifiedFailure = error; throw; }
             catch (InferenceException error) when (error.InnerException is LlmProviderException) { classifiedFailure = error; throw; }
@@ -285,7 +285,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
     {
         LlmProviderException provider = original is InferenceException inference
             ? (LlmProviderException)inference.InnerException! : (LlmProviderException)original;
-        var safe = new LlmProviderException("Grok context compaction request failed.", LlmTransport.XaiResponses,
+        var safe = new LlmProviderException(SecretRedactor.Sanitize(provider.Message, credential, secrets), LlmTransport.XaiResponses,
             provider.StatusCode, provider.ProviderCode is { } code ? SecretRedactor.Sanitize(code, credential, secrets) : null,
             provider.RequestId is { } id ? SecretRedactor.Sanitize(id, credential, secrets) : null, provider.RetryAfter,
             innerException: new CompactionEvidence(original), isContextOverflow: provider.IsContextOverflow);

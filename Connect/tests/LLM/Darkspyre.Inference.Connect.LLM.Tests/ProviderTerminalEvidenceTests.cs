@@ -1666,7 +1666,7 @@ public sealed class ProviderTerminalEvidenceTests
         var retryAfter = TimeSpan.FromSeconds(17);
         using var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
             malformed ? "{}" :
-                "{\"error\":{\"code\":\"rate_limit_test-token_header-value_default-value\",\"message\":\"Failure default-value\"}}",
+                "{\"error\":{\"code\":\"rate_limit_test-token_header-value_default-value\",\"message\":\"Failure test-token header-value default-value\"},\"input\":\"private compaction source\"}",
             malformed ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests, retryAfter,
             "request-test-token-header-value-default-value-1");
         using var http = new HttpClient(handler);
@@ -1694,8 +1694,11 @@ public sealed class ProviderTerminalEvidenceTests
         {
             Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
             Assert.Equal(retryAfter, failure.RetryAfter);
+            Assert.Equal("Grok request failed (429): Failure [REDACTED] [REDACTED] [REDACTED]", failure.Message);
         }
+        else Assert.Equal("Grok context compaction failed.", failure.Message);
         Assert.Null(failure.SanitizedResponseBody);
+        Assert.DoesNotContain("private compaction source", failure.ToString(), StringComparison.Ordinal);
         foreach (string secret in new[] { "test-token", "header-value", "default-value" })
             Assert.DoesNotContain(secret, failure.ToString(), StringComparison.Ordinal);
         Assert.Equal("header-value", handler.RequestTrace);

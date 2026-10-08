@@ -43,6 +43,11 @@ public static class XaiErrorClassifier
         ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
             true, "Provider rejected the video request.", cancellationToken);
 
+    internal static Task ThrowIfUnsuccessfulCompactionAsync(HttpResponseMessage response, LlmCredential? credential,
+        IEnumerable<string> additionalSecrets, CancellationToken cancellationToken) =>
+        ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
+            false, "Provider rejected the context-compaction request.", cancellationToken);
+
     internal static Task ThrowIfUnsuccessfulEmbeddingAsync(HttpResponseMessage response, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(response);
