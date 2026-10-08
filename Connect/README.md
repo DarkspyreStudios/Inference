@@ -3192,6 +3192,16 @@ detail remain observed. The client does not sum named detail into a total or cou
 calls or sources. It leaves the separate `file_search_calls`/`document_search_calls` pairing unknown
 because their neutral aggregation is unqualified. Other Responses providers do not acquire these xAI
 metrics. Terminal usage remains authoritative; no interim usage producer or capability is added.
+One streaming OAuth CodeExecution request at source `e3cb082` on Global/Default
+`grok-4.20-0309-non-reasoning` returns `437` for `19 * 23`, with one observed code call completed
+and chat status `Completed`/finish `completed`. The existing tester reports normalized usage:
+965 input, 17 output, 982 total, 448 cached input, unknown cache-write and zero reasoning tokens;
+provider-reported USD cost `0.0057783500`; one total hosted call and zero sources. Named call
+counts report CodeExecution 1 and WebSearch, SocialSearch, RemoteMcp and ImageGeneration 0.
+The request supplies 128 output tokens and two hosted turns, uses only the tester's saved OAuth
+credential, and performs no retry or account/route fallback. This qualifies these reported
+normalized facts on the selected route, not subscription billing, raw-provider equality, every
+category's nonzero mapping, headers, document-counter pairing or nonstreaming accounting.
 
 `LlmChatRequest.ProviderControls`, its Common request projection and `LlmAgentTurnRequest`
 carry `XaiMultiAgentControls`. An absent control inherits `XaiConnectionOptions.MultiAgent`;
