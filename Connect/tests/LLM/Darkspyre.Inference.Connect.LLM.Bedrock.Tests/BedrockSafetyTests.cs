@@ -1528,6 +1528,59 @@ public sealed class BedrockSafetyTests
         Assert.Equal(streaming ? 0 : 1, invoker.ConverseRequests.Count);
     }
 
+    [Theory]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("{}", true)]
+    [InlineData(" { } \n", true)]
+    public async Task StreamedToolCallsRequireActualObjectInput(string? input, bool valid)
+    {
+        var control = new StreamControl();
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => control, _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var wire = new List<IEventStreamEvent>
+        {
+            new ContentBlockStartEvent
+            {
+                ContentBlockIndex = 0, Start = new() { ToolUse = new() { ToolUseId = "tool-1", Name = "weather" } }
+            }
+        };
+        if (input is not null)
+            wire.Add(new ContentBlockDeltaEvent { ContentBlockIndex = 0, Delta = new() { ToolUse = new() { Input = input } } });
+        wire.Add(new ContentBlockStopEvent { ContentBlockIndex = 0 });
+        wire.Add(new MessageStopEvent { StopReason = StopReason.Tool_use });
+        var invoker = new StubConverseInvoker { Events = wire };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        var events = new List<LlmStreamEvent>();
+        async Task ReadAsync()
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(ResourceConnection(streaming: true), Request())) events.Add(item);
+        }
+
+        if (valid)
+        {
+            await ReadAsync();
+            LlmChatResult result = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
+            Assert.Equal(LlmCompletionStatus.RequiresAction, result.Status);
+            var call = Assert.IsType<LlmToolCall>(Assert.Single(result.ToolCalls));
+            Assert.Equal(("tool-1", "weather", input), (call.Id, call.Name, call.ArgumentsJson));
+            Assert.Equal(call, Assert.Single(events.OfType<LlmToolCallCompletedEvent>()).ToolCall);
+        }
+        else
+        {
+            LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(ReadAsync);
+            Assert.Equal("Bedrock returned tool input that is not a JSON object.", failure.Message);
+            Assert.Equal("stream-request-1", failure.RequestId);
+            Assert.Empty(events.OfType<LlmToolCallCompletedEvent>());
+            Assert.Empty(events.OfType<LlmChatCompletionEvent>());
+        }
+        Assert.Equal("tool-1", Assert.Single(events.OfType<LlmToolCallStartedEvent>()).ToolCallId);
+        Assert.Single(invoker.StreamRequests);
+        Assert.Empty(invoker.ConverseRequests);
+        Assert.True(invoker.Disposed);
+    }
+
     [Fact]
     public async Task AgentCoreStreamFailureSurvivesFailedResponseCleanup()
     {

@@ -4115,6 +4115,10 @@ continuation state. An unknown or missing stop reason reports `Unknown`.
 A `tool_use` reply with null, scalar or array tool input throws `LlmProviderException` in both
 Converse modes. Non-streaming mapping rejects it before publishing response events. Empty object
 input remains valid, and provider-reported malformed stop reasons keep their `Failed` result.
+Streaming preserves the actual argument text. Missing or empty argument text does not become `{}`;
+it publishes no completed tool call and a `tool_use` terminal reports the same invalid-object error.
+An explicitly streamed `{}` remains a valid empty object. This follows the required
+[AWS tool-input delta](https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_ToolUseBlockDelta.html).
 
 Managed Converse compaction rejects a change to the provider-visible message prefix through the last
 signed assistant or to the top-level system prompt before resource callbacks or context replacement.

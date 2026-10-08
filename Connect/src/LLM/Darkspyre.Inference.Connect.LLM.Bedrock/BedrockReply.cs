@@ -181,12 +181,12 @@ internal sealed class BedrockStreamAccumulator
         public StringBuilder Arguments { get; } = new();
 
         /// <summary>
-        /// Parses the arguments. Empty arguments mean an empty object. Anything other than a JSON object marks the
-        /// block invalid and returns null.
+        /// Parses the actual arguments. Empty text or anything other than a JSON object marks the block invalid
+        /// and returns null.
         /// </summary>
         public LlmToolCall? Stop()
         {
-            string arguments = Arguments.Length == 0 ? "{}" : Arguments.ToString();
+            string arguments = Arguments.ToString();
             try
             {
                 using JsonDocument document = JsonDocument.Parse(arguments);
@@ -203,7 +203,7 @@ internal sealed class BedrockStreamAccumulator
         public override BedrockBlock ToReplyBlock() => new BedrockToolUseBlock(
             Id,
             Name,
-            Arguments.Length == 0 ? "{}" : Arguments.ToString(),
+            Arguments.ToString(),
             _valid);
     }
 }
