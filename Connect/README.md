@@ -3203,6 +3203,10 @@ or trigger another catalog request.
 Resource operation wrapping retains the boundary-owned protocol explanation and sanitized HTTP
 failure message. It withholds provider response bodies. An unowned provider message without the
 selected connection's secret context remains generic.
+Batch receipt, request-metadata and pagination strings reject credential or effective-header echoes.
+Deferred submission IDs use the same captured request context, including borrowed-client defaults.
+Protected native values fail protocol admission without rewriting an identity or publishing a receipt.
+Failure observations retain the actual dispatch and response facts.
 Rejected Responses generation supplies its live outgoing headers, including borrowed-client defaults,
 alongside resolved hosted-authorization secrets to that same classifier.
 Files metadata and download failures also redact effective outgoing header values, including headers

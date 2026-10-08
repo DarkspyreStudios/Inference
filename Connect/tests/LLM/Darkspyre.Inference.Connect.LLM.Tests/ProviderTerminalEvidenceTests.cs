@@ -1079,6 +1079,65 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.Equal(1, handler.Calls);
     }
 
+    [Theory]
+    [InlineData(true, "request_id", "default-value")]
+    [InlineData(false, "batch_id", "default-value")]
+    [InlineData(false, "name", "header-value")]
+    [InlineData(false, "create_api_key_id", "test-token")]
+    public async Task GrokResourceReceiptsRejectProtectedFieldsWithoutInventingAReceipt(
+        bool deferred, string field, string secret)
+    {
+        JsonObject body = deferred
+            ? new() { ["request_id"] = "request-1" }
+            : new() { ["batch_id"] = "batch-1", ["name"] = "batch" };
+        body[field] = "reflected-" + secret;
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body.ToJsonString(),
+            requestId: "request-test-token-header-value-default-value-1");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var client = new XaiResponsesLlmClient(http);
+        var source = new ResourcePreparationTests.Source(new()
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" },
+            Catalog = []
+        });
+        await using var access = new LlmConnectionAccess(source, [], [client]);
+        await using var core = new LlmProviderService(source, [client], [], connectionAccess: access);
+        await using var resources = new LlmResourceProviderService(access, core);
+
+        LlmResourceOperationException operation = await Assert.ThrowsAsync<LlmResourceOperationException>(async () =>
+        {
+            if (deferred)
+                await resources.SubmitDeferredAsync("connection", new()
+                { ModelId = "selected-model", Messages = [new("user", "hello")] });
+            else await resources.CreateAsync("connection", "batch");
+        });
+
+        LlmProviderException failure = Assert.IsType<LlmProviderException>(operation.InnerException);
+        Assert.Equal("xAI returned invalid resource protocol data.", failure.Message);
+        Assert.Equal(HttpStatusCode.OK, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        Assert.True(operation.Observation.ResponseObserved);
+        Assert.Equal(!deferred, operation.Observation.BatchMutationDispatched);
+        Assert.Equal(deferred, operation.Observation.DeferredSubmissionDispatched);
+        Assert.Null(operation.Observation.ObservedBatch);
+        Assert.Null(operation.Observation.ObservedDeferred);
+        Assert.Empty(operation.Observation.ObservedCommits);
+        string diagnostics = operation + JsonSerializer.Serialize(operation.Observation,
+            ConnectResourcesJson.LlmResourceOperationObservation);
+        foreach (string protectedValue in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(protectedValue, diagnostics, StringComparison.Ordinal);
+        Assert.Equal("test-token", handler.RequestBearerParameter);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
     [Fact]
     public async Task GrokBatchReceiptKeepsDateOnlyTimesUnknown()
     {

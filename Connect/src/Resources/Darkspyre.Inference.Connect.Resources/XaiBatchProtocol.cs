@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM;
@@ -149,15 +150,22 @@ internal sealed class XaiBatchProtocol(HttpClient http, LlmConnection connection
     private static JsonElement Array(JsonElement root, string name) => Property(root, name) is { ValueKind: JsonValueKind.Array } value
         ? value : throw new JsonException();
 
-    private static string RequiredString(JsonElement root, string name) => Property(root, name) is { ValueKind: JsonValueKind.String } value
-        ? value.GetString()! : throw new JsonException();
+    private string RequiredString(JsonElement root, string name) => Property(root, name) is { ValueKind: JsonValueKind.String } value
+        ? ProtectedString(value.GetString()!) : throw new JsonException();
 
-    private static string? OptionalString(JsonElement root, string name) => Property(root, name) switch
+    private string? OptionalString(JsonElement root, string name) => Property(root, name) switch
     {
         { ValueKind: JsonValueKind.Undefined or JsonValueKind.Null } => null,
-        { ValueKind: JsonValueKind.String } value => value.GetString(),
+        { ValueKind: JsonValueKind.String } value => ProtectedString(value.GetString()!),
         _ => throw new JsonException()
     };
+
+    private string ProtectedString(string value)
+    {
+        if (value != SecretRedactor.Sanitize(value, LlmCredential.Parse(connection.Credential), observation.SecretContext))
+            throw new JsonException();
+        return value;
+    }
 
     private static long? Count(JsonElement root, string name) => Property(root, name) switch
     {

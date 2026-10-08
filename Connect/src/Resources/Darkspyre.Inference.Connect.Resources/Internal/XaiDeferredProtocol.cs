@@ -153,7 +153,7 @@ internal sealed class XaiDeferredProtocol(HttpClient http, LlmConnection connect
             id = field.Value.GetString();
         }
         if (string.IsNullOrWhiteSpace(id) || id is "." or ".." || id.Any(char.IsControl)) throw new JsonException();
-        string safe = SecretRedactor.Sanitize(id, LlmCredential.Parse(connection.Credential), connection.AdditionalHeaders.Values);
+        string safe = SecretRedactor.Sanitize(id, LlmCredential.Parse(connection.Credential), observation.SecretContext);
         if (!string.Equals(id, safe, StringComparison.Ordinal)) throw new JsonException();
         // The submission response supplies no timestamp; the documented retention period is not an observed expiry.
         return new(id, new(ProviderHttp.BuildUri(connection, "chat/deferred-completion").AbsoluteUri, connectionId));
