@@ -3088,6 +3088,13 @@ names `max_output_tokens`, `max_prompt_tokens` and `max_time_limit`; each maps t
 Unknown statuses and incomplete reasons map to `Unknown`. Recognized `context_length_exceeded`
 codes or reasons raise `LlmProviderException.IsContextOverflow` before completion without retrying.
 The named incomplete limits remain `Incomplete` when no recognized overflow code is present.
+Two small live requests against source `0dacacd` select Global/Default
+`grok-4.20-0309-non-reasoning`, request 32 output tokens and ask for the integers from 1 to 100.
+Streaming and nonstreaming both stop after 16, report exactly 32 output tokens and return
+`Incomplete` with finish reason `incomplete`; each reports 207 input tokens. No tool executes.
+The tester's exit code 1 reflects that incomplete result, not a transport failure. These runs qualify
+the selected plain-text cap and incomplete result in both modes. They do not establish the semantics
+of hosted-tool aggregate usage or resolve the separate hosted-search output-token discrepancy.
 Encrypted context stays opaque; diagnostics redact its named values and
 reflections, and malformed JSON does not retain a parser exception containing provider text.
 The owning terminal-evidence tests exercise OAuth Grok streaming and nonstreaming through an HTTP
