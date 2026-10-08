@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -16,7 +17,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         ILlmContextEstimator,
         ILlmAccountUsageClient,
         IExternalLlmAuthenticationProbe,
-        IStreamingCredentialRefreshPolicy
+        IStreamingCredentialRefreshPolicy,
+        ILlmCatalogCapabilities
 {
     private const string CatalogEndpoint = "https://api.anthropic.com/v1";
     private const string AnthropicVersion = "2023-06-01";
@@ -40,6 +42,9 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     internal static readonly IReadOnlySet<LlmReasoningLevel> ReasoningLevels = LlmReasoningEffort.Levels(
         LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High,
         LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum);
+
+    private static readonly IReadOnlySet<LlmReasoningLevel> Claude46ReasoningLevels = LlmReasoningEffort.Levels(
+        LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.Maximum);
 
     protected override LlmProviderCapabilities DefaultCapabilities => Capabilities;
 
@@ -77,9 +82,16 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     internal static LlmProviderCapabilities ResolveCapabilities(LlmConnection connection, string? modelId)
     {
         _ = ClaudeCliConfiguration.ValidateConnection(connection);
-        LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(Capabilities, connection, modelId);
+        IReadOnlySet<LlmReasoningLevel>? offered = CatalogReasoningLevels(connection, modelId)
+            ?? (modelId is "claude-sonnet-4-6" or "claude-opus-4-6"
+                or "claude-sonnet-4-6[1m]" or "claude-opus-4-6[1m]" ? Claude46ReasoningLevels : null);
+        LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(
+            Capabilities with { ReasoningLevels = offered ?? ReasoningLevels }, connection, modelId);
         return capabilities with
         {
+            ReasoningLevels = offered is not null
+                ? capabilities.ReasoningLevels.Intersect(offered).ToFrozenSet()
+                : capabilities.ReasoningLevels,
             SupportsModelListing = true,
             SupportsJsonObject = false,
             SupportsTemperature = false,
@@ -103,6 +115,18 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                     PreservesOrder = true
                 }
         };
+    }
+
+    private static FrozenSet<LlmReasoningLevel>? CatalogReasoningLevels(LlmConnection connection, string? modelId)
+    {
+        if (ILlmCatalogCapabilities.EntryFor(connection, modelId) is not { ValueKind: JsonValueKind.Object } entry)
+            return null;
+        if (entry.TryGetProperty("supportsEffort", out JsonElement support) && support.ValueKind == JsonValueKind.False)
+            return FrozenSet<LlmReasoningLevel>.Empty;
+        if (!entry.TryGetProperty("supportedEffortLevels", out JsonElement levels) || levels.ValueKind != JsonValueKind.Array)
+            return null;
+        return ReasoningLevels.Where(level => levels.EnumerateArray().Any(value =>
+            value.ValueKind == JsonValueKind.String && value.GetString() == LlmReasoningEffort.Word(level))).ToFrozenSet();
     }
 
     public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(
@@ -370,7 +394,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         bool completed = string.Equals(terminal.Subtype, "success", StringComparison.Ordinal)
             && (finishReason is null
                 || string.Equals(finishReason, "end_turn", StringComparison.OrdinalIgnoreCase)
-                || string.Equals(finishReason, "stop_sequence", StringComparison.OrdinalIgnoreCase));
+                || string.Equals(finishReason, "stop_sequence", StringComparison.OrdinalIgnoreCase)
+                || terminal.HasStructuredOutput && string.Equals(finishReason, "tool_use", StringComparison.OrdinalIgnoreCase));
         LlmStructuredOutputValidation? validation = request.StructuredOutput is null
             ? null
             : refused
@@ -539,11 +564,13 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 $"{CatalogEndpoint}/models{query}");
             ApplyCatalogHeaders(request, catalogCredential);
             using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            string[] secrets = request.Headers.SelectMany(header => header.Value).ToArray();
             await ProviderHttp.ThrowIfUnsuccessfulAsync(
                 response,
                 Transport,
                 credential,
                 "Anthropic model discovery",
+                secrets,
                 cancellationToken);
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             JsonDocument document;
@@ -558,7 +585,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                     response,
                     body,
                     credential,
-                    exception);
+                    exception, secrets);
             }
 
             using (document)
@@ -724,11 +751,13 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         }
 
         string text = LlmJson.GetString(root, "result") ?? string.Empty;
+        bool hasStructuredOutput = false;
         if (preferStructuredOutput
             && root.TryGetProperty("structured_output", out JsonElement structuredOutput)
             && structuredOutput.ValueKind is not JsonValueKind.Null and not JsonValueKind.Undefined)
         {
             text = structuredOutput.GetRawText();
+            hasStructuredOutput = true;
         }
         bool isError = root.TryGetProperty("is_error", out JsonElement error)
             && error.ValueKind == JsonValueKind.True;
@@ -737,6 +766,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             null,
             new ClaudeTerminalResult(
                 text,
+                hasStructuredOutput,
                 isError,
                 LlmJson.GetString(root, "subtype"),
                 LlmJson.GetString(root, "stop_reason"),
@@ -881,6 +911,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     private sealed record ClaudeTerminalResult(
         string Text,
+        bool HasStructuredOutput,
         bool IsError,
         string? Subtype,
         string? StopReason,

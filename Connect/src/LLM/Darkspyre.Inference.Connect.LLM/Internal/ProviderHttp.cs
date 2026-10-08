@@ -71,6 +71,7 @@ internal static class ProviderHttp
         LlmTransport transport,
         LlmCredential? credential,
         string operation,
+        IEnumerable<string> additionalSecrets,
         CancellationToken cancellationToken)
     {
         if (response.IsSuccessStatusCode)
@@ -81,18 +82,19 @@ internal static class ProviderHttp
         string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
         (string? actualCode, string? actualMessage, string? actualType) = ReadProviderError(body);
         bool overflow = LlmContextOverflow.Http(transport, actualCode, actualType, actualMessage);
-        string sanitized = SecretRedactor.Sanitize(body, credential);
+        string[] secrets = additionalSecrets.ToArray();
+        string sanitized = SecretRedactor.Sanitize(body, credential, secrets);
         (string? code, string? providerMessage, _) = ReadProviderError(sanitized);
-        string requestId = ReadRequestId(response) ?? "unknown";
+        string? requestId = ReadRequestId(response, credential, secrets);
         string summary = string.IsNullOrWhiteSpace(providerMessage) ? sanitized : providerMessage;
-        string message = $"{operation} failed ({(int)response.StatusCode}, request {requestId}): {summary}";
+        string message = $"{operation} failed ({(int)response.StatusCode}, request {requestId ?? "unknown"}): {summary}";
 
         throw new LlmProviderException(
             message,
             transport,
             response.StatusCode,
             code,
-            ReadRequestId(response),
+            requestId,
             response.Headers.RetryAfter?.Delta,
             sanitized,
             isContextOverflow: overflow);
@@ -106,7 +108,8 @@ internal static class ProviderHttp
             if (response.Headers.TryGetValues(headerName, out IEnumerable<string>? values))
             {
                 string? id = values.FirstOrDefault();
-                return id is not null && extraSecrets is not null ? SecretRedactor.Sanitize(id, credential, extraSecrets) : id;
+                return id is not null && (credential is not null || extraSecrets is not null)
+                    ? SecretRedactor.Sanitize(id, credential, extraSecrets ?? []) : id;
             }
         }
 
@@ -138,7 +141,7 @@ internal static class ProviderHttp
         }
     }
 
-    private static (string? Code, string? Message, string? Type) ReadProviderError(string body)
+    internal static (string? Code, string? Message, string? Type) ReadProviderError(string body)
     {
         try
         {

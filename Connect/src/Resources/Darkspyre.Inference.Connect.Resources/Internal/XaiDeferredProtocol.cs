@@ -50,7 +50,7 @@ internal sealed class XaiDeferredProtocol(HttpClient http, LlmConnection connect
                     throw new InferenceException(InferenceFailureCode.ProtocolFailure, "xAI returned an unexpected deferred response status.");
                 string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, current).ConfigureAwait(false);
                 fence();
-                var actual = codec.DecodeCompleteResponse(body, response, connection);
+                var actual = codec.DecodeCompleteResponse(body, response, connection, observation.SecretContext);
                 observation.ObservedDeferredResult = new LlmDeferredCompleted(actual.Result);
                 fence();
                 return actual;
@@ -70,11 +70,13 @@ internal sealed class XaiDeferredProtocol(HttpClient http, LlmConnection connect
         foreach (var file in decoded.OutputFiles)
         {
             fence();
-            var writer = new XaiGeneratedFileWriter(resources, scope, file.Name, fence, observation);
-            InferenceResourceCommitResult receipt = await writer.MaterializeAsync(files, connection, file.Id, token).ConfigureAwait(false);
-            receipts.Add(receipt);
-            result = decoded.Result with { GeneratedResources = receipts };
-            observation.ObservedDeferredResult = new LlmDeferredCompleted(result);
+            var writer = new XaiGeneratedFileWriter(resources, scope, file.Name, fence, observation, receipt =>
+            {
+                receipts.Add(receipt);
+                result = decoded.Result with { GeneratedResources = receipts };
+                observation.ObservedDeferredResult = new LlmDeferredCompleted(result);
+            });
+            await writer.MaterializeAsync(files, connection, file.Id, token).ConfigureAwait(false);
             fence();
         }
         fence();

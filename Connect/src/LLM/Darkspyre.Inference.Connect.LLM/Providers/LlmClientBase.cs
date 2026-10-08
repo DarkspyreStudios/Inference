@@ -48,11 +48,13 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
             ProviderHttp.ApplyHeaders(request, connection);
 
             using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            string[] secrets = request.Headers.SelectMany(header => header.Value).ToArray();
             await ProviderHttp.ThrowIfUnsuccessfulAsync(
                 response,
                 Transport,
                 credential,
                 "Model discovery",
+                secrets,
                 cancellationToken);
 
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
@@ -105,7 +107,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
                     response,
                     body,
                     credential,
-                    exception);
+                    exception, secrets);
             }
         }
         return consumption.Publish(result);
@@ -368,13 +370,13 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
         HttpResponseMessage response,
         string rawBody,
         LlmCredential? credential,
-        Exception? innerException = null, IEnumerable<string>? extraSecrets = null) => new(
+        JsonException? innerException = null, IEnumerable<string>? extraSecrets = null) => new(
             message,
             Transport,
             response.StatusCode,
             requestId: ProviderHttp.ReadRequestId(response, credential, extraSecrets),
             sanitizedResponseBody: SecretRedactor.Sanitize(rawBody, credential, extraSecrets ?? []),
-            innerException: innerException);
+            innerException: innerException is null ? null : SecretRedactor.Sanitize(innerException));
 
     protected void EnsureTransport(LlmConnection connection)
     {

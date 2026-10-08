@@ -38,11 +38,10 @@ internal static class XaiDocumentSearch
             message = new(HttpMethod.Post, ProviderHttp.BuildUri(connection, "documents/search"));
             XaiRequestHeaders.Apply(message, connection, false);
             message.Content = RequestJson.Content(payload);
-            secrets = message.Headers.Where(header => header.Key == "Authorization" || connection.AdditionalHeaders.ContainsKey(header.Key))
-                .SelectMany(header => header.Value).ToArray();
             Fence();
             response = await http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, consumption.Token).ConfigureAwait(false);
             Fence();
+            secrets = connection.AdditionalHeaders.Values.Concat(message.Headers.SelectMany(header => header.Value)).ToArray();
             await XaiErrorClassifier.ThrowIfUnsuccessfulDocumentSearchAsync(response, consumption.Token).ConfigureAwait(false);
             Fence();
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, consumption.Token).ConfigureAwait(false);

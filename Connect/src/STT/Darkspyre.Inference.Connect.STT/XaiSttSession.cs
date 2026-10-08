@@ -40,7 +40,7 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
         _events = Channel.CreateBounded<(SpeechTranscriptEvent, long)>(new BoundedChannelOptions(limits.MaximumBufferedEvents)
         { FullMode = BoundedChannelFullMode.Wait, SingleReader = true, SingleWriter = true });
     }
-    internal static async Task<XaiSttSession> OpenAsync(Func<Uri, HttpRequestMessage, Action, Action<Exception>, CancellationToken, Task<WebSocket>> connect,
+    internal static async Task<XaiSttSession> OpenAsync(Func<Uri, HttpRequestMessage, LlmCredential?, Action, Action<Exception>, CancellationToken, Task<WebSocket>> connect,
         LlmConnection snapshot, SttConnection connection, SpeechStreamOptions options, InferenceStreamLimits limits,
         Action openingFence, Action<Exception> recordCleanup, CancellationToken token)
     {
@@ -51,7 +51,7 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
         try
         {
             openingFence();
-            socket = await connect(XaiSttProtocol.StreamUri(connection.Endpoint, options), headers, openingFence, recordCleanup, timeout.Token).ConfigureAwait(false);
+            socket = await connect(XaiSttProtocol.StreamUri(connection.Endpoint, options), headers, LlmCredential.Parse(snapshot.Credential), openingFence, recordCleanup, timeout.Token).ConfigureAwait(false);
             openingFence(); ArgumentNullException.ThrowIfNull(socket);
             session = new(socket, options, limits); session._receiver = session.ReceiveAsync();
             await session._ready.Task.WaitAsync(timeout.Token).ConfigureAwait(false); openingFence();

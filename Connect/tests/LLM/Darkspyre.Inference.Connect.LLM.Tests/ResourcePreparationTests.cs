@@ -13,12 +13,98 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ResourcePreparationTests
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task HostedImageFailureRetainsTheEarlierCommittedResource(bool streaming, bool cancelAfterHosted)
+    {
+        using var cancellation = new CancellationTokenSource();
+        using var handler = new HostedImages(streaming, cancelAfterHosted);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        LlmConnection connection = ResourceResults.Connection() with
+        { CapabilityOverrides = new() { SupportsStreaming = streaming } };
+        GeneratedWrite? write = null;
+        var workspace = new Resources(new("workspace", "session", 3, []), [])
+        {
+            WriteFactory = create => write = new GeneratedWrite("workspace", create, () => { })
+        };
+        await using var provider = new LlmProviderService(new Source(connection), [client]);
+        var events = new List<LlmStreamEvent>();
+        var request = new LlmChatRequest
+        {
+            ModelId = "grok-4.7",
+            Messages = [new("user", "Create images")],
+            HostedTools = [new LlmImageGenerationTool()],
+            Resources = workspace
+        };
+        IAsyncEnumerable<LlmStreamEvent> stream = cancelAfterHosted
+            ? client.StreamAsync(connection, request, cancellation.Token)
+            : provider.StreamAsync("connection", request, cancellation.Token);
+
+        Exception? failure = await Record.ExceptionAsync(async () =>
+        {
+            await foreach (LlmStreamEvent item in stream)
+            {
+                events.Add(item);
+                if (cancelAfterHosted && item is LlmHostedToolCallCompletedEvent) cancellation.Cancel();
+            }
+        });
+
+        Assert.Equal(HostedImages.Png, write!.CommittedBytes);
+        Assert.True(write.Disposed);
+        Assert.DoesNotContain(events, item => item is LlmChatCompletionEvent);
+        InferenceResourceOperationFailure facts;
+        if (cancelAfterHosted)
+        {
+            var canceled = Assert.IsType<InferenceResourceOperationCanceledException>(failure);
+            Assert.True(canceled.CancellationToken.IsCancellationRequested);
+            Assert.Single(events.OfType<LlmHostedToolCallCompletedEvent>());
+            facts = canceled.Failure;
+        }
+        else facts = Assert.IsType<InferenceResourceOperationException>(failure).Failure;
+        InferenceResourceOperationFailure restored = JsonSerializer.Deserialize(
+            JsonSerializer.SerializeToUtf8Bytes(facts, InferenceJson.InferenceResourceOperationFailure),
+            InferenceJson.InferenceResourceOperationFailure)!;
+        InferenceResourceCommitResult committed = Assert.Single(restored.GeneratedResources);
+        Assert.Equal(write.Reference, committed.Resource.Reference);
+        Assert.Equal("image/png", committed.Resource.ContentType);
+        Assert.Equal(4, committed.Selection!.Revision);
+        Assert.Equal([write.Reference], committed.Selection.SelectedResources);
+        Assert.Equal(1, handler.Requests);
+    }
+
     [Fact]
-    public async Task ImportedDeferredReceiptConsumesOnceAndReturnsTheActualChatResult()
+    public async Task DeferredChatUsesTheSharedStrictFunctionRootAdmissionBeforeDispatch()
     {
         var handler = new ResourceResults();
         using var http = new HttpClient(handler);
         var source = new Source(ResourceResults.Connection());
+        ILlmClient[] clients = [new XaiResponsesLlmClient(http)];
+        await using var access = new LlmConnectionAccess(source, [], clients);
+        await using var core = new LlmProviderService(source, clients, [], connectionAccess: access);
+        await using var resources = new LlmResourceProviderService(access, core);
+        var request = new LlmChatRequest
+        {
+            ModelId = "selected-model",
+            Messages = [new("user", "hello")],
+            Tools = [new LlmToolDefinition { Name = "echo", Strict = true, InputSchema = JsonElement.Parse("{\"type\":\"string\"}") }]
+        };
+
+        await Assert.ThrowsAsync<NotSupportedException>(() => resources.SubmitDeferredAsync("selected-connection", request));
+        Assert.Empty(handler.Requests);
+    }
+
+    [Fact]
+    public async Task ImportedDeferredReceiptConsumesOnceAndReturnsTheActualChatResult()
+    {
+        var handler = new ResourceResults(diagnosticEchoes: true);
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var source = new Source(ResourceResults.Connection() with
+        { AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" } });
         ILlmClient[] clients = [new XaiResponsesLlmClient(http)];
         await using var access = new LlmConnectionAccess(source, [], clients);
         await using var core = new LlmProviderService(source, clients, [], connectionAccess: access);
@@ -36,17 +122,64 @@ public sealed class ResourcePreparationTests
         Assert.Equal(LlmCompletionStatus.Completed, chat.Status);
         Assert.Equal("stop", chat.FinishReason);
         Assert.Equal(5, chat.Usage!.TotalTokens);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", chat.Diagnostics!.RequestId);
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, chat.Diagnostics.RawFinalResponseJson!, StringComparison.Ordinal);
         Assert.Empty(chat.GeneratedResources);
         Assert.Equal("original-connection", imported.Scope.Identity);
         Assert.Equal(new Uri("https://api.x.ai/v1/chat/deferred-completion/request-1"), Assert.Single(handler.Requests));
     }
 
     [Fact]
-    public async Task BatchChatResultsUseTheActualEnvelopeAndReturnOnlyTheRequestedPage()
+    public async Task DeferredCancellationAfterCommitRetainsTheGeneratedFileInTheRecoveredChat()
     {
-        var handler = new ResourceResults(batch: true);
+        using var cancellation = new CancellationTokenSource();
+        var handler = new ResourceResults(generatedFile: true);
         using var http = new HttpClient(handler);
         var source = new Source(ResourceResults.Connection());
+        ILlmClient[] clients = [new XaiResponsesLlmClient(http)];
+        await using var access = new LlmConnectionAccess(source, [], clients);
+        await using var core = new LlmProviderService(source, clients, [], connectionAccess: access);
+        await using var resources = new LlmResourceProviderService(access, core);
+        GeneratedWrite? write = null;
+        var workspace = new Resources(new("workspace", "session", 3, []), [])
+        {
+            WriteFactory = create => write = new GeneratedWrite("workspace", create, cancellation.Cancel)
+        };
+        var receipt = new LlmDeferredCompletion("request-1",
+            new("https://api.x.ai/v1/chat/deferred-completion", "original-connection"));
+
+        LlmResourceOperationCanceledException failure = await Assert.ThrowsAsync<LlmResourceOperationCanceledException>(
+            () => resources.GetDeferredAsync("selected-connection", receipt, workspace, cancellation.Token));
+
+        Assert.True(failure.Observation.DeferredRetrievalDispatched);
+        Assert.Equal("generated bytes", System.Text.Encoding.UTF8.GetString(write!.CommittedBytes));
+        Assert.True(write.Disposed);
+        InferenceResourceCommitResult committed = Assert.Single(failure.Observation.ObservedCommits);
+        LlmResourceOperationObservation restored = JsonSerializer.Deserialize(
+            JsonSerializer.SerializeToUtf8Bytes(failure.Observation, ConnectResourcesJson.LlmResourceOperationObservation),
+            ConnectResourcesJson.LlmResourceOperationObservation)!;
+        LlmChatResult recovered = Assert.IsType<LlmDeferredCompleted>(restored.ObservedDeferredResult).Result;
+        Assert.Equal("resource answer", recovered.Text);
+        InferenceResourceCommitResult generated = Assert.Single(recovered.GeneratedResources);
+        Assert.Equal(committed.Resource, generated.Resource);
+        Assert.Equal(4, generated.Selection!.Revision);
+        Assert.Equal([generated.Resource.Reference], generated.Selection.SelectedResources);
+        Assert.Equal(new[]
+        {
+            new Uri("https://api.x.ai/v1/chat/deferred-completion/request-1"),
+            new Uri("https://api.x.ai/v1/files/generated-file/content")
+        }, handler.Requests);
+    }
+
+    [Fact]
+    public async Task BatchChatResultsUseTheActualEnvelopeAndReturnOnlyTheRequestedPage()
+    {
+        var handler = new ResourceResults(batch: true, diagnosticEchoes: true);
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var source = new Source(ResourceResults.Connection() with
+        { AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" } });
         ILlmClient[] clients = [new XaiResponsesLlmClient(http)];
         await using var access = new LlmConnectionAccess(source, [], clients);
         await using var core = new LlmProviderService(source, clients, [], connectionAccess: access);
@@ -64,7 +197,11 @@ public sealed class ResourcePreparationTests
         Assert.Equal("observed-model", chat.ModelId);
         Assert.Equal(LlmCompletionStatus.Completed, chat.Status);
         Assert.Equal(5, chat.Usage!.TotalTokens);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", chat.Diagnostics!.RequestId);
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, chat.Diagnostics.RawFinalResponseJson!, StringComparison.Ordinal);
         Assert.Equal(InferenceFailureCode.ExecutionFailed, Assert.IsType<LlmBatchFailure>(page.Items[1]).Error.Code);
+        Assert.Equal("The row failed. [REDACTED] [REDACTED] [REDACTED]", Assert.IsType<LlmBatchFailure>(page.Items[1]).Error.Message);
         Assert.Equal(new[]
         {
             new Uri("https://api.x.ai/v1/batches/batch-1"),
@@ -694,7 +831,48 @@ public sealed class ResourcePreparationTests
         }
     }
 
-    private sealed class ResourceResults(bool batch = false) : HttpMessageHandler
+    private sealed class HostedImages(bool streaming, bool singleImage) : HttpMessageHandler
+    {
+        private const string Image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1sAAAAASUVORK5CYII=";
+        public static byte[] Png => Convert.FromBase64String(Image);
+        public int Requests { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (request.Method == HttpMethod.Get)
+            {
+                string path = request.RequestUri!.AbsolutePath;
+                Assert.True(path is "/v1/models" or "/v1/language-models", path);
+                string array = path == "/v1/models" ? "data" : "models";
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                { Content = new StringContent($"{{\"{array}\":[{{\"id\":\"grok-4.7\"}}]}}") });
+            }
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal(new Uri("https://api.x.ai/v1/responses"), request.RequestUri);
+            Requests++;
+            var output = new JsonArray(new JsonObject
+            { ["type"] = "image_generation_call", ["id"] = "image-1", ["status"] = "completed", ["result"] = Image });
+            if (!singleImage) output.Add(item: new JsonObject
+            { ["type"] = "image_generation_call", ["id"] = "image-2", ["status"] = "completed", ["result"] = "invalid base64!" });
+            var response = new JsonObject
+            {
+                ["id"] = "response-1",
+                ["model"] = "grok-4.7",
+                ["status"] = "completed",
+                ["output"] = output
+            };
+            string body = streaming
+                ? "data: " + new JsonObject { ["type"] = "response.completed", ["response"] = response }.ToJsonString() + "\n\n"
+                : response.ToJsonString();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(body, System.Text.Encoding.UTF8, streaming ? "text/event-stream" : "application/json")
+            });
+        }
+    }
+
+    private sealed class ResourceResults(bool batch = false, bool generatedFile = false, bool diagnosticEchoes = false) : HttpMessageHandler
     {
         private const string Chat = """
             {"id":"completion-1","model":"observed-model","choices":[{"index":0,
@@ -719,9 +897,30 @@ public sealed class ResourcePreparationTests
             Assert.Equal(HttpMethod.Get, request.Method);
             Assert.Equal("test-token", request.Headers.Authorization!.Parameter);
             Requests.Add(request.RequestUri!);
+            string chat = Chat;
+            if (diagnosticEchoes)
+            {
+                Assert.Equal("header-value", Assert.Single(request.Headers.GetValues("X-Trace")));
+                Assert.Equal("default-value", Assert.Single(request.Headers.GetValues("X-Default")));
+                var echoed = JsonNode.Parse(Chat)!.AsObject();
+                echoed["trace"] = "test-token header-value default-value";
+                chat = echoed.ToJsonString();
+            }
+            Task<HttpResponseMessage> Response(HttpStatusCode status, string body)
+            {
+                var response = new HttpResponseMessage(status) { Content = new StringContent(body) };
+                if (diagnosticEchoes) response.Headers.Add("x-request-id", "request-test-token-header-value-default-value-1");
+                return Task.FromResult(response);
+            }
+            if (generatedFile)
+            {
+                Assert.InRange(Requests.Count, 1, 2);
+                var generatedBody = JsonNode.Parse(Chat)!.AsObject();
+                generatedBody["output_files"] = new JsonArray(new JsonObject { ["file_id"] = "generated-file", ["name"] = "generated.txt" });
+                return Response(HttpStatusCode.OK, Requests.Count == 1 ? generatedBody.ToJsonString() : "generated bytes");
+            }
             if (!batch)
-                return Task.FromResult(new HttpResponseMessage(Requests.Count == 1 ? HttpStatusCode.OK : HttpStatusCode.Gone)
-                { Content = new StringContent(Requests.Count == 1 ? Chat : "{}") });
+                return Response(Requests.Count == 1 ? HttpStatusCode.OK : HttpStatusCode.Gone, Requests.Count == 1 ? chat : "{}");
             Assert.InRange(Requests.Count, 1, 2);
             string body = Requests.Count == 1
                 ? "{\"batch_id\":\"batch-1\",\"name\":\"batch\"}"
@@ -731,16 +930,16 @@ public sealed class ResourcePreparationTests
                         new JsonObject
                         {
                             ["batch_request_id"] = "row-1",
-                            ["batch_result"] = new JsonObject { ["response"] = new JsonObject { ["chat_get_completion"] = JsonNode.Parse(Chat) } }
+                            ["batch_result"] = new JsonObject { ["response"] = new JsonObject { ["chat_get_completion"] = JsonNode.Parse(chat) } }
                         },
                         new JsonObject
                         {
                             ["batch_request_id"] = "row-2",
-                            ["batch_result"] = new JsonObject { ["error"] = "The row failed." }
+                            ["batch_result"] = new JsonObject { ["error"] = diagnosticEchoes ? "The row failed. test-token header-value default-value" : "The row failed." }
                         }),
                     ["pagination_token"] = "next-cursor"
                 }.ToJsonString();
-            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
+            return Response(HttpStatusCode.OK, body);
         }
     }
 
@@ -788,6 +987,7 @@ public sealed class ResourcePreparationTests
         public InferenceResourceSelection Selection { get; set; } = selection;
         public List<MemoryStream> Reads { get; } = [];
         public int ReleaseAttempts { get; private set; }
+        public Func<InferenceResourceCreate, IInferenceResourceWriteHandle>? WriteFactory { get; init; }
 
         public Task<InferenceResourceDescriptor?> GetAsync(InferenceResourceReference reference, CancellationToken cancellationToken = default)
         {
@@ -805,7 +1005,8 @@ public sealed class ResourcePreparationTests
         }
 
         public Task<InferenceResourceSelection> GetSelectionAsync(CancellationToken cancellationToken = default) => Task.FromResult(Selection);
-        public Task<IInferenceResourceWriteHandle> OpenWriteAsync(InferenceResourceCreate resource, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IInferenceResourceWriteHandle> OpenWriteAsync(InferenceResourceCreate resource, CancellationToken cancellationToken = default) =>
+            Task.FromResult(WriteFactory?.Invoke(resource) ?? throw new NotSupportedException());
         public Task<InferenceResourceSelection> SelectAsync(IReadOnlyList<InferenceResourceReference> references, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<InferenceResourceSelection> ReplaceSelectionAsync(IReadOnlyList<InferenceResourceReference> references, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
 
@@ -821,5 +1022,34 @@ public sealed class ResourcePreparationTests
         }
         private Exception? ReleaseFailure => releaseFailure;
         internal TaskCompletionSource ReadEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    }
+
+    private sealed class GeneratedWrite(string workspace, InferenceResourceCreate create, Action afterCommit) : IInferenceResourceWriteHandle
+    {
+        private readonly MemoryStream _content = new();
+        public InferenceResourceReference Reference { get; } = new(workspace, "generated");
+        public Stream Content => _content;
+        public byte[] CommittedBytes { get; private set; } = [];
+        public bool Disposed { get; private set; }
+
+        public Task<InferenceResourceCommitResult> CommitAsync(long bytesWritten, InferenceResourceCommitOptions? options = null,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Assert.True(options!.SelectForSession);
+            Assert.Equal(_content.Length, bytesWritten);
+            CommittedBytes = _content.ToArray();
+            var receipt = new InferenceResourceCommitResult(
+                new(Reference, create.SessionId, create.FileName, create.ContentType, bytesWritten),
+                new(workspace, create.SessionId!, 4, [Reference]));
+            afterCommit();
+            return Task.FromResult(receipt);
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            Disposed = true;
+            return _content.DisposeAsync();
+        }
     }
 }

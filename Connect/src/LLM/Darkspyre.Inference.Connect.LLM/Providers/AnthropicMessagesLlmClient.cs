@@ -209,19 +209,21 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             httpRequest,
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
+        string[] secrets = httpRequest.Headers.SelectMany(header => header.Value).ToArray();
         if (ObserveAccountUsage(response) is { } observed) { yield return consumption.Publish<LlmStreamEvent>(new AccountUsageObservedEvent(observed)); }
         await ProviderHttp.ThrowIfUnsuccessfulAsync(
             response,
             Transport,
             credential,
             "Anthropic Messages request",
+            secrets,
             cancellationToken);
 
         if (!stream)
         {
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(
-                         body, response, connection, request, enforcement, credential, capabilities.SupportsReasoningText))
+                         body, response, connection, request, enforcement, credential, secrets, capabilities.SupportsReasoningText))
             {
                 yield return consumption.Publish<LlmStreamEvent>(completeEvent);
             }
@@ -261,7 +263,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                     response,
                     data,
                     credential,
-                    exception);
+                    exception, secrets);
             }
 
             using (document)
@@ -274,7 +276,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                         {
                             responseId = LlmJson.GetString(message, "id");
                             observedModel = ObservedModel.Read(message, "model", Transport, connection,
-                                credential, response.RequestMessage, observedModel);
+                                credential, response.RequestMessage, observedModel, secrets);
                             if (message.TryGetProperty("container", out _)) containerId = ReadContainer(message, connection.Transport);
                             inputTokens = ReadToken(message, "usage", "input_tokens") ?? inputTokens;
                             outputTokens = ReadToken(message, "usage", "output_tokens") ?? outputTokens;
@@ -385,7 +387,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
 
                         break;
                     case "error":
-                        throw ProviderError(root, response, data, credential);
+                        throw ProviderError(root, response, data, credential, secrets);
                     case "message_stop":
                         LlmToolCall[] completedToolCalls = toolCalls
                             .OrderBy(pair => pair.Key)
@@ -413,7 +415,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             containerId,
                             response,
                             lastEvent,
-                            credential)));
+                            credential,
+                            secrets)));
                         yield break;
                 }
             }
@@ -423,7 +426,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             "Anthropic Messages ended without a terminal event.",
             response,
             lastEvent ?? string.Empty,
-            credential);
+            credential, extraSecrets: secrets);
     }
 
     protected virtual LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
@@ -437,6 +440,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement,
         LlmCredential? credential,
+        IReadOnlyList<string> secrets,
         bool reasoningText)
     {
         JsonDocument document;
@@ -451,7 +455,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 response,
                 body,
                 credential,
-                exception);
+                exception, secrets);
         }
 
         using (document)
@@ -460,14 +464,14 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             string? type = root.ValueKind == JsonValueKind.Object ? LlmJson.GetString(root, "type") : null;
             if (type == "error")
             {
-                throw ProviderError(root, response, body, credential);
+                throw ProviderError(root, response, body, credential, secrets);
             }
 
             if (type != "message"
                 || !root.TryGetProperty("content", out JsonElement content)
                 || content.ValueKind != JsonValueKind.Array)
             {
-                throw ProtocolException("Anthropic Messages returned a malformed response.", response, body, credential);
+                throw ProtocolException("Anthropic Messages returned a malformed response.", response, body, credential, extraSecrets: secrets);
             }
 
             var text = new StringBuilder();
@@ -489,7 +493,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                         string name = LlmJson.GetString(block, "name") ?? string.Empty;
                         if (id.Length == 0 || name.Length == 0)
                         {
-                            throw ProtocolException("Anthropic Messages returned an incomplete tool call.", response, body, credential);
+                            throw ProtocolException("Anthropic Messages returned an incomplete tool call.", response, body, credential, extraSecrets: secrets);
                         }
 
                         toolCalls.Add(new LlmToolCall(
@@ -520,12 +524,13 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                     ReadToken(root, "usage", "cache_read_input_tokens"),
                     ReadToken(root, "usage", "cache_creation_input_tokens")),
                 LlmJson.GetString(root, "id"),
-                ObservedModel.Read(root, "model", Transport, connection, credential, response.RequestMessage),
+                ObservedModel.Read(root, "model", Transport, connection, credential, response.RequestMessage, extraSecrets: secrets),
                 () => content.GetArrayLength() == 0 ? null : JsonNode.Parse(content.GetRawText())!.AsArray(),
                 ReadContainer(root, connection.Transport),
                 response,
                 body,
-                credential);
+                credential,
+                secrets);
             return [.. CompleteResponseEvents.From(result, reasoning)];
         }
     }
@@ -546,7 +551,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         string? containerId,
         HttpResponseMessage response,
         string? rawFinal,
-        LlmCredential? credential)
+        LlmCredential? credential,
+        IReadOnlyList<string> secrets)
     {
         bool refused = string.Equals(stopReason, "refusal", StringComparison.Ordinal);
         bool paused = string.Equals(stopReason, "pause_turn", StringComparison.Ordinal);
@@ -593,8 +599,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             StructuredOutput = validation,
             Diagnostics = new LlmProviderDiagnostics(
                 (int)response.StatusCode,
-                ProviderHttp.ReadRequestId(response),
-                rawFinal is null ? null : SecretRedactor.Sanitize(rawFinal, credential))
+                ProviderHttp.ReadRequestId(response, credential, secrets),
+                rawFinal is null ? null : SecretRedactor.Sanitize(rawFinal, credential, secrets))
         };
     }
 
@@ -610,18 +616,19 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         JsonElement root,
         HttpResponseMessage response,
         string raw,
-        LlmCredential? credential)
+        LlmCredential? credential,
+        IReadOnlyList<string> secrets)
     {
         JsonElement error = LlmJson.GetObject(root, "error") ?? root;
+        string safe = SecretRedactor.Sanitize(raw, credential, secrets);
+        (_, string? message, string? type) = ProviderHttp.ReadProviderError(safe);
         return new LlmProviderException(
-            SecretRedactor.Sanitize(
-                LlmJson.GetString(error, "message") ?? "Anthropic returned a stream error.",
-                credential),
+            message ?? "Anthropic returned a stream error.",
             Transport,
             response.StatusCode,
-            LlmJson.GetString(error, "type"),
-            ProviderHttp.ReadRequestId(response),
-            sanitizedResponseBody: SecretRedactor.Sanitize(raw, credential),
+            type,
+            ProviderHttp.ReadRequestId(response, credential, secrets),
+            sanitizedResponseBody: safe,
             isContextOverflow: LlmContextOverflow.Anthropic(LlmJson.GetString(error, "type"), LlmJson.GetString(error, "message")));
     }
 
@@ -644,11 +651,13 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 BuildApiUri(connection, $"models{query}"));
             ApplyAnthropicHeaders(request, connection, credential);
             using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            string[] secrets = request.Headers.SelectMany(header => header.Value).ToArray();
             await ProviderHttp.ThrowIfUnsuccessfulAsync(
                 response,
                 Transport,
                 credential,
                 "Anthropic model discovery",
+                secrets,
                 cancellationToken);
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             JsonDocument document;
@@ -663,7 +672,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                     response,
                     body,
                     credential,
-                    exception);
+                    exception, secrets);
             }
 
             using (document)

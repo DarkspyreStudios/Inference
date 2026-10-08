@@ -21,5 +21,9 @@
     <ProjectReference Include="..\..\..\src\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" />
     <ProjectReference Include="..\..\..\src\LLM\Darkspyre.Inference.Connect.LLM.Vertex\Darkspyre.Inference.Connect.LLM.Vertex.csproj" />
     <ProjectReference Include="..\..\..\src\Resources\Darkspyre.Inference.Connect.Resources\Darkspyre.Inference.Connect.Resources.csproj" />
+    <ProjectReference Include="..\..\..\src\Audio\Darkspyre.Inference.Connect.Audio\Darkspyre.Inference.Connect.Audio.csproj" />
+    <ProjectReference Include="..\..\..\src\Realtime\Darkspyre.Inference.Connect.Realtime\Darkspyre.Inference.Connect.Realtime.csproj" />
+    <ProjectReference Include="..\..\..\src\STT\Darkspyre.Inference.Connect.STT\Darkspyre.Inference.Connect.STT.csproj" />
+    <ProjectReference Include="..\..\..\src\TTS\Darkspyre.Inference.Connect.TTS\Darkspyre.Inference.Connect.TTS.csproj" />
   </ItemGroup>
 </Project>

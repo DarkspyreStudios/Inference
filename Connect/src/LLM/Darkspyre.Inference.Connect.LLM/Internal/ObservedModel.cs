@@ -23,6 +23,8 @@ internal static class ObservedModel
         string model = value.GetString()!;
         if (string.IsNullOrWhiteSpace(model)) throw Invalid();
         IEnumerable<string> protectedValues = connection.AdditionalHeaders.Values;
+        if (sentMessage is not null)
+            protectedValues = protectedValues.Concat(sentMessage.Headers.SelectMany(header => header.Value));
         if (sentMessage?.Headers.Authorization?.Parameter is { } token)
             protectedValues = protectedValues.Append(token);
         if (extraSecrets is not null) protectedValues = protectedValues.Concat(extraSecrets);

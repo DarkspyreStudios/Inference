@@ -10,6 +10,10 @@ internal sealed record ConsoleInvocation(
 {
     public LlmVertexConfiguration? Vertex { get; init; }
 
+    public XaiConnectionOptions? Xai { get; init; }
+
+    public bool NonStreaming { get; init; }
+
     public static ConsoleInvocation Parse(string[] args, ConsoleTesterProviders providers)
     {
         ArgumentNullException.ThrowIfNull(args);
@@ -25,6 +29,8 @@ internal sealed record ConsoleInvocation(
         string? googleProject = null;
         string? googleLocation = null;
         LlmGoogleAuthenticationMode? googleAuthentication = null;
+        XaiRegion? xaiRegion = null;
+        bool nonStreaming = false;
         var commandArguments = new List<string>();
         for (int index = 1; index < args.Length; index++)
         {
@@ -73,14 +79,16 @@ internal sealed record ConsoleInvocation(
                 if (argument == "--google-project") { googleProject = args[index]; }
                 else { googleLocation = args[index]; }
             }
-            else if (argument == "--endpoint")
+            else if (argument == "--xai-region")
             {
-                if (endpoint is not null || ++index >= args.Length
-                    || !Uri.TryCreate(args[index], UriKind.Absolute, out Uri? uri)
-                    || uri.Scheme is not ("http" or "https") || !string.IsNullOrEmpty(uri.UserInfo)
-                    || !string.IsNullOrEmpty(uri.Query) || !string.IsNullOrEmpty(uri.Fragment))
-                    throw new ArgumentException("--endpoint requires one HTTP(S) base URL without credentials, query or fragment.", nameof(args));
-                endpoint = uri.AbsoluteUri.TrimEnd('/');
+                if (xaiRegion is not null || ++index >= args.Length
+                    || !Enum.TryParse(args[index], ignoreCase: true, out XaiRegion region) || !Enum.IsDefined(region))
+                    throw new ArgumentException("--xai-region requires one of Global or UnitedStates.", nameof(args));
+                xaiRegion = region;
+            }
+            else if (argument == "--non-streaming")
+            {
+                nonStreaming = true;
             }
             else if (argument == "--helper")
             {
@@ -105,6 +113,14 @@ internal sealed record ConsoleInvocation(
         }
 
         ConsoleTesterProvider provider = providers.Resolve(providerId);
+        if (xaiRegion is not null && provider.Transport != LlmTransport.XaiResponses)
+            throw new ArgumentException("--xai-region requires the Grok provider.", nameof(args));
+        if (xaiRegion is not null && args[0] is not ("status" or "models" or "prompt" or "agent" or "login" or "usage" or "grok-probe"))
+            throw new ArgumentException("--xai-region is valid only for connection commands.", nameof(args));
+        if (nonStreaming && args[0] != "prompt")
+            throw new ArgumentException("--non-streaming is valid only for prompt.", nameof(args));
+        if (args[0] == "grok-probe" && provider.Transport != LlmTransport.XaiResponses)
+            throw new ArgumentException("grok-probe requires --provider grok-subscription.", nameof(args));
         if (provider.Transport == LlmTransport.AwsBedrockAgentCore
             && args[0] != "setup" && string.IsNullOrWhiteSpace(harnessArn))
         {
@@ -140,6 +156,8 @@ internal sealed record ConsoleInvocation(
             [.. commandArguments],
             endpoint ?? helper ?? harnessArn)
         {
+            Xai = xaiRegion is XaiRegion selectedRegion ? new() { Region = selectedRegion } : null,
+            NonStreaming = nonStreaming,
             Vertex = provider.Transport == LlmTransport.GoogleVertexAi ? new()
             { ProjectId = googleProject, Location = googleLocation, AuthenticationMode = googleAuthentication ?? LlmGoogleAuthenticationMode.ApplicationDefault } : null
         };

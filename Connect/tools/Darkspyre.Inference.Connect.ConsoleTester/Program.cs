@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -78,8 +79,12 @@ internal static class Program
                 "models" => await RunModelsAsync(llms, invocation, cancellation.Token),
                 "usage" => await RunUsageAsync(llms, invocation, cancellation.Token),
                 "prompt" => await RunPromptAsync(llms, invocation, cancellation.Token),
+                "grok-probe" when invocation.Provider.Transport == LlmTransport.XaiResponses =>
+                    await GrokProbe.RunAsync(llms, agent, invocation, cancellation.Token),
                 "agy-probe" when invocation.Provider.Transport == LlmTransport.GoogleAntigravityCli =>
-                    await AntigravityProbe.RunAsync(llms, agent, invocation, cancellation.Token),
+                    await NativeCliProbe.RunAsync(llms, agent, invocation, cancellation.Token),
+                "claude-probe" when invocation.Provider.Transport == LlmTransport.AnthropicClaudeCli =>
+                    await NativeCliProbe.RunAsync(llms, agent, invocation, cancellation.Token),
                 "codex-probe" when invocation.Provider.Transport == LlmTransport.OpenAiCodex =>
                     await CodexProtocolProbe.RunAsync(llms, invocation.Provider.ConnectionId,
                         ParsePromptOptions(invocation.CommandArguments).Model, cancellation.Token),
@@ -339,28 +344,37 @@ internal static class Program
         ConsoleInvocation invocation,
         CancellationToken cancellationToken)
     {
-        PromptOptions options = ParsePromptOptions(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId);
-        if (!await CheckReadyAsync(llms, invocation, cancellationToken)) return 3;
-
-        string prompt = await ReadPromptAsync();
-        if (string.IsNullOrWhiteSpace(prompt))
+        LlmChatRequest request;
+        if (invocation.CommandArguments is ["--request", string requestPath])
         {
-            throw new ArgumentException("A prompt is required.");
+            request = await ReadChatRequestAsync(requestPath, cancellationToken);
+            if (!await CheckReadyAsync(llms, invocation, cancellationToken)) return 3;
         }
-
-        LlmStructuredOutputRequest? structuredOutput = options.SchemaPath is null
-            ? null
-            : await ReadSchemaAsync(options.SchemaPath, cancellationToken);
-        IReadOnlyList<LlmAttachment> attachments = await ReadAttachmentsAsync(
-            options.Attachments,
-            cancellationToken);
-        var request = new LlmChatRequest
+        else
         {
-            ModelId = options.Model,
-            Messages = [new LlmChatMessage("user", prompt) { Attachments = attachments }],
-            ReasoningLevel = options.Effort,
-            StructuredOutput = structuredOutput
-        };
+            PromptOptions options = ParsePromptOptions(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId);
+            if (!await CheckReadyAsync(llms, invocation, cancellationToken)) return 3;
+
+            string prompt = await ReadPromptAsync();
+            if (string.IsNullOrWhiteSpace(prompt))
+            {
+                throw new ArgumentException("A prompt is required.");
+            }
+
+            LlmStructuredOutputRequest? structuredOutput = options.SchemaPath is null
+                ? null
+                : await ReadSchemaAsync(options.SchemaPath, cancellationToken);
+            IReadOnlyList<LlmAttachment> attachments = await ReadAttachmentsAsync(
+                options.Attachments,
+                cancellationToken);
+            request = new LlmChatRequest
+            {
+                ModelId = options.Model,
+                Messages = [new LlmChatMessage("user", prompt) { Attachments = attachments }],
+                ReasoningLevel = options.Effort,
+                StructuredOutput = structuredOutput
+            };
+        }
 
         bool wroteOutput = false;
         int exitCode = 1;
@@ -369,38 +383,81 @@ internal static class Program
                            request,
                            cancellationToken))
         {
-            switch (streamEvent)
+            if (streamEvent is LlmChatCompletionEvent completion)
             {
-                case LlmTextDeltaEvent text:
-                    Console.Write(text.Delta);
-                    wroteOutput = true;
-                    break;
-                case LlmStructuredOutputSnapshotEvent snapshot:
-                    Console.WriteLine($"[structured snapshot] {snapshot.Content.GetRawText()}");
-                    wroteOutput = true;
-                    break;
-                case LlmRefusalDeltaEvent refusal:
-                    Console.Error.WriteLine($"[refusal] {refusal.Delta}");
-                    break;
-                case LlmActivityEvent activity:
-                    Console.Error.WriteLine($"[activity] {activity.Activity}");
-                    break;
-                case LlmUsageDeltaEvent usage:
-                    Console.Error.WriteLine($"[usage] input={usage.Cumulative.InputTokens} output={usage.Cumulative.OutputTokens} total={usage.Cumulative.TotalTokens}");
-                    break;
-                case LlmChatCompletionEvent completion:
-                    if (wroteOutput)
-                    {
-                        Console.WriteLine();
-                    }
-                    WriteCompletion(completion.Result);
-                    exitCode = completion.Result.Status is LlmCompletionStatus.Completed or LlmCompletionStatus.Unknown ? 0 : 1;
-                    break;
+                if (wroteOutput)
+                {
+                    Console.WriteLine();
+                }
+                WriteCompletion(completion.Result, Console.Error);
+                exitCode = completion.Result.Status is LlmCompletionStatus.Completed or LlmCompletionStatus.Unknown ? 0 : 1;
+            }
+            else
+            {
+                wroteOutput |= WritePromptEvent(streamEvent, Console.Out, Console.Error);
             }
         }
 
         return exitCode;
     }
+
+    internal static bool WritePromptEvent(LlmStreamEvent streamEvent, TextWriter output, TextWriter diagnostics)
+    {
+        switch (streamEvent)
+        {
+            case LlmTextDeltaEvent text:
+                output.Write(text.Delta);
+                return true;
+            case LlmStructuredOutputSnapshotEvent snapshot:
+                output.WriteLine($"[structured snapshot] {snapshot.Content.GetRawText()}");
+                return true;
+            case LlmRefusalDeltaEvent refusal:
+                diagnostics.WriteLine($"[refusal] {refusal.Delta}");
+                break;
+            case LlmActivityEvent activity:
+                diagnostics.WriteLine($"[activity] {activity.Activity}");
+                break;
+            case LlmUsageDeltaEvent usage:
+                WriteModelUsage("usage", usage.Cumulative, diagnostics);
+                break;
+            case LlmHostedToolCallStartedEvent started:
+                WriteHostedStarted(started.CallId, started.Kind, started.Name, diagnostics);
+                break;
+            case LlmHostedToolCallProgressEvent progress:
+                WriteHostedProgress(progress.CallId, progress.Phase, diagnostics);
+                break;
+            case LlmHostedToolCallCompletedEvent completed:
+                WriteHostedCompleted(completed.Call, diagnostics);
+                break;
+            case LlmCitationEvent citation:
+                WriteCitation(citation.Citation, diagnostics);
+                break;
+        }
+        return false;
+    }
+
+    private static void WriteHostedStarted(string callId, LlmHostedToolKind kind, string name, TextWriter diagnostics) =>
+        diagnostics.WriteLine($"[hosted:started] id={callId} kind={kind} name={name}");
+
+    private static void WriteHostedProgress(string callId, LlmHostedToolPhase phase, TextWriter diagnostics) =>
+        diagnostics.WriteLine($"[hosted:progress] id={callId} phase={phase}");
+
+    private static void WriteHostedCompleted(LlmHostedToolCall call, TextWriter diagnostics)
+    {
+        diagnostics.WriteLine($"[hosted:completed] id={call.CallId ?? "unknown"} kind={call.Kind} name={call.Name} status={call.Status ?? "unknown"}");
+        if (call.Kind == LlmHostedToolKind.ImageGeneration)
+        {
+            string bytes = call.Output is LlmHostedImageOutput image
+                ? image.Data.Length.ToString(CultureInfo.CurrentCulture) : "unknown";
+            diagnostics.WriteLine($"[hosted:image] bytes={bytes}");
+        }
+    }
+
+    private static void WriteCitation(LlmCitation citation, TextWriter diagnostics) =>
+        diagnostics.WriteLine($"[citation] {citation.Url}");
+
+    private static void WriteModelUsage(string label, LlmUsage? usage, TextWriter diagnostics) =>
+        diagnostics.WriteLine($"[{label}] {JsonSerializer.Serialize(usage, (JsonTypeInfo)InferenceJson.LlmUsage)}");
 
     private static async Task<int> RunAgentAsync(
         LlmProviderService llms,
@@ -408,7 +465,8 @@ internal static class Program
         ConsoleInvocation invocation,
         CancellationToken cancellationToken)
     {
-        PromptOptions options = ParsePromptOptions(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId);
+        PromptOptions options = ParsePromptOptions(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId,
+            allowModelIterationLimit: true);
         if (!await CheckReadyAsync(llms, invocation, cancellationToken)) return 3;
         LlmProviderCapabilities capabilities = await llms.GetModelCapabilitiesAsync(
             invocation.Provider.ConnectionId, options.Model, cancellationToken);
@@ -446,6 +504,7 @@ internal static class Program
             {
                 ModelId = options.Model,
                 Runtime = RuntimeFor(capabilities.Agent),
+                ExecutionOptions = options.ExecutionOptions,
                 Tools = tools,
                 ToolHandler = tools.Count > 0 ? ExecuteToolAsync : null
             },
@@ -461,7 +520,7 @@ internal static class Program
                            },
                            cancellationToken))
         {
-            WriteAgentEvent(agentEvent);
+            WriteAgentEvent(agentEvent, Console.Out, Console.Error);
             if (agentEvent is LlmAgentTurnCompletedEvent completed)
                 exitCode = completed.Status is LlmAgentTurnStatus.Completed or LlmAgentTurnStatus.Unknown ? 0 : 1;
         }
@@ -592,42 +651,59 @@ internal static class Program
         });
     }
 
-    private static void WriteAgentEvent(LlmAgentEvent agentEvent)
+    internal static void WriteAgentEvent(LlmAgentEvent agentEvent, TextWriter output, TextWriter diagnostics)
     {
         switch (agentEvent)
         {
             case LlmAgentTextDeltaEvent text:
-                Console.Write(text.Delta);
+                output.Write(text.Delta);
                 break;
             case LlmAgentStructuredOutputSnapshotEvent snapshot:
-                Console.WriteLine($"[structured snapshot] {snapshot.Content.GetRawText()}");
+                output.WriteLine($"[structured snapshot] {snapshot.Content.GetRawText()}");
                 break;
             case LlmAgentReasoningDeltaEvent reasoning:
-                Console.Error.Write(reasoning.Delta);
+                diagnostics.Write(reasoning.Delta);
                 break;
             case LlmAgentCitationsSnapshotEvent citations:
-                Console.Error.WriteLine($"[citations snapshot] request={citations.RequestId} count={citations.Citations.Count}");
+                diagnostics.WriteLine($"[citations snapshot] request={citations.RequestId} count={citations.Citations.Count}");
+                break;
+            case LlmAgentUsageEvent usage:
+                diagnostics.WriteLine($"[usage request] session={usage.ThreadId} turn={usage.TurnId} request={usage.RequestId}");
+                WriteModelUsage("usage", usage.Usage, diagnostics);
+                WriteModelUsage("run usage", usage.RunTotals, diagnostics);
+                break;
+            case LlmAgentHostedToolCallStartedEvent started:
+                WriteHostedStarted(started.CallId, started.Kind, started.Name, diagnostics);
+                break;
+            case LlmAgentHostedToolCallProgressEvent progress:
+                WriteHostedProgress(progress.CallId, progress.Phase, diagnostics);
+                break;
+            case LlmAgentHostedToolCallCompletedEvent hosted:
+                WriteHostedCompleted(hosted.Call, diagnostics);
+                break;
+            case LlmAgentCitationEvent citation:
+                WriteCitation(citation.Citation, diagnostics);
                 break;
             case LlmAgentToolEvent tool:
-                Console.Error.WriteLine(tool.Output is null
+                diagnostics.WriteLine(tool.Output is null
                     ? $"[tool:{tool.Status}] {tool.Tool}"
                     : $"[tool:{tool.Status}] {tool.Tool} output parts={tool.Output.Parts.Count} error={tool.Output.IsError}");
                 break;
             case LlmAgentToolPresentationEvent presentation:
-                Console.Error.WriteLine($"[tool presentation] replay={presentation.IsReplay} content parts={presentation.Tool.Content.Count} locations={presentation.Tool.Locations.Count}");
+                diagnostics.WriteLine($"[tool presentation] replay={presentation.IsReplay} content parts={presentation.Tool.Content.Count} locations={presentation.Tool.Locations.Count}");
                 break;
             case LlmAgentContentObservationEvent observation:
-                Console.Error.WriteLine($"[content observation] kind={observation.Kind} mode={observation.Mode} replay={observation.IsReplay} parts={observation.Content.Count}");
+                diagnostics.WriteLine($"[content observation] kind={observation.Kind} mode={observation.Mode} replay={observation.IsReplay} parts={observation.Content.Count}");
                 break;
             case LlmAgentActivityEvent activity:
-                Console.Error.WriteLine($"[activity] {activity.Activity}");
+                diagnostics.WriteLine($"[activity] {activity.Activity}");
                 break;
             case LlmAgentWarningEvent warning:
-                Console.Error.WriteLine($"[warning] {warning.Message}");
+                diagnostics.WriteLine($"[warning] {warning.Message}");
                 break;
             case LlmAgentTurnCompletedEvent completed:
-                Console.WriteLine();
-                WriteAgentCompletion(completed, Console.Error);
+                output.WriteLine();
+                WriteAgentCompletion(completed, diagnostics);
                 break;
         }
     }
@@ -638,11 +714,13 @@ internal static class Program
         if (completed.Error is { Length: > 0 } error) diagnostics.WriteLine($"[error] {error}");
     }
 
-    private static PromptOptions ParsePromptOptions(string[] args, string? defaultModel = null)
+    internal static PromptOptions ParsePromptOptions(string[] args, string? defaultModel = null,
+        bool allowModelIterationLimit = false)
     {
         string? model = defaultModel;
         LlmReasoningLevel? effort = null;
         string? schemaPath = null;
+        int? maxModelIterations = null;
         var attachments = new List<AttachmentOption>();
         for (int index = 0; index < args.Length; index++)
         {
@@ -653,6 +731,10 @@ internal static class Program
                     when index + 1 < args.Length => args[++index],
                 "--model" or "--effort" or "--schema" or "--attach-image" or "--attach-document" =>
                     throw new ArgumentException($"{option} requires a value."),
+                "--max-model-iterations" when allowModelIterationLimit && index + 1 < args.Length => args[++index],
+                "--max-model-iterations" when allowModelIterationLimit =>
+                    throw new ArgumentException($"{option} requires a value."),
+                "--request" => throw new ArgumentException("--request is valid only as prompt's sole request option with one file path."),
                 _ => throw new ArgumentException($"Unknown prompt option '{option}'.")
             };
 
@@ -676,6 +758,11 @@ internal static class Program
                 case "--attach-document":
                     attachments.Add(new AttachmentOption(LlmBinaryKind.Document, value));
                     break;
+                case "--max-model-iterations":
+                    maxModelIterations = int.TryParse(value, out int limit) && limit > 0
+                        ? limit
+                        : throw new ArgumentException("--max-model-iterations must be a positive integer.");
+                    break;
             }
         }
 
@@ -684,7 +771,8 @@ internal static class Program
             throw new ArgumentException("prompt requires --model <model-id>.");
         }
 
-        return new PromptOptions(model, effort, schemaPath, attachments);
+        return new PromptOptions(model, effort, schemaPath, attachments,
+            maxModelIterations is int maximum ? new() { MaxModelIterations = maximum } : null);
     }
 
     private static async Task<IReadOnlyList<LlmAttachment>> ReadAttachmentsAsync(
@@ -766,20 +854,28 @@ internal static class Program
         };
     }
 
-    private static void WriteCompletion(LlmChatResult result)
+    internal static async Task<LlmChatRequest> ReadChatRequestAsync(string path, CancellationToken cancellationToken)
+    {
+        string json = await File.ReadAllTextAsync(path, cancellationToken);
+        return JsonSerializer.Deserialize(json, ConnectLlmJson.ChatRequest)
+            ?? throw new ArgumentException("The request file must contain a chat request.", nameof(path));
+    }
+
+    internal static void WriteCompletion(LlmChatResult result, TextWriter diagnostics)
     {
         string usage = result.Usage is null
             ? "unavailable"
-            : $"{result.Usage.InputTokens ?? 0} in / {result.Usage.OutputTokens ?? 0} out";
-        Console.Error.WriteLine(
+            : $"{result.Usage.InputTokens?.ToString(CultureInfo.CurrentCulture) ?? "unknown"} in / {result.Usage.OutputTokens?.ToString(CultureInfo.CurrentCulture) ?? "unknown"} out";
+        diagnostics.WriteLine(
             $"[completed] status={result.Status} finish={result.FinishReason ?? "unknown"} usage={usage}");
+        WriteModelUsage("usage", result.Usage, diagnostics);
         if (result.StructuredOutput is { } structured)
         {
-            Console.Error.WriteLine(
+            diagnostics.WriteLine(
                 $"[structured] enforcement={structured.Enforcement} valid={structured.IsValid}");
             foreach (string error in structured.Errors)
             {
-                Console.Error.WriteLine($"[structured] {error}");
+                diagnostics.WriteLine($"[structured] {error}");
             }
         }
     }
@@ -816,10 +912,13 @@ internal static class Program
               darkspyre-inference-connect-tester models --provider <codex|antigravity|bedrock>
               darkspyre-inference-connect-tester usage  --provider <codex|claude|antigravity>
               darkspyre-inference-connect-tester agy-probe --provider antigravity [--model <id>] [--case all|text|structured|native-tools|session|resume|controls|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
+              darkspyre-inference-connect-tester claude-probe --provider claude [--model <id>] [--case all|resume|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
               darkspyre-inference-connect-tester codex-probe --provider codex --model <model-id>
+              darkspyre-inference-connect-tester grok-probe --provider grok-subscription [--model <id>] [--case all|strict|files] [--repeat 1..20] [--timeout-seconds 1..600] [--xai-region Global|UnitedStates]
               darkspyre-inference-connect-tester managed-probe --provider codex --model <model-id>
-              darkspyre-inference-connect-tester prompt --provider <codex|claude|antigravity|bedrock|agentcore> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>]
-              darkspyre-inference-connect-tester agent  --provider <codex|claude|agentcore|antigravity> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>]
+              darkspyre-inference-connect-tester prompt --provider <codex|claude|antigravity|bedrock|agentcore|grok-subscription> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--non-streaming] [--xai-region Global|UnitedStates]
+              darkspyre-inference-connect-tester prompt --provider <provider-id> --request <file> [--harness-arn <arn>] [--non-streaming] [--xai-region Global|UnitedStates]
+              darkspyre-inference-connect-tester agent  --provider <codex|claude|agentcore|antigravity|bedrock|grok-subscription> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--max-model-iterations <positive integer>]
 
             prompt reads one line interactively, or the complete prompt from redirected standard input:
               echo 'Reply only with OK.' | darkspyre-inference-connect-tester prompt --provider codex --model gpt-5.6-terra
@@ -832,6 +931,10 @@ internal static class Program
               echo 'Call darkspyre_inference_connect_attachment with kind image and confirm you received it.' | darkspyre-inference-connect-tester agent --provider codex --model gpt-5.6-terra
               echo 'Call darkspyre_inference_connect_attachment with kind document and quote its text.' | darkspyre-inference-connect-tester agent --provider claude --model sonnet
 
+            --request loads the complete ChatRequest JSON through ConnectLlmJson.ChatRequest instead of stdin.
+            It cannot be combined with --model, --effort, --schema or attachment options and is not an agent option.
+            The selected connection still owns credentials and transport controls; live authorities cannot be loaded from JSON.
+
             providers and setup display adapter-owned metadata without generation or authentication.
             OpenAI-compatible --endpoint selects an anonymous test endpoint without reading or writing stored credentials.
             Apple needs its separately built helper and a ready on-device model; no login is required.
@@ -840,6 +943,8 @@ internal static class Program
             --google-authentication ApiKey selects projectless express mode; login reads VERTEX_API_KEY and stores it in the vault.
             gemini-probe performs explicit metered Gemini API generation with the key that login --provider gemini stored from GEMINI_API_KEY.
             apple-probe performs explicit local generation, reports each case and never retries a failed case.
+            grok-probe runs explicit strict-function replay and synthetic Files checks without retries.
+            Files cleanup deletes only the file identified by that case's upload receipt.
             agy-probe runs explicit subscription turns through the Antigravity native session in a temporary
             workspace, reports the CLI version and turn count, and never retries a failed case.
             agent offers host tools only to runtimes that support them, and selects the provider's configured
@@ -868,13 +973,14 @@ internal static class Program
         }
     }
 
-    private sealed record PromptOptions(
+    internal sealed record PromptOptions(
         string Model,
         LlmReasoningLevel? Effort,
         string? SchemaPath,
-        IReadOnlyList<AttachmentOption> Attachments);
+        IReadOnlyList<AttachmentOption> Attachments,
+        LlmAgentExecutionOptions? ExecutionOptions);
 
-    private sealed record AttachmentOption(LlmBinaryKind Kind, string Path);
+    internal sealed record AttachmentOption(LlmBinaryKind Kind, string Path);
 
     internal sealed record BedrockLoginOptions(string Profile, string Region);
 }

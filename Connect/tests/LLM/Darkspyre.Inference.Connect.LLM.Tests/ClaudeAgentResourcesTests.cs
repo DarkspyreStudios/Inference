@@ -1,7 +1,9 @@
 using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Channels;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -14,6 +16,34 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     private readonly string _directory = Directory.CreateTempSubdirectory("connect-claude-resources-").FullName;
 
     public void Dispose() => Directory.Delete(_directory, recursive: true);
+
+    [Fact]
+    public async Task InitializationEffortFactsRejectAnUnsupportedNativeTurnBeforeAnyWrite()
+    {
+        var process = new ManualProcess
+        {
+            InitializationPayload = JsonElement.Parse(
+                """{"models":[{"value":"claude-test","displayName":"CLI model choice","supportsEffort":true,"supportedEffortLevels":["low"]}]}""")
+        };
+        LlmConnection connection = Connection() with
+        { CapabilityOverrides = new() { ReasoningLevels = ClaudeCliLlmClient.ReasoningLevels } };
+        await using ILlmAgentSession session = await Start(process, connection);
+        int initializationWrites = process.RawWrites().Length;
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(async () =>
+        {
+            await foreach (LlmAgentEvent _ in session.RunTurnAsync(new()
+            {
+                Input = [new LlmAgentTextContent("Reply with OK.")],
+                ReasoningLevel = LlmReasoningLevel.ExtraHigh
+            }, limit.Token)) { }
+        });
+
+        Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
+        Assert.Equal(initializationWrites, process.RawWrites().Length);
+        Assert.DoesNotContain(process.RawWrites().Select(line => JsonElement.Parse(line)), item => item.GetProperty("type").GetString() == "user");
+    }
 
     [Fact]
     public async Task FailedNativeTerminalKeepsSafeErrorsWithoutPublishingDiagnosticTextAsAnAnswer()
@@ -557,6 +587,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         public Task? ModelWriteRelease { get; init; }
         public Exception? ToolWriteFailure { get; init; }
         public bool WithholdStopReplies { get; init; }
+        public JsonElement? InitializationPayload { get; init; }
         public TaskCompletionSource DisposalEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ToolWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource ModelWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -585,7 +616,18 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
                 && root.GetProperty("request").GetProperty("subtype").GetString() != "interrupt"
                 && !(WithholdStopReplies && root.GetProperty("request").GetProperty("subtype").GetString() == "stop_task"))
             {
-                Push(new { type = "control_response", response = new { subtype = "success", request_id = root.GetProperty("request_id").GetString(), response = new { } } });
+                JsonElement payload = root.GetProperty("request").GetProperty("subtype").GetString() == "initialize"
+                    && InitializationPayload is { } initialization ? initialization : JsonElement.Parse("{}");
+                _output.Writer.TryWrite(new JsonObject
+                {
+                    ["type"] = "control_response",
+                    ["response"] = new JsonObject
+                    {
+                        ["subtype"] = "success",
+                        ["request_id"] = root.GetProperty("request_id").GetString(),
+                        ["response"] = JsonNode.Parse(payload.GetRawText())
+                    }
+                }.ToJsonString());
             }
         }
 

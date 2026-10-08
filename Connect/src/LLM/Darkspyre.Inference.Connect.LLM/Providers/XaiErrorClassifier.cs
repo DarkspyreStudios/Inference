@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.WebSockets;
 using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -28,8 +29,8 @@ public static class XaiErrorClassifier
             diagnosticBody, "Provider rejected the Files request.", cancellationToken);
 
     internal static Task ThrowIfUnsuccessfulSpeechAsync(HttpResponseMessage response, LlmCredential? credential,
-        CancellationToken cancellationToken) =>
-        ThrowIfUnsuccessfulCoreAsync(response, credential, [],
+        IEnumerable<string> additionalSecrets, CancellationToken cancellationToken) =>
+        ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
             false, "Provider rejected the speech request.", cancellationToken);
 
     internal static Task ThrowIfUnsuccessfulImageAsync(HttpResponseMessage response, LlmCredential? credential,
@@ -74,13 +75,24 @@ public static class XaiErrorClassifier
             diagnosticCode: safeCode);
     }
 
-    internal static Exception SpeechUpgradeFailure(HttpStatusCode status, Exception original)
+    internal static Exception SpeechUpgradeFailure(ClientWebSocket socket, Exception original,
+        LlmCredential? credential, HttpRequestMessage request, HttpClient http)
     {
         var evidence = new SpeechTransportEvidence(original);
-        // The BCL exposes status, not the failed upgrade's body. Do not infer body-dependent facts.
-        return status != 0 && status != HttpStatusCode.SwitchingProtocols
-            ? Classify(status, null, null, "Provider rejected the speech request.", evidence)
-            : new InferenceException(InferenceFailureCode.ExecutionFailed, "The speech connection could not be opened.", evidence);
+        HttpStatusCode status = socket.HttpStatusCode;
+        if (status == 0 || status == HttpStatusCode.SwitchingProtocols)
+            return new InferenceException(InferenceFailureCode.ExecutionFailed, "The speech connection could not be opened.", evidence);
+
+        // The BCL exposes upgrade headers and status, not the failed response body.
+        using var response = new HttpResponseMessage(status);
+        if (socket.HttpResponseHeaders is { } headers)
+            foreach (var header in headers) response.Headers.TryAddWithoutValidation(header.Key, header.Value);
+        string[] secrets = request.Headers.SelectMany(header => header.Value)
+            .Concat(http.DefaultRequestHeaders.SelectMany(header => header.Value))
+            .Concat(new[] { request.Headers.Authorization?.Parameter, http.DefaultRequestHeaders.Authorization?.Parameter }.OfType<string>())
+            .ToArray();
+        return Classify(status, null, null, "Provider rejected the speech request.", evidence,
+            ProviderHttp.ReadRequestId(response, credential, secrets), response.Headers.RetryAfter?.Delta);
     }
 
     private static Exception Classify(HttpStatusCode status, string? code, string? message, string safe,
@@ -130,7 +142,7 @@ public static class XaiErrorClassifier
             using JsonDocument document = JsonDocument.Parse(body);
             JsonElement root = document.RootElement;
             JsonElement error = LlmJson.GetObject(root, "error") ?? root;
-            return (LlmJson.GetString(root, "error") ?? LlmJson.GetString(error, "code"),
+            return (LlmJson.GetString(error, "code") ?? LlmJson.GetString(root, "error"),
                 LlmJson.GetString(error, "message") ?? LlmJson.GetString(root, "error_description")
                 ?? LlmJson.GetString(root, "error"));
         }

@@ -47,7 +47,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
-        OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
+        // The native cap excludes reasoning and function tokens; it does not bound total output.
+        OutputLimitEnforcement = LlmOutputLimitEnforcement.Unknown,
         SupportsStreaming = true,
         SupportsStreamingUsage = true,
         SupportsReasoningText = true,
@@ -202,10 +203,10 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             message = new(HttpMethod.Post, ProviderHttp.BuildUri(connection, "responses/compact"));
             message.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
             XaiRequestHeaders.Apply(message, connection, stream: false);
-            secrets = message.Headers.SelectMany(header => header.Value).ToArray();
             Fence();
             response = await Http.SendAsync(message, HttpCompletionOption.ResponseHeadersRead, consumption.Token).ConfigureAwait(false);
             Fence();
+            secrets = connection.AdditionalHeaders.Values.Concat(message.Headers.SelectMany(header => header.Value)).ToArray();
             try
             {
                 await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, credential, secrets, consumption.Token).ConfigureAwait(false);
@@ -328,8 +329,13 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
                 if (web.Location is not null)
                     throw new NotSupportedException("Grok web search does not accept a user location.");
             }
-            else if (tool is XaiXSearchTool { AllowedHandles: not null, ExcludedHandles: not null })
-                throw new ArgumentException("Grok X search cannot combine allowed and excluded handles.", nameof(request));
+            else if (tool is XaiXSearchTool social)
+            {
+                if (social.AllowedHandles is not null && social.ExcludedHandles is not null)
+                    throw new ArgumentException("Grok X search cannot combine allowed and excluded handles.", nameof(request));
+                if (social.AllowedHandles?.Count > 20 || social.ExcludedHandles?.Count > 20)
+                    throw new ArgumentException("Grok X search accepts at most 20 handles per filter.", nameof(request));
+            }
             else if (tool is LlmRemoteMcpTool mcp)
             {
                 if (!Uri.TryCreate(mcp.ServerUrl, UriKind.Absolute, out Uri? server)
@@ -361,8 +367,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
                     || part is LlmToolOutputResource { BodyKind: LlmBinaryKind.Image, Data: { } data } && data.Length > MaxImageBytes)
                     throw new ArgumentException("Grok tool input images must not exceed 20 MiB.", nameof(request));
         foreach (LlmToolDefinition tool in request.Tools.OfType<LlmToolDefinition>().Where(tool => tool.Strict))
-            if (!XaiSchemaLimits.Fits(tool.InputSchema))
-                throw new NotSupportedException("A strict Grok tool schema is outside the supported native guarantees. The schema is not weakened or sent as non-strict.");
+            XaiSchemaLimits.ValidateStrictTool(tool.InputSchema);
     }
 
     protected override JsonObject BuildPayload(LlmConnection connection, LlmChatRequest request,
@@ -391,7 +396,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             ((JsonArray)payload["include"]!).Add((JsonNode?)"web_search_call.action.sources");
         if (request.HostedTools.OfType<LlmCodeExecutionTool>().Any())
             ((JsonArray)payload["include"]!).Add((JsonNode?)"code_interpreter_call.outputs");
-        payload["no_inline_citations"] = true;
+        ((JsonArray)payload["include"]!).Add((JsonNode?)"no_inline_citations");
         if (request.ProviderControls is XaiMultiAgentControls { AgentCount: { } count })
             payload["reasoning"] = new JsonObject
             {
@@ -516,7 +521,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             using HttpResponseMessage response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken)
                 .ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), [], cancellationToken)
+            IEnumerable<string> secrets = connection.AdditionalHeaders.Values.Concat(request.Headers.SelectMany(header => header.Value));
+            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, LlmCredential.Parse(connection.Credential), secrets, cancellationToken)
                 .ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
@@ -556,7 +562,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             }
 
             LlmProviderException InvalidTokens() => ProtocolException(
-                "Grok tokenization returned an invalid token sequence.", response, string.Empty, LlmCredential.Parse(connection.Credential));
+                "Grok tokenization returned an invalid token sequence.", response, string.Empty, LlmCredential.Parse(connection.Credential),
+                extraSecrets: secrets);
         }
         return consumption.Publish(result);
     }

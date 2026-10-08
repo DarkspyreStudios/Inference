@@ -440,7 +440,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private readonly IClaudeCliSessionProcess _process;
         // The last model acknowledged by the CLI; _route guards reads and changes.
         private string? _selectedModelId;
-        private readonly LlmConnection _connection;
+        private LlmConnection _connection;
         private readonly HashSet<string> _accountedCalls = new(StringComparer.Ordinal);
         private readonly HashSet<string> _completedResults = new(StringComparer.Ordinal);
         private readonly IReadOnlyList<LlmAgentToolDefinition> _tools;
@@ -603,7 +603,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 };
             }
 
-            await SendControlRequestAsync(request, cancellationToken);
+            JsonElement initialization = await SendControlRequestAsync(request, cancellationToken);
+            if (initialization.ValueKind == JsonValueKind.Object && initialization.TryGetProperty("models", out _))
+                _connection = _connection with { Catalog = ClaudeCliModelCatalog.Project(initialization) };
             await SetThinkingDisplayAsync(requestReasoningText, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
         }

@@ -5,6 +5,32 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class CliProcessLauncherTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void WindowsNativeInvocationRejectsTheCompleteEscapedCommandBeforeLaunch(bool escaped)
+    {
+        const string executable = @"C:\Tools\claude.exe";
+        // Include the quoted executable, argument separator, argument quotes and terminating NUL.
+        string admittedArgument = escaped ? new string('"', (32767 - executable.Length - 6) / 2)
+            : new string('x', 32767 - executable.Length - 4);
+        var admitted = new ProcessStartInfo();
+        admitted.Environment["PATH"] = string.Empty;
+        CliProcessLauncher.ConfigureWindows(admitted, executable, [admittedArgument]);
+        Assert.Equal(executable, admitted.FileName);
+        Assert.Equal(admittedArgument, Assert.Single(admitted.ArgumentList));
+
+        string[] arguments = escaped ? [new string('"', 18_000)] : [new string('x', 20_000), new string('x', 20_000)];
+        var start = new ProcessStartInfo();
+        start.Environment["PATH"] = string.Empty;
+
+        ArgumentException failure = Assert.Throws<ArgumentException>(() =>
+            CliProcessLauncher.ConfigureWindows(start, executable, arguments));
+
+        Assert.Contains("32767", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(arguments[0], failure.Message, StringComparison.Ordinal);
+    }
+
     [UnixFact]
     public async Task InteractiveAntigravityPipeDeliversCompleteLineBeforeInputOrExit()
     {

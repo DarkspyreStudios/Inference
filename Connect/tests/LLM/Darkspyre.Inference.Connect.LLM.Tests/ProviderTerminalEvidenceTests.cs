@@ -13,17 +13,831 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ProviderTerminalEvidenceTests
 {
     [Theory]
-    [InlineData("{\"oneOf\":[{\"type\":\"number\"},{\"type\":\"integer\"}]}")]
-    [InlineData("{\"allOf\":[{\"minimum\":2},{\"maximum\":4}]}")]
-    [InlineData("{\"not\":{\"const\":1}}")]
-    [InlineData("{\"if\":{\"const\":1},\"then\":{\"const\":2}}")]
-    public async Task GrokBestEffortCompositionRequiresExplicitOriginalSchemaValidation(string constraint)
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GrokVisibleOutputCapDoesNotPromiseATotalOutputCeiling(bool streaming)
     {
-        JsonElement schema = JsonElement.Parse("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"value\":" + constraint + "}}");
+        const string response = """
+            {"id":"response-1","model":"grok-4.6","status":"completed","output":[{"type":"message","id":"message-1","role":"assistant","content":[{"type":"output_text","text":"answer"}]}],"usage":{"input_tokens":654,"output_tokens":137,"total_tokens":791,"output_tokens_details":{"reasoning_tokens":126}}}
+            """;
+        string body = streaming ? $"data: {{\"type\":\"response.completed\",\"response\":{response}}}\n\n" : response;
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming, body, emptyCatalog: true);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+        await using var service = new LlmProviderService(new ResourcePreparationTests.Source(connection), [client]);
+        var request = new LlmChatRequest
+        {
+            ModelId = "grok-4.6",
+            MaxOutputTokens = 128,
+            Messages = [new("user", "hello")]
+        };
+
+        LlmRequestAccounting accounting = await service.MeasureRequestAsync("connection", request,
+            new() { ReservedOutputTokens = 64 });
+        Assert.Equal(LlmOutputLimitEnforcement.Unknown, accounting.OutputLimitEnforcement);
+        Assert.Equal(64, accounting.ReservedOutputTokens);
+        var facade = new ConnectLlmInference(service, "connection");
+        Assert.Equal(LlmOutputLimitEnforcement.Unknown,
+            (await facade.GetCapabilitiesAsync(request.ModelId)).OutputLimitEnforcement);
+
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in service.StreamAsync("connection", request)) events.Add(item);
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("answer", result.Text);
+        Assert.Equal(new LlmUsage(654, 137, 791) { ReasoningOutputTokens = 126 }, result.Usage);
+        using var sent = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(128, sent.RootElement.GetProperty("max_output_tokens").GetInt32());
+    }
+
+    [Theory]
+    [InlineData(LlmTransport.OpenAiResponses)]
+    [InlineData(LlmTransport.OpenAiCompatibleChat)]
+    [InlineData(LlmTransport.AnthropicMessages)]
+    [InlineData(LlmTransport.XaiResponses)]
+    public async Task HttpGenerationFailuresRedactEffectiveRequestSecrets(LlmTransport transport)
+    {
+        var retryAfter = TimeSpan.FromSeconds(17);
+        using var handler = new Handler(transport, streaming: false,
+            "{\"error\":{\"code\":\"rate_limit_test-key_provider-secret_header-value_default-value\",\"message\":\"Failure test-key header-value default-value\",\"refresh_token\":\"provider-secret\"}}",
+            HttpStatusCode.TooManyRequests, retryAfter, "request-test-key-header-value-default-value-1");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        ILlmClient client = transport switch
+        {
+            LlmTransport.OpenAiResponses => new OpenAiResponsesLlmClient(http),
+            LlmTransport.OpenAiCompatibleChat => new OpenAiCompatibleChatLlmClient(http),
+            LlmTransport.XaiResponses => new XaiResponsesLlmClient(http),
+            _ => new AnthropicMessagesLlmClient(http)
+        };
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = transport,
+            Endpoint = transport == LlmTransport.XaiResponses ? "https://api.x.ai/v1" : "https://provider.example.test/v1",
+            Xai = transport == LlmTransport.XaiResponses ? new() : null,
+            Credential = (transport == LlmTransport.XaiResponses
+                ? new LlmCredential { OAuth = new() { AccessToken = "test-key" } }
+                : new LlmCredential { ApiKey = "test-key" }).Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection,
+                new() { ModelId = transport == LlmTransport.XaiResponses ? "grok-4.7" : "selected-model", Messages = [new("user", "hello")] })) { }
+        });
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        Assert.Contains("Failure [REDACTED] [REDACTED] [REDACTED]", failure.Message, StringComparison.Ordinal);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal(retryAfter, failure.RetryAfter);
+        Assert.DoesNotContain("test-key", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("provider-secret", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("header-value", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("default-value", failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(LlmTransport.XaiResponses, false, false)]
+    [InlineData(LlmTransport.XaiResponses, true, false)]
+    [InlineData(LlmTransport.XaiResponses, true, true)]
+    [InlineData(LlmTransport.OpenAiResponses, true, false)]
+    [InlineData(LlmTransport.OpenAiResponses, true, true)]
+    [InlineData(LlmTransport.OpenAiCodex, true, false)]
+    [InlineData(LlmTransport.OpenAiCodex, true, true)]
+    public async Task ResponsesProtocolFailuresRedactEffectiveRequestSecrets(LlmTransport transport, bool streaming, bool providerError)
+    {
+        const string error = "{\"type\":\"error\",\"error\":{\"code\":\"rate_limit_test-token_header-value_default-value_provider-secret\",\"message\":\"Failure test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}}";
+        string payload = providerError ? error : "not-json test-token header-value default-value";
+        using var handler = new Handler(transport, streaming, streaming ? $"data: {payload}\n\n" : payload,
+            requestId: "request-test-token-header-value-default-value-1");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        ILlmClient client = transport switch
+        {
+            LlmTransport.XaiResponses => new XaiResponsesLlmClient(http),
+            LlmTransport.OpenAiCodex => new OpenAiCodexLlmClient(http),
+            _ => new OpenAiResponsesLlmClient(http)
+        };
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = transport,
+            Endpoint = transport == LlmTransport.XaiResponses ? "https://api.x.ai/v1" : "https://provider.example.test/v1",
+            Xai = transport == LlmTransport.XaiResponses ? new() : null,
+            Credential = (transport == LlmTransport.OpenAiResponses
+                ? new LlmCredential { ApiKey = "test-token" }
+                : new LlmCredential { OAuth = new() { AccessToken = "test-token", AccountId = "test-account" } }).Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" },
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+        var observations = new List<LlmStreamEvent>();
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection,
+                new() { ModelId = transport == LlmTransport.XaiResponses ? "grok-4.7" : "selected-model", Messages = [new("user", "hello")] }))
+                observations.Add(item);
+        });
+
+        Assert.Equal(HttpStatusCode.OK, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        if (providerError)
+            Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        else
+            Assert.Null(failure.ProviderCode);
+        foreach (string secret in new[] { "test-token", "header-value", "default-value", "provider-secret" })
+            Assert.DoesNotContain(secret, failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(observations, item => item is LlmChatCompletionEvent);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(LlmTransport.AnthropicMessages, false, "malformed")]
+    [InlineData(LlmTransport.AnthropicMessages, true, "malformed")]
+    [InlineData(LlmTransport.AnthropicMessages, false, "error")]
+    [InlineData(LlmTransport.AnthropicMessages, true, "error")]
+    [InlineData(LlmTransport.AnthropicMessages, false, "complete")]
+    [InlineData(LlmTransport.AnthropicMessages, true, "complete")]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, false, "malformed")]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, true, "malformed")]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, false, "error")]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, true, "error")]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, false, "complete")]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, true, "complete")]
+    public async Task ChatBodyDiagnosticsRedactEffectiveRequestSecrets(LlmTransport transport, bool streaming, string outcome)
+    {
+        bool anthropic = transport == LlmTransport.AnthropicMessages;
+        string error = new JsonObject
+        {
+            ["type"] = "error",
+            ["error"] = new JsonObject
+            {
+                [anthropic ? "type" : "code"] = "rate_limit_test-token_header-value_default-value_provider-secret",
+                ["message"] = "Failure test-token header-value default-value provider-secret",
+                ["refresh_token"] = "provider-secret"
+            }
+        }.ToJsonString();
+        const string complete = "{\"type\":\"message\",\"id\":\"message-1\",\"model\":\"claude-sonnet-4-6\",\"content\":[{\"type\":\"text\",\"text\":\"answer\"}],\"stop_reason\":\"end_turn\",\"trace\":\"test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}";
+        const string chatComplete = "{\"id\":\"message-1\",\"model\":\"reported-model\",\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"answer\"},\"finish_reason\":\"stop\"}],\"trace\":\"test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}";
+        const string chatChunk = "{\"id\":\"message-1\",\"model\":\"reported-model\",\"choices\":[{\"delta\":{\"content\":\"answer\"},\"finish_reason\":\"stop\"}],\"trace\":\"test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}";
+        const string terminal = "{\"type\":\"message_stop\",\"trace\":\"test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}";
+        string payload = outcome switch
+        {
+            "error" => error,
+            "complete" => anthropic ? complete : chatComplete,
+            _ => "not-json test-token header-value default-value"
+        };
+        string body = payload;
+        if (streaming)
+        {
+            if (outcome != "complete")
+                body = $"data: {payload}\n\n";
+            else if (anthropic)
+                body = "data: {\"type\":\"message_start\",\"message\":{\"id\":\"message-1\",\"model\":\"claude-sonnet-4-6\"}}\n\n"
+                    + "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"answer\"}}\n\n"
+                    + "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}\n\n"
+                    + $"data: {terminal}\n\n";
+            else
+                body = $"data: {chatChunk}\n\ndata: [DONE]\n\n";
+        }
+        using var handler = new Handler(transport, streaming, body,
+            requestId: "request-test-token-header-value-default-value-1");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        ILlmClient client = anthropic ? new AnthropicMessagesLlmClient(http) : new OpenAiCompatibleChatLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = transport,
+            Endpoint = "https://provider.example.test/v1",
+            Credential = new LlmCredential { ApiKey = "test-token" }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" },
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+        var observations = new List<LlmStreamEvent>();
+        async Task ReadAsync()
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection,
+                new() { ModelId = anthropic ? "claude-sonnet-4-6" : "selected-model", Messages = [new("user", "hello")] }))
+                observations.Add(item);
+        }
+
+        string diagnostics;
+        if (outcome == "complete")
+        {
+            await ReadAsync();
+            LlmChatResult result = Assert.Single(observations.OfType<LlmChatCompletionEvent>()).Result;
+            Assert.Equal("answer", result.Text);
+            Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+            Assert.Equal(anthropic ? "claude-sonnet-4-6" : "reported-model", result.ModelId);
+            Assert.Equal(200, result.Diagnostics!.HttpStatusCode);
+            Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", result.Diagnostics.RequestId);
+            diagnostics = result.Diagnostics.RawFinalResponseJson!;
+        }
+        else
+        {
+            LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(ReadAsync);
+            Assert.Equal(HttpStatusCode.OK, failure.StatusCode);
+            Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+            if (outcome == "error")
+            {
+                Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+                Assert.Equal("Failure [REDACTED] [REDACTED] [REDACTED] [REDACTED]", failure.Message);
+            }
+            else
+            {
+                Assert.Null(failure.ProviderCode);
+                JsonException parsing = Assert.IsAssignableFrom<JsonException>(failure.InnerException);
+                JsonException original = Assert.ThrowsAny<JsonException>(() => JsonDocument.Parse(payload));
+                Assert.Equal(original.LineNumber, parsing.LineNumber);
+                Assert.Equal(original.BytePositionInLine, parsing.BytePositionInLine);
+                Assert.Null(parsing.Path);
+            }
+            Assert.DoesNotContain(observations, item => item is LlmChatCompletionEvent);
+            diagnostics = failure.ToString() + failure.SanitizedResponseBody;
+        }
+
+        foreach (string secret in new[] { "test-token", "header-value", "default-value", "provider-secret" })
+            Assert.DoesNotContain(secret, diagnostics, StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", diagnostics, StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(LlmTransport.OpenAiResponses, false, false)]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, false, false)]
+    [InlineData(LlmTransport.AnthropicMessages, false, false)]
+    [InlineData(LlmTransport.OpenAiCodex, false, false)]
+    [InlineData(LlmTransport.OpenAiCodex, false, true)]
+    [InlineData(LlmTransport.OpenAiCodex, true, false)]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, true, false)]
+    public async Task DiscoveryProtocolFailuresKeepSafeHttpEvidence(LlmTransport transport, bool accountUsage, bool invalidCatalog)
+    {
+        using var handler = new Handler(transport, streaming: false,
+            invalidCatalog ? "{\"models\":null,\"message\":\"test-token header-value default-value\"}" : "not-json test-token header-value default-value",
+            requestId: "request-test-token-header-value-default-value-1", expectedMethod: HttpMethod.Get);
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        ILlmClient client = transport switch
+        {
+            LlmTransport.OpenAiResponses => new OpenAiResponsesLlmClient(http),
+            LlmTransport.OpenAiCompatibleChat => new OpenAiCompatibleChatLlmClient(http),
+            LlmTransport.OpenAiCodex => new OpenAiCodexLlmClient(http),
+            _ => new AnthropicMessagesLlmClient(http)
+        };
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = transport,
+            Endpoint = accountUsage && transport == LlmTransport.OpenAiCompatibleChat
+                ? "https://openrouter.ai/api/v1" : "https://provider.example.test/backend-api/codex",
+            Credential = (transport == LlmTransport.OpenAiCodex
+                ? new LlmCredential { OAuth = new() { AccessToken = "test-token", AccountId = "test-account" } }
+                : new LlmCredential { ApiKey = "test-token" }).Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            if (accountUsage)
+                await ((ILlmAccountUsageClient)client).GetAccountUsageAsync(connection);
+            else
+                await client.ListModelsAsync(connection);
+        });
+
+        Assert.Equal(HttpStatusCode.OK, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        Assert.Null(failure.ProviderCode);
+        if (invalidCatalog)
+        {
+            Assert.Equal("Codex model discovery did not return a model catalog.", failure.Message);
+            Assert.Null(failure.InnerException);
+        }
+        else
+        {
+            Assert.Contains("invalid JSON", failure.Message, StringComparison.Ordinal);
+            Assert.IsAssignableFrom<JsonException>(failure.InnerException);
+        }
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GrokRequestsNoInlineCitationsThroughThePublishedIncludeList(bool streaming)
+    {
+        const string terminal = """
+            {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}
+            """;
+        string body = streaming ? "data: {\"type\":\"response.completed\",\"response\":" + terminal + "}\n\n" : terminal;
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, new()
+        {
+            ModelId = "grok-4.20-0309-non-reasoning",
+            Messages = [new("user", "Search the selected domain.")],
+            MaxOutputTokens = 64,
+            MaxHostedTurns = 2,
+            HostedTools = [new LlmWebSearchTool(AllowedDomains: ["docs.x.ai"])]
+        })) { }
+
+        using JsonDocument sent = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(64, sent.RootElement.GetProperty("max_output_tokens").GetInt32());
+        Assert.Equal(2, sent.RootElement.GetProperty("max_turns").GetInt32());
+        string?[] includes = sent.RootElement.GetProperty("include").EnumerateArray().Select(value => value.GetString()).ToArray();
+        Assert.Contains("reasoning.encrypted_content", includes);
+        Assert.Contains("web_search_call.action.sources", includes);
+        Assert.Contains("no_inline_citations", includes);
+        Assert.False(sent.RootElement.TryGetProperty("no_inline_citations", out _));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GrokNativeXSearchItemsProduceHostedObservationsAndRetainOpaqueReplay(bool streaming)
+    {
+        const string search = """{"type":"x_search_call","id":"x-call","status":"failed"}""";
+        string terminal = """{"id":"response-1","status":"completed","output":[""" + search
+            + """,{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}""";
+        string body = streaming
+            ? "data: {\"type\":\"response.output_item.added\",\"item\":" + search + "}\n\n"
+                + "data: {\"type\":\"response.completed\",\"response\":" + terminal + "}\n\n"
+            : terminal;
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = "selected-model",
+            Messages = [new("user", "Search X")],
+            HostedTools = [new XaiXSearchTool()]
+        };
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+
+        LlmHostedToolCall call = Assert.Single(events.OfType<LlmHostedToolCallCompletedEvent>()).Call;
+        Assert.Equal("x-call", call.CallId);
+        Assert.Equal(LlmHostedToolKind.SocialSearch, call.Kind);
+        Assert.Equal("x_search", call.Name);
+        Assert.Equal("failed", call.Status);
+        Assert.Null(call.Input);
+        Assert.Null(call.Output);
+        Assert.Empty(events.OfType<LlmHostedToolCallProgressEvent>());
+        Assert.Empty(events.OfType<LlmToolCallCompletedEvent>());
+        Assert.Equal(streaming ? 1 : 0, events.OfType<LlmHostedToolCallStartedEvent>().Count());
+        if (streaming)
+        {
+            LlmHostedToolCallStartedEvent started = Assert.Single(events.OfType<LlmHostedToolCallStartedEvent>());
+            Assert.Equal((call.CallId, call.Kind, call.Name), (started.CallId, started.Kind, started.Name));
+        }
+        LlmChatResult result = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("answer", result.Text);
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with
+        {
+            Messages = [new("user", "Search X"), new("assistant", result.Text) { ContinuationState = result.ContinuationState },
+                new("user", "Continue")]
+        })) { }
+        using JsonDocument sent = JsonDocument.Parse(handler.RequestBody!);
+        JsonElement replay = Assert.Single(sent.RootElement.GetProperty("input").EnumerateArray(),
+            item => item.TryGetProperty("type", out JsonElement type) && type.GetString() == "x_search_call");
+        Assert.Equal(search, replay.GetRawText());
+        Assert.Equal(2, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData("grok-4.20-0309-non-reasoning")]
+    [InlineData("grok-4.20-non-reasoning")]
+    public async Task GrokNonreasoningCatalogIdentityRetainsItsSamplingProfile(string modelId)
+    {
         const string body = """
-            {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"value\":1}"}]}]}
+            {"id":"response-1","model":"grok-4.20-0309-non-reasoning","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}
+            """;
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = false },
+            Catalog = [new("grok-4.20-0309-non-reasoning", "Grok 4.20 (Non-Reasoning)")
+            {
+                CatalogEntry = JsonElement.Parse("""{"aliases":["grok-4.20-non-reasoning"],"capabilities":{"reasoning_effort":[]}}""")
+            }]
+        };
+
+        LlmProviderCapabilities capabilities = client.GetCapabilities(connection, modelId);
+        Assert.True(capabilities.SupportsTemperature);
+        Assert.True(capabilities.SupportsTopP);
+        Assert.Empty(capabilities.ReasoningLevels);
+
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, new()
+        {
+            ModelId = modelId,
+            Messages = [new("user", "hello")],
+            Temperature = 0.25,
+            TopP = 0.9
+        })) events.Add(item);
+
+        Assert.Equal(LlmCompletionStatus.Completed, Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Status);
+        using JsonDocument sent = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(modelId, sent.RootElement.GetProperty("model").GetString());
+        Assert.Equal(0.25, sent.RootElement.GetProperty("temperature").GetDouble());
+        Assert.Equal(0.9, sent.RootElement.GetProperty("top_p").GetDouble());
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false, 20)]
+    [InlineData(true, 20)]
+    [InlineData(false, 21)]
+    [InlineData(true, 21)]
+    public async Task GrokXSearchUsesThePublishedHandleLimitWithoutTruncatingFilters(bool excluded, int count)
+    {
+        const string body = """
+            {"id":"response-1","model":"grok-4.7","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}
+            """;
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = false }
+        };
+        string[] handles = Enumerable.Range(0, count).Select(index => $"handle-{index}").ToArray();
+        var request = new LlmChatRequest
+        {
+            ModelId = "grok-4.7",
+            Messages = [new("user", "Search X")],
+            HostedTools = [excluded ? new XaiXSearchTool(ExcludedHandles: handles) : new XaiXSearchTool(AllowedHandles: handles)]
+        };
+        if (count > 20)
+        {
+            Assert.Throws<ArgumentException>(() => client.PreflightResourceRequest(connection, request));
+            await Assert.ThrowsAsync<ArgumentException>(async () =>
+            {
+                await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+            });
+            Assert.Equal(0, handler.Calls);
+            return;
+        }
+
+        client.PreflightResourceRequest(connection, request);
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+        Assert.Equal(LlmCompletionStatus.Completed, Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Status);
+        Assert.Equal(1, handler.Calls);
+        using JsonDocument sent = JsonDocument.Parse(handler.RequestBody!);
+        JsonElement tool = Assert.Single(sent.RootElement.GetProperty("tools").EnumerateArray());
+        Assert.Equal("x_search", tool.GetProperty("type").GetString());
+        Assert.Equal(handles, tool.GetProperty(excluded ? "excluded_x_handles" : "allowed_x_handles")
+            .EnumerateArray().Select(value => value.GetString()));
+        Assert.False(tool.TryGetProperty(excluded ? "allowed_x_handles" : "excluded_x_handles", out _));
+    }
+
+    [Theory]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"enum\":[]}}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"anyOf\":[]}}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":true}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":false}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"array\",\"minContains\":1}}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"array\",\"maxContains\":1}}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":17}}}", true)]
+    [InlineData("{\"type\":\"object\",\"required\":[\"value\",\"value\"]}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"enum\":17}}}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"minimum\":\"one\"}}}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"minLength\":1e-100}}}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"maxItems\":1.0000000000000000000000000001}}}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"format\":17}}}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"multipleOf\":0}}}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"uniqueItems\":17}}}", true)]
+    [InlineData("{\"type\":\"object\",\"$vocabulary\":{\"https://schemas.example.test/custom\":17}}", true)]
+    [InlineData("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"dependencies\":17}", true)]
+    [InlineData("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"dependencies\":{\"value\":{\"type\":17}}}", true)]
+    [InlineData("{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"type\":\"object\",\"additionalItems\":17}", false)]
+    [InlineData("{\"$schema\":\"https://schemas.example.test/custom-dialect\",\"type\":\"object\",\"properties\":17}", false)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"\\p{L}"}}}""", false)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"(?i:a)"}}}""", false)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"(?:x"}}}""", true)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"x)"}}}""", true)]
+    public async Task GrokSchemaAdmissionDistinguishesMalformedValuesFromNativeRejections(string schema, bool malformed)
+    {
+        const string body = """
+            {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"value\":\"x\"}"}]}]}
             """;
         var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = false, SupportsJsonSchema = true }
+        };
+        var output = new LlmStructuredOutputRequest { Name = "answer", Schema = JsonElement.Parse(schema) };
+        var tool = new LlmToolDefinition { Name = "echo", Strict = true, InputSchema = output.Schema };
+        var request = new LlmChatRequest { ModelId = "selected-model", Messages = [new("user", "hello")] };
+        await Assert.ThrowsAsync(malformed ? typeof(ArgumentException) : typeof(NotSupportedException), async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with { StructuredOutput = output })) { }
+        });
+        await Assert.ThrowsAsync(malformed ? typeof(ArgumentException) : typeof(NotSupportedException), async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with { Tools = [tool] })) { }
+        });
+        if (malformed)
+            await Assert.ThrowsAsync<ArgumentException>(async () =>
+            {
+                await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with
+                {
+                    StructuredOutput = output with { Fallback = LlmStructuredOutputFallback.LocalValidation }
+                })) { }
+            });
+        Assert.Equal(0, handler.Calls);
+        bool localBoolean = !malformed && output.Schema.TryGetProperty("properties", out JsonElement properties)
+            && properties.ValueKind == JsonValueKind.Object && properties.TryGetProperty("value", out JsonElement value)
+            && value.ValueKind is JsonValueKind.True or JsonValueKind.False;
+        if (localBoolean)
+        {
+            var events = new List<LlmStreamEvent>();
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection, request with
+            {
+                StructuredOutput = output with { Fallback = LlmStructuredOutputFallback.LocalValidation }
+            })) events.Add(item);
+            LlmStructuredOutputValidation validation = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.StructuredOutput!;
+            Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, validation.Enforcement);
+            Assert.Equal(output.Schema.GetProperty("properties").GetProperty("value").GetBoolean(), validation.IsValid);
+            using var local = JsonDocument.Parse(handler.RequestBody!);
+            Assert.False(local.RootElement.TryGetProperty("text", out _));
+        }
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with { Tools = [tool with { Strict = false }] })) { }
+        using var sent = JsonDocument.Parse(handler.RequestBody!);
+        JsonElement sentTool = Assert.Single(sent.RootElement.GetProperty("tools").EnumerateArray());
+        Assert.False(sentTool.GetProperty("strict").GetBoolean());
+        Assert.Equal(schema, sentTool.GetProperty("parameters").GetRawText());
+        Assert.Equal(localBoolean ? 2 : 1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}},\"additionalProperties\":false}", true)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":[\"string\",\"null\"],\"enum\":[\"x\",null],\"const\":\"x\"}},\"default\":{\"type\":17,\"anyOf\":[]},\"examples\":[{\"minContains\":\"one\"}]}", true)]
+    [InlineData("{\"type\":\"object\",\"title\":\"Answer\",\"description\":\"A value\",\"$comment\":\"Annotation\",\"readOnly\":true,\"writeOnly\":false,\"deprecated\":false,\"properties\":{\"value\":{\"type\":\"string\",\"format\":\"email\"}}}", false)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"^x[.]?$"}}}""", true)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"^x\\.?$"}}}""", true)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"^[(?=]?x$"}}}""", true)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"^(?:x)$"}}}""", true)]
+    [InlineData("""{"type":"object","properties":{"value":{"type":"string","pattern":"^[()]?x\\)?$"}}}""", true)]
+    public async Task GrokSchemaAdmissionPreservesBooleanClosureAndLiteralPayloads(string schema, bool validOutput)
+    {
+        await CheckReferenceAdmission(JsonElement.Parse(schema), guaranteed: true, validOutput);
+    }
+
+    [Fact]
+    public void OriginalSchemaValidationKeepsRepeatedIdsRequestLocal()
+    {
+        var first = new LlmStructuredOutputRequest
+        {
+            Name = "answer",
+            Schema = JsonElement.Parse("""
+                {"$id":"https://schemas.example.test/repeated-validation","type":"string","maxLength":1}
+                """)
+        };
+        var second = first with
+        {
+            Schema = JsonElement.Parse("""
+                {"$id":"https://schemas.example.test/repeated-validation","type":"string","maxLength":2}
+                """)
+        };
+        const LlmStructuredOutputEnforcement mode = LlmStructuredOutputEnforcement.LocalValidationOnly;
+        Assert.False(StructuredOutput.Validate("\"xx\"", first, mode).IsValid);
+        Assert.True(StructuredOutput.Validate("\"xx\"", second, mode).IsValid);
+        Assert.False(StructuredOutput.Validate("\"xx\"", first, mode).IsValid);
+    }
+
+    [Theory]
+    [InlineData("{\"type\":\"string\"}", false)]
+    [InlineData("{\"properties\":{\"value\":{\"type\":\"string\"}}}", false)]
+    [InlineData("{\"type\":[\"object\",\"null\"]}", false)]
+    [InlineData("{\"anyOf\":[{\"type\":\"object\"},{\"type\":\"string\"}]}", false)]
+    [InlineData("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"$ref\":\"#/definitions/input\",\"definitions\":{\"input\":{\"type\":\"string\"}}}", false)]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"type\":\"string\"}}}", true)]
+    [InlineData("{\"$ref\":\"#/$defs/input\",\"$defs\":{\"input\":{\"type\":\"object\"}}}", true)]
+    [InlineData("{\"anyOf\":[{\"type\":\"object\",\"properties\":{\"a\":{\"type\":\"string\"}}},{\"type\":\"object\",\"properties\":{\"b\":{\"type\":\"integer\"}}}]}", true)]
+    public async Task GrokStrictToolsRequireProvenObjectRootsWithoutChangingNonStrictTools(string schema, bool guaranteed)
+    {
+        const string body = """
+            {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"hello"}]}]}
+            """;
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = false }
+        };
+        var tool = new LlmToolDefinition { Name = "echo", Strict = true, InputSchema = JsonElement.Parse(schema) };
+        var request = new LlmChatRequest { ModelId = "selected-model", Messages = [new("user", "hello")], Tools = [tool] };
+        if (!guaranteed)
+        {
+            await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            {
+                await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+            });
+            Assert.Equal(0, handler.Calls);
+        }
+        else
+        {
+            var events = new List<LlmStreamEvent>();
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+            Assert.Equal("hello", Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Text);
+            using var sent = JsonDocument.Parse(handler.RequestBody!);
+            JsonElement sentTool = Assert.Single(sent.RootElement.GetProperty("tools").EnumerateArray());
+            Assert.True(sentTool.GetProperty("strict").GetBoolean());
+            Assert.Equal(schema, sentTool.GetProperty("parameters").GetRawText());
+        }
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with { Tools = [tool with { Strict = false }] })) { }
+        using var nonStrict = JsonDocument.Parse(handler.RequestBody!);
+        JsonElement unchanged = Assert.Single(nonStrict.RootElement.GetProperty("tools").EnumerateArray());
+        Assert.False(unchanged.GetProperty("strict").GetBoolean());
+        Assert.Equal(schema, unchanged.GetProperty("parameters").GetRawText());
+        Assert.Equal(guaranteed ? 2 : 1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(4096, 1, false)]
+    [InlineData(1, 4096, true)]
+    public async Task GrokReferenceGuaranteeUsesTheEmbeddedResourceNotTheOuterPointer(int innerBound, int outerBound, bool guaranteed)
+    {
+        JsonNode schema = JsonNode.Parse("""
+            {"$id":"https://schemas.example.test/root","type":"object","$defs":{"item":{"type":"string"},"nested":{"$id":"nested","$defs":{"item":{"type":"string"}},"$ref":"#/$defs/item"}},"properties":{"value":{"$ref":"#/$defs/nested"}}}
+            """)!;
+        schema["$defs"]!["item"]!["maxLength"] = outerBound;
+        schema["$defs"]!["nested"]!["$defs"]!["item"]!["maxLength"] = innerBound;
+        await CheckReferenceAdmission(JsonElement.Parse(schema.ToJsonString()), guaranteed);
+    }
+
+    [Fact]
+    public async Task GrokReferenceGuaranteeResolvesDeclaredAnchorsAndSharesTheSameTarget()
+    {
+        JsonElement schema = JsonElement.Parse("""
+            {"$id":"https://schemas.example.test/root","type":"object","$defs":{"item":{"$anchor":"content","type":"string","maxLength":1}},"properties":{"value":{"$ref":"#content"},"other":{"$ref":"https://schemas.example.test/root#/$defs/item"}}}
+            """);
+        await CheckReferenceAdmission(schema, guaranteed: true);
+    }
+
+    [Theory]
+    [InlineData("http://json-schema.org/draft-07/schema#", true)]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", false)]
+    public async Task GrokReferenceGuaranteeUsesTheDeclaredDraftSiblingRules(string dialect, bool guaranteed)
+    {
+        JsonNode schema = JsonNode.Parse("""
+            {"$ref":"#/definitions/object","maxProperties":4096,"definitions":{"object":{"type":"object","properties":{"value":{"type":"string"}}}}}
+            """)!;
+        schema["$schema"] = dialect;
+        await CheckReferenceAdmission(JsonElement.Parse(schema.ToJsonString()), guaranteed);
+    }
+
+    [Theory]
+    [InlineData("{\"type\":\"object\",\"default\":{\"type\":\"string\",\"maxLength\":1},\"properties\":{\"value\":{\"$ref\":\"#/default\"}}}")]
+    [InlineData("{\"type\":\"object\",\"$defs\":{\"node\":{\"$id\":\"nested\",\"$ref\":\"#\"}},\"properties\":{\"value\":{\"$ref\":\"#/$defs/node\"}}}")]
+    [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"$ref\":\"https://schemas.other.test/external\"}}}")]
+    [InlineData("{\"type\":\"object\",\"$defs\":{\"item\":{\"type\":\"string\",\"maxLength\":1}},\"properties\":{\"value\":{\"$ref\":\"https://json-schema.invalid/root#/$defs/item\"}}}")]
+    [InlineData("{\"type\":\"object\",\"additionalProperties\":true,\"properties\":{\"value\":{\"$ref\":\"#/additionalProperties\"}}}")]
+    public async Task GrokReferenceGuaranteeRefusesLiteralTargetsCyclesAndUnresolvedResources(string schema)
+    {
+        await CheckReferenceAdmission(JsonElement.Parse(schema), guaranteed: false);
+    }
+
+    private static async Task CheckReferenceAdmission(JsonElement schema, bool guaranteed, bool validOutput = true)
+    {
+        const string body = """
+            {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"value\":\"x\"}"}]}]}
+            """;
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = false, SupportsJsonSchema = true }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = "selected-model",
+            Messages = [new("user", "hello")],
+            StructuredOutput = new() { Name = "answer", Schema = schema }
+        };
+        if (!guaranteed)
+        {
+            await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            {
+                await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+            });
+            Assert.Equal(0, handler.Calls);
+            return;
+        }
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+        LlmStructuredOutputValidation validation = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.StructuredOutput!;
+        Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, validation.Enforcement);
+        Assert.Equal(validOutput, validation.IsValid);
+        using var sent = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(schema.GetRawText(), sent.RootElement.GetProperty("text").GetProperty("format").GetProperty("schema").GetRawText());
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData("{\"oneOf\":[{\"type\":\"number\"},{\"type\":\"integer\"}]}", false, "1")]
+    [InlineData("{\"allOf\":[{\"minimum\":2},{\"maximum\":4}]}", false, "1")]
+    [InlineData("{\"not\":{\"const\":1}}", false, "1")]
+    [InlineData("{\"if\":{\"const\":1},\"then\":{\"const\":2}}", false, "1")]
+    [InlineData("{\"format\":\"custom-format\"}", true, "1")]
+    [InlineData("{\"multipleOf\":2}", false, "1")]
+    [InlineData("{\"uniqueItems\":true}", true, "1")]
+    [InlineData("{\"customAssertion\":false}", true, "1")]
+    [InlineData("{\"$vocabulary\":{\"https://schemas.example.test/custom\":false}}", true, "1")]
+    [InlineData("{\"prefixItems\":17}", true, "1")]
+    [InlineData("{\"dependentSchemas\":17}", true, "1")]
+    [InlineData("{\"unevaluatedProperties\":17}", true, "1")]
+    [InlineData("{\"$anchor\":17}", true, "1")]
+    [InlineData("{\"dependencies\":{\"requiredForValue\":[\"missing\"],\"value\":{\"multipleOf\":2}}}", true, "1")]
+    [InlineData("""{"type":"string","pattern":"^.$"}""", false, "\"\\n\"")]
+    [InlineData("""{"type":"string","pattern":"^(a)\\1$"}""", true, "\"aa\"")]
+    [InlineData("""{"type":"string","pattern":"(?=a)a"}""", true, "\"a\"")]
+    [InlineData("""{"type":"string","pattern":"\\ba\\b"}""", true, "\"a\"")]
+    public async Task GrokUnprovenGuaranteesRequireExplicitOriginalSchemaValidation(string constraint, bool validOutput, string outputValue)
+    {
+        JsonElement schema = JsonElement.Parse("{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"value\":" + constraint + "}}");
+        JsonNode body = JsonNode.Parse("""
+            {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{\"value\":1}"}]}]}
+            """)!;
+        body["output"]![0]!["content"]![0]!["text"] = new JsonObject { ["value"] = JsonNode.Parse(outputValue) }.ToJsonString();
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body.ToJsonString());
         using var http = new HttpClient(handler);
         var client = new XaiResponsesLlmClient(http);
         var connection = new LlmConnection
@@ -56,7 +870,7 @@ public sealed class ProviderTerminalEvidenceTests
         })) events.Add(item);
         LlmStructuredOutputValidation validation = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.StructuredOutput!;
         Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, validation.Enforcement);
-        Assert.False(validation.IsValid);
+        Assert.Equal(validOutput, validation.IsValid);
         Assert.Equal(schema.GetRawText(), output.Schema.GetRawText());
         using (var sent = JsonDocument.Parse(handler.RequestBody!)) Assert.False(sent.RootElement.TryGetProperty("text", out _));
         Assert.Equal(1, handler.Calls);
@@ -229,13 +1043,51 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Fact]
+    public async Task GrokFlatModelAccessFailureKeepsItsCodeSeparateFromTheRedactedMessage()
+    {
+        const string body = """
+            {"code":"not-found","error":"The model requested-model does not exist or your team test-token does not have access to it."}
+            """;
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming: true, body,
+            HttpStatusCode.NotFound, requestId: "request-1");
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://us.api.x.ai/v1",
+            Xai = new() { Region = XaiRegion.UnitedStates },
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize()
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, new()
+            {
+                ModelId = "requested-model",
+                Messages = [new("user", "hello")]
+            })) { }
+        });
+
+        Assert.Equal("not-found", failure.ProviderCode);
+        Assert.Equal(HttpStatusCode.NotFound, failure.StatusCode);
+        Assert.Equal("request-1", failure.RequestId);
+        Assert.Contains("does not have access", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("test-token", failure.ToString(), StringComparison.Ordinal);
+        Assert.Contains("[REDACTED]", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
     public async Task GrokBatchFailureKeepsSafeRequestIdInTheProviderErrorAndOperationReceipt()
     {
         var retryAfter = TimeSpan.FromSeconds(17);
         var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
-            "{\"error\":{\"code\":\"rate_limit_test-token_provider-secret\",\"message\":\"Rate limit test-token\",\"refresh_token\":\"provider-secret\"}}",
-            HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-1");
+            "{\"error\":{\"code\":\"rate_limit_test-token_provider-secret_header-value_default-value\",\"message\":\"Rate limit test-token header-value default-value\",\"refresh_token\":\"provider-secret\"}}",
+            HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-header-value-default-value-1");
         using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
         var client = new XaiResponsesLlmClient(http);
         var source = new ResourcePreparationTests.Source(new()
         {
@@ -243,7 +1095,8 @@ public sealed class ProviderTerminalEvidenceTests
             Transport = LlmTransport.XaiResponses,
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
-            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize()
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
         });
         await using var access = new LlmConnectionAccess(source, [], [client]);
         await using var core = new LlmProviderService(source, [client], [], connectionAccess: access);
@@ -254,8 +1107,8 @@ public sealed class ProviderTerminalEvidenceTests
         LlmProviderException failure = Assert.IsType<LlmProviderException>(operation.InnerException);
 
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
-        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]", failure.ProviderCode);
-        Assert.Equal("request-[REDACTED]-1", failure.RequestId);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
         Assert.Equal(retryAfter, failure.RetryAfter);
         Assert.Equal(failure.RequestId, operation.Observation.RequestId);
         Assert.Equal(429, operation.Observation.HttpStatusCode);
@@ -265,6 +1118,10 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.Null(failure.SanitizedResponseBody);
         Assert.DoesNotContain("test-token", failure.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("provider-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("header-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("default-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
         Assert.Equal(1, handler.Calls);
     }
 
@@ -301,15 +1158,194 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Theory]
+    [InlineData("download")]
+    [InlineData("configured-download")]
+    [InlineData("configured-metadata")]
+    public async Task GrokFileReadFailuresRedactTheEffectiveRequestHeaders(string route)
+    {
+        var retryAfter = TimeSpan.FromSeconds(17);
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            "{\"error\":{\"code\":\"rate_limit_test-token_header-value_provider-secret\",\"refresh_token\":\"provider-secret\"}}",
+            HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-header-value-1", HttpMethod.Get);
+        using var http = new HttpClient(handler);
+        await using var files = new XaiFileClient(http);
+        using var destination = new MemoryStream();
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = route == "download" ? new Dictionary<string, string> { ["X-Trace"] = "header-value" } : []
+        };
+        void Configure(HttpRequestMessage request) => request.Headers.Add("X-Trace", "header-value");
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            if (route == "download")
+                await files.DownloadAsync(connection, "file-1", destination, null, () => { }, CancellationToken.None);
+            else if (route == "configured-download")
+                await files.OpenDownloadAsync(connection, "file-1", Timeout.InfiniteTimeSpan, () => { }, CancellationToken.None, Configure);
+            else
+                await files.GetAsync(connection, "file-1", () => { }, CancellationToken.None, configureHeaders: Configure);
+        });
+
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        Assert.Equal(retryAfter, failure.RetryAfter);
+        Assert.DoesNotContain("test-token", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("header-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("provider-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal(1, handler.Calls);
+        Assert.True(destination.CanWrite);
+        Assert.Equal(0, destination.Length);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GrokTokenizationFailuresRedactProtectedRequestHeaders(bool malformed)
+    {
+        var retryAfter = TimeSpan.FromSeconds(17);
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            malformed ? "{\"token_ids\":null}" :
+                "{\"error\":{\"code\":\"rate_limit_test-token_header-value_default-value\",\"message\":\"Failure header-value default-value\"}}",
+            malformed ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests, retryAfter,
+            "request-test-token-header-value-default-value-1");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            client.TokenizeAsync(connection, "selected-model", "source text"));
+
+        Assert.Equal(malformed ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        if (malformed)
+            Assert.Equal("Grok tokenization returned an invalid token sequence.", failure.Message);
+        else
+        {
+            Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+            Assert.Equal(retryAfter, failure.RetryAfter);
+        }
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GrokCatalogFailuresRedactProtectedRequestHeaders(bool malformed)
+    {
+        var retryAfter = TimeSpan.FromSeconds(17);
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            malformed ? "{\"data\":null,\"message\":\"Failure test-token header-value default-value\"}" :
+                "{\"error\":{\"code\":\"rate_limit_test-token_header-value_default-value\",\"message\":\"Failure header-value default-value\"}}",
+            malformed ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests, retryAfter,
+            "request-test-token-header-value-default-value-1", HttpMethod.Get);
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            client.ListModelsAsync(connection));
+
+        Assert.Equal(malformed ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        if (malformed)
+            Assert.Equal("Grok model discovery returned an invalid catalog.", failure.Message);
+        else
+        {
+            Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+            Assert.Equal(retryAfter, failure.RetryAfter);
+        }
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GrokCompactionFailuresRedactEffectiveRequestHeaders(bool malformed)
+    {
+        var retryAfter = TimeSpan.FromSeconds(17);
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
+            malformed ? "{}" :
+                "{\"error\":{\"code\":\"rate_limit_test-token_header-value_default-value\",\"message\":\"Failure default-value\"}}",
+            malformed ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests, retryAfter,
+            "request-test-token-header-value-default-value-1");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var client = new XaiResponsesLlmClient(http);
+        await using var files = new XaiFileClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            client.CompactWithResourcesAsync(connection,
+                new() { ModelId = "grok-4.6", Messages = [new("user", "reference text")] }, files,
+                static () => { }, CancellationToken.None));
+
+        Assert.Equal(malformed ? HttpStatusCode.OK : HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        if (!malformed)
+        {
+            Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+            Assert.Equal(retryAfter, failure.RetryAfter);
+        }
+        Assert.Null(failure.SanitizedResponseBody);
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task GrokSearchAndEmbeddingFailuresKeepSafeProviderCodes(bool embedding)
     {
         var retryAfter = TimeSpan.FromSeconds(17);
         var handler = new Handler(LlmTransport.XaiResponses, streaming: false,
-            "{\"error\":{\"code\":\"rate_limit_test-token_header-value_provider-secret\",\"refresh_token\":\"provider-secret\"}}",
-            HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-header-value-1");
+            "{\"error\":{\"code\":\"rate_limit_test-token_header-value_default-value_provider-secret\",\"refresh_token\":\"provider-secret\"}}",
+            HttpStatusCode.TooManyRequests, retryAfter, "request-test-token-header-value-default-value-1");
         using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
         var connection = new LlmConnection
         {
             Version = "1",
@@ -328,13 +1364,16 @@ public sealed class ProviderTerminalEvidenceTests
                 new("reference", ["collection-1"]), () => { }, CancellationToken.None));
 
         Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
-        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
-        Assert.Equal("request-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
         Assert.Equal(retryAfter, failure.RetryAfter);
         Assert.Null(failure.SanitizedResponseBody);
         Assert.DoesNotContain("test-token", failure.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("header-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("default-value", failure.ToString(), StringComparison.Ordinal);
         Assert.DoesNotContain("provider-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
         Assert.Equal(1, handler.Calls);
     }
 
@@ -402,6 +1441,46 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Theory]
+    [InlineData(LlmTransport.GoogleGeminiApi, false)]
+    [InlineData(LlmTransport.GoogleVertexAi, false)]
+    [InlineData(LlmTransport.GoogleGeminiApi, true)]
+    [InlineData(LlmTransport.GoogleVertexAi, true)]
+    public async Task GoogleModelObservationsRefuseEffectiveHeaderSecrets(LlmTransport transport, bool borrowedBearer)
+    {
+        const string body = "data: {\"modelVersion\":\"model-default-value\",\"candidates\":[{\"finishReason\":\"STOP\",\"content\":{\"parts\":[{\"text\":\"answer\"}]}}]}\n\n";
+        using var handler = new Handler(transport, streaming: true, body);
+        using var http = new HttpClient(handler);
+        if (borrowedBearer) http.DefaultRequestHeaders.Authorization = new("Bearer", "default-value");
+        else http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        await using var authentication = new VertexAuthentication();
+        ILlmClient client = transport == LlmTransport.GoogleGeminiApi
+            ? new GeminiApiLlmClient(http) : new VertexLlmClient(http, authentication);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = transport,
+            Endpoint = transport == LlmTransport.GoogleGeminiApi ? GeminiApiLlmClient.DefaultEndpoint : VertexEndpoints.BaseEndpoint,
+            Vertex = transport == LlmTransport.GoogleVertexAi ? new() { AuthenticationMode = LlmGoogleAuthenticationMode.ApiKey } : null,
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
+        };
+        var events = new List<LlmStreamEvent>();
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection, new()
+            {
+                ModelId = transport == LlmTransport.GoogleGeminiApi ? "gemini-3-flash-preview" : "google/gemini-3-flash-preview",
+                Messages = [new("user", "hello")]
+            })) events.Add(item);
+        });
+
+        Assert.Equal(transport, failure.Transport);
+        Assert.DoesNotContain("default-value", failure.ToString(), StringComparison.Ordinal);
+        Assert.Empty(events);
+        Assert.Equal("default-value", borrowedBearer ? handler.RequestBearerParameter : handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
     [InlineData(LlmTransport.GoogleGeminiApi)]
     [InlineData(LlmTransport.GoogleVertexAi)]
     public async Task GeminiTerminalUsageReplacesEarlierCountsWithoutCarryingStaleSubsets(LlmTransport transport)
@@ -424,7 +1503,7 @@ public sealed class ProviderTerminalEvidenceTests
         var request = new LlmChatRequest { ModelId = "gemini-2.5-flash", Messages = [new("user", "hello")] };
         var codec = new GeminiContinuationCodec("test-gemini", "Gemini");
         var route = new GeminiRoute(transport, "Gemini", "gemini_",
-            (response, token) => ProviderHttp.ThrowIfUnsuccessfulAsync(response, transport, null, "generation", token), codec.Encode);
+            (response, token) => ProviderHttp.ThrowIfUnsuccessfulAsync(response, transport, null, "generation", [], token), codec.Encode);
         var events = new List<LlmStreamEvent>();
         await foreach (LlmStreamEvent item in GeminiStream.ReadAsync(http, new(HttpMethod.Post, connection.Endpoint), route,
             connection, request, null, stream: true, usageDeltas: true, reasoningText: false, CancellationToken.None))
@@ -488,7 +1567,7 @@ public sealed class ProviderTerminalEvidenceTests
         {
             var codec = new GeminiContinuationCodec("test-gemini", "Gemini");
             var route = new GeminiRoute(transport, "Gemini", "gemini_",
-                (response, token) => ProviderHttp.ThrowIfUnsuccessfulAsync(response, transport, null, "generation", token), codec.Encode);
+                (response, token) => ProviderHttp.ThrowIfUnsuccessfulAsync(response, transport, null, "generation", [], token), codec.Encode);
             source = GeminiStream.ReadAsync(http, new(HttpMethod.Post, connection.Endpoint), route, connection,
                 request, null, streaming, usageDeltas: true, reasoningText: false, CancellationToken.None);
         }
@@ -610,14 +1689,26 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     private sealed class Handler(LlmTransport transport, bool streaming, string? scriptedBody = null,
-        HttpStatusCode statusCode = HttpStatusCode.OK, TimeSpan? retryAfter = null, string? requestId = null) : HttpMessageHandler
+        HttpStatusCode statusCode = HttpStatusCode.OK, TimeSpan? retryAfter = null, string? requestId = null,
+        HttpMethod? expectedMethod = null, bool emptyCatalog = false) : HttpMessageHandler
     {
         internal int Calls { get; private set; }
         internal string? RequestBody { get; private set; }
+        internal string? RequestTrace { get; private set; }
+        internal string? RequestDefaultTrace { get; private set; }
+        internal string? RequestBearerParameter { get; private set; }
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
-            Assert.Equal(HttpMethod.Post, request.Method);
+            if (emptyCatalog && request.Method == HttpMethod.Get)
+            {
+                Assert.True(request.RequestUri!.AbsolutePath is "/v1/models" or "/v1/language-models");
+                return new(HttpStatusCode.OK) { Content = new StringContent("{\"data\":[],\"models\":[]}", Encoding.UTF8, "application/json") };
+            }
+            Assert.Equal(expectedMethod ?? HttpMethod.Post, request.Method);
+            RequestTrace = request.Headers.TryGetValues("X-Trace", out IEnumerable<string>? values) ? Assert.Single(values) : null;
+            RequestDefaultTrace = request.Headers.TryGetValues("X-Default", out IEnumerable<string>? defaults) ? Assert.Single(defaults) : null;
+            RequestBearerParameter = request.Headers.Authorization?.Parameter;
             RequestBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
             string body = scriptedBody ?? Body(transport, streaming);
             var response = new HttpResponseMessage(statusCode)

@@ -1,12 +1,36 @@
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Realtime;
 using Darkspyre.Inference.Common.Resources;
+using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.Voice.Tests;
 
 namespace Darkspyre.Inference.Connect.Realtime.Tests;
 
 public sealed class XaiRealtimeSessionTests
 {
+    [Fact]
+    public async Task FailedUpgradeRetainsSafeRequestIdAndRetryDelay()
+    {
+        using var handler = new RejectedVoiceUpgrade("/v1/realtime");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-secret");
+        await using var access = new LlmConnectionAccess(new VoiceConnectionSource(), []);
+        var binding = new XaiFamilyBinding(new("selected"), access);
+        await using var provider = new XaiRealtimeProvider(http);
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            provider.OpenSessionAsync(new()
+            {
+                Transport = RealtimeTransport.XaiRealtime,
+                Endpoint = new(VoiceTestData.Connection.Endpoint),
+                Xai = binding.Selection,
+                AdditionalHeaders = new Dictionary<string, string> { ["X-Family"] = "family-secret" }
+            }, new() { TurnDetection = new RealtimeManualTurnDetection() }, VoiceTestData.Limits(), binding));
+
+        VoiceTestData.AssertUpgradeFailure(failure);
+        Assert.Equal(1, handler.Sends);
+    }
+
     private static readonly string[] RepeatedCommands = ["session.update", "input_audio_buffer.append", "input_audio_buffer.commit", "response.create", "response.create"];
     private static async Task<IRealtimeVoiceSession> OpenAsync(VoiceSocket socket, VoiceResources? resources = null, int events = 16)
     {

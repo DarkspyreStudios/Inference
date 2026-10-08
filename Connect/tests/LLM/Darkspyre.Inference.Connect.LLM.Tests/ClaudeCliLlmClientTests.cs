@@ -1,7 +1,9 @@
 using Darkspyre.Inference.Connect.LLM.Internal;
+using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -12,6 +14,94 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ClaudeCliLlmClientTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CatalogEffortFactsControlAliasAdmissionThroughTheFacade(bool supportsEffort)
+    {
+        var process = new CatalogProcess
+        {
+            ModelInfo = JsonElement.Parse(supportsEffort
+                ? """{"value":"cli-returned-alias","displayName":"CLI model choice","supportsEffort":true,"supportedEffortLevels":["low"]}"""
+                : """{"value":"cli-returned-alias","displayName":"CLI model choice","supportsEffort":false}"""
+            )
+        };
+        var runner = new RecordingRunner(new(0,
+            """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
+            string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, process);
+        LlmConnection connection = CliConnection() with
+        { CapabilityOverrides = new() { ReasoningLevels = ClaudeCliLlmClient.ReasoningLevels } };
+        await using var service = new LlmProviderService(new ResourcePreparationTests.Source(connection), [client]);
+
+        LlmProviderCapabilities capabilities = await service.GetModelCapabilitiesAsync("connection", "cli-returned-alias");
+        Assert.True(capabilities.ReasoningLevels.SetEquals(supportsEffort ? [LlmReasoningLevel.Low] : []));
+        var request = new LlmChatRequest
+        {
+            ModelId = "cli-returned-alias",
+            Messages = [new("user", "Reply with OK.")],
+            ReasoningLevel = LlmReasoningLevel.ExtraHigh
+        };
+        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() =>
+            ReadAllAsync(service.StreamAsync("connection", request)));
+        Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
+        Assert.Empty(runner.Invocations);
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(service.StreamAsync("connection",
+            request with { ReasoningLevel = supportsEffort ? LlmReasoningLevel.Low : null }));
+        Assert.Equal(LlmCompletionStatus.Completed, Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Status);
+        Assert.Equal(1, process.Initializations);
+        IReadOnlyList<string> arguments = Assert.Single(runner.Invocations).Arguments;
+        Assert.Equal("cli-returned-alias", arguments[arguments.ToList().IndexOf("--model") + 1]);
+    }
+
+    [Theory]
+    [InlineData("claude-sonnet-4-6")]
+    [InlineData("claude-opus-4-6")]
+    [InlineData("claude-sonnet-4-6[1m]")]
+    [InlineData("claude-opus-4-6[1m]")]
+    public async Task ExplicitClaude46ProfilesRejectExtraHighBeforeInvocation(string model)
+    {
+        var runner = new RecordingRunner(new(0,
+            """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
+            string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        LlmConnection connection = CliConnection() with
+        {
+            ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>
+            {
+                [model] = new() { ReasoningLevels = ClaudeCliLlmClient.ReasoningLevels }
+            }
+        };
+        IReadOnlySet<LlmReasoningLevel> offered = client.GetCapabilities(connection, model).ReasoningLevels;
+        Assert.True(offered.SetEquals([LlmReasoningLevel.Low, LlmReasoningLevel.Medium,
+            LlmReasoningLevel.High, LlmReasoningLevel.Maximum]));
+        var request = new LlmChatRequest
+        {
+            ModelId = model,
+            Messages = [new("user", "Reply with OK.")],
+            ReasoningLevel = LlmReasoningLevel.ExtraHigh
+        };
+
+        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() =>
+            ReadAllAsync(client.StreamAsync(connection, request)));
+        Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
+        Assert.Empty(runner.Invocations);
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection,
+            request with { ReasoningLevel = LlmReasoningLevel.Maximum }));
+        Assert.Equal(LlmCompletionStatus.Completed, Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Status);
+        IReadOnlyList<string> arguments = Assert.Single(runner.Invocations).Arguments;
+        Assert.Equal("max", arguments[arguments.ToList().IndexOf("--effort") + 1]);
+        LlmConnection narrowed = CliConnection() with
+        { CapabilityOverrides = new() { ReasoningLevels = LlmReasoningEffort.Levels(LlmReasoningLevel.Low) } };
+        Assert.True(client.GetCapabilities(narrowed, model).ReasoningLevels.SetEquals([LlmReasoningLevel.Low]));
+        Assert.Contains(LlmReasoningLevel.ExtraHigh, client.GetCapabilities(CliConnection(), "sonnet").ReasoningLevels);
+        Assert.Contains(LlmReasoningLevel.ExtraHigh, client.GetCapabilities(CliConnection(), "unrecognized-model").ReasoningLevels);
+    }
+
     [Theory]
     [InlineData(true, 0)]
     [InlineData(false, 0)]
@@ -50,6 +140,51 @@ public sealed class ClaudeCliLlmClientTests
         Assert.Single(runner.Invocations);
     }
 
+    [Theory]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    public async Task SuccessfulSchemaToolStopRequiresTheNativeStructuredPayload(bool streaming, bool nativePayload)
+    {
+        const string answer = """{"marker":"fixture"}""";
+        string output = new JsonObject
+        {
+            ["type"] = "result",
+            ["subtype"] = "success",
+            ["is_error"] = false,
+            ["stop_reason"] = "tool_use",
+            ["result"] = answer,
+            ["structured_output"] = nativePayload ? JsonNode.Parse(answer) : null
+        }.ToJsonString();
+        var runner = new RecordingRunner(new(0, output, string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        LlmConnection connection = CliConnection() with { CapabilityOverrides = new() { SupportsStreaming = streaming } };
+        var request = new LlmChatRequest
+        {
+            ModelId = "claude-test",
+            Messages = [new("user", "Return the marker")],
+            StructuredOutput = new()
+            {
+                Name = "marker",
+                Schema = JsonElement.Parse("""
+                    {"type":"object","properties":{"marker":{"type":"string"}},"required":["marker"],"additionalProperties":false}
+                    """)
+            }
+        };
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection, request));
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+
+        Assert.Equal(nativePayload ? LlmCompletionStatus.Completed : LlmCompletionStatus.Unknown, result.Status);
+        Assert.Equal("tool_use", result.FinishReason);
+        Assert.Equal(answer, result.Text);
+        Assert.True(result.StructuredOutput!.IsValid);
+        Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, result.StructuredOutput.Enforcement);
+        Assert.Single(runner.Invocations);
+    }
+
     [Fact]
     public async Task AccountUsageFailurePreservesSanitizedResultDetail()
     {
@@ -65,6 +200,41 @@ public sealed class ClaudeCliLlmClientTests
         Assert.Contains("Account usage is unavailable for this organization.", failure.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("usage-secret", failure.ToString(), StringComparison.Ordinal);
         Assert.Single(runner.Invocations);
+    }
+
+    [Fact]
+    public async Task CatalogOAuthProtocolFailureRedactsTheActualHttpHeadersWithoutLaunchingTheCli()
+    {
+        using var handler = new UnexpectedHttpHandler(request =>
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal(new Uri("https://api.anthropic.com/v1/models?limit=1000"), request.RequestUri);
+            Assert.Equal("test-token", request.Headers.Authorization!.Parameter);
+            Assert.Equal("header-value", Assert.Single(request.Headers.GetValues("X-Trace")));
+            Assert.Equal("default-value", Assert.Single(request.Headers.GetValues("X-Default")));
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new StringContent("not-json test-token header-value default-value") };
+            response.Headers.Add("x-request-id", "request-test-token-header-value-default-value-1");
+            return response;
+        });
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Trace", "header-value");
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var runner = new RecordingRunner(new(0, string.Empty, string.Empty));
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        LlmConnection connection = CliConnection() with
+        { Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize() };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => client.ListModelsAsync(connection));
+
+        Assert.Equal(HttpStatusCode.OK, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        Assert.Equal("Anthropic model discovery returned invalid JSON.", failure.Message);
+        Assert.IsAssignableFrom<JsonException>(failure.InnerException);
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.Empty(runner.Invocations);
+        Assert.Equal(1, handler.Calls);
     }
 
     [Fact]
@@ -223,12 +393,17 @@ public sealed class ClaudeCliLlmClientTests
         }
     }
 
-    private sealed class UnexpectedHttpHandler : HttpMessageHandler
+    private sealed class UnexpectedHttpHandler(Func<HttpRequestMessage, HttpResponseMessage>? respond = null) : HttpMessageHandler
     {
+        internal int Calls { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
-            CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("OAuth prompt unexpectedly used HTTP.");
+            CancellationToken cancellationToken)
+        {
+            Calls++;
+            return respond is null ? throw new InvalidOperationException("OAuth prompt unexpectedly used HTTP.")
+                : Task.FromResult(respond(request));
+        }
     }
 
     private sealed class NoSessionProcesses : IClaudeCliSessionProcessFactory
@@ -241,6 +416,9 @@ public sealed class ClaudeCliLlmClientTests
     private sealed class CatalogProcess : IClaudeCliSessionProcessFactory, IClaudeCliSessionProcess
     {
         private string? _reply;
+        internal JsonElement ModelInfo { get; init; } = JsonElement.Parse(
+            """{"value":"cli-returned-alias","displayName":"CLI model choice","unmappedOption":"preserved"}""");
+        internal int Initializations { get; private set; }
         public ClaudeCliSessionInvocation? Invocation { get; private set; }
         public Task? DisposalRelease { get; init; }
         public TaskCompletionSource DisposalEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -258,6 +436,7 @@ public sealed class ClaudeCliLlmClientTests
             JsonElement request = document.RootElement;
             Assert.Equal("control_request", request.GetProperty("type").GetString());
             Assert.Equal("initialize", request.GetProperty("request").GetProperty("subtype").GetString());
+            Initializations++;
             _reply = new JsonObject
             {
                 ["type"] = "control_response",
@@ -265,9 +444,10 @@ public sealed class ClaudeCliLlmClientTests
                 {
                     ["subtype"] = "success",
                     ["request_id"] = request.GetProperty("request_id").GetString(),
-                    ["response"] = JsonNode.Parse("""
-                        {"models":[{"value":"cli-returned-alias","displayName":"CLI model choice","unmappedOption":"preserved"}]}
-                        """)
+                    ["response"] = new JsonObject
+                    {
+                        ["models"] = new JsonArray(JsonNode.Parse(ModelInfo.GetRawText()))
+                    }
                 }
             }.ToJsonString();
             return ValueTask.CompletedTask;

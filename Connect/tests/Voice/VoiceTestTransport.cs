@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -20,10 +21,89 @@ internal static class VoiceTestData
         Credential = new LlmCredential { OAuth = new() { AccessToken = "dummy-test-token" } }.Serialize()
     };
     internal static TaskCompletionSource Signal() => new(TaskCreationOptions.RunContinuationsAsynchronously);
+    internal static void AssertUpgradeFailure(LlmProviderException failure)
+    {
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("upgrade-[REDACTED]-[REDACTED]-[REDACTED]-[REDACTED]-[REDACTED]-[REDACTED]", failure.RequestId);
+        Assert.Equal(TimeSpan.FromSeconds(17), failure.RetryAfter);
+        Assert.Null(failure.ProviderCode);
+        foreach (string value in new[] { "private upgrade body", "dummy-test-token", "binding-secret", "family-secret", "default-secret", "refresh-secret", "identity-secret" })
+            Assert.DoesNotContain(value, failure.ToString(), StringComparison.Ordinal);
+    }
+    internal static void AssertRestFailure(LlmProviderException failure)
+    {
+        Assert.Equal(HttpStatusCode.TooManyRequests, failure.StatusCode);
+        Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]", failure.RequestId);
+        Assert.Equal(TimeSpan.FromSeconds(17), failure.RetryAfter);
+        foreach (string value in new[] { "private speech source", "dummy-test-token", "binding-secret", "family-secret", "default-secret", "provider-secret" })
+            Assert.DoesNotContain(value, failure.ToString(), StringComparison.Ordinal);
+    }
     internal static string Type(byte[] bytes)
     {
         using JsonDocument json = JsonDocument.Parse(bytes);
         return json.RootElement.GetProperty("type").GetString()!;
+    }
+}
+
+internal sealed class VoiceConnectionSource : ILlmConnectionSource
+{
+    public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
+        => Task.FromResult<LlmConnection?>(VoiceTestData.Connection with
+        {
+            Credential = new LlmCredential
+            {
+                OAuth = new() { AccessToken = "dummy-test-token", RefreshToken = "refresh-secret", IdToken = "identity-secret" }
+            }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Binding"] = "binding-secret" }
+        });
+    public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion,
+        CancellationToken cancellationToken = default) => throw new InvalidOperationException("No authenticator refreshes this fixture credential.");
+}
+
+internal sealed class RejectedVoiceHttp(string path) : HttpMessageHandler
+{
+    internal int Sends { get; private set; }
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        Sends++;
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Equal(path, request.RequestUri!.AbsolutePath);
+        Assert.Equal("dummy-test-token", request.Headers.Authorization!.Parameter);
+        Assert.Equal("binding-secret", Assert.Single(request.Headers.GetValues("X-Binding")));
+        Assert.Equal("family-secret", Assert.Single(request.Headers.GetValues("X-Family")));
+        Assert.Equal("default-secret", Assert.Single(request.Headers.GetValues("X-Default")));
+        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Content = new StringContent("""
+                {"error":{"code":"rate_limit_dummy-test-token_binding-secret_family-secret_default-secret_provider-secret","message":"private speech source","refresh_token":"provider-secret"}}
+                """)
+        };
+        response.Headers.Add("x-request-id", "request-binding-secret-family-secret-default-secret");
+        response.Headers.RetryAfter = new(TimeSpan.FromSeconds(17));
+        return Task.FromResult(response);
+    }
+}
+
+internal sealed class RejectedVoiceUpgrade(string path) : HttpMessageHandler
+{
+    internal int Sends { get; private set; }
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+    {
+        Sends++;
+        Assert.Equal(HttpMethod.Get, request.Method);
+        Assert.Equal(path, request.RequestUri!.AbsolutePath);
+        Assert.Equal("dummy-test-token", request.Headers.Authorization!.Parameter);
+        Assert.Equal("binding-secret", Assert.Single(request.Headers.GetValues("X-Binding")));
+        Assert.Equal("family-secret", Assert.Single(request.Headers.GetValues("X-Family")));
+        Assert.Equal("default-secret", Assert.Single(request.Headers.GetValues("X-Default")));
+        var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Content = new StringContent("private upgrade body")
+        };
+        response.Headers.Add("x-request-id", "upgrade-dummy-test-token-binding-secret-family-secret-default-secret-refresh-secret-identity-secret");
+        response.Headers.RetryAfter = new(TimeSpan.FromSeconds(17));
+        return Task.FromResult(response);
     }
 }
 
@@ -37,7 +117,7 @@ internal sealed class VoiceSocket : WebSocket
     internal bool Disposed { get; private set; }
     internal void Json(string json) => _incoming.Writer.TryWrite((Encoding.UTF8.GetBytes(json), WebSocketMessageType.Text));
     internal void End() => _incoming.Writer.TryWrite(([], WebSocketMessageType.Close));
-    internal Task<WebSocket> ConnectAsync(Uri uri, HttpRequestMessage headers, Action fence,
+    internal Task<WebSocket> ConnectAsync(Uri uri, HttpRequestMessage headers, LlmCredential? credential, Action fence,
         Action<Exception> cleanup, CancellationToken token)
     {
         token.ThrowIfCancellationRequested(); fence();

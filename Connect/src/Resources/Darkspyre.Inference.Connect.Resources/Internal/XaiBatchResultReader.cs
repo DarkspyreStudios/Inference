@@ -50,7 +50,7 @@ internal sealed class XaiBatchResultReader(HttpClient http, LlmConnection connec
             if (error.ValueKind == JsonValueKind.String)
             {
                 if (nativeResponse.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null)) throw XaiMediaData.Malformed();
-                string message = SecretRedactor.Sanitize(error.GetString()!, LlmCredential.Parse(connection.Credential), connection.AdditionalHeaders.Values);
+                string message = SecretRedactor.Sanitize(error.GetString()!, LlmCredential.Parse(connection.Credential), observation.SecretContext);
                 result = new LlmBatchFailure(id, new(InferenceFailureCode.ExecutionFailed, null, message));
                 observation.ObserveResult(result);
             }
@@ -86,7 +86,7 @@ internal sealed class XaiBatchResultReader(HttpClient http, LlmConnection connec
     private async Task<LlmBatchChatResult> ReadChatAsync(string id, JsonElement body, XaiDeferredChatCodec codec,
         HttpResponseMessage response, CancellationToken token)
     {
-        var decoded = codec.DecodeCompleteResponse(body.GetRawText(), response, connection);
+        var decoded = codec.DecodeCompleteResponse(body.GetRawText(), response, connection, observation.SecretContext);
         var result = new LlmBatchChatResult(id, decoded.Result);
         int index = observation.ObserveResult(result);
         foreach (var file in decoded.OutputFiles) XaiFileRequestData.Identity(file.Id);
@@ -214,7 +214,7 @@ internal sealed class XaiBatchResultReader(HttpClient http, LlmConnection connec
             string? message = decoded.ErrorMessage;
             var failure = new LlmBatchFailure(id, new(InferenceFailureCode.ExecutionFailed, decoded.ErrorCode,
                 message is null ? $"The provider video state is {decoded.State}."
-                    : SecretRedactor.Sanitize(message, LlmCredential.Parse(connection.Credential), connection.AdditionalHeaders.Values)));
+                    : SecretRedactor.Sanitize(message, LlmCredential.Parse(connection.Credential), observation.SecretContext)));
             observation.ObserveResult(failure);
             return failure;
         }
@@ -266,7 +266,7 @@ internal sealed class XaiBatchResultReader(HttpClient http, LlmConnection connec
     { ImplementationId = ProviderDefinitions.GrokSubscription.Id, ModelId = model, Runtime = "xAI", Backend = "connect" };
 
     private bool Protected(string value) => value != SecretRedactor.Sanitize(value,
-        LlmCredential.Parse(connection.Credential), connection.AdditionalHeaders.Values);
+        LlmCredential.Parse(connection.Credential), observation.SecretContext);
     private string RequiredString(JsonElement root, string name) => XaiMediaData.RequiredString(root, name, Protected);
     private string? OptionalString(JsonElement root, string name) => XaiMediaData.OptionalString(root, name, Protected);
     private static int Present(JsonElement value) => value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined ? 0 : 1;

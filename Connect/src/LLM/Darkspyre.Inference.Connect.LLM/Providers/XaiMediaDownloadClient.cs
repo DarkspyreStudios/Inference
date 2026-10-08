@@ -44,7 +44,7 @@ internal sealed class XaiMediaDownloadClient(HttpClient http)
     {
         XaiMediaData.RequireHttpUrl(url);
         // No selected connection headers, authorization or cookies enter this pipeline.
-        return XaiHttpDownload.OpenAsync(http, new Uri(url), null, timeout, fence, (response, _) =>
+        return XaiHttpDownload.OpenAsync(http, new Uri(url), null, timeout, fence, (_, response, _) =>
         {
             if (!response.IsSuccessStatusCode)
                 throw new HttpRequestException("The unsigned media transfer failed.", null, response.StatusCode);

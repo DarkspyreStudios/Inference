@@ -12,7 +12,6 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
     private readonly HashSet<string> _started = new(StringComparer.Ordinal);
     private readonly HashSet<string> _citationKeys = new(StringComparer.Ordinal);
     private readonly List<LlmCitation> _citations = [];
-    private readonly List<InferenceResourceCommitResult> _generated = [];
     private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
     private static readonly byte[] JpegSignature = [255, 216, 255];
     private bool _completed;
@@ -72,7 +71,7 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
                         if (input is { ValueKind: not JsonValueKind.Object }) throw malformed();
                         result = new LlmHostedSearchOutput(input is { } action ? ReadSources(action) : null);
                         break;
-                    case LlmHostedToolKind.SocialSearch:
+                    case LlmHostedToolKind.SocialSearch when LlmJson.GetString(item, "type") == "custom_tool_call":
                         input = OptionalValue(item, "input");
                         if (input is { ValueKind: not JsonValueKind.String }) throw malformed();
                         break;
@@ -115,7 +114,7 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
     internal override LlmChatResult Decorate(LlmChatResult result) => result with
     {
         Citations = _citations.ToArray(),
-        GeneratedResources = _generated.ToArray()
+        GeneratedResources = preparation.GeneratedResources.ToArray()
     };
 
     private (LlmHostedToolKind Kind, string Name)? Identify(JsonElement item)
@@ -125,6 +124,8 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
         {
             "file_search_call" => (LlmHostedToolKind.DocumentSearch, "file_search"),
             "web_search_call" => (LlmHostedToolKind.WebSearch, "web_search"),
+            // https://docs.x.ai/developers/tools/tool-usage-details identifies the native Responses type.
+            "x_search_call" => (LlmHostedToolKind.SocialSearch, "x_search"),
             "code_interpreter_call" => (LlmHostedToolKind.CodeExecution, "code_interpreter"),
             "image_generation_call" => (LlmHostedToolKind.ImageGeneration, "image_generation"),
             "mcp_call" => (LlmHostedToolKind.RemoteMcp, RequiredString(item, "name")),
@@ -224,7 +225,7 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
         InferenceResourceSelectionVersion scope = preparation.Selection ?? throw malformed();
         SpeechResourceWriter.Writer? writer = null;
         Exception? failure = null;
-        _generated.EnsureCapacity(_generated.Count + 1);
+        preparation.GeneratedResources.EnsureCapacity(preparation.GeneratedResources.Count + 1);
         try
         {
             preparation.Fence();
@@ -233,7 +234,7 @@ internal sealed class XaiHostedToolObserver(Func<Exception> malformed, XaiHosted
             await writer.WriteAsync(bytes, token).ConfigureAwait(false);
             InferenceResourceDescriptor descriptor = await writer.CommitAsync(token).ConfigureAwait(false);
             InferenceResourceCommitResult receipt = writer.ObservedCommit ?? throw malformed();
-            _generated.Add(receipt);
+            preparation.GeneratedResources.Add(receipt);
             output = output with { Resources = new[] { descriptor } };
         }
         catch (Exception error) { failure = error; }

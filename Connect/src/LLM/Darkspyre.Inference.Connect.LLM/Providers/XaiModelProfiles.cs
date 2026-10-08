@@ -17,14 +17,17 @@ internal sealed record XaiModelProfile(
 internal static class XaiModelProfiles
 {
     private static readonly XaiModelProfile Unknown = new(LlmReasoningEffort.Levels(), null, false);
+    private static readonly XaiModelProfile NonReasoning = new(LlmReasoningEffort.Levels(), null, true);
     private static readonly XaiModelProfile Reasoning = new(LlmReasoningEffort.Levels(
         LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh), LlmReasoningLevel.High, true);
 
     // https://docs.x.ai/developers/model-capabilities/text/reasoning
     // https://docs.x.ai/developers/model-capabilities/text/multi-agent
+    // https://docs.x.ai/developers/models/grok-4.20-0309-non-reasoning
     private static readonly (string Prefix, XaiModelProfile Profile)[] Rows =
     [
-        ("grok-4.20-non-reasoning", new(LlmReasoningEffort.Levels(), null, true)),
+        ("grok-4.20-0309-non-reasoning", NonReasoning),
+        ("grok-4.20-non-reasoning", NonReasoning),
         ("grok-4.20-multi-agent", new(LlmReasoningEffort.Levels(), null, true, MultiAgent: new(
             new Dictionary<string, int>(StringComparer.Ordinal) { ["low"] = 4, ["medium"] = 4, ["high"] = 16, ["xhigh"] = 16 }.ToFrozenDictionary(StringComparer.Ordinal)))),
         ("grok-4.7", Reasoning),

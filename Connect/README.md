@@ -40,6 +40,37 @@ completion options or body values. Raw arbitrary caller use of .NET `HttpContent
 intercepted: its nonvirtual cached APIs can bypass content overrides. Direct supplied clients and
 `BorrowHostFactory` keep ordinary body and ownership semantics.
 
+The shared LLM HTTP failure helper redacts known credentials and observed outgoing request headers
+from the response body, provider code, request ID and rendered message. This includes borrowed-client
+default headers. Each send owner supplies its live request headers after the send; redaction does not
+depend on the response retaining its request. Credential-aware ID reads also sanitize when no extra
+secret context is supplied.
+Missing IDs remain absent in fields and render as `unknown`; observed HTTP status and retry delay remain intact.
+Responses generation carries one request-local header and hosted-authorization snapshot through both
+complete and streamed body conversion. Malformed-response and provider stream-error diagnostics use
+that context for their message, nullable provider code, request ID and diagnostic body.
+Stream-error codes and messages come from the redacted native error envelope through the shared
+HTTP error reader, so named secret values are also removed from those fields.
+Anthropic Messages carries the actual sent headers through streamed and complete body conversion.
+Its protocol errors and terminal diagnostics redact the request ID and body with that context.
+Native errors retain their Anthropic type and explanatory message from the redacted envelope;
+overflow classification reads the original provider facts.
+Shared protocol errors retain JSON parsing failures with their actual line and byte positions.
+Their inner exception uses a fixed parsing message and no input path because parser text can quote secrets.
+Compatible chat carries actual sent headers through streamed generation and its canonical complete decoder.
+Protocol/native errors and terminal diagnostics use that context for their safe fields and body.
+Native error codes and messages come from the same redacted-envelope reader; overflow classification
+retains the original provider facts.
+Shared OpenAI-compatible, Anthropic and Codex model discovery readers carry actual sent headers
+to the existing protocol-error boundary. Codex/OpenRouter account parsing uses that boundary too.
+Malformed JSON and Codex's missing-catalog response retain known HTTP status and a sanitized nullable
+request ID. Parser diagnostics omit input-quoting text; OpenRouter's stream parser supplies no raw body.
+Claude's optional HTTP catalog uses this boundary without launching the CLI.
+OpenAI embedding conversion uses actual sent headers for model-identity checks, request IDs and
+diagnostic bodies. Invalid embeddings retain sanitized validation details and use the same safe
+JSON-parser projection as chat protocol errors. Successful vectors, usage and safe model identities
+remain unchanged.
+
 Mapped task results publish after response, body and request cleanup completes; retirement begun by
 cleanup prevents late success without replacing an earlier operation failure. If an owned logger
 fails after receiving a response, that unhanded response is cleaned up once. Refused cleanup remains
@@ -120,6 +151,9 @@ operation-created JSONL belongs only to creation from requests. Collections copy
 result bytes and opaque JSON. The owned codec rejects contradictory facts and undefined operations.
 Provider failures retain the current response's sanitized request ID in both the operation observation
 and the nested provider exception. HTTP status and retry delay remain available without response bodies.
+Batch/deferred exchanges add actual sent headers, including borrowed-client defaults, to their existing
+operation secret context before observing a response. HTTP rejection and canonical chat decoding use
+that same context; batch row errors and native field admission also use it.
 `LlmResourceOperationException` and `LlmResourceOperationCanceledException` expose a copied observation
 with fixed diagnostic text. Cancellation preserves its actual cause and token. Their constructors do
 not sanitize caller-supplied inner exceptions. Exceptions remain runtime objects, not JSON roots.
@@ -158,6 +192,9 @@ successful publication. `GeneratedResources` contains the exact ordered commit r
 access is legal for artifact-free results; observed artifacts require access before any download or
 write, while failure still reports the preceding consume-once dispatch and response. Earlier committed
 outputs survive a later transfer, commit, cleanup or publication failure without deletion or retry.
+The writer's commit callback updates the recovered chat's `GeneratedResources` before cancellation
+and cleanup fences. A canceled retrieval therefore retains each valid committed file in both the
+recovered chat and the operation's commit observations.
 Incremental batch requests and creation from requests share one ordered snapshot and the canonical
 Responses, image and video body builders. Every row is validated before credential refresh or input
 transfers. Chat selections are frozen once per prompt; media reads only its named sources. One batch
@@ -201,6 +238,8 @@ returned text, reported model, terminal status and usage. Its batch case checks 
 by one result-page request, the native `chat_get_completion` envelope, ordered row outcomes and the
 returned cursor without automatic paging. These managed cases do not establish provider access,
 media materialization or independent transport/cleanup fault qualification.
+The cancellation-after-commit case uses a memory-backed write handle and checks the portable recovered
+chat and its exact selection receipt. It does not qualify remote Files delivery or cleanup refusal.
 
 This assembly activates no global provider registration and makes no OAuth or endpoint-qualification claim.
 Caller workspace storage remains caller-owned. Constructing or serializing a receipt performs no
@@ -431,7 +470,9 @@ collection IDs and optional result limits; each descriptor accepts at most ten c
 Actual built `input_file` content also enables implicit document-search observations. Both paths
 request `file_search_call.results`. Hosted-tool include strings use primitive JSON nodes without
 default reflection metadata. Web controls use flat domains and image controls. X controls
-preserve handles and dates without an invented handle cutoff or date interpretation. Deferred MCP
+preserve exact handles and apply the [published 20-handle limit](https://docs.x.ai/developers/tools/x-search)
+to each allowed or excluded filter before effects. Oversized lists refuse without truncation.
+Typed date bounds project as `YYYY-MM-DD` without date interpretation. Deferred MCP
 adds the server-side `tool_search` descriptor and retains its ordered opaque call/output items.
 Pure preflight counts all wire tools before effects. Authorization resolves once per distinct
 borrowed authority during generation, never during estimation or serialization.
@@ -451,16 +492,59 @@ in opaque replay. Result-only `CompleteAsync` retains its terminal chat result; 
 provider-specific file-search phase events. X custom calls are classified only by the published
 search names and retain actual call IDs separately from opaque item IDs. Image progress uses only
 documented lifecycle events. Unpublished understanding output/event shapes remain unmapped.
+The [documented native `x_search_call` type](https://docs.x.ai/developers/tools/tool-usage-details)
+also produces SocialSearch observations through the same lifecycle owner. Its observed ID and status
+remain exact. Undocumented input/output facts stay null; the complete native item remains in opaque
+continuation. Classification does not qualify live OAuth X Search execution.
+Two bounded OAuth requests against production source `8db9204` use Global/Default
+`grok-4.20-0309-non-reasoning`, X Search restricted to the `xai` handle, 64 requested output
+tokens and two hosted turns. The prompt asks for one recent Grok post's topic in at most five
+words, or `none` if no post is found. Streaming reports three actual `x_keyword_search` starts
+and matching terminal calls with status `completed`, eight separate citation occurrences and
+the answer `Voice Agent Builder`; usage is 5162 input and 76 output tokens. Nonstreaming reports
+one terminal `x_keyword_search` and one `x_semantic_search`, both `completed`, without fabricated
+starts; it answers `none` and emits no citation events, with 2613 input and 89 output tokens.
+Both chat results are `Completed` with finish reason `completed`. These runs qualify selected
+OAuth X Search execution in both modes, not the native `x_search_call` item shape, post contents,
+date filters, understanding controls, output-token-cap enforcement or other models/routes.
+The lack of citation events does not establish provider-reported absence. The tester uses its own saved
+OAuth credential without retries or account/route fallback.
+Two bounded OAuth requests on Global/Default `grok-4.20-0309-non-reasoning` use the CodeExecution
+descriptor to calculate `19 * 23`. Streaming reports an actual `code_interpreter` start and a
+terminal call with status `completed`; nonstreaming reports the terminal call without a fabricated
+start. Both return `437`, chat status `Completed`, finish reason `completed`, and usage of 1613 input
+and 17 output tokens. Caller bounds are 128 output tokens and two hosted turns. This qualifies that
+selected code-tool route in both modes, not downloadable artifacts, progress events or other hosted
+families. The tester uses its own saved OAuth credential without retries or account/route fallback.
 
 Citations preserve first-observed annotation order and suppress terminal copies of the same
-occurrence. The adapter requests `no_inline_citations`. Offset units are unqualified, so positions
-remain absent. Code outputs preserve actual code, logs and image URLs without fetching remote
+occurrence. The adapter requests `no_inline_citations` in the existing `include` array, as the
+[Responses citation protocol](https://docs.x.ai/developers/tools/citations) specifies; it sends no
+top-level boolean for that control. Offset units are unqualified, so positions remain absent.
+Two bounded OAuth requests against source `8db9204` use Global/Default
+`grok-4.20-0309-non-reasoning`, WebSearch restricted to `docs.x.ai`, 64 requested output tokens
+and two hosted turns. Each reports three actual terminal web calls with status `completed` and
+eleven citation occurrences. Streaming also reports three actual starts; nonstreaming invents
+none. Both return `Code Execution Tool | xAI` with separate citations and no inline citation
+links, chat status `Completed` and finish reason `completed`. Streaming reports 11905 input and
+75 output tokens; nonstreaming reports 11905 input and 135 output tokens and adds explanatory
+prose. These runs qualify the selected web-search and citation route in both modes, not exact
+title-only formatting, output-token-cap enforcement, positional offsets or other models/routes.
+The output-token discrepancy remains unresolved; controlled outgoing-request tests verify the
+requested limit is sent unchanged. The tester uses its own OAuth credential without retries or
+account/route fallback.
+
+Code outputs preserve actual code, logs and image URLs without fetching remote
 artifacts. MCP arguments, output and error remain actual JSON values, including JSON strings.
 Generated images decode bare base64 and identify JPEG/PNG from bytes. Without Resources they carry
 copied bytes. With Resources they use the existing admitted scope and staged resource writer,
 atomically commit-and-select, and release the owned write handle before hosted completion. The
 final result carries actual ordered commit receipts. Cleanup errors preserve original failures and
-uncertain mutation facts. Operation-local MCP secrets reach existing HTTP, SSE, protocol, model and
+uncertain mutation facts. The admitted hosted preparation frame retains the same receipt list through
+terminal parsing, publication and owned cleanup. A later malformed output or failed publication
+preserves earlier committed images in the existing resource failure carrier; it does not roll them
+back or publish a successful chat result. Borrowed authority detachment does not erase commit facts.
+Operation-local MCP secrets reach existing HTTP, SSE, protocol, model and
 terminal diagnostic sanitization; retained opaque terminal output is not rewritten.
 Managed sessions snapshot hosted data, borrow authorization and preserve actual streamed hosted
 and citation observations under the invocation RequestId; they never route hosted observations to
@@ -540,7 +624,17 @@ metadata for these closed families does not establish retirement of an active pr
 The LLM serializer retirement check loads Common and Connect LLM privately into one collectible
 context. It exercises the owned LLM metadata roots and a result with nested Common usage and tool
 data. Its weak-reference checks cover both assemblies, metadata, options and result data after
-unload. This check does not execute or retire a provider or native engine.
+unload. The separate Resources case privately loads Common, LLM, Image, Video and Resources.
+It exercises the Resources metadata getters and round-trips a batch page with nested chat usage,
+tools and a generated-resource commit/selection receipt. It checks release of all five assemblies,
+the owned metadata/options and the nested result/receipt objects after unload. These checks do not
+execute or retire a provider or native engine.
+The combined Common/Connect case exercises all 504 declared metadata getters across the nine fixed
+owners in one private generation. It retains the same batch-result roundtrip and checks release of
+all nine assemblies and their metadata/options. Test-only source references supply Audio, Realtime,
+STT and TTS; shipping dependencies stay unchanged. Getter execution does not serialize every possible
+request/result value or establish Tensor metadata, active provider lifetime, NativeAOT or release-package
+qualification.
 
 Retained chat protocol builders write stop arrays, model aliases, numeric/string control IDs and
 Responses output joins through structured JSON nodes and elements. Vertex argument-path identity
@@ -691,6 +785,8 @@ HTTP chat adapters read the returned `model`. Gemini and Vertex Gemini read the 
 `modelVersion` unchanged as the model identity, without deriving a separate revision from its name.
 Missing observations remain unknown. Conflicting observations within one HTTP response, malformed
 values and protected credential/header values refuse publication through a fixed safe error.
+The shared model-observation reader includes actual sent headers, including borrowed-client defaults,
+as well as selected credentials and explicit operation context. Gemini and Vertex use this same reader.
 Claude streaming reads the most recent actual main assistant message or message-start observation;
 init selections, subagent messages and aggregate usage keys do not supply identity. Its non-streaming
 terminal format and the current Apple, Antigravity and Bedrock protocols report no model identity.
@@ -869,8 +965,15 @@ from borrowed input; input-only operation failures do not poison client retireme
 No automatic reconnect/replay occurs. OAuth endpoint acceptance and real
 voice/latency qualification remain open: the guide's latency value 2 is passed through unchanged despite
 the standalone schema's narrower 0/1 declaration. Controlled tests do not qualify live provider access.
-Failed BCL WebSocket upgrades use only collected actual HTTP status: 401/402 retain the shared
-authentication/entitlement status rules, while 400/403 cannot imply hidden body-dependent facts.
+REST synthesis and transcription failures use the shared xAI HTTP classifier. Its redaction context
+includes selected-connection headers, family headers and effective outgoing request headers, including
+borrowed HttpClient defaults. Public errors retain sanitized provider codes, request IDs, actual HTTP
+status and retry delay. They do not expose reflected protected headers or the raw speech response body.
+Failed BCL WebSocket upgrades retain collected actual HTTP status, sanitized request ID and delta
+retry delay. The shared classifier uses the selected credential, selected/family request headers and
+borrowed HttpClient defaults for redaction. Private opening callbacks carry the already selected
+credential; they do not reacquire it. Status 401/402 retains the shared authentication/entitlement
+rules, while 400/403 cannot imply hidden body-dependent facts.
 Unobserved status remains a safe transport failure. Raw bodies, headers and transport diagnostics
 are not public errors; original transport evidence remains internal. Cancellation is not reclassified.
 
@@ -1033,6 +1136,10 @@ endpoint, region, service tier, agent count, headers, provider options and capab
 This catches a refreshed credential returned with its original source version; equality is local
 change detection, not account or principal proof. Unrelated runtime and authority graphs are not
 retained in this catalog projection.
+The focused catalog regressions exercise an actual credential-access refresh and conditional source
+save through the chat facade. The refreshed original-version snapshot replaces the old catalog and
+uses the new token for both REST listings. The HTTP boundary is offline; this does not qualify xAI
+OAuth or account entitlement.
 Concurrent requests for one connection share a single listing, request accounting and managed sessions
 read the same list, and a failed listing is not kept. Common's `ILlmInference` carries the same pair:
 `ListModelsAsync` may answer from a kept list, and `RefreshModelsAsync` lists again. A service built by
@@ -1097,6 +1204,14 @@ A disposed default-context facade or authorization object can remain retained wi
 separately collectible source or adapter generation alive through those released references.
 Retained caller metadata, live settings objects and genuine foreign exception objects remain separate
 roots. This does not establish retirement of an active provider, native runtime or whole SDK graph.
+The focused collectible-generation regression executes actual `AddLlmConnect` registration and
+resolves all nine default chat clients, the SDK HTTP pool, chat/agent/embedding facades and the
+Files alias. The alias resolves the same chat facade. Connect and the reused connection-source
+fixture execute in the foreign load context with matching source MVIDs. After real container
+disposal, the load context, assemblies, source, clients, pool and facades collect from an outer
+frame that retains only weak references. No network request, credential callback, CLI process or
+native engine runs. This checks healthy default-registration retirement, not every extension,
+active session/body, cleanup refusal, retained exception or target platform.
 
 Cache retirement clears kept models, cancels provider listings through an owner token, and waits
 for every listing, including entries replaced by an edit or refresh. A cancelled caller only stops
@@ -1341,6 +1456,8 @@ retains actual refused owners behind safe diagnostics. Provider failures retain 
 request ID, status and retry delay without exposing the response body. The adapter is not registered. Subscription
 OAuth, model entitlement, preview format and the published input-schema/example disagreement remain
 unqualified; no default embedding model or working xAI availability is advertised.
+Embedding and document-search failure conversion uses selected and effective outgoing header values
+captured after the send. Reflected HttpClient-default headers remain redacted from codes and request IDs.
 
 Retirement fences new requests, cancels
 connection lookup and provider calls, and awaits all active requests before releasing its adapter references. Supplied adapters and the
@@ -1471,6 +1588,15 @@ Vertex typed function-argument streams accept dot names and single- or double-qu
 names in their JSONPath property selectors. Both quoted forms preserve the exact decoded property
 name and share indexed-array reconstruction. Returned calls, portable results and retained
 thought-signature continuations carry the same reconstructed arguments.
+An initial named no-argument call also completes when `willContinue` is explicitly false and
+`partialArgs` is absent. The [Vertex function-call contract](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/reference/rest/v1/Content#FunctionCall)
+defines false and omitted `willContinue` as final. Both forms retain the actual call identity and
+thought signature, expose empty portable arguments and produce a replayable continuation after a
+recognized successful tool stop. An unnamed initial fragment still refuses.
+Complete calls with `args` and `willContinue:false` use the ordinary call parser in streaming and
+nonstreaming responses. The parser consumes the final control without dropping arguments, call
+identity or thought signatures from portable results and canonical continuations. An open fragment
+stream still uses its existing completion checks.
 
 Responses reports `Unknown` for an unrecognized native status and does not publish continuation
 state from that outcome. Tool calls alone do not establish successful completion. Direct Codex
@@ -1615,6 +1741,16 @@ for a caller-directed later turn. They do not automatically retry or execute ser
 running `LlmUsageDeltaEvent` observations and is mirrored on Common's capabilities. Each observation
 replaces the previous value for the entire call. Null counts remain unknown. Duplicate observations
 are suppressed. Only completion usage is authoritative, including when it corrects an earlier value.
+ConsoleTester completion diagnostics render each unreported token count as `unknown`, preserve
+reported zero as `0`, and render an absent usage object as `unavailable`. Missing provider counts
+never appear as measured zero.
+Prompt usage deltas and completion diagnostics include the complete normalized `LlmUsage` as
+JSON through the owned `InferenceJson.LlmUsage` metadata. Agent usage diagnostics preserve the
+actual session, turn and request IDs, followed by separate current-request and run-total usage
+objects. Every reported token subset, provider cost, hosted count and source count remains exact;
+unreported fields and absent objects remain JSON null. One serializer serves all three paths
+without reflection, local accounting or raw provider-body logging. Diagnostics stay on stderr,
+separate from answer text.
 `LlmUsage` also carries nullable `ProviderReportedCostUsd`, `HostedToolCallCount`, `HostedSourcesUsed`
 and a frozen `HostedToolCalls` map keyed by `LlmHostedToolKind`. These are independent provider facts;
 no local price calculation or named-count sum invents an unreported total. Distinct completed calls
@@ -1800,6 +1936,15 @@ and quoted shell metacharacters are retained. The complete command line, includi
 and switches, cannot exceed [8191 characters](https://learn.microsoft.com/en-us/troubleshoot/windows-client/shell-experience/command-line-string-limitation). These batch restrictions do not apply to native or
 resolved Node arguments. An AGY prompt still has its separate platform argument-size bound and
 process-list exposure; a batch launch can hit the smaller command-line bound first.
+
+Native Windows and resolved Node invocations also check the complete prepared command before launch.
+The check counts the quoted executable, all arguments with .NET's quote/backslash expansion,
+separators and terminating NUL against the
+[CreateProcessW 32,767-character limit](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw).
+An oversized command fails with `ArgumentException` asking the caller to reduce the prompt or schema.
+The launcher retains the original structured arguments and leaves rendering to `ProcessStartInfo`.
+The existing launcher fixture checks expanded quotes and aggregate arguments through Windows
+configuration, including accepted boundary arguments. It does not start a Windows process on macOS.
 
 The POSIX launcher test checks inherited-PATH precedence, skipped non-executable files,
 user-local CLI lookup and explicit paths with real filesystem entries. A shell fixture verifies
@@ -2668,7 +2813,12 @@ input budget, and preserves `LlmContextMeasurementSource`. Neither `IsSupported`
 OpenAI Responses, Anthropic Messages and Bedrock Converse advertise `ProviderEnforced`; direct Codex,
 Claude CLI and Antigravity advertise `Unsupported`. Generic compatible endpoints and the custom
 AgentCore harness remain `Unknown`: forwarding a field is not evidence of enforcement. A reserve
-does not enforce `MaxOutputTokens`. Bounded summarization must reject an unsupported or unverifiable
+does not enforce `MaxOutputTokens`. Grok Responses also reports `Unknown` for total-output enforcement.
+Its native `max_output_tokens` limits visible output only, excluding reasoning and function tokens,
+as the [xAI Responses reference](https://docs.x.ai/developers/rest-api-reference/inference/responses.md)
+documents. Connect forwards the requested cap unchanged and retains complete provider usage.
+Accounting does not treat that visible-only cap as a qualified total-output reserve.
+Bounded summarization must reject an unsupported or unverifiable
 route, not switch models or silently omit its cap. No new inference retries or compaction orchestration
 are introduced by these APIs.
 
@@ -2752,6 +2902,8 @@ follows it. Compacted and usage events retain actual request ID, nullable droppe
 nullable usage. Compaction billing contributes to turn usage, not model iterations or context occupancy.
 Priority compaction is unsupported pending qualification and refuses before refresh, resource callbacks
 or HTTP. Ordinary Priority generation remains available and never silently downgrades its tier.
+Compaction failures redact selected and effective outgoing header values captured after the send,
+including borrowed HttpClient defaults, from provider codes and request IDs. Raw response bodies stay withheld.
 
 `CanCompactHistory` is true when unprotected history exists or a protected function result contains
 a text part longer than 2,000 characters or a binary part. `ProtectedFits` is the nullable inverse of
@@ -2945,6 +3097,42 @@ only OAuth tokens. Expiry comes from `expires_in` or the access-token JWT; accou
 The shared OAuth pipeline refreshes within 60 seconds of expiry. It preserves account metadata,
 accepts rotated tokens and saves through `LlmConnectionAccess`'s version-conditional source seam.
 
+ConsoleTester qualification uses its separate credential store and the Global/Default route.
+Device sign-in completes with the account check, and model discovery returns eight native choices.
+One short prompt on the selected `grok-4.20-0309-non-reasoning` model returns `GROK-121-OK`,
+`Completed` with finish reason `completed`, and usage of 194 input and 7 output tokens.
+These checks use the public facade without retries or app credential access. They do not qualify
+token refresh, other models, strict tools, structured output or media.
+The same model completes a Global/Default nonstreaming request with `GROK-121-NONSTREAM-OK`,
+finish reason `completed`, and usage of 197 input and 10 output tokens. A UnitedStates/Default
+streaming request for that model returns the provider's HTTP 404 model/access error before output.
+The tester preserves that failure and does not retry or switch routes. UnitedStates discovery
+returns two native choices, `grok-4.6` and `grok-4.7`. One UnitedStates/Default streaming request
+on the listed `grok-4.6` model completes with `GROK-121-US-OK`, finish reason `completed`, and
+reported usage of 648 input and 358 output tokens. This qualifies that selected model and route,
+not every US model; a Global catalog entry does not establish access on the US route.
+The public tester rechecks UnitedStates/Default model discovery against source `b64c30f` with its
+existing OAuth credential. Authentication succeeds and the list again contains `grok-4.6` and
+`grok-4.7`, without a region/endpoint mismatch or generation prompt. This checks library catalog
+execution, not a consuming application's saved settings or sign-in display.
+One genuine UnitedStates/Default nonstreaming request at source `ced2dfd` selects `grok-4.6`,
+Low reasoning and 128 requested output tokens. It returns `GROK-121-US-NONSTREAM-OK`,
+`Completed` with finish reason `completed`, and reported usage of 654 input and 137 output
+tokens, including 126 reasoning output tokens and 512 cached input tokens. The reported output
+includes reasoning that the native visible-output cap excludes. This count is not evidence of a
+visible-cap violation and does not qualify total-output enforcement. It uses the tester's saved
+OAuth without retries, uploads, hosted tools or another route.
+A separate Global/Default turn on `grok-4.20-0309-non-reasoning` with a three-iteration cap completes
+the existing echo callback and replays its successful text result. The turn completes after two
+model steps with final answer `GROK-121-ECHO-OK`. No retry, other tool, upload or media operation
+occurs. This qualifies ordinary client-tool replay, not strict functions or hosted tools.
+One small UTF-8 reference note sent through the existing inline document attachment path returns
+`GROK-121-DOCUMENT-OK` on the Global/Default `grok-4.20-0309-non-reasoning` model. Both streaming
+and nonstreaming requests complete with finish reason `completed` and reported usage of 247 input
+and 10 output tokens each. The tester uses its separate saved OAuth credential without a Files
+upload, retry or alternate route. This qualifies that inline document input, not Files CRUD,
+provider file references, cross-provider resource transfer or hosted-search lifecycle observations.
+
 `XaiErrorClassifier` supplies one sanitized HTTP failure policy. It maps 401 and the specified
 token-validation 403 message to `AuthenticationRequired`, and 402 or a blocked account to the named
 entitlement failure (`AccessDenied`). Unknown 403 responses remain provider errors. Subscription-specific
@@ -2954,6 +3142,16 @@ The shared HTTP classifier preserves the response status, observed request ID an
 the redacted error envelope, including when a route withholds the diagnostic body. Batch and deferred
 resource failures retain that safe code. Request IDs use the same credential redactor as diagnostic
 bodies. A reported retry delay is diagnostic data, not permission to retry.
+Rejected Responses generation supplies its live outgoing headers, including borrowed-client defaults,
+alongside resolved hosted-authorization secrets to that same classifier.
+Files metadata and download failures also redact effective outgoing header values, including headers
+added by cross-family request configuration. The existing send owner supplies its actual request to
+the shared error boundary. Borrowed streams keep their existing ownership.
+Focused coverage checks reflected header values in provider codes and request IDs on ordinary
+downloads, configured downloads and configured metadata reads while retaining status and retry facts.
+An explicit error-envelope `code` takes precedence over a string `error` message. OAuth envelopes
+without a separate code retain their string error code. Flat model/access failures preserve
+`not-found` as the provider code and retain the redacted explanatory message separately.
 Named authentication and entitlement failures clear the setup device attempt without saving a credential.
 Device-grant `access_denied` and `expired_token` failures retain their actual status and code,
 the redacted request ID and any observed delta retry delay. These failures end the sign-in attempt;
@@ -2969,6 +3167,13 @@ names `max_output_tokens`, `max_prompt_tokens` and `max_time_limit`; each maps t
 Unknown statuses and incomplete reasons map to `Unknown`. Recognized `context_length_exceeded`
 codes or reasons raise `LlmProviderException.IsContextOverflow` before completion without retrying.
 The named incomplete limits remain `Incomplete` when no recognized overflow code is present.
+Two small live requests against source `0dacacd` select Global/Default
+`grok-4.20-0309-non-reasoning`, request 32 output tokens and ask for the integers from 1 to 100.
+Streaming and nonstreaming both stop after 16, report exactly 32 output tokens and return
+`Incomplete` with finish reason `incomplete`; each reports 207 input tokens. No tool executes.
+The tester's exit code 1 reflects that incomplete result, not a transport failure. These runs qualify
+the selected plain-text cap and incomplete result in both modes. They do not establish the semantics
+of hosted-tool aggregate usage or resolve the separate hosted-search output-token discrepancy.
 Encrypted context stays opaque; diagnostics redact its named values and
 reflections, and malformed JSON does not retain a parser exception containing provider text.
 The owning terminal-evidence tests exercise OAuth Grok streaming and nonstreaming through an HTTP
@@ -2987,19 +3192,107 @@ tool search; `web_search` is a reserved hosted name.
 The client joins the generic and language listings, offers only listed language models, and reads the
 facade's published catalog. Catalog reasoning levels and image modalities override family fallbacks.
 Unknown manually entered models still permit a request without fabricated discovery evidence.
+Live ConsoleTester discovery at source `987283a` selects UnitedStates/Default and uses its existing
+saved Grok sign-in. Authentication check succeeds, and the model list returns `grok-4.6` and
+`grok-4.7` with exit code 0. This qualifies selected-route discovery after the diagnostic repair,
+not refresh/expiry, other regions or generation on every listed model.
+Two small OAuth requests against production source `e3cb082` select the discovered `grok-4.6`
+model on UnitedStates/Default, explicit `Low` reasoning and 128 requested output tokens. Both
+calculate `17 * 19`, return only `323`, and finish as `Completed` with reason `completed`.
+Streaming reports 650 input, 93 output and 92 reasoning output tokens; nonstreaming reports
+650 input, 86 output and 85 reasoning output tokens. The tester uses its own saved credential
+without retries, tools, app credential access or route fallback. These runs qualify selected-route
+acceptance of the Low-effort request in both modes, not every effort level, comparative reasoning
+quality, an echoed applied-effort observation or general output-token-cap enforcement.
 Image prompts require catalog image support and cannot exceed 20 MiB. Temperature and top-p follow
 the model profile; top-k, seed, penalties and string stops are unsupported on this Responses route.
+The discovered `grok-4.20-0309-non-reasoning` ID shares the existing non-reasoning sampling profile
+with its `grok-4.20-non-reasoning` alias. Catalog resolution retains temperature/top-p support
+without adding selectable reasoning levels or rewriting the requested model ID.
 The schema preflight follows schema positions and local references, not literal data. Bounds
 above 2048 string characters, 256 array items or 64 properties require explicitly authorized local
-validation against the original schema. The same admission owner treats `not`, conditionals and
+validation against the original schema. The same private admission owner distinguishes guaranteed,
+outside-guarantee, provider-rejected and invalid basic keyword values. Empty enum/anyOf variants,
+boolean property schemas, min/maxContains and Draft-07 tuple items have no native admission.
+Explicit boolean `additionalProperties` remains supported. A reference to that boolean from another
+position does not inherit its position-specific guarantee. Invalid basic type, enum, required,
+numeric and schema-container shapes fail before effects, including with local fallback selected.
+Count-keyword admission compares the original number exactly with its integral decimal candidate.
+Fractional counts cannot round into admitted integers. Counts outside decimal representation remain
+outside native guarantees; admission invents no rejection cutoff for those values.
+The [documented formats](https://docs.x.ai/developers/model-capabilities/text/structured-outputs)
+`date`, `time`, `date-time`, `email`, `uuid`, `ipv4`, `ipv6` and `uri` retain native admission.
+Other formats, unlisted assertions and declared vocabularies remain outside
+native guarantees, not invented provider rejections. Known standard annotations retain their literal
+values. Invalid keyword shapes refuse before dispatch. The default case does not grant unknown
+keywords a native guarantee. Original-schema format evaluation keeps the selected supplier dialect
+and vocabulary policy; native admission does not turn invalid output into valid output.
+Explicit Draft-07 admission does not interpret newer applicators, anchor declarations, vocabulary
+declarations or `deprecated` payloads as that draft's keyword shapes. Explicit Draft 2020-12 does
+not interpret retired `additionalItems` or `dependencies` payloads as active keywords. These names
+remain outside native guarantees, and their literal payloads are not traversed as schemas.
+Draft-07 `dependencies` validates property-dependency arrays and indexes schema dependencies through
+the same position-aware worklist. Dependencies remain outside native guarantees. Unknown declared
+dialects remain unproven without applying a known dialect's keyword-container shapes. This boundary
+does not select a new dialect for original-schema evaluation or for undeclared default-profile schemas.
+The same admission owner scans known regex support differences without compiling or matching a
+pattern. It distinguishes escaped operators and character-class contents from active syntax.
+Documented backreferences, Unicode property escapes, word boundaries and lookaround/modifier groups
+have no native admission. Unescaped dot outside a class remains outside guarantees because
+[xAI dot-all matching](https://docs.x.ai/developers/model-capabilities/text/structured-outputs#regex-support-pattern)
+can accept a newline rejected by the original schema. Literal escaped dots and class dots keep their
+admission. Other alphanumeric escapes and unlisted group introducers remain unproven, not invented
+provider rejections. Unmatched active group delimiters fail before dispatch, including with explicit
+local fallback. Escaped parentheses and character-class literals do not alter group balance.
+Unterminated escapes and classes also remain unproven. No provider regex-length
+or repetition cutoff is added. This support scan is
+not complete regex syntax validation or proof of full Unicode/dialect matching equivalence.
+Response schemas outside native admission retain explicit original-schema local fallback; non-strict
+functions stay unchanged. The deferred/batch Chat codec uses this same strict-function entry and
+response enforcement owner; its separate wire builder and decoder remain separate.
+Its operation-local index resolves pointers against the
+selected schema resource, honors embedded `$id` bases and Draft 2020-12 `$anchor` names, and admits
+only indexed schema targets. Definition containers are inspected without applying unused constraints
+to the emitted instance. Shared targets are not cycles. Unknown dialects, unresolved resources,
+literal targets, cycles, dynamic references and unproven nonempty `$id` fragments remain outside
+guarantees. An absolute reference requires an actual declared absolute identity; the internal
+resolution base supplies no caller-visible identity. The index never fetches a resource or
+registers a schema globally. Draft-07 references ignore sibling assertions. Draft 2020-12 and
+undeclared default-profile references retain them.
+The same admission owner treats `not`, conditionals and
 multi-branch `allOf` as outside native guarantees. xAI gives `oneOf` the same meaning as `anyOf`;
 native admission requires pairwise-disjoint explicit simple types on non-reference branches,
 including nullable type arrays. A `$ref` sibling type is not proof of exclusivity in Draft-07.
 `number` overlaps `integer`. Unproven exclusivity requires explicit local validation for responses
 and refuses explicitly strict tools before effects. Non-strict tools retain their original schema
-and strictness. Local validation uses the original schema and reports invalid output without
-rewriting it or retrying. This check does not implement the complete schema/dialect/reference
-classification or original-dialect ECMA regex evaluator.
+and strictness. Explicitly strict function roots also require a proven object type after local
+reference resolution. The same traversal records object proofs for referenced targets, single-branch
+intersections and object-only unions. Scalar, nullable/mixed and untyped roots do not acquire an
+object proof merely because the schema document is a JSON object or contains `properties`.
+Draft-07 `$ref` siblings cannot supply that proof. This is not a general satisfiability analysis.
+Local validation uses the original schema and reports invalid output without
+rewriting it or retrying. Legacy fragment-ID resolution, complete dialect-specific keyword shapes
+and complete regex classification or original-dialect ECMA regex evaluation remain incomplete.
+Live Global/Default qualification on `grok-4.20-0309-non-reasoning` covers one unchanged object
+schema with required string `marker`, enum `GROK-121-SCHEMA-OK` and `additionalProperties:false`.
+Streaming and genuine nonstreaming requests both complete with finish reason `completed`,
+`ProviderJsonSchema` enforcement and valid output containing that marker. Reported usage is
+250 input/18 output tokens for streaming and 250 input/15 output for nonstreaming.
+These two requests use only the tester's separate OAuth credential, with no retry or schema/output
+rewrite. They do not qualify regex, strict functions, other schemas/models, refresh or media.
+Two OAuth requests at production source `e3cb082` use the same selected Global/Default model
+with one strictly declared `report_marker` function, a fixed required string enum and closed
+object schema, a specific function choice and 128 requested output tokens. Streaming and genuine
+nonstreaming each return `RequiresAction` with finish reason `tool_calls`, no ordinary answer,
+314 input/18 output/332 total tokens and 192 cached input tokens. The tester exits 1 because the
+request needs caller action; this is not a transport failure. No callback or replay executes.
+These runs qualify selected-route admission of that strict descriptor and forced choice, not
+returned arguments, arbitrary strict schemas, regex guarantees or strict-function replay.
+The shared `StructuredOutput` validator builds the unchanged original schema in a fresh local
+registry for each validation. Repeated `$id` values across requests do not collide or retain request
+graphs in the global registry. Existing supplier default dialect, vocabulary and dialect registries,
+format evaluation and global lookup fallback remain unchanged. The pinned supplier's default
+dialect is V1, not an implicit Draft 2020-12 selection.
 The client does not interpret unqualified xAI headers as OpenAI account-usage evidence. Its usage
 header names and units require separate provider qualification; no quota snapshot is fabricated.
 
@@ -3013,6 +3306,29 @@ detail remain observed. The client does not sum named detail into a total or cou
 calls or sources. It leaves the separate `file_search_calls`/`document_search_calls` pairing unknown
 because their neutral aggregation is unqualified. Other Responses providers do not acquire these xAI
 metrics. Terminal usage remains authoritative; no interim usage producer or capability is added.
+One streaming OAuth CodeExecution request at source `e3cb082` on Global/Default
+`grok-4.20-0309-non-reasoning` returns `437` for `19 * 23`, with one observed code call completed
+and chat status `Completed`/finish `completed`. The existing tester reports normalized usage:
+965 input, 17 output, 982 total, 448 cached input, unknown cache-write and zero reasoning tokens;
+provider-reported USD cost `0.0057783500`; one total hosted call and zero sources. Named call
+counts report CodeExecution 1 and WebSearch, SocialSearch, RemoteMcp and ImageGeneration 0.
+The request supplies 128 output tokens and two hosted turns, uses only the tester's saved OAuth
+credential, and performs no retry or account/route fallback. This qualifies these reported
+normalized facts on the selected route, not subscription billing, raw-provider equality, every
+category's nonzero mapping, headers, document-counter pairing or nonstreaming accounting.
+One streaming OAuth image-generation request at production source `0dacacd` on Global/Default
+`grok-4.7` reports a native start, `Generating` progress, a completed hosted call and ordinary
+answer `OK`. One genuine nonstreaming request at `a6f7b5f` reports a completed hosted call and
+108,299 typed image bytes. Both use Low reasoning, 256 requested output tokens, one hosted turn
+and explicit Generate action, without input resources or another image request. Both chat results
+are `Completed` with finish reason `completed` and report one ImageGeneration call, one total hosted
+call, zero other named hosted calls and zero sources. Nonstreaming usage reports 5,493 input,
+128 output, 5,621 total, 1,664 cached input and 81 reasoning tokens, unknown cache-write tokens
+and provider-reported USD cost `0.0531477200`. The streaming run establishes lifecycle delivery;
+its formatter does not report payload presence. The nonstreaming run establishes typed payload
+delivery, not decoded pixels, dimensions, streaming byte delivery or Session/Workspace commit.
+Neither run writes image bytes to a file or log, retries, changes account/route or establishes
+separate subscription billing from the reported cost.
 
 `LlmChatRequest.ProviderControls`, its Common request projection and `LlmAgentTurnRequest`
 carry `XaiMultiAgentControls`. An absent control inherits `XaiConnectionOptions.MultiAgent`;
@@ -3028,8 +3344,11 @@ through tool iterations; Connect and batch Resources metadata preserve the fixed
 `AddLlmConnect` registers the Grok provider, authenticator, Responses client and managed agent through
 the same finite SDK HTTP pipelines. Provider discovery performs no OAuth or model requests.
 `AddLlmConnectXai` uses the same registration path; calling it again does not duplicate Grok services.
-Registration is not live qualification; OAuth and provider qualification remain `NotRun`.
+Registration alone does not qualify OAuth refresh or every provider capability. The selected live
+qualifications above do not change registration behavior.
 `LlmModelListCache` owns generic and lazy listings for all four model families. Agent counts are distinct from reasoning levels.
+Grok catalog HTTP and malformed-catalog failures redact reflected credentials and selected/effective
+outgoing headers, including borrowed HttpClient defaults, while retaining actual safe request IDs.
 The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/pricing).
 
 `LlmProviderService` implements Connect's `ILlmTextTokenizer`. `TokenizeAsync` accepts a connection
@@ -3040,6 +3359,8 @@ refresh. The Grok adapter sends only `model` and `text` to the selected region's
 bytes. A token's bytes need not decode independently as UTF-8 and are never reconstructed from its
 display text. Missing fields and invalid integer/byte representations fail with fixed protocol errors
 without retaining raw bodies. `ConnectLlmJson.Tokenization` and `Token` own result serialization.
+HTTP rejections and malformed-token errors redact reflected credential, selected-header and effective
+outgoing-header values, including borrowed HttpClient defaults, from public diagnostics and request IDs.
 The facade drains active tokenization during retirement and rejects late results through its
 synchronous owner fence. Injected access and clients remain borrowed. Cancellation that races a
 provider failure retains the actual error as its cause. Tokenization does not count instructions,
@@ -3131,8 +3452,10 @@ The owning TTS, STT and Realtime test projects drive the production session code
 with stand-in WebSockets. They check ordered sends, actual completion observations, reusable TTS
 and Realtime sessions, bounded feeds with paused readers, resource drain and committed-audio
 recovery after cleanup failure. The test-only transport source is shared within Connect.
-The Realtime tests start at the connected session boundary. These tests do not qualify live OAuth,
-HTTP upgrade, provider entitlement, native resumption or actual speech quality.
+Each family also drives its public opening route through a real BCL ClientWebSocket with a controlled
+HTTP rejection. These checks preserve safe request ID and retry delay without publishing credentials
+or a failed-upgrade body. They do not qualify a successful live HTTP upgrade, live OAuth,
+provider entitlement, native resumption or actual speech quality.
 
 `AddRealtimeConnect()` registers `RealtimeProviderService` and `XaiRealtimeProvider`.
 Its setup catalog contains registered `IRealtimeProvider` definitions. Registration performs no
@@ -3543,11 +3866,17 @@ and [Sonnet 4.6](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card
 The existing SDK marshaller is verified for both request modes. Live gpt-oss 20B and 120B Low
 ConverseStream calls in `us-east-1` return text that fails the original schema's JSON validation.
 The result retains `IsValid = false`; provider-reported completion is not a validated structured
-answer. Native structured-output qualification remains open on DSA-109. Sonnet and real nonstreaming
-structured output through Connect are unqualified. A direct AWS CLI 2.37.2 Converse call on 20B Low
+answer. Native structured-output success remains unqualified on DSA-109. Sonnet is not exercised by
+these calls. A direct AWS CLI 2.37.2 Converse call on 20B Low
 also returns malformed JSON with the same schema in `us-east-1`, without Connect or its stream parser.
 That proves a provider-facing nonstreaming failure for that request. It does not establish the cause
 of every streaming failure or qualify a native schema guarantee. Responses are not rewritten.
+The public ConsoleTester also exercises Connect's real nonstreaming Converse path on 20B Low
+against source `612d2b1`, using one short native-schema request with a 256-output-token cap.
+The provider reports `Completed`/`stop`, 80 input tokens and 47 output tokens, but its original response
+fails JSON validation with `ProviderJsonSchema` and `IsValid = false`. This is a failed structured-output
+qualification, not a truncation or successful schema guarantee. Tester exit 0 denotes provider completion;
+the separate validation result remains false. No retry, response repair or fallback occurs.
 
 Converse sends a reasoning level through `additionalModelRequestFields` for Claude, Nova 2 and the
 qualified gpt-oss models, classified from the model or inference-profile id:
@@ -3768,6 +4097,12 @@ Claude subscription account usage runs the CLI-owned `/usage` command separately
 quota windows plus approximate local request/session activity. It only needs the CLI login, not the
 separate model-catalog OAuth credential. API-key connections do not advertise account usage because
 Anthropic does not expose the subscription report through the Messages API.
+The public account-usage path is live-qualified against source `0dacacd` and installed Claude CLI
+2.1.289 with its existing sign-in. The standalone `/usage` report returns three quota windows and
+four approximate local activity metrics. Used fractions, complementary remaining fractions,
+model-specific labels and reported reset times survive normalization; actual zero stays zero.
+Unreported plan, credits, absolute limits and observation provenance remain unknown. This read-only
+check does not qualify passive response observations, refresh, other versions or target platforms.
 
 Native chat-style tools are enabled for API-key connections. Claude subscription chat requests remain
 isolated one-shot generations, report `SupportsToolUse = false`, and launch the CLI with tools disabled.
@@ -3924,6 +4259,31 @@ Subscription connections use the Claude CLI's native `--json-schema` contract an
 `Medium`, `High`, `ExtraHigh` and `Maximum` reasoning levels. Darkspyre.Inference.Connect.LLM uses
 the terminal event's canonical `structured_output` value and validates it locally before returning
 completion.
+Explicit `claude-sonnet-4-6` and `claude-opus-4-6` model IDs, including their `[1m]` forms, offer
+only `Low`, `Medium`, `High` and `Maximum`, matching the
+[Claude Code effort table](https://code.claude.com/docs/en/model-config#adjust-effort-level).
+Their shared chat/native-session resolver rejects `ExtraHigh` before sending a prompt or control.
+Connection/model overrides can narrow that set but cannot widen it. Aliases and unknown model IDs
+without catalog effort facts retain their existing policy; the adapter does not infer their resolved model.
+Published native catalog fields `supportsEffort` and `supportedEffortLevels` take precedence over
+family defaults. Explicit false offers no selectable effort. A reported list offers only its recognized
+levels, including an explicitly empty list. Overrides can narrow but cannot widen these reported facts.
+Chat uses the existing connection/version model-list cache, shared with discovery. Native sessions
+retain optional `models` from their own initialize reply through the same catalog decoder, without
+another process or catalog query. Both lanes use the same effort resolver before prompt/control writes.
+A successful native schema result with a non-null `structured_output` also completes when its
+observed stop reason is `tool_use`. The [CLI structured-output contract](https://code.claude.com/docs/en/agent-sdk/structured-outputs)
+identifies that payload as the final structured result. Connect retains the actual stop reason.
+JSON in ordinary result text without that native payload does not turn an unresolved tool stop
+into completion. Error, refusal, incomplete and unknown-stop handling remains unchanged.
+Live qualification against source `0dacacd` uses installed Claude CLI 2.1.289, its existing sign-in,
+the `sonnet` alias and explicit Low effort. One unchanged object schema requires a string marker
+with one enum value and forbids additional properties. Streaming and nonstreaming both return
+`{"marker":"CLAUDE-121-SCHEMA-OK"}`, status `Completed`, finish reason `tool_use` and
+`ProviderJsonSchema` validation with `IsValid = true`. Reported usage is 1149 input/69 output
+tokens for streaming and 1153 input/69 output tokens for nonstreaming. This qualifies the selected
+simple schema and effort request, not every schema, model, applied effort, OAuth refresh or platform.
+Connect reads no CLI credentials and performs no fallback or schema rewrite.
 
 ### Model discovery
 
@@ -3935,7 +4295,10 @@ returned aliases stay aliases, and an empty list stays empty. The owned temporar
 retired before options are published. Manual model selection remains available. A host can
 explicitly attach the optional browser-authorized catalog OAuth credential to use the existing
 paged HTTP catalog instead. Prompts, CLI readiness, usage and agent tools ignore that credential.
-Installed CLI initialization compatibility remains a separate qualification requirement.
+Installed Claude CLI 2.1.289 lists twelve native choices through the public tester with its existing
+sign-in, including `default`, `opus`, `fable`, `sonnet` and `haiku`. This qualifies native listing
+without a generation prompt or HTTP catalog credential. Refresh, generation on every returned model
+and other-platform initialization remain separate qualification requirements.
 The focused chat-adapter tests use a process stand-in to check returned alias/metadata preservation,
 the no-catalog-OAuth route and cancellation while process retirement drains. These checks use no
 installed CLI or provider calls.
@@ -3983,6 +4346,24 @@ Native controls and resume for this model remain unqualified. The adapter does n
 retry a turn or fabricate a conversation identity in response to that failure.
 
 Each request runs in an empty temporary workspace with terminal sandboxing and slash-command expansion disabled. A streamed request sends its prompt as BOM-free UTF-8 through standard input. A request with `SupportsStreaming = false` is the exception: the CLI's only non-streaming form, `agy -p "<prompt>" --output-format json`, takes the prompt as a process argument, because stream-json input requires stream-json output. That prompt is visible in the local process list. It must fit in one argument: at most 131,071 UTF-8 bytes on macOS and Linux, and at most 30,000 characters on Windows, where a `.cmd` or `.bat` launcher cannot carry it at all because the prompt contains line breaks. A prompt that does not fit fails with `NotSupportedException` before the CLI starts. Native JSON Schema and the `Low`, `Medium` and `High` reasoning levels are supported. Only `agent_response` step deltas stream as answer text. A schema-backed request streams no provisional text: it returns the terminal event's canonical `structured_output` value, validated locally. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
+
+Two public ConsoleTester nonstreaming calls at source `cec838c`, installed CLI 1.3.1 and selected
+`gemini-3.8-flash-low` with Low effort complete through the CLI's JSON-response path. The plain call
+returns exactly `AGY-121-COMPLETE-OK`, `Completed/completed` and 12,657 input/56 output tokens.
+The schema call returns the required closed-object enum marker, `Completed/completed`,
+`ProviderJsonSchema` enforcement, valid output and 27,459 input/1,536 output tokens.
+Both report actual totals and leave unreported cache, reasoning, cost and hosted counts unknown.
+Neither call retries or copies CLI credentials. These runs qualify selected nonstreaming plain and
+schema output, not all models, caller output caps, provider tool activity, refresh or other platforms.
+
+The same public tester at source `c6edbb8` qualifies one nonstreaming native schema request on
+CLI 1.3.1 with selected model `claude-sonnet-4-6`. The unchanged closed-object schema requires
+one enum marker. The JSON-response path returns exactly
+`{"marker":"CONNECT_AGY_SONNET_JSON_121"}`, `Completed/completed`, `ProviderJsonSchema`
+enforcement and `IsValid = true`. Reported usage is 15,527 input, 205 output and 15,732 total tokens;
+cache, reasoning, cost and hosted counts remain unknown. No selectable effort is requested for
+this model. One call runs without retries or credential copying. This qualifies that schema and
+selected CLI route, not independently observed upstream identity, refresh or Windows execution.
 
 Antigravity may emit its own internal tool activity, but the CLI owns that execution. Because
 Darkspyre.Inference.Connect.LLM cannot surface the call for host authorization and result submission, this adapter reports
@@ -4066,6 +4447,14 @@ The resume case requires a completed resumed turn as well as the retained conver
 marker. Matching answer text on a failed or interrupted turn does not qualify resume.
 The control case uses an offered effort, or omits effort when the model has no control. It checks local
 refusal of an unsupported effort before proving that the same session still completes subsequent turns.
+Actual native qualification covers the controls, native-tools and cancellation cases on Antigravity 1.3.1 with
+the selected `claude-opus-4-6-thinking` model. The controls case completes three turns and retains
+the conversation through schema addition and removal after local unsupported-effort refusal.
+The tool case completes one fixture-file read with reported tool output and exact marker recall.
+The cancellation case stops after the first text delta, settles the owned local process and verifies
+that the cancelled session refuses further turns. It makes one turn attempt without retry.
+These cases qualify the selected route, not an independently observed upstream model identity,
+all catalog models, credential refresh or other CLI platforms.
 
 `IsAuthenticatedAsync` performs the non-consuming `agy models` check, so an installed but signed-out executable is not reported as authenticated. Run `agy` interactively to sign in or refresh the CLI session. Antigravity owns its credential and session storage in the operating system's native keyring; Darkspyre.Inference.Connect.LLM does not inspect it.
 
@@ -4078,6 +4467,12 @@ Account-usage and process-exit failures use the same bounded terminal-error proj
 native sessions. A JSON diagnostic inside the native error string is redacted before composition.
 The actual usage or exit error code remains unchanged. Raw terminal envelopes are not used in place
 of an available safe terminal error.
+The public account-usage path is live-qualified against source `0dacacd` and installed Antigravity
+1.3.1 with its existing sign-in. Its standalone `/usage` report returns two weekly model-group
+quota windows. Remaining percentages and reset timestamps match the native tab-separated report;
+the complementary used fractions are derived from those percentages. Unreported plan, credits,
+absolute limits, activity metrics and observation provenance are not manufactured. This read-only
+check does not qualify passive generation observations, refresh or other CLI versions/platforms.
 
 ## Apple Foundation Models on device
 
@@ -4190,6 +4585,20 @@ Codex uses host-owned device OAuth stored in `Darkspyre.SecureStore`; Claude and
 CLI-owned credentials. The tester also stores host-owned AWS profile/region configuration.
 Agent completion diagnostics include both status and the actual completion reason. The tester
 prints an existing completion error separately; it does not replace it with a generic status.
+Prompt and agent diagnostics display actual hosted-call starts, progress phases, terminal status
+and individual citation URLs on stderr. Model answer text remains on stdout. Both paths use the
+same formatter. Missing call identity and terminal status display as `unknown`; a terminal call
+does not imply successful tool execution. Diagnostics do not dump hosted input/output JSON or
+generated image bytes.
+Image-generation completions also report the actual typed image byte count, or `unknown` when
+the payload is absent. This diagnostic reports payload presence, not pixel validity, dimensions
+or a resource commit. It writes neither binary content nor base64 to either output stream.
+`prompt --request <file>` loads a complete `LlmChatRequest` using `ConnectLlmJson.ChatRequest`
+instead of reading stdin. The file supplies model, messages, supported controls and ordered hosted
+descriptors. It cannot be combined with inline model, effort, schema or attachment options and is
+not an `agent` option. Credentials, region and streaming selection remain on the selected connection.
+Owned JSON converters reject live resource and authorization services; the tester does not reconstruct
+them from data. The normal prompt/attachment mode uses the same request facade unchanged.
 
 ### Apple console harness
 
@@ -4296,6 +4705,15 @@ dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- managed-
 
 The first checks direct tools, attachments and state replay. The second checks the managed loop,
 JSON capture/reopen, fork and low-cap host compaction. Use a model returned by `models`.
+The `agent` command accepts `--max-model-iterations` as a positive integer. It passes that cap to
+the existing managed execution policy. Omission keeps the library defaults. Other commands reject
+the option, and native sessions reject managed execution options. A model iteration includes a
+tool request or the model's answer after a tool result; the cap is not a count of all HTTP requests.
+The `prompt` command accepts `--non-streaming` to select the provider's complete-response request.
+Grok connection commands accept `--xai-region Global|UnitedStates`; the typed choice derives the fixed endpoint
+and retains the same tester credential key. Route and streaming controls apply only to the selected
+connection and participate in its version. These controls do not save or copy app settings.
+`setup` rejects the region option because it renders a separate unsaved settings draft.
 The managed tester persists captured contexts through `ConnectLlmJson.AgentContext` metadata.
 Its round-trip retains document bytes, tool identities and resource-selection facts without
 default reflection serialization.
@@ -4316,6 +4734,71 @@ its existing completion check.
 The tester does not print inner exceptions, response bodies or stack traces. Local request refusals
 retain their explanation, including the reasoning levels the selected model accepts.
 
+`grok-probe --provider grok-subscription` explicitly checks `strict`, `files`, or both with
+`--case all`. It uses the existing probe model/repeat/deadline options and typed `--xai-region`.
+Strict checks use one original closed object schema, validate the returned required enum argument,
+permit at most two managed model iterations and require the successful callback's unique result
+as the completed answer. This is not qualification of arbitrary strict schemas or regex guarantees.
+Files checks upload one synthetic UTF-8 file with a requested one-hour expiry, get its identity,
+check one newest-files page, download and compare its exact original bytes, and delete only the
+ID returned by that upload. Cleanup uses a separate wait with the case's selected deadline and
+preserves independent operation and cleanup failures. An upload without a returned receipt leaves
+remote creation unknown; no guessed ID, filename search deletion, retry or rollback is performed.
+The checks use the existing agent and Files facades and do not copy application credentials.
+
+Live Global/Default qualification at source `1418ba1` passes both cases with the tester's
+existing OAuth credential and no retries. The strict case selects
+`grok-4.20-0309-non-reasoning`, validates its original argument, completes one callback and returns
+the exact unique callback result in 3.17 seconds. Two distinct model-step observations total
+676 input, 45 output and 721 tokens, with provider-reported cost of 0.0006215000 USD.
+That cost observation does not establish the account's actual billing. The Files case completes
+in 2.13 seconds, verifies all 89 original bytes and confirms deletion of its exact upload.
+These results do not qualify arbitrary strict schemas, regex semantics, public URLs, every page,
+expiry enforcement, cross-provider resource transfer or credential refresh.
+
+One public nonstreaming prompt at source `d26da43`, Global/Default and
+`grok-4.20-0309-non-reasoning` returns exactly `CONNECT_GROK_COMPLETE_OK` with
+`Completed/completed`. Actual usage reports 198 input, 6 output and 204 total tokens, with
+128 cached input tokens and provider-reported cost of 0.0001281000 USD. The connection selects
+`SupportsStreaming = false`; the adapter sends the native complete Responses request.
+This qualifies the selected plain complete route, not native response schemas, all models,
+credential refresh or actual account billing. The call does not retry or copy application credentials.
+
+At source `990ae40`, the public request-file command checks one original closed object schema with a
+required string enum on the same Global/Default model. Streaming and native nonstreaming each return
+the exact `CONNECT_GROK_SCHEMA_121` marker, `Completed/completed` and
+`ProviderJsonSchema` with `IsValid = true`. The cap is 128 visible output tokens. Streaming reports
+259 input, 15 output and 274 total tokens, with 192 cached input tokens and cost of 0.0001596500 USD.
+Nonstreaming reports 259 input, 12 output and 271 total tokens, with 256 cached input tokens and cost
+of 0.0000849500 USD. Both report zero reasoning tokens. This qualifies that schema and selected route,
+not arbitrary schemas, regex guarantees, cap enforcement, credential refresh or actual billing.
+The calls use the tester's saved OAuth without retries or application credential copies.
+
+One streamed hosted web-search request at source `4d7f4eb`, Global/Default and the same model,
+uses the existing request-file command with `docs.x.ai` as the only allowed domain. Caller budgets
+are two hosted turns and 128 output tokens. Connect surfaces one matching WebSearch start/completion,
+five citation observations and `Completed/completed`. Actual usage reports 3874 input, 49 output
+and 3923 total tokens, one WebSearch call, one total hosted call and cost of 0.0099650000 USD.
+The provider reports zero sources used separately from those five citations; the adapter reads that
+native usage field without deriving a count from citations. This qualifies the selected hosted search,
+not other hosted tools, domain-filter enforcement, output-cap enforcement, billing or every model.
+
+One streamed hosted code-execution request at source `33ddb0c` uses the same selected model and
+Global/Default route to evaluate `sum([2, 3, 5])`. Caller budgets are two hosted turns and 128
+visible output tokens. Connect surfaces one matching CodeExecution start/completion, answer `10`
+and `Completed/completed`. Actual usage reports 997 input, 21 output and 1018 total tokens,
+one CodeExecution call, one total hosted call and cost of 0.0062987500 USD. The request does not
+retry, read local files or copy credentials. This qualifies the selected synthetic code-execution
+route, not arbitrary remote execution, generated artifacts, output-cap enforcement or billing.
+
+```bash
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- grok-probe --provider grok-subscription --case strict --repeat 1 --timeout-seconds 60
+```
+
+```bash
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- grok-probe --provider grok-subscription --case files --repeat 1 --timeout-seconds 60
+```
+
 Claude uses the same commands with `--provider claude`:
 
 ```bash
@@ -4324,8 +4807,43 @@ dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- login --
 
 Claude subscription prompts require the official Claude CLI to be installed and signed in. The
 tester creates an `AnthropicClaudeCli` connection with `Credential = null`; Darkspyre.Inference.Connect.LLM does not read
-or store the CLI credential. Enter `sonnet`, `opus`, another alias, or an exact model ID manually
-because the tester does not configure the optional HTTP catalog credential.
+or store the CLI credential. `models --provider claude` discovers native choices through the CLI's
+initialization response without an HTTP catalog credential or generation prompt. A prompt accepts
+`sonnet`, `opus`, another returned choice, or a manually entered exact model ID.
+
+`claude-probe` uses the shared native CLI probe for `resume` and `cancel`. Resume disposes the
+first session and requires a completed second turn in the same conversation with exact marker
+recall. Cancellation stops after the first text delta and requires caller cancellation plus
+successful owned-session disposal. It does not claim remote work termination or an unusable
+session after interruption. Both cases use Claude's read-only host runtime policy and no host tools.
+Native qualification passes on installed Claude CLI 2.1.289 with the selected `sonnet` alias.
+Resume completes both turns across the process replacement with exact conversation identity and marker
+recall. Cancellation reaches the first text delta, surfaces caller cancellation and completes owned
+session disposal. These three turn attempts qualify the named cases, not credential refresh, remote
+work termination, every model or other CLI platforms.
+
+The same resume case at source `ef626b8` passes on Antigravity CLI 1.3.1 with
+`claude-sonnet-4-6`. Two completed turns retain the exact conversation ID across process replacement
+and recall the synthetic marker. The case passes in 18.23 seconds with two turn attempts, no retry
+and no skipped prerequisite. This qualifies that selected model's native resume, not GPT-OSS
+capacity, every model, OAuth refresh or other platforms.
+
+The existing `agent` command at source `7a2204d`, installed Claude CLI 2.1.289, `sonnet` and
+Low effort completes one document tool-result turn in an empty scratch working directory.
+The attachment callback completes with two output parts and no tool error. The final answer is
+exactly `Darkspyre.Inference.Connect.LLM attachment smoke test document.` The turn reports
+`Completed` and usage of 3621 input, 105 output and 3726 total tokens. The observed tool events
+name only the attachment tool. This qualifies that synthetic document result, not strict tools,
+Files uploads, logical resource references, cross-provider transfer or other models and platforms.
+The tester uses its existing read-only host policy and does not copy CLI credentials or retry.
+
+```bash
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- claude-probe --provider claude --model sonnet --case resume --repeat 1 --timeout-seconds 90
+```
+
+```bash
+dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- claude-probe --provider claude --model sonnet --case cancel --repeat 1 --timeout-seconds 90
+```
 
 Antigravity uses `--provider antigravity` (or `agy`). Run `agy` interactively once to sign in; the
 tester does not request or store a Google authorization code. `agy-probe` runs explicit live cases
