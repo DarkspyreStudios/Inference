@@ -3208,6 +3208,9 @@ Context-compaction rejection uses this body-withholding policy. Its wrapper reta
 named explanation and actual status, code, request ID, retry delay and overflow flag, without exporting
 the response body or original exception graph. Malformed successful compaction responses retain
 their fixed protocol failure message.
+Compaction send failures capture effective headers even when no response returns. Recognized HTTP and
+typed provider failures retain the shared send boundary's redacted explanation and observed facts through
+the body-withholding compaction wrapper. A missing response does not create HTTP observations or a retry.
 Batch and deferred resource failures retain that safe code and explanation. Request IDs use the
 same credential redactor as diagnostic bodies. A reported retry delay is diagnostic data, not permission to retry.
 Grok catalog and tokenization send failures share the same `XaiErrorClassifier` projection.

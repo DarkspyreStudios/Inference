@@ -1707,6 +1707,53 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GrokCompactionSendFailuresRetainRedactedExplanationAndObservedFacts(bool classified)
+    {
+        const string explanation = "Transport refused test-token header-value default-value.";
+        Exception cause = classified
+            ? new LlmProviderException(explanation, LlmTransport.XaiResponses, HttpStatusCode.BadGateway,
+                "transport_test-token_header-value_default-value", "request-test-token-header-value-default-value",
+                TimeSpan.FromSeconds(17), "private compaction source", new IOException(explanation), isContextOverflow: true)
+            : new HttpRequestException(explanation, new IOException(explanation));
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming: false, sendFailure: cause);
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var client = new XaiResponsesLlmClient(http);
+        await using var files = new XaiFileClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
+            client.CompactWithResourcesAsync(connection,
+                new() { ModelId = "grok-4.6", Messages = [new("user", "reference text")] }, files,
+                static () => { }, CancellationToken.None));
+
+        Assert.Equal("Transport refused [REDACTED] [REDACTED] [REDACTED].", failure.Message);
+        Assert.Equal(classified ? HttpStatusCode.BadGateway : null, failure.StatusCode);
+        Assert.Equal(classified ? "transport_[REDACTED]_[REDACTED]_[REDACTED]" : null, failure.ProviderCode);
+        Assert.Equal(classified ? "request-[REDACTED]-[REDACTED]-[REDACTED]" : null, failure.RequestId);
+        Assert.Equal(classified ? TimeSpan.FromSeconds(17) : null, failure.RetryAfter);
+        Assert.Equal(classified, failure.IsContextOverflow);
+        Assert.Null(failure.SanitizedResponseBody);
+        Assert.NotSame(cause, failure.InnerException);
+        Assert.Null(failure.InnerException?.InnerException);
+        foreach (string privateValue in new[] { "test-token", "header-value", "default-value", "private compaction source" })
+            Assert.DoesNotContain(privateValue, failure.ToString(), StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(false, true)]
     [InlineData(true, false)]

@@ -252,6 +252,8 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
         }
         catch (Exception error)
         {
+            if (message is not null)
+                secrets = connection.AdditionalHeaders.Values.Concat(message.Headers.SelectMany(header => header.Value)).ToArray();
             failures.Add(LlmResourcePreparation.IsResourceFailure(error) ? error
                 : ReferenceEquals(error, classifiedFailure) ? ClassifiedCompactionFailure(error, credential, secrets)
                 : CompactionFailure(error, response, credential, secrets));
@@ -275,11 +277,17 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
     }
 
     private static Exception CompactionFailure(Exception original, HttpResponseMessage? response,
-        LlmCredential? credential, string[] secrets) => original is OperationCanceledException canceled
-        ? new OperationCanceledException("Grok context compaction was interrupted.", new CompactionEvidence(original), canceled.CancellationToken)
-        : new LlmProviderException("Grok context compaction failed.", LlmTransport.XaiResponses, response?.StatusCode,
+        LlmCredential? credential, string[] secrets)
+    {
+        if (response is null && original is HttpRequestException or LlmProviderException
+            or InferenceException { InnerException: LlmProviderException })
+            return ClassifiedCompactionFailure(XaiErrorClassifier.HttpSendFailure(original, credential, secrets), credential, secrets);
+        return original is OperationCanceledException canceled
+            ? new OperationCanceledException("Grok context compaction was interrupted.", new CompactionEvidence(original), canceled.CancellationToken)
+            : new LlmProviderException("Grok context compaction failed.", LlmTransport.XaiResponses, response?.StatusCode,
             requestId: response is null ? null : ProviderHttp.ReadRequestId(response) is { } id ? SecretRedactor.Sanitize(id, credential, secrets) : null,
             innerException: new CompactionEvidence(original));
+    }
 
     private static Exception ClassifiedCompactionFailure(Exception original, LlmCredential? credential, string[] secrets)
     {
