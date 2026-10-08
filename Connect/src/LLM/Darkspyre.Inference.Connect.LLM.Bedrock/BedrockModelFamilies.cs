@@ -14,7 +14,7 @@ internal enum BedrockModelFamily
 
 internal static partial class BedrockModelFamilies
 {
-    private static readonly string[] ProfilePrefixes = ["us.", "eu.", "apac.", "jp.", "au.", "in.", "global."];
+    private static readonly string[] ProfilePrefixes = ["us.", "us-gov.", "eu.", "apac.", "jp.", "au.", "in.", "global."];
 
     /// <summary>Recognizes explicit ARN references and documented geographic/global inference profiles.</summary>
     internal static bool IsInferenceProfile(string modelId) =>

@@ -506,6 +506,49 @@ public sealed class BedrockSafetyTests
         }
     }
 
+    [Theory]
+    [InlineData("openai.gpt-oss-20b-1:0")]
+    [InlineData("openai.gpt-oss-120b-1:0")]
+    public async Task GovCloudProfilesRetainGptOssFactsAndNativeRequestIdentity(string baseModel)
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => throw new NotSupportedException(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var client = new BedrockLlmClient(factory, guard, new StubConverseInvoker(), NullLogger<BedrockLlmClient>.Instance);
+        string modelId = "us-gov." + baseModel;
+        LlmConnection connection = Connection();
+        LlmProviderCapabilities capabilities = client.GetCapabilities(connection, modelId);
+        Assert.Contains(LlmReasoningLevel.Low, capabilities.ReasoningLevels);
+        Assert.True(capabilities.SupportsJsonSchema);
+        Assert.False(capabilities.SupportsPromptImages);
+        Assert.False(capabilities.SupportsPromptDocuments);
+        Assert.True(BedrockModelResolver.LooksLikeInferenceProfile(modelId));
+        Assert.Equal(BedrockModelFamily.OpenAiGptOss, BedrockModelFamilies.Classify(modelId).Family);
+        Assert.Equal(baseModel, BedrockModelFamilies.Classify(modelId).BaseModelId);
+        LlmChatRequest request = Request() with
+        {
+            ModelId = modelId,
+            ReasoningLevel = LlmReasoningLevel.Low,
+            StructuredOutput = new() { Name = "answer", Schema = JsonElement.Parse("""{"type":"object"}""") }
+        };
+        _ = client.ValidateRequest(connection, request);
+        var enforcement = StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
+        Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, enforcement);
+        ConverseRequest built = BedrockLlmClient.BuildRequest(connection, request, modelId, enforcement);
+        foreach (var wire in new[]
+        {
+            ConverseRequestMarshaller.Instance.Marshall(built),
+            ConverseStreamRequestMarshaller.Instance.Marshall(BedrockLlmClient.ToStreamRequest(built))
+        })
+        {
+            Assert.Equal(modelId, Assert.Single(wire.PathResources).Value);
+            using Stream body = wire.ContentStream;
+            using JsonDocument sent = JsonDocument.Parse(body);
+            Assert.Equal("low", sent.RootElement.GetProperty("additionalModelRequestFields").GetProperty("reasoning_effort").GetString());
+            Assert.Equal("json_schema", sent.RootElement.GetProperty("outputConfig").GetProperty("textFormat").GetProperty("type").GetString());
+        }
+    }
+
     [Fact]
     public async Task IndiaHaikuCannotEnableUnsupportedNativeSchemas()
     {
