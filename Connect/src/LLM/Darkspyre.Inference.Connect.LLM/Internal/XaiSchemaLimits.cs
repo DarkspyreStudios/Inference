@@ -351,7 +351,7 @@ internal static class XaiSchemaLimits
                 {
                     JsonElement value = property.Value;
                     if (InactiveKeyword(property.Name, draft)) continue;
-                    if (ignoresSiblings && property.Name is not ("$defs" or "definitions")) continue;
+                    if (ignoresSiblings && property.Name is not ("$ref" or "$defs" or "definitions")) continue;
                     switch (property.Name)
                     {
                         case "dependencies" when draft == SchemaDraft.Draft7:
@@ -401,7 +401,7 @@ internal static class XaiSchemaLimits
                             Add(value, property.Name == "additionalProperties");
                             break;
                     }
-                    if (!ignoresSiblings && ClassifyKeyword(property, draft) == SchemaDisposition.InvalidSchema)
+                    if ((!ignoresSiblings || property.Name == "$ref") && ClassifyKeyword(property, draft) == SchemaDisposition.InvalidSchema)
                         return Reject(SchemaDisposition.InvalidSchema);
                 }
                 Locations.Add(schema, new(baseUri, draft, applied));

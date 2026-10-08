@@ -3344,8 +3344,9 @@ to the emitted instance. Shared targets are not cycles. Unknown dialects, unreso
 literal targets, cycles, dynamic references and unproven nonempty `$id` fragments remain outside
 guarantees. An absolute reference requires an actual declared absolute identity; the internal
 resolution base supplies no caller-visible identity. The index never fetches a resource or
-registers a schema globally. Draft-07 references ignore sibling assertions. Draft 2020-12 and
-undeclared default-profile references retain them.
+registers a schema globally. Draft-07 references ignore sibling assertions. Their own `$ref` values
+must be strings; non-string values fail before dispatch even with local fallback selected.
+Draft 2020-12 and undeclared default-profile references retain sibling assertions.
 The same admission owner treats `not`, conditionals and
 multi-branch `allOf` as outside native guarantees. xAI gives `oneOf` the same meaning as `anyOf`;
 native admission requires pairwise-disjoint explicit simple types on non-reference branches,

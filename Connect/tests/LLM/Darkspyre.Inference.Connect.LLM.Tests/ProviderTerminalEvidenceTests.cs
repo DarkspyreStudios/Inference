@@ -598,6 +598,44 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.False(tool.TryGetProperty(excluded ? "allowed_x_handles" : "excluded_x_handles", out _));
     }
 
+    [Fact]
+    public async Task GrokDraft7MalformedReferenceRefusesLocalFallbackBeforeDispatch()
+    {
+        const string body = """
+            {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{}"}]}]}
+            """;
+        var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = false, SupportsJsonSchema = true }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = "selected-model",
+            Messages = [new("user", "hello")],
+            StructuredOutput = new()
+            {
+                Name = "answer",
+                Schema = JsonElement.Parse("""{"$schema":"http://json-schema.org/draft-07/schema#","$ref":42}"""),
+                Fallback = LlmStructuredOutputFallback.LocalValidation
+            }
+        };
+
+        ArgumentException failure = await Assert.ThrowsAsync<ArgumentException>(async () =>
+        {
+            await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+        });
+        Assert.Equal("The Grok schema contains an invalid JSON Schema keyword value.", failure.Message);
+        Assert.Equal(0, handler.Calls);
+    }
+
     [Theory]
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"enum\":[]}}}", false)]
     [InlineData("{\"type\":\"object\",\"properties\":{\"value\":{\"anyOf\":[]}}}", false)]
