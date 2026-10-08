@@ -32,6 +32,7 @@ internal static class GrokProbe
                 invocation.Provider.ConnectionId, options.TimeoutSeconds, cancellation)),
             new("batch", cancellation => BatchAsync(batches, invocation.Provider.ConnectionId,
                 options.Model, options.TimeoutSeconds, Console.Out, cancellation)),
+            new("batch-list", cancellation => BatchListAsync(batches, invocation.Provider.ConnectionId, cancellation)),
             new("deferred", cancellation => DeferredAsync(batches, invocation.Provider.ConnectionId,
                 options.Model, Console.Out, cancellation))
         ];
@@ -69,6 +70,16 @@ internal static class GrokProbe
     {
         if (result.Audio.IsEmpty || !result.ContentType.StartsWith("audio/", StringComparison.OrdinalIgnoreCase))
             throw new ProbeFailure("Speech must return nonempty audio with an audio media type.");
+    }
+
+    private static async Task<string> BatchListAsync(ILlmBatchClient batches, string connectionId, CancellationToken token)
+    {
+        LlmBatchPage page = await batches.ListAsync(connectionId, new(Limit: 1), token);
+        if (page.Items.Count == 0)
+            throw new ProbeUnavailable("The single batch page is empty; receipt timestamp parsing is unqualified.");
+        if (page.Items.Count != 1 || page.Items[0].CreateTime is null)
+            throw new ProbeFailure("The single batch page must contain one receipt with its observed creation time.");
+        return "one native batch receipt and its creation time parsed; one read-only page, no generation, mutation, cleanup or retry";
     }
 
     internal static async Task<string> BatchAsync(ILlmBatchClient batches, string connectionId, string model,

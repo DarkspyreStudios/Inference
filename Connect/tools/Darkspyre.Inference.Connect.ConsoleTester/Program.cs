@@ -920,7 +920,7 @@ internal static class Program
               darkspyre-inference-connect-tester agy-probe --provider antigravity [--model <id>] [--case all|text|structured|native-tools|session|resume|controls|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
               darkspyre-inference-connect-tester claude-probe --provider claude [--model <id>] [--case all|resume|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
               darkspyre-inference-connect-tester codex-probe --provider codex --model <model-id>
-              darkspyre-inference-connect-tester grok-probe --provider grok-subscription [--model <id>] [--case all|strict|files|tts|batch|deferred] [--repeat 1..20] [--timeout-seconds 1..600] [--xai-region Global|UnitedStates]
+              darkspyre-inference-connect-tester grok-probe --provider grok-subscription [--model <id>] [--case all|strict|files|tts|batch|batch-list|deferred] [--repeat 1..20] [--timeout-seconds 1..600] [--xai-region Global|UnitedStates]
               darkspyre-inference-connect-tester managed-probe --provider codex --model <model-id>
               darkspyre-inference-connect-tester prompt --provider <codex|claude|antigravity|bedrock|agentcore|grok-subscription> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--non-streaming] [--xai-region Global|UnitedStates]
               darkspyre-inference-connect-tester prompt --provider <provider-id> --request <file> [--harness-arn <arn>] [--non-streaming] [--xai-region Global|UnitedStates]
@@ -949,7 +949,7 @@ internal static class Program
             --google-authentication ApiKey selects projectless express mode; login reads VERTEX_API_KEY and stores it in the vault.
             gemini-probe performs explicit metered Gemini API generation with the key that login --provider gemini stored from GEMINI_API_KEY.
             apple-probe performs explicit local generation, reports each case and never retries a failed case.
-            grok-probe runs explicit strict-function replay and synthetic Files checks without retries.
+            grok-probe runs explicit selected checks without retries; batch-list reads one page without mutation or generation.
             Files cleanup deletes only the file identified by that case's upload receipt.
             agy-probe runs explicit subscription turns through the Antigravity native session in a temporary
             workspace, reports the CLI version and turn count, and never retries a failed case.

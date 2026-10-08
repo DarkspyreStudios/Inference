@@ -4803,7 +4803,7 @@ its existing completion check.
 The tester does not print arbitrary inner exception text, response bodies or stack traces. Local request refusals
 retain their explanation, including the reasoning levels the selected model accepts.
 
-`grok-probe --provider grok-subscription` explicitly checks `strict`, `files`, `tts`, `batch`
+`grok-probe --provider grok-subscription` explicitly checks `strict`, `files`, `tts`, `batch`, `batch-list`
 or `deferred`, or every case with `--case all`. It uses the existing probe model/repeat/deadline
 options and typed `--xai-region`.
 Strict checks use one original closed object schema, validate the returned required enum argument,
@@ -4824,6 +4824,9 @@ batch, reads one metadata page and one result page, and retains at most one MiB 
 Metadata IDs remain provider IDs; result correlation uses the submitted CustomId. Completed output
 must match the marker. An empty result page reports `SKIP` and exit 3, not successful completion
 or a fabricated pending state.
+`batch-list` reads one page with limit one. It requires an actual receipt with its observed creation
+time and reports an empty page as unqualified. It sends no generation or mutation, performs no
+cleanup, and does not infer ownership of an existing batch from its name.
 Cleanup requests cancellation only for its own receipt when the observed pending count is nonzero
 or unknown. A cancellation acknowledgement does not prove terminal cleanup. Cleanup uses the
 case's selected timeout and retains both the operation and cancellation failure if both occur.
