@@ -462,6 +462,19 @@ The [documented native `x_search_call` type](https://docs.x.ai/developers/tools/
 also produces SocialSearch observations through the same lifecycle owner. Its observed ID and status
 remain exact. Undocumented input/output facts stay null; the complete native item remains in opaque
 continuation. Classification does not qualify live OAuth X Search execution.
+Two bounded OAuth requests against production source `8db9204` use Global/Default
+`grok-4.20-0309-non-reasoning`, X Search restricted to the `xai` handle, 64 requested output
+tokens and two hosted turns. The prompt asks for one recent Grok post's topic in at most five
+words, or `none` if no post is found. Streaming reports three actual `x_keyword_search` starts
+and matching terminal calls with status `completed`, eight separate citation occurrences and
+the answer `Voice Agent Builder`; usage is 5162 input and 76 output tokens. Nonstreaming reports
+one terminal `x_keyword_search` and one `x_semantic_search`, both `completed`, without fabricated
+starts; it answers `none` and emits no citation events, with 2613 input and 89 output tokens.
+Both chat results are `Completed` with finish reason `completed`. These runs qualify selected
+OAuth X Search execution in both modes, not the native `x_search_call` item shape, post contents,
+date filters, understanding controls, output-token-cap enforcement or other models/routes.
+The lack of citation events does not establish provider-reported absence. The tester uses its own saved
+OAuth credential without retries or account/route fallback.
 Two bounded OAuth requests on Global/Default `grok-4.20-0309-non-reasoning` use the CodeExecution
 descriptor to calculate `19 * 23`. Streaming reports an actual `code_interpreter` start and a
 terminal call with status `completed`; nonstreaming reports the terminal call without a fabricated
