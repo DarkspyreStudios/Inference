@@ -4849,6 +4849,10 @@ Batch creation returns HTTP 200 but fails before a batch receipt is parsed. Remo
 unknown; no repeat creation or guessed cleanup occurs. The deferred check receives an actual receipt
 and one retrieval returns typed pending in 1.37 seconds. It reports `SKIP`, not completed generation.
 These observations do not qualify batch results, deferred completion, STT or Realtime.
+At source `1efcc21`, one Global/Default read-only batch page passes in 0.78 seconds with the saved
+credential. Its actual creation and expiry fields are valid calendar dates; the receipt retains
+unknown instants. No generation, mutation, cleanup or retry occurs. This qualifies that receipt
+decoding, not batch creation/add/results, every timestamp variant or the lost earlier creation payload.
 
 Live Global/Default qualification at source `1418ba1` passes both cases with the tester's
 existing OAuth credential and no retries. The strict case selects
