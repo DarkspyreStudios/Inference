@@ -141,7 +141,7 @@ internal static class ProviderHttp
         }
     }
 
-    private static (string? Code, string? Message, string? Type) ReadProviderError(string body)
+    internal static (string? Code, string? Message, string? Type) ReadProviderError(string body)
     {
         try
         {

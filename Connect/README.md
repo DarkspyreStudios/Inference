@@ -46,6 +46,11 @@ default headers. Each send owner supplies its live request headers after the sen
 depend on the response retaining its request. Credential-aware ID reads also sanitize when no extra
 secret context is supplied.
 Missing IDs remain absent in fields and render as `unknown`; observed HTTP status and retry delay remain intact.
+Responses generation carries one request-local header and hosted-authorization snapshot through both
+complete and streamed body conversion. Malformed-response and provider stream-error diagnostics use
+that context for their message, nullable provider code, request ID and diagnostic body.
+Stream-error codes and messages come from the redacted native error envelope through the shared
+HTTP error reader, so named secret values are also removed from those fields.
 
 Mapped task results publish after response, body and request cleanup completes; retirement begun by
 cleanup prevents late success without replacing an earlier operation failure. If an owned logger

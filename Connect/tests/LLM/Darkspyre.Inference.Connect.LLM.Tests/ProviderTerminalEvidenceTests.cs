@@ -65,6 +65,61 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Theory]
+    [InlineData(LlmTransport.XaiResponses, false, false)]
+    [InlineData(LlmTransport.XaiResponses, true, false)]
+    [InlineData(LlmTransport.XaiResponses, true, true)]
+    [InlineData(LlmTransport.OpenAiResponses, true, true)]
+    [InlineData(LlmTransport.OpenAiCodex, true, true)]
+    public async Task ResponsesProtocolFailuresRedactEffectiveRequestSecrets(LlmTransport transport, bool streaming, bool providerError)
+    {
+        const string error = "{\"type\":\"error\",\"error\":{\"code\":\"rate_limit_test-token_header-value_default-value_provider-secret\",\"message\":\"Failure test-token header-value default-value provider-secret\",\"refresh_token\":\"provider-secret\"}}";
+        string payload = providerError ? error : "not-json";
+        using var handler = new Handler(transport, streaming, streaming ? $"data: {payload}\n\n" : payload,
+            requestId: "request-test-token-header-value-default-value-1");
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        ILlmClient client = transport switch
+        {
+            LlmTransport.XaiResponses => new XaiResponsesLlmClient(http),
+            LlmTransport.OpenAiCodex => new OpenAiCodexLlmClient(http),
+            _ => new OpenAiResponsesLlmClient(http)
+        };
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = transport,
+            Endpoint = transport == LlmTransport.XaiResponses ? "https://api.x.ai/v1" : "https://provider.example.test/v1",
+            Xai = transport == LlmTransport.XaiResponses ? new() : null,
+            Credential = (transport == LlmTransport.OpenAiResponses
+                ? new LlmCredential { ApiKey = "test-token" }
+                : new LlmCredential { OAuth = new() { AccessToken = "test-token", AccountId = "test-account" } }).Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" },
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+        var observations = new List<LlmStreamEvent>();
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection,
+                new() { ModelId = transport == LlmTransport.XaiResponses ? "grok-4.7" : "selected-model", Messages = [new("user", "hello")] }))
+                observations.Add(item);
+        });
+
+        Assert.Equal(HttpStatusCode.OK, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        if (providerError)
+            Assert.Equal("rate_limit_[REDACTED]_[REDACTED]_[REDACTED]_[REDACTED]", failure.ProviderCode);
+        else
+            Assert.Null(failure.ProviderCode);
+        foreach (string secret in new[] { "test-token", "header-value", "default-value", "provider-secret" })
+            Assert.DoesNotContain(secret, failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.DoesNotContain(observations, item => item is LlmChatCompletionEvent);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task GrokRequestsNoInlineCitationsThroughThePublishedIncludeList(bool streaming)
