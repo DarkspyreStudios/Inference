@@ -4704,6 +4704,15 @@ recall. Cancellation reaches the first text delta, surfaces caller cancellation 
 session disposal. These three turn attempts qualify the named cases, not credential refresh, remote
 work termination, every model or other CLI platforms.
 
+The existing `agent` command at source `7a2204d`, installed Claude CLI 2.1.289, `sonnet` and
+Low effort completes one document tool-result turn in an empty scratch working directory.
+The attachment callback completes with two output parts and no tool error. The final answer is
+exactly `Darkspyre.Inference.Connect.LLM attachment smoke test document.` The turn reports
+`Completed` and usage of 3621 input, 105 output and 3726 total tokens. The observed tool events
+name only the attachment tool. This qualifies that synthetic document result, not strict tools,
+Files uploads, logical resource references, cross-provider transfer or other models and platforms.
+The tester uses its existing read-only host policy and does not copy CLI credentials or retry.
+
 ```bash
 dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- claude-probe --provider claude --model sonnet --case resume --repeat 1 --timeout-seconds 90
 ```
