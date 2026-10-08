@@ -3377,9 +3377,22 @@ reference resolution. The same traversal records object proofs for referenced ta
 intersections and object-only unions. Scalar, nullable/mixed and untyped roots do not acquire an
 object proof merely because the schema document is a JSON object or contains `properties`.
 Draft-07 `$ref` siblings cannot supply that proof. This is not a general satisfiability analysis.
+The local object proof does not establish native strict-tool root acceptance. On UnitedStates/Default
+`grok-4.6`, a strict tool rooted at `$ref` receives HTTP 400 with `invalid-argument` and
+`invalid_client_tool_schema`: "tool parameter root must be an object type (root schema is a $ref)".
+The current preflight admits a proven referenced-object root; this native route is not qualified.
 Local validation uses the original schema and reports invalid output without
 rewriting it or retrying. Complete dialect-specific keyword shapes and complete regex classification
 or original-dialect ECMA regex evaluation remain incomplete.
+Live UnitedStates/Default qualification at source `4f17955` covers one genuine nonstreaming
+`grok-4.6` response with a Draft-07 fragment-ID reference, closed object and required enum marker.
+The unchanged original schema returns `{"marker":"FRAGMENT_OK"}`, `Completed/completed`,
+`ProviderJsonSchema` enforcement and valid output. Usage reports 751 input, 80 output, 512 cached input
+and 72 reasoning output tokens, with reported cost 0.0004540360 USD. The request selects Low reasoning
+and asks for 128 output tokens. A separate streaming strict-tool request with a referenced root
+receives the rejection above; no callback or tool replay executes. Both calls use the tester's existing
+credential without sign-in, authentication probing, retries, schema rewriting or route fallback.
+These calls do not qualify arbitrary references, every schema/model, output-cap enforcement or refresh.
 Live Global/Default qualification on `grok-4.20-0309-non-reasoning` covers one unchanged object
 schema with required string `marker`, enum `GROK-121-SCHEMA-OK` and `additionalProperties:false`.
 Streaming and genuine nonstreaming requests both complete with finish reason `completed`,
