@@ -13,6 +13,53 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ProviderTerminalEvidenceTests
 {
     [Theory]
+    [InlineData("grok-4.20-0309-non-reasoning")]
+    [InlineData("grok-4.20-non-reasoning")]
+    public async Task GrokNonreasoningCatalogIdentityRetainsItsSamplingProfile(string modelId)
+    {
+        const string body = """
+            {"id":"response-1","model":"grok-4.20-0309-non-reasoning","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}
+            """;
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming: false, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = false },
+            Catalog = [new("grok-4.20-0309-non-reasoning", "Grok 4.20 (Non-Reasoning)")
+            {
+                CatalogEntry = JsonElement.Parse("""{"aliases":["grok-4.20-non-reasoning"],"capabilities":{"reasoning_effort":[]}}""")
+            }]
+        };
+
+        LlmProviderCapabilities capabilities = client.GetCapabilities(connection, modelId);
+        Assert.True(capabilities.SupportsTemperature);
+        Assert.True(capabilities.SupportsTopP);
+        Assert.Empty(capabilities.ReasoningLevels);
+
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, new()
+        {
+            ModelId = modelId,
+            Messages = [new("user", "hello")],
+            Temperature = 0.25,
+            TopP = 0.9
+        })) events.Add(item);
+
+        Assert.Equal(LlmCompletionStatus.Completed, Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Status);
+        using JsonDocument sent = JsonDocument.Parse(handler.RequestBody!);
+        Assert.Equal(modelId, sent.RootElement.GetProperty("model").GetString());
+        Assert.Equal(0.25, sent.RootElement.GetProperty("temperature").GetDouble());
+        Assert.Equal(0.9, sent.RootElement.GetProperty("top_p").GetDouble());
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
     [InlineData(false, 20)]
     [InlineData(true, 20)]
     [InlineData(false, 21)]

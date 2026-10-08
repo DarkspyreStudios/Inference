@@ -3045,6 +3045,9 @@ facade's published catalog. Catalog reasoning levels and image modalities overri
 Unknown manually entered models still permit a request without fabricated discovery evidence.
 Image prompts require catalog image support and cannot exceed 20 MiB. Temperature and top-p follow
 the model profile; top-k, seed, penalties and string stops are unsupported on this Responses route.
+The discovered `grok-4.20-0309-non-reasoning` ID shares the existing non-reasoning sampling profile
+with its `grok-4.20-non-reasoning` alias. Catalog resolution retains temperature/top-p support
+without adding selectable reasoning levels or rewriting the requested model ID.
 The schema preflight follows schema positions and local references, not literal data. Bounds
 above 2048 string characters, 256 array items or 64 properties require explicitly authorized local
 validation against the original schema. The same private admission owner distinguishes guaranteed,
