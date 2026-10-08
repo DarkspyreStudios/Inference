@@ -13,6 +13,70 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ProviderTerminalEvidenceTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task GrokNativeXSearchItemsProduceHostedObservationsAndRetainOpaqueReplay(bool streaming)
+    {
+        const string search = """{"type":"x_search_call","id":"x-call","status":"failed"}""";
+        string terminal = """{"id":"response-1","status":"completed","output":[""" + search
+            + """,{"type":"message","role":"assistant","content":[{"type":"output_text","text":"answer"}]}]}""";
+        string body = streaming
+            ? "data: {\"type\":\"response.output_item.added\",\"item\":" + search + "}\n\n"
+                + "data: {\"type\":\"response.completed\",\"response\":" + terminal + "}\n\n"
+            : terminal;
+        using var handler = new Handler(LlmTransport.XaiResponses, streaming, body);
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = LlmTransport.XaiResponses,
+            Endpoint = "https://api.x.ai/v1",
+            Xai = new(),
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = streaming }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = "selected-model",
+            Messages = [new("user", "Search X")],
+            HostedTools = [new XaiXSearchTool()]
+        };
+        var events = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+
+        LlmHostedToolCall call = Assert.Single(events.OfType<LlmHostedToolCallCompletedEvent>()).Call;
+        Assert.Equal("x-call", call.CallId);
+        Assert.Equal(LlmHostedToolKind.SocialSearch, call.Kind);
+        Assert.Equal("x_search", call.Name);
+        Assert.Equal("failed", call.Status);
+        Assert.Null(call.Input);
+        Assert.Null(call.Output);
+        Assert.Empty(events.OfType<LlmHostedToolCallProgressEvent>());
+        Assert.Empty(events.OfType<LlmToolCallCompletedEvent>());
+        Assert.Equal(streaming ? 1 : 0, events.OfType<LlmHostedToolCallStartedEvent>().Count());
+        if (streaming)
+        {
+            LlmHostedToolCallStartedEvent started = Assert.Single(events.OfType<LlmHostedToolCallStartedEvent>());
+            Assert.Equal((call.CallId, call.Kind, call.Name), (started.CallId, started.Kind, started.Name));
+        }
+        LlmChatResult result = Assert.IsType<LlmChatCompletionEvent>(events[^1]).Result;
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("answer", result.Text);
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request with
+        {
+            Messages = [new("user", "Search X"), new("assistant", result.Text) { ContinuationState = result.ContinuationState },
+                new("user", "Continue")]
+        })) { }
+        using JsonDocument sent = JsonDocument.Parse(handler.RequestBody!);
+        JsonElement replay = Assert.Single(sent.RootElement.GetProperty("input").EnumerateArray(),
+            item => item.TryGetProperty("type", out JsonElement type) && type.GetString() == "x_search_call");
+        Assert.Equal(search, replay.GetRawText());
+        Assert.Equal(2, handler.Calls);
+    }
+
+    [Theory]
     [InlineData("grok-4.20-0309-non-reasoning")]
     [InlineData("grok-4.20-non-reasoning")]
     public async Task GrokNonreasoningCatalogIdentityRetainsItsSamplingProfile(string modelId)

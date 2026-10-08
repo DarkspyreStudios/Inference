@@ -458,6 +458,10 @@ in opaque replay. Result-only `CompleteAsync` retains its terminal chat result; 
 provider-specific file-search phase events. X custom calls are classified only by the published
 search names and retain actual call IDs separately from opaque item IDs. Image progress uses only
 documented lifecycle events. Unpublished understanding output/event shapes remain unmapped.
+The [documented native `x_search_call` type](https://docs.x.ai/developers/tools/tool-usage-details)
+also produces SocialSearch observations through the same lifecycle owner. Its observed ID and status
+remain exact. Undocumented input/output facts stay null; the complete native item remains in opaque
+continuation. Classification does not qualify live OAuth X Search execution.
 
 Citations preserve first-observed annotation order and suppress terminal copies of the same
 occurrence. The adapter requests `no_inline_citations`. Offset units are unqualified, so positions
