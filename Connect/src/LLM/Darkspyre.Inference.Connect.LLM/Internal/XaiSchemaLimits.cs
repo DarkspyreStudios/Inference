@@ -40,8 +40,8 @@ internal static class XaiSchemaLimits
     private static SchemaDisposition Analyze(JsonElement root, bool requireObjectRoot)
     {
         var index = new SchemaIndex();
-        if (!index.Build(root)) return index.Failure;
-        SchemaDisposition disposition = SchemaDisposition.Guaranteed;
+        if (!index.Build(root)) return index.Disposition;
+        SchemaDisposition disposition = index.Disposition;
         var pending = new Stack<(JsonElement Schema, bool Exit, bool AllowsBoolean)>();
         var active = new HashSet<JsonElement>();
         var done = new HashSet<JsonElement>();
@@ -290,7 +290,7 @@ internal static class XaiSchemaLimits
     private sealed class SchemaIndex
     {
         internal Dictionary<JsonElement, SchemaLocation> Locations { get; } = [];
-        internal SchemaDisposition Failure { get; private set; } = SchemaDisposition.OutsideGuarantee;
+        internal SchemaDisposition Disposition { get; private set; } = SchemaDisposition.Guaranteed;
         private readonly Dictionary<string, SchemaResource> _resources = new(StringComparer.Ordinal);
         private readonly Dictionary<string, JsonElement> _anchors = new(StringComparer.Ordinal);
 
@@ -332,13 +332,14 @@ internal static class XaiSchemaLimits
                 {
                     if (id.ValueKind != JsonValueKind.String || !Uri.TryCreate(baseUri, id.GetString(), out Uri? selected))
                         return Reject(SchemaDisposition.InvalidSchema);
-                    if (selected.Fragment.Length > 1) return false;
+                    if (selected.Fragment.Length > 1) Disposition = SchemaDisposition.OutsideGuarantee;
                     baseUri = selected;
                     origin = origin == ResourceOrigin.Absolute || Uri.TryCreate(id.GetString(), UriKind.Absolute, out _)
                         ? ResourceOrigin.Absolute : ResourceOrigin.Relative;
                     string key = ResourceKey(baseUri);
-                    if (_resources.TryGetValue(key, out SchemaResource? existing) && !existing.Schema.Equals(schema)) return false;
-                    _resources[key] = new(schema, origin);
+                    if (_resources.TryGetValue(key, out SchemaResource? existing) && !existing.Schema.Equals(schema))
+                        Disposition = SchemaDisposition.OutsideGuarantee;
+                    else _resources[key] = new(schema, origin);
                 }
                 if (!ignoresSiblings && draft is SchemaDraft.Draft202012 or SchemaDraft.RetainSiblings
                     && schema.TryGetProperty("$anchor", out JsonElement anchor))
@@ -346,7 +347,7 @@ internal static class XaiSchemaLimits
                     if (anchor.ValueKind != JsonValueKind.String || anchor.GetString() is not { } name || !ValidAnchor(name))
                         return Reject(SchemaDisposition.InvalidSchema);
                     string key = new UriBuilder(baseUri) { Fragment = name }.Uri.AbsoluteUri;
-                    if (!_anchors.TryAdd(key, schema)) return false;
+                    if (!_anchors.TryAdd(key, schema)) Disposition = SchemaDisposition.OutsideGuarantee;
                 }
                 var applied = new List<JsonElement>();
                 foreach (JsonProperty property in schema.EnumerateObject())
@@ -419,7 +420,7 @@ internal static class XaiSchemaLimits
 
         private bool Reject(SchemaDisposition failure)
         {
-            Failure = failure;
+            Disposition = failure;
             return false;
         }
 

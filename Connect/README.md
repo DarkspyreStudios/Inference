@@ -3356,6 +3356,8 @@ Active `$id` values must parse as string URI references. Active `$anchor` values
 with the dialect's ASCII anchor-name syntax. Those failures use the invalid-keyword error before
 dispatch, including local fallback. The index keeps nonempty `$id` fragments and duplicate identities
 outside native guarantees.
+Those unproven identities do not stop the index's keyword and container checks. Malformed values
+detected by those checks still fail before dispatch when local fallback is selected.
 The same admission owner treats `not`, conditionals and
 multi-branch `allOf` as outside native guarantees. xAI gives `oneOf` the same meaning as `anyOf`;
 native admission requires pairwise-disjoint explicit simple types on non-reference branches,

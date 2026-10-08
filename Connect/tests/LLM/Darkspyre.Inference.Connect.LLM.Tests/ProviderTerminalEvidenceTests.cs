@@ -604,7 +604,19 @@ public sealed class ProviderTerminalEvidenceTests
     [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"http://["}""")]
     [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$anchor":42}""")]
     [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$anchor":"bad anchor"}""")]
-    public async Task GrokMalformedSchemaIdentityRefusesLocalFallbackBeforeDispatch(string schema)
+    public Task GrokMalformedSchemaIdentityRefusesLocalFallbackBeforeDispatch(string schema) => CheckInvalidSchemaAdmission(schema);
+
+    [Theory]
+    [InlineData("""{"$schema":"http://json-schema.org/draft-07/schema#","$id":"https://schemas.example.test/root#legacy","required":17}""", true)]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$defs":{"first":{"$id":"https://schemas.example.test/shared","required":17},"second":{"$id":"https://schemas.example.test/shared"}}}""", true)]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$defs":{"first":{"$anchor":"shared","required":17},"second":{"$anchor":"shared"}}}""", true)]
+    [InlineData("""{"$schema":"http://json-schema.org/draft-07/schema#","$id":"https://schemas.example.test/root#legacy"}""", false)]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$defs":{"first":{"$id":"https://schemas.example.test/shared"},"second":{"$id":"https://schemas.example.test/shared"}}}""", false)]
+    [InlineData("""{"$schema":"https://json-schema.org/draft/2020-12/schema","$defs":{"first":{"$anchor":"shared"},"second":{"$anchor":"shared"}}}""", false)]
+    public Task GrokUnprovenIdentitiesDoNotSkipKeywordValidation(string schema, bool malformed) => malformed
+        ? CheckInvalidSchemaAdmission(schema) : CheckReferenceAdmission(JsonElement.Parse(schema), guaranteed: false);
+
+    private static async Task CheckInvalidSchemaAdmission(string schema)
     {
         const string body = """
             {"id":"response-1","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"{}"}]}]}
