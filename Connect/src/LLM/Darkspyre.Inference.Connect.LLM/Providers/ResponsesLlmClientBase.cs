@@ -841,8 +841,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             finalRefusal = finalRefusal.Length > 0 ? finalRefusal : streamedRefusal;
         }
 
-        LlmClientToolCall[] toolCalls = OpenAiResponsesTools.ReadToolCalls(responseRoot,
-            connection.Transport == LlmTransport.XaiResponses);
+        LlmClientToolCall[] toolCalls = OpenAiResponsesTools.ReadToolCalls(responseRoot, connection.Transport);
 
         string? providerStatus = LlmJson.GetString(responseRoot, "status");
         if (providerStatus is null && connection.Transport == LlmTransport.OpenAiCodex)

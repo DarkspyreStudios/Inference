@@ -255,7 +255,7 @@ internal static class OpenAiResponsesTools
         _ => throw new ArgumentOutOfRangeException(nameof(choice))
     };
 
-    public static LlmClientToolCall[] ReadToolCalls(JsonElement responseRoot, bool supportsShell)
+    public static LlmClientToolCall[] ReadToolCalls(JsonElement responseRoot, LlmTransport transport)
     {
         if (!responseRoot.TryGetProperty("output", out JsonElement output)
             || output.ValueKind != JsonValueKind.Array)
@@ -266,7 +266,12 @@ internal static class OpenAiResponsesTools
         var calls = new List<LlmClientToolCall>();
         foreach (JsonElement item in output.EnumerateArray())
         {
-            if (TryReadToolCall(item, supportsShell, out LlmClientToolCall? call) && call is not null)
+            if (transport == LlmTransport.XaiResponses && LlmJson.GetString(item, "type") == "function_call"
+                && (string.IsNullOrWhiteSpace(LlmJson.GetString(item, "call_id"))
+                    || string.IsNullOrWhiteSpace(LlmJson.GetString(item, "name"))
+                    || LlmJson.GetString(item, "arguments") is null))
+                throw new ArgumentException("Terminal function calls require call_id, name and string arguments.");
+            if (TryReadToolCall(item, transport == LlmTransport.XaiResponses, out LlmClientToolCall? call) && call is not null)
             {
                 calls.Add(call);
             }

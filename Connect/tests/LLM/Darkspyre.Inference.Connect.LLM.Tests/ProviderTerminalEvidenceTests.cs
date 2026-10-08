@@ -2237,6 +2237,105 @@ public sealed class ProviderTerminalEvidenceTests
         Assert.Equal(call.Id, Assert.Single(events.OfType<LlmToolCallCompletedEvent>()).ToolCall.Id);
     }
 
+    [Theory]
+    [InlineData("call_id", null, "UNKNOWN_STOP")]
+    [InlineData("call_id", "\" \"", "UNKNOWN_STOP")]
+    [InlineData("name", null, "UNKNOWN_STOP")]
+    [InlineData("name", "7", "UNKNOWN_STOP")]
+    [InlineData("arguments", null, "UNKNOWN_STOP")]
+    [InlineData("arguments", "null", "UNKNOWN_STOP")]
+    [InlineData("arguments", "{}", "UNKNOWN_STOP")]
+    [InlineData("arguments", null, "failed")]
+    [InlineData("arguments", null, "incomplete")]
+    public async Task GrokMalformedTerminalFunctionsDoNotInventOrDropCallFields(string field, string? value, string status)
+    {
+        foreach (bool streaming in new[] { false, true })
+        {
+            JsonObject call = JsonNode.Parse("""
+                {"type":"function_call","id":"item-1","call_id":"call-1","name":"echo","arguments":"{}"}
+                """)!.AsObject();
+            if (value is null) call.Remove(field);
+            else call[field] = JsonNode.Parse(value);
+            var terminal = new JsonObject { ["id"] = "response-1", ["status"] = status, ["output"] = new JsonArray(call) };
+            string body = streaming
+                ? $"data: {new JsonObject { ["type"] = "response.completed", ["response"] = terminal }.ToJsonString()}\n\n"
+                : terminal.ToJsonString();
+            using var handler = new Handler(LlmTransport.XaiResponses, streaming, body, requestId: "request-1");
+            using var http = new HttpClient(handler);
+            var client = new XaiResponsesLlmClient(http);
+            var connection = new LlmConnection
+            {
+                Version = "1",
+                Transport = LlmTransport.XaiResponses,
+                Endpoint = "https://api.x.ai/v1",
+                Xai = new(),
+                Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token", AccountId = "test-account" } }.Serialize(),
+                CapabilityOverrides = new() { SupportsStreaming = streaming }
+            };
+            var events = new List<LlmStreamEvent>();
+            LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+            {
+                await foreach (LlmStreamEvent item in client.StreamAsync(connection,
+                    new() { ModelId = "selected-model", Messages = [new("user", "hello")] })) events.Add(item);
+            });
+
+            Assert.Equal("Grok Responses returned invalid terminal output.", failure.Message);
+            Assert.Equal(HttpStatusCode.OK, failure.StatusCode);
+            Assert.Equal("request-1", failure.RequestId);
+            Assert.Null(failure.InnerException);
+            Assert.Empty(events.OfType<LlmToolCallCompletedEvent>());
+            Assert.Empty(events.OfType<LlmChatCompletionEvent>());
+            Assert.Equal(1, handler.Calls);
+        }
+    }
+
+    [Theory]
+    [InlineData(" { \"value\" : \"provider text\" } \n")]
+    [InlineData("{")]
+    public async Task GrokUnknownTerminalFunctionsRetainLiteralArguments(string arguments)
+    {
+        foreach (bool streaming in new[] { false, true })
+        {
+            var call = new JsonObject
+            {
+                ["type"] = "function_call",
+                ["id"] = "item-1",
+                ["call_id"] = "call-1",
+                ["name"] = "echo",
+                ["arguments"] = arguments
+            };
+            var terminal = new JsonObject { ["id"] = "response-1", ["status"] = "UNKNOWN_STOP", ["output"] = new JsonArray(call) };
+            string body = streaming
+                ? $"data: {new JsonObject { ["type"] = "response.completed", ["response"] = terminal }.ToJsonString()}\n\n"
+                : terminal.ToJsonString();
+            using var handler = new Handler(LlmTransport.XaiResponses, streaming, body);
+            using var http = new HttpClient(handler);
+            var client = new XaiResponsesLlmClient(http);
+            var connection = new LlmConnection
+            {
+                Version = "1",
+                Transport = LlmTransport.XaiResponses,
+                Endpoint = "https://api.x.ai/v1",
+                Xai = new(),
+                Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token", AccountId = "test-account" } }.Serialize(),
+                CapabilityOverrides = new() { SupportsStreaming = streaming }
+            };
+            var events = new List<LlmStreamEvent>();
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection,
+                new() { ModelId = "selected-model", Messages = [new("user", "hello")] })) events.Add(item);
+
+            LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+            Assert.Equal(LlmCompletionStatus.Unknown, result.Status);
+            Assert.Null(result.ContinuationState);
+            var observed = Assert.IsType<LlmToolCall>(Assert.Single(result.ToolCalls));
+            Assert.Equal("call-1", observed.Id);
+            Assert.Equal("echo", observed.Name);
+            Assert.Equal(arguments, observed.ArgumentsJson);
+            Assert.Equal(arguments, Assert.Single(events.OfType<LlmToolCallCompletedEvent>()).ToolCall.ArgumentsJson);
+            Assert.Equal(1, handler.Calls);
+        }
+    }
+
     [Fact]
     public async Task GrokEmptyTerminalOutputDoesNotResurrectProvisionalCallsOrText()
     {

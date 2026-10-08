@@ -3275,7 +3275,15 @@ The shared Responses pipeline retains xAI output as an ordered deep clone, inclu
 items and encrypted metadata. Continuation is bound to the transport, endpoint, account and model;
 token rotation on the same account does not break that binding. The terminal output is authoritative,
 including an empty array. Function completions use terminal calls, and a call without streamed arguments
-still emits its arguments once. Known terminal statuses map to completion, action, refusal, failure or
+still emits its arguments once. Terminal function calls require a nonblank native `call_id`, a nonblank
+name and string arguments. The output item ID does not replace the call ID, and absent arguments do
+not become `{}`. Malformed fields report "Grok Responses returned invalid terminal output." before
+completed tool or chat events, including on failed, incomplete and unknown-status replies. Arguments
+retain their literal text; this shape check does not validate or repair their JSON. Valid unknown-status
+calls remain observable without continuation state. Provisional stream parsing is unchanged.
+The [xAI function-calling protocol](https://docs.x.ai/developers/tools/function-calling) uses
+`arguments` for execution and `call_id` to correlate the result.
+Known terminal statuses map to completion, action, refusal, failure or
 incomplete results. The [xAI response schema](https://docs.x.ai/developers/rest-api-reference/inference/responses)
 names `max_output_tokens`, `max_prompt_tokens` and `max_time_limit`; each maps to `Incomplete`.
 Unknown statuses and incomplete reasons map to `Unknown`. Recognized `context_length_exceeded`
