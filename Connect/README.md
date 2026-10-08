@@ -2178,6 +2178,14 @@ upload destinations and explicit user data. Common metadata refuses these provid
 `ConnectVideoJson` owns their complete generation/edit/extension and scoped receipt graph.
 The private Video codec validates all implemented request controls before resolving any media source.
 It preserves supplied aspect ratios without establishing their effective provider behavior.
+The canonical codec supplies the published model facts for both request admission and capability
+lookup. `grok-imagine-video-1.5` and `grok-imagine-video-1.5-lite` offer generation only, with text/first-frame
+output through 1080p. Lite's provider output is upscaled. Lite refuses references and pinned frames;
+classic refuses reference audio. Reference-image limits are 14 for 1.5 and seven for classic, and
+classic reference-to-video duration is at most ten seconds. The codec accepts the published `21:9`
+and `5:2` aspect ratios unchanged. These facts follow the
+[xAI Video model table](https://docs.x.ai/developers/model-capabilities/video/overview) and
+[REST schema](https://docs.x.ai/developers/rest-api-reference/inference/videos).
 Serialized job/output scope is data, not proof of authority. Each implemented transport owns
 receipt validation and download-origin authorization before effects. Lookup and download carry a
 private view of the same borrowed binding, with the facade's retirement fence, before acquisition or refresh.

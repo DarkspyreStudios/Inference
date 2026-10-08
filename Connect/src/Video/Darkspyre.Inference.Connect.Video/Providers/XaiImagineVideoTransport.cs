@@ -1,4 +1,3 @@
-using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http.Json;
@@ -37,26 +36,7 @@ internal sealed class XaiImagineVideoTransport : IVideoTransport, IDisposable, I
             if (modelId is not null && !models.Any(model => model.Id == modelId))
                 throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The selected connection does not list this video model.");
             if (models.Count == 0) return new VideoCapabilities();
-            bool modern = modelId == "grok-imagine-video-1.5";
-            bool classic = modelId == "grok-imagine-video";
-            return new VideoCapabilities
-            {
-                Operations = new[] { VideoOperation.Generation, VideoOperation.Edit, VideoOperation.Extension }.ToFrozenSet(),
-                SourceKinds = new[] { InferenceMediaSourceKind.Binary, InferenceMediaSourceKind.Url,
-                    InferenceMediaSourceKind.ProviderFile, InferenceMediaSourceKind.Resource }.ToFrozenSet(),
-                MinimumGenerationDuration = TimeSpan.FromSeconds(1),
-                MaximumGenerationDuration = TimeSpan.FromSeconds(15),
-                MinimumExtensionDuration = TimeSpan.FromSeconds(2),
-                MaximumExtensionDuration = TimeSpan.FromSeconds(10),
-                ResolutionHeights = modern ? [480, 720, 1080] : classic ? [480, 720] : null,
-                MaximumKeyframes = modern ? 4 : classic ? 0 : null,
-                MaximumReferenceAudio = 3,
-                SupportsLastFrame = modern,
-                SupportsAudioControl = true,
-                SupportsPresetVoiceReferences = true,
-                SupportsSuppliedAudioReferences = true,
-                SupportsProgress = true
-            };
+            return XaiVideoProtocol.Capabilities(modelId);
         }, cancellationToken);
 
     public Task<VideoJob> SubmitAsync(VideoConnection connection, VideoRequest request,

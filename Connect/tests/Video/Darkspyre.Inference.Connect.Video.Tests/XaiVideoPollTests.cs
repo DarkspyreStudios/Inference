@@ -1,5 +1,7 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Common.Video;
 using Darkspyre.Inference.Connect.LLM;
@@ -10,6 +12,139 @@ namespace Darkspyre.Inference.Connect.Video.Tests;
 
 public sealed class XaiVideoPollTests
 {
+    [Theory]
+    [InlineData("21:9")]
+    [InlineData("5:2")]
+    public void CurrentVideoRatiosPreserveNativeBody(string aspectRatio)
+    {
+        var request = new VideoGenerationRequest
+        { ModelId = "grok-imagine-video-1.5", Prompt = "A paper boat", AspectRatio = aspectRatio };
+
+        (string route, JsonObject body) = XaiVideoProtocol.Build(request,
+            _ => throw new InvalidOperationException("No media source is supplied."), static () => { });
+
+        Assert.Equal("videos/generations", route);
+        Assert.Equal(aspectRatio, body["aspect_ratio"]!.GetValue<string>());
+        Assert.Equal(request.ModelId, body["model"]!.GetValue<string>());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void LiteHighResolutionPreservesNativeBody(bool firstFrame)
+    {
+        var image = new UrlMediaSource(new("https://media.example.test/image"));
+        var request = new VideoGenerationRequest
+        {
+            ModelId = "grok-imagine-video-1.5-lite",
+            Prompt = "A paper boat",
+            ResolutionHeight = 1080,
+            FirstFrame = firstFrame ? image : null
+        };
+
+        (_, JsonObject body) = XaiVideoProtocol.Build(request, source =>
+        {
+            Assert.Same(image, source);
+            return new() { ["url"] = image.Url.OriginalString };
+        }, static () => { });
+
+        Assert.Equal("1080p", body["resolution"]!.GetValue<string>());
+        Assert.Equal(request.ModelId, body["model"]!.GetValue<string>());
+        Assert.Equal(firstFrame, body.ContainsKey("image"));
+        if (firstFrame) Assert.Equal(image.Url.OriginalString, body["image"]!["url"]!.GetValue<string>());
+        VideoCapabilities capabilities = XaiVideoProtocol.Capabilities(request.ModelId);
+        Assert.Collection(capabilities.ResolutionHeights!,
+            height => Assert.Equal(480, height), height => Assert.Equal(720, height), height => Assert.Equal(1080, height));
+        Assert.Equal(VideoOperation.Generation, Assert.Single(capabilities.Operations));
+        Assert.Equal(0, capabilities.MaximumReferenceImages);
+        Assert.Equal(0, capabilities.MaximumKeyframes);
+        Assert.False(capabilities.SupportsLastFrame);
+    }
+
+    [Theory]
+    [InlineData("grok-imagine-video-1.5", false)]
+    [InlineData("grok-imagine-video-1.5", true)]
+    [InlineData("grok-imagine-video-1.5-lite", false)]
+    [InlineData("grok-imagine-video-1.5-lite", true)]
+    public void GenerationOnlyVideoModelsRefuseOtherOperationsBeforeSourceResolution(string modelId, bool extension)
+    {
+        var source = new UrlMediaSource(new("https://media.example.test/video"));
+        VideoRequest request = extension
+            ? new VideoExtensionRequest { ModelId = modelId, Prompt = "Continue", SourceVideo = source }
+            : new VideoEditRequest { ModelId = modelId, Prompt = "Change", SourceVideo = source };
+
+        Assert.Throws<NotSupportedException>(() => XaiVideoProtocol.Build(request,
+            _ => throw new InvalidOperationException("Unsupported operation reached source resolution."), static () => { }));
+        VideoCapabilities capabilities = XaiVideoProtocol.Capabilities(modelId);
+        Assert.DoesNotContain(extension ? VideoOperation.Extension : VideoOperation.Edit, capabilities.Operations);
+        Assert.Null(capabilities.MinimumExtensionDuration);
+        Assert.Null(capabilities.MaximumExtensionDuration);
+    }
+
+    [Theory]
+    [InlineData("grok-imagine-video-1.5", 15)]
+    [InlineData("grok-imagine-video", 8)]
+    public void VideoReferenceImageLimitsRefuseBeforeSourceResolution(string modelId, int count)
+    {
+        var image = new UrlMediaSource(new("https://media.example.test/image"));
+        var request = new VideoGenerationRequest
+        { ModelId = modelId, Prompt = "A paper boat", ReferenceImages = Enumerable.Repeat<InferenceMediaSource>(image, count).ToArray() };
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => XaiVideoProtocol.Build(request,
+            _ => throw new InvalidOperationException("Excess references reached source resolution."), static () => { }));
+        Assert.Equal(count - 1, XaiVideoProtocol.Capabilities(modelId).MaximumReferenceImages);
+    }
+
+    [Theory]
+    [InlineData("grok-imagine-video")]
+    [InlineData("grok-imagine-video-1.5-lite")]
+    public void VideoModelsWithoutReferenceAudioRefuseBeforeSourceResolution(string modelId)
+    {
+        var request = new VideoGenerationRequest
+        { ModelId = modelId, Prompt = "A paper boat", ReferenceAudio = [new VideoVoiceReference("eve")] };
+
+        Assert.Throws<NotSupportedException>(() => XaiVideoProtocol.Validate(request));
+        VideoCapabilities capabilities = XaiVideoProtocol.Capabilities(modelId);
+        Assert.Equal(0, capabilities.MaximumReferenceAudio);
+        Assert.False(capabilities.SupportsPresetVoiceReferences);
+        Assert.False(capabilities.SupportsSuppliedAudioReferences);
+    }
+
+    [Theory]
+    [InlineData("last-frame")]
+    [InlineData("keyframes")]
+    [InlineData("reference-images")]
+    public void LiteVideoRefusesReferenceModesBeforeSourceResolution(string mode)
+    {
+        var image = new UrlMediaSource(new("https://media.example.test/image"));
+        var request = new VideoGenerationRequest
+        {
+            ModelId = "grok-imagine-video-1.5-lite",
+            Prompt = "A paper boat",
+            LastFrame = mode == "last-frame" ? image : null,
+            Keyframes = mode == "keyframes" ? [new(image, TimeSpan.FromSeconds(1))] : null,
+            ReferenceImages = mode == "reference-images" ? [image] : null
+        };
+
+        Assert.Throws<NotSupportedException>(() => XaiVideoProtocol.Build(request,
+            _ => throw new InvalidOperationException("Unsupported references reached source resolution."), static () => { }));
+    }
+
+    [Fact]
+    public void ClassicReferenceVideoRefusesDurationAboveTenSeconds()
+    {
+        var request = new VideoGenerationRequest
+        {
+            ModelId = "grok-imagine-video",
+            Prompt = "A paper boat",
+            Duration = TimeSpan.FromSeconds(11),
+            ReferenceImages = [new UrlMediaSource(new("https://media.example.test/image"))]
+        };
+
+        Assert.Throws<ArgumentOutOfRangeException>(() => XaiVideoProtocol.Build(request,
+            _ => throw new InvalidOperationException("Invalid duration reached source resolution."), static () => { }));
+    }
+
     [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]

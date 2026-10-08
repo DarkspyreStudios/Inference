@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -10,6 +11,35 @@ namespace Darkspyre.Inference.Connect.Video.Internal;
 /// <summary>Stateless native mapping; media resolution and receipt authority remain with the admitted transport.</summary>
 internal static class XaiVideoProtocol
 {
+    /// <summary>Published model facts shared by request admission and selected-model discovery.</summary>
+    internal static VideoCapabilities Capabilities(string? modelId)
+    {
+        bool modern = modelId == "grok-imagine-video-1.5";
+        bool lite = modelId == "grok-imagine-video-1.5-lite";
+        bool classic = modelId == "grok-imagine-video";
+        bool generationOnly = modern || lite;
+        return new()
+        {
+            Operations = (generationOnly ? new[] { VideoOperation.Generation }
+                : new[] { VideoOperation.Generation, VideoOperation.Edit, VideoOperation.Extension }).ToFrozenSet(),
+            SourceKinds = new[] { InferenceMediaSourceKind.Binary, InferenceMediaSourceKind.Url,
+                InferenceMediaSourceKind.ProviderFile, InferenceMediaSourceKind.Resource }.ToFrozenSet(),
+            MinimumGenerationDuration = TimeSpan.FromSeconds(1),
+            MaximumGenerationDuration = TimeSpan.FromSeconds(15),
+            MinimumExtensionDuration = generationOnly ? null : TimeSpan.FromSeconds(2),
+            MaximumExtensionDuration = generationOnly ? null : TimeSpan.FromSeconds(10),
+            ResolutionHeights = generationOnly ? [480, 720, 1080] : classic ? [480, 720] : null,
+            MaximumKeyframes = modern ? 4 : classic || lite ? 0 : null,
+            MaximumReferenceImages = modern ? 14 : classic ? 7 : lite ? 0 : null,
+            MaximumReferenceAudio = classic || lite ? 0 : 3,
+            SupportsLastFrame = modern,
+            SupportsAudioControl = true,
+            SupportsPresetVoiceReferences = !classic && !lite,
+            SupportsSuppliedAudioReferences = !classic && !lite,
+            SupportsProgress = true
+        };
+    }
+
     internal static void Validate(VideoRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -52,20 +82,25 @@ internal static class XaiVideoProtocol
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
         if (request.ProviderOptions is not null and not XaiVideoOptions)
             throw new NotSupportedException("Unknown video provider controls.");
+        VideoCapabilities capabilities = Capabilities(request.ModelId);
         string route;
         int? duration = null;
         switch (request)
         {
             case VideoGenerationRequest generation:
                 route = "videos/generations";
-                duration = ValidateGeneration(generation);
+                duration = ValidateGeneration(generation, capabilities);
                 break;
             case VideoEditRequest edit:
+                if (!capabilities.Operations.Contains(VideoOperation.Edit))
+                    throw new NotSupportedException("The selected video model does not support editing.");
                 route = "videos/edits";
                 ArgumentException.ThrowIfNullOrWhiteSpace(edit.Prompt);
                 ValidateSource(edit.SourceVideo, allowFile: true);
                 break;
             case VideoExtensionRequest extension:
+                if (!capabilities.Operations.Contains(VideoOperation.Extension))
+                    throw new NotSupportedException("The selected video model does not support extension.");
                 route = "videos/extensions";
                 // The primary schema requires prompt although the neutral contract permits unknown/omitted prompt.
                 if (string.IsNullOrWhiteSpace(extension.Prompt))
@@ -96,7 +131,7 @@ internal static class XaiVideoProtocol
         return (route, duration, storage, uploadUrl, user);
     }
 
-    private static int? ValidateGeneration(VideoGenerationRequest request)
+    private static int? ValidateGeneration(VideoGenerationRequest request, VideoCapabilities capabilities)
     {
         if (request.FirstFrame is { } first) ValidateSource(first, allowFile: true);
         if (request.LastFrame is { } last) ValidateSource(last, allowFile: true);
@@ -104,17 +139,21 @@ internal static class XaiVideoProtocol
         if (string.IsNullOrWhiteSpace(request.Prompt) && request.FirstFrame is null && request.LastFrame is null
             && request.Keyframes is not { Count: > 0 } && !references)
             throw new ArgumentException("Text-only video generation requires a prompt.", nameof(request));
-        int? duration = request.Duration is { } value ? WholeSeconds(value, 1, 15) : null;
+        if (request.ModelId == "grok-imagine-video-1.5-lite" && (references || request.LastFrame is not null
+            || request.Keyframes is { Count: > 0 }))
+            throw new NotSupportedException("This video model supports only text-to-video and first-frame image-to-video.");
+        int? duration = request.Duration is { } value
+            ? WholeSeconds(value, 1, request.ModelId == "grok-imagine-video" && references ? 10 : 15) : null;
         if (request.AspectRatio is { } aspect)
         {
-            if (aspect is not ("1:1" or "16:9" or "9:16" or "4:3" or "3:4" or "3:2" or "2:3"))
+            if (aspect is not ("1:1" or "16:9" or "9:16" or "4:3" or "3:4" or "3:2" or "2:3" or "21:9" or "5:2"))
                 throw new ArgumentException("Unsupported video aspect ratio.", nameof(request));
         }
         if (request.ResolutionHeight is { } resolution)
         {
             if (resolution is not (480 or 720 or 1080)) throw new ArgumentOutOfRangeException(nameof(request));
             if (resolution == 1080 && (references || request.Keyframes is { Count: > 0 }
-                || request.ModelId != "grok-imagine-video-1.5"))
+                || capabilities.ResolutionHeights?.Contains(1080) != true))
                 throw new NotSupportedException("The selected video mode has no documented native 1080p mapping.");
         }
         if (request.ModelId == "grok-imagine-video" && (request.LastFrame is not null
@@ -132,9 +171,15 @@ internal static class XaiVideoProtocol
             }
         }
         if (request.ReferenceImages is { } images)
+        {
+            if (capabilities.MaximumReferenceImages is { } maximum && images.Count > maximum)
+                throw new ArgumentOutOfRangeException(nameof(request), "The selected video model's reference image limit is exceeded.");
             foreach (InferenceMediaSource image in images) ValidateSource(image, allowFile: true);
+        }
         if (request.ReferenceAudio is { } audio)
         {
+            if (audio.Count > 0 && capabilities.MaximumReferenceAudio == 0)
+                throw new NotSupportedException("The selected video model does not support reference audio.");
             if (audio.Count > 3) throw new ArgumentOutOfRangeException(nameof(request));
             foreach (VideoReferenceAudio source in audio)
             {
