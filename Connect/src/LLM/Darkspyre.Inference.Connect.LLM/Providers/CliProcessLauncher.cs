@@ -8,6 +8,8 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 internal static partial class CliProcessLauncher
 {
     internal const int MaximumBatchCommandCharacters = 8191;
+    // CreateProcessW includes the terminating NUL in its UTF-16 command-line bound.
+    private const int MaximumWindowsCommandCharacters = 32767;
     private static readonly Encoding Utf8WithoutPreamble = new UTF8Encoding(false, true);
 
     internal static ProcessStartInfo CreateStartInfo(
@@ -81,6 +83,7 @@ internal static partial class CliProcessLauncher
                 }
                 start.ArgumentList.Add(entry);
                 AddExecutableArguments(start, node, arguments);
+                ValidateWindowsCommandLength(start);
                 return;
             }
 
@@ -101,9 +104,50 @@ internal static partial class CliProcessLauncher
             }
             start.ArgumentList.Add(entry);
             AddExecutableArguments(start, node, arguments);
+            ValidateWindowsCommandLength(start);
             return;
         }
         AddExecutableArguments(start, executable, arguments);
+        ValidateWindowsCommandLength(start);
+    }
+
+    private static void ValidateWindowsCommandLength(ProcessStartInfo start)
+    {
+        ReadOnlySpan<char> executable = start.FileName.AsSpan().Trim();
+        long length = executable.Length + (executable.StartsWith('"') && executable.EndsWith('"') ? 0L : 2L) + 1;
+        foreach (string argument in start.ArgumentList)
+        {
+            length += 1 + WindowsArgumentLength(argument);
+        }
+        if (length > MaximumWindowsCommandCharacters)
+        {
+            throw new ArgumentException(
+                "The Windows CLI command exceeds the 32767-character limit after argument escaping. Reduce the prompt or schema.");
+        }
+    }
+
+    // Count .NET ArgumentList escaping without rendering or changing the arguments.
+    private static long WindowsArgumentLength(string argument)
+    {
+        bool quoted = argument.Length == 0;
+        long length = argument.Length + 2L;
+        int backslashes = 0;
+        foreach (char value in argument)
+        {
+            if (value == '\\')
+            {
+                backslashes++;
+                continue;
+            }
+            if (value == '"')
+            {
+                quoted = true;
+                length += backslashes + 1L;
+            }
+            else if (char.IsWhiteSpace(value)) quoted = true;
+            backslashes = 0;
+        }
+        return quoted ? length + backslashes : argument.Length;
     }
 
     internal static string BuildBatchArguments(string interpreter, string executable, IReadOnlyList<string> arguments)

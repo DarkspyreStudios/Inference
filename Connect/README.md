@@ -1937,6 +1937,15 @@ and switches, cannot exceed [8191 characters](https://learn.microsoft.com/en-us/
 resolved Node arguments. An AGY prompt still has its separate platform argument-size bound and
 process-list exposure; a batch launch can hit the smaller command-line bound first.
 
+Native Windows and resolved Node invocations also check the complete prepared command before launch.
+The check counts the quoted executable, all arguments with .NET's quote/backslash expansion,
+separators and terminating NUL against the
+[CreateProcessW 32,767-character limit](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw).
+An oversized command fails with `ArgumentException` asking the caller to reduce the prompt or schema.
+The launcher retains the original structured arguments and leaves rendering to `ProcessStartInfo`.
+The existing launcher fixture checks expanded quotes and aggregate arguments through Windows
+configuration, including accepted boundary arguments. It does not start a Windows process on macOS.
+
 The POSIX launcher test checks inherited-PATH precedence, skipped non-executable files,
 user-local CLI lookup and explicit paths with real filesystem entries. A shell fixture verifies
 literal arguments without shell expansion. The test skips on Windows and does not qualify
