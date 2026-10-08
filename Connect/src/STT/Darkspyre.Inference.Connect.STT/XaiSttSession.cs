@@ -139,7 +139,8 @@ internal sealed class XaiSttSession : ISpeechTranscriptionSession
                 {
                     case "transcript.created":
                         if (_created) throw XaiSttProtocol.Protocol();
-                        string id = XaiSttProtocol.RequiredString(root, "id"); if (id.Length == 0) throw XaiSttProtocol.Protocol();
+                        string id = XaiSttProtocol.RequiredString(root, "id");
+                        if (id.Length == 0 || SecretRedactor.ContainsProtectedValue(id, _credential, _secrets)) throw XaiSttProtocol.Protocol();
                         _created = true; await PublishAsync(new SpeechTranscriptCreatedEvent(id), token).ConfigureAwait(false); _ready.TrySetResult(); break;
                     case "transcript.partial":
                         int? partialChannel = ReadChannel(root);

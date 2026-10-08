@@ -332,6 +332,8 @@ infer audio format from filenames.
 
 The reusable WebSocket session waits for `transcript.created`, sends audio packets and ordered
 `finalize`/`audio.done` commands, and exposes one bounded event feed with caller-supplied limits.
+Opening rejects transcript IDs that echo a credential or protected outgoing header, including
+borrowed-client defaults, before publishing the created event. It never rewrites the native ID.
 Opus packets remain indivisible; explicit accepted sample-rate controls are sent unchanged, but the
 provider ignores them for Opus. Streaming maps explicit text normalization to the nullable `format`
 query parameter documented in the [xAI STT reference](https://docs.x.ai/developers/rest-api-reference/inference/speech-to-text).
@@ -341,7 +343,8 @@ ordered as received. The convenience stream owns one temporary session and its i
 and client retirement cancels and drains that work without requiring a paused reader to resume.
 Explicitly handed-off sessions remain caller-owned. Cleanup refusals retain actual unsafe owners
 and failures; borrowed HTTP, authorization, resource access and input sources remain undisposed.
-Diagnostics use fixed speech labels without copying provider error messages. OAuth endpoint
+WebSocket error events retain the provider's redacted explanation. Protocol failures use fixed speech
+labels without exposing provider payloads. OAuth endpoint
 acceptance, the provider's ambiguous 500 MB/50-character limits and real-time behavior remain
 provider qualification boundaries; the library does not invent byte or Unicode cutoffs.
 

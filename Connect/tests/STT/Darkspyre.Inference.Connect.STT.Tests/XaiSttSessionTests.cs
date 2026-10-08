@@ -1,5 +1,6 @@
 using System.Net.Http.Headers;
 using System.Net.WebSockets;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.STT;
 using Darkspyre.Inference.Connect.LLM;
@@ -9,6 +10,36 @@ namespace Darkspyre.Inference.Connect.STT.Tests;
 
 public sealed class XaiSttSessionTests
 {
+    [Theory]
+    [InlineData("dummy-test-token")]
+    [InlineData("default-secret")]
+    public async Task ProtectedTranscriptIdentityRefusesOpeningWithoutPublishingAReplacement(string secret)
+    {
+        using var socket = new VoiceSocket();
+        socket.Json(new JsonObject { ["type"] = "transcript.created", ["id"] = "transcript-" + secret }.ToJsonString());
+        using var http = new HttpClient();
+        http.DefaultRequestHeaders.Add("X-Default", "default-secret");
+        await using var access = new LlmConnectionAccess(new VoiceConnectionSource(), []);
+        var binding = new XaiFamilyBinding(new("selected"), access);
+        await using ISpeechTranscriptionClient client = new XaiSttProvider(http, socket.ConnectAsync).Bind(new()
+        {
+            Transport = SttTransport.XaiStt,
+            Endpoint = new(VoiceTestData.Connection.Endpoint),
+            Xai = binding.Selection
+        }, binding);
+
+        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(async () =>
+        {
+            await using ISpeechTranscriptionSession session = await client.OpenStreamAsync(new(), VoiceTestData.Limits())
+                .WaitAsync(VoiceTestData.Timeout);
+        });
+
+        Assert.Equal(InferenceFailureCode.ProtocolFailure, failure.Code);
+        Assert.Equal("The xAI transcription response contains invalid protocol facts.", failure.Message);
+        Assert.DoesNotContain(secret, failure.ToString(), StringComparison.Ordinal);
+        Assert.Empty(socket.Sent);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
