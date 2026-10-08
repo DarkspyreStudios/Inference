@@ -2873,6 +2873,8 @@ with observed status and request identity. Unrelated host failures retain the ma
 diagnostic; cancellation and independently failed owned cleanup remain distinct.
 Model-stream errors include the sanitized original model message and its reported status in the
 explanation. The outer HTTP status remains separate.
+Pre-classified Bedrock input-overflow failures use the same credential and selected-header redactor
+for public diagnostics. Their observed status and overflow flag remain intact.
 xAI input overflow raises this failure instead of returning an incomplete completion; output-token
 truncation remains an incomplete completion.
 Each model step permits at most two provider-overflow pauses, including across continued segments.

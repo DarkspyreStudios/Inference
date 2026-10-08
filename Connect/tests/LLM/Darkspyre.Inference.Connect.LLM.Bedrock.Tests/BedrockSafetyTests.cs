@@ -22,6 +22,42 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 public sealed class BedrockSafetyTests
 {
     [Fact]
+    public async Task ClassifiedOverflowRedactsDiagnosticsAndPreservesTheOverflowFlag()
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => new StreamControl(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var sdkFailure = new Amazon.BedrockRuntime.Model.ValidationException("Input is too long: fixture-secret.", ErrorType.Sender,
+            "validation-header-secret", "request-fixture-secret", HttpStatusCode.BadRequest);
+        var invoker = new StubConverseInvoker
+        {
+            Failure = BedrockConverseInvoker.Unwrap(
+                new BedrockRuntimeEventStreamException("Stream failed.", sdkFailure), CancellationToken.None)
+        };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = ResourceConnection(streaming: true) with
+        { AdditionalHeaders = new Dictionary<string, string> { ["X-Selected"] = "header-secret" } };
+        var events = new List<LlmStreamEvent>();
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            await foreach (LlmStreamEvent item in client.StreamAsync(connection, Request())) events.Add(item);
+        });
+
+        Assert.True(failure.IsContextOverflow);
+        Assert.Equal(LlmTransport.AwsBedrockConverse, failure.Transport);
+        Assert.Equal(HttpStatusCode.BadRequest, failure.StatusCode);
+        Assert.Equal("validation-[REDACTED]", failure.ProviderCode);
+        Assert.Equal("request-[REDACTED]", failure.RequestId);
+        Assert.Contains("exceeds the model context window", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("fixture-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain("header-secret", failure.ToString(), StringComparison.Ordinal);
+        Assert.Empty(events.OfType<LlmChatCompletionEvent>());
+        Assert.Single(invoker.StreamRequests);
+        Assert.True(invoker.Disposed);
+    }
+
+    [Fact]
     public async Task ModelStreamFailurePreservesSanitizedOriginalDiagnostics()
     {
         await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
