@@ -540,12 +540,13 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 $"{CatalogEndpoint}/models{query}");
             ApplyCatalogHeaders(request, catalogCredential);
             using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
+            string[] secrets = request.Headers.SelectMany(header => header.Value).ToArray();
             await ProviderHttp.ThrowIfUnsuccessfulAsync(
                 response,
                 Transport,
                 credential,
                 "Anthropic model discovery",
-                request.Headers.SelectMany(header => header.Value),
+                secrets,
                 cancellationToken);
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             JsonDocument document;
@@ -560,7 +561,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                     response,
                     body,
                     credential,
-                    exception);
+                    exception, secrets);
             }
 
             using (document)

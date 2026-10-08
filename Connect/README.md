@@ -61,6 +61,11 @@ Compatible chat carries actual sent headers through streamed generation and its 
 Protocol/native errors and terminal diagnostics use that context for their safe fields and body.
 Native error codes and messages come from the same redacted-envelope reader; overflow classification
 retains the original provider facts.
+Shared OpenAI-compatible, Anthropic and Codex model discovery readers carry actual sent headers
+to the existing protocol-error boundary. Codex/OpenRouter account parsing uses that boundary too.
+Malformed JSON and Codex's missing-catalog response retain known HTTP status and a sanitized nullable
+request ID. Parser diagnostics omit input-quoting text; OpenRouter's stream parser supplies no raw body.
+Claude's optional HTTP catalog uses this boundary without launching the CLI.
 
 Mapped task results publish after response, body and request cleanup completes; retirement begun by
 cleanup prevents late success without replacing an earlier operation failure. If an owned logger

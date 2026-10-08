@@ -236,6 +236,68 @@ public sealed class ProviderTerminalEvidenceTests
     }
 
     [Theory]
+    [InlineData(LlmTransport.OpenAiResponses, false, false)]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, false, false)]
+    [InlineData(LlmTransport.AnthropicMessages, false, false)]
+    [InlineData(LlmTransport.OpenAiCodex, false, false)]
+    [InlineData(LlmTransport.OpenAiCodex, false, true)]
+    [InlineData(LlmTransport.OpenAiCodex, true, false)]
+    [InlineData(LlmTransport.OpenAiCompatibleChat, true, false)]
+    public async Task DiscoveryProtocolFailuresKeepSafeHttpEvidence(LlmTransport transport, bool accountUsage, bool invalidCatalog)
+    {
+        using var handler = new Handler(transport, streaming: false,
+            invalidCatalog ? "{\"models\":null,\"message\":\"test-token header-value default-value\"}" : "not-json test-token header-value default-value",
+            requestId: "request-test-token-header-value-default-value-1", expectedMethod: HttpMethod.Get);
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        ILlmClient client = transport switch
+        {
+            LlmTransport.OpenAiResponses => new OpenAiResponsesLlmClient(http),
+            LlmTransport.OpenAiCompatibleChat => new OpenAiCompatibleChatLlmClient(http),
+            LlmTransport.OpenAiCodex => new OpenAiCodexLlmClient(http),
+            _ => new AnthropicMessagesLlmClient(http)
+        };
+        var connection = new LlmConnection
+        {
+            Version = "1",
+            Transport = transport,
+            Endpoint = accountUsage && transport == LlmTransport.OpenAiCompatibleChat
+                ? "https://openrouter.ai/api/v1" : "https://provider.example.test/backend-api/codex",
+            Credential = (transport == LlmTransport.OpenAiCodex
+                ? new LlmCredential { OAuth = new() { AccessToken = "test-token", AccountId = "test-account" } }
+                : new LlmCredential { ApiKey = "test-token" }).Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
+        {
+            if (accountUsage)
+                await ((ILlmAccountUsageClient)client).GetAccountUsageAsync(connection);
+            else
+                await client.ListModelsAsync(connection);
+        });
+
+        Assert.Equal(HttpStatusCode.OK, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        Assert.Null(failure.ProviderCode);
+        if (invalidCatalog)
+        {
+            Assert.Equal("Codex model discovery did not return a model catalog.", failure.Message);
+            Assert.Null(failure.InnerException);
+        }
+        else
+        {
+            Assert.Contains("invalid JSON", failure.Message, StringComparison.Ordinal);
+            Assert.IsAssignableFrom<JsonException>(failure.InnerException);
+        }
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.Equal("header-value", handler.RequestTrace);
+        Assert.Equal("default-value", handler.RequestDefaultTrace);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task GrokRequestsNoInlineCitationsThroughThePublishedIncludeList(bool streaming)

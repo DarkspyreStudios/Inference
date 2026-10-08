@@ -1,4 +1,5 @@
 using Darkspyre.Inference.Connect.LLM.Internal;
+using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -110,6 +111,41 @@ public sealed class ClaudeCliLlmClientTests
         Assert.Contains("Account usage is unavailable for this organization.", failure.Message, StringComparison.Ordinal);
         Assert.DoesNotContain("usage-secret", failure.ToString(), StringComparison.Ordinal);
         Assert.Single(runner.Invocations);
+    }
+
+    [Fact]
+    public async Task CatalogOAuthProtocolFailureRedactsTheActualHttpHeadersWithoutLaunchingTheCli()
+    {
+        using var handler = new UnexpectedHttpHandler(request =>
+        {
+            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal(new Uri("https://api.anthropic.com/v1/models?limit=1000"), request.RequestUri);
+            Assert.Equal("test-token", request.Headers.Authorization!.Parameter);
+            Assert.Equal("header-value", Assert.Single(request.Headers.GetValues("X-Trace")));
+            Assert.Equal("default-value", Assert.Single(request.Headers.GetValues("X-Default")));
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new StringContent("not-json test-token header-value default-value") };
+            response.Headers.Add("x-request-id", "request-test-token-header-value-default-value-1");
+            return response;
+        });
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Add("X-Trace", "header-value");
+        http.DefaultRequestHeaders.Add("X-Default", "default-value");
+        var runner = new RecordingRunner(new(0, string.Empty, string.Empty));
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        LlmConnection connection = CliConnection() with
+        { Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize() };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => client.ListModelsAsync(connection));
+
+        Assert.Equal(HttpStatusCode.OK, failure.StatusCode);
+        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", failure.RequestId);
+        Assert.Equal("Anthropic model discovery returned invalid JSON.", failure.Message);
+        Assert.IsAssignableFrom<JsonException>(failure.InnerException);
+        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
+            Assert.DoesNotContain(secret, failure.ToString() + failure.SanitizedResponseBody, StringComparison.Ordinal);
+        Assert.Empty(runner.Invocations);
+        Assert.Equal(1, handler.Calls);
     }
 
     [Fact]
@@ -268,12 +304,17 @@ public sealed class ClaudeCliLlmClientTests
         }
     }
 
-    private sealed class UnexpectedHttpHandler : HttpMessageHandler
+    private sealed class UnexpectedHttpHandler(Func<HttpRequestMessage, HttpResponseMessage>? respond = null) : HttpMessageHandler
     {
+        internal int Calls { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
-            CancellationToken cancellationToken) =>
-            throw new InvalidOperationException("OAuth prompt unexpectedly used HTTP.");
+            CancellationToken cancellationToken)
+        {
+            Calls++;
+            return respond is null ? throw new InvalidOperationException("OAuth prompt unexpectedly used HTTP.")
+                : Task.FromResult(respond(request));
+        }
     }
 
     private sealed class NoSessionProcesses : IClaudeCliSessionProcessFactory

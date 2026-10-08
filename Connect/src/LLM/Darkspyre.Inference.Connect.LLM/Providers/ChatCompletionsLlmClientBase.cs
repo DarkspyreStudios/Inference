@@ -79,10 +79,20 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             using var request = new HttpRequestMessage(HttpMethod.Get, ProviderHttp.BuildUri(connection, "key"));
             ProviderHttp.ApplyHeaders(request, connection);
             using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-            await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, LlmCredential.Parse(connection.Credential),
-                "OpenRouter key usage", request.Headers.SelectMany(header => header.Value), cancellationToken);
-            using JsonDocument document = await JsonDocument.ParseAsync(await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken), cancellationToken: cancellationToken);
-            result = OpenRouterAccountUsageParser.Parse(document.RootElement, DateTimeOffset.UtcNow, LlmCredential.Parse(connection.Credential));
+            LlmCredential? credential = LlmCredential.Parse(connection.Credential);
+            string[] secrets = request.Headers.SelectMany(header => header.Value).ToArray();
+            await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, credential,
+                "OpenRouter key usage", secrets, cancellationToken);
+            try
+            {
+                using JsonDocument document = await JsonDocument.ParseAsync(await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken), cancellationToken: cancellationToken);
+                result = OpenRouterAccountUsageParser.Parse(document.RootElement, DateTimeOffset.UtcNow, credential);
+            }
+            catch (JsonException error)
+            {
+                throw ProtocolException("OpenRouter key usage returned invalid JSON.", response,
+                    string.Empty, credential, error, secrets);
+            }
         }
         return consumption.Publish(result);
     }
