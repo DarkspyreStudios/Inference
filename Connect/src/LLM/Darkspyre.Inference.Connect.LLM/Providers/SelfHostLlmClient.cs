@@ -66,6 +66,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         var capabilities = ToConnect(await engine.GetCapabilitiesAsync(request.ModelId, cancellationToken).ConfigureAwait(false));
         LlmClientBase.ValidateSampling(request, capabilities);
         LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
+        LlmClientBase.ValidateOutputLimit(request, capabilities);
         HostedTools.Validate(request, capabilities);
         ClientTools.Validate(request, capabilities.SupportsShellTools);
         await foreach (CommonLlm.LlmStreamEvent item in engine.StreamAsync(ToCommon(request), cancellationToken).ConfigureAwait(false))

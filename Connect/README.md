@@ -4565,6 +4565,11 @@ capability result before enumerating its stream. Nonmutating accounting validate
 against one synchronous host capability snapshot without acquiring or running an engine.
 An unsupported explicit level fails with `InvalidRequest`; accepted and omitted levels retain their
 original values in the Common request. Both paths use the shared reasoning admission validator.
+The shared sampling validator checks temperature support and finiteness for both SelfHost paths.
+Accounting reports an unsupported temperature request as unsupported instead of producing a text
+estimate. Generation uses the same output-limit validator as the HTTP adapters before calling the
+engine stream. `Unsupported` refuses an explicit cap; `Unknown` permits an attempt without changing
+the enforcement fact. Accepted temperature and output-cap values pass unchanged to Common.
 
 Agent sessions run on the managed agent lane, which executes host tools; context estimates count the
 request text with Connect's local tokenizer. Binary prompt attachments, structured tool content and

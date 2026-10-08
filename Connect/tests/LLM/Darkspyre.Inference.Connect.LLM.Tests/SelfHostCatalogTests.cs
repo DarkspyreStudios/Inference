@@ -11,6 +11,62 @@ public sealed class SelfHostCatalogTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task TemperatureAdmissionUsesTheEngineSupportFlag(bool supported)
+    {
+        var engine = new Engine { Capabilities = new() { SupportsTemperature = supported } };
+        await using var service = new LlmProviderService(new Source(), [new SelfHostLlmClient(new Host(engine))]);
+        ILlmInference inference = service.Bind("connection");
+        LlmRequestAccounting measurement = await service.MeasureRequestAsync("connection", new()
+        { ModelId = "model", Messages = [new("user", "hello")], Temperature = 0.4 });
+        Assert.Equal(supported, measurement.IsSupported);
+        Assert.Null(engine.LastRequest);
+        if (!supported)
+        {
+            Assert.Null(measurement.UsedContextTokens);
+            InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() => inference.CompleteAsync(new()
+            { ModelId = "model", Messages = [new("user", "hello")], Temperature = 0.4 }));
+            Assert.Equal(InferenceFailureCode.UnsupportedFeature, failure.Code);
+            Assert.Null(engine.LastRequest);
+        }
+        LlmInferenceResult result = await inference.CompleteAsync(new()
+        { ModelId = "model", Messages = [new("user", "hello")], Temperature = supported ? 0.4 : null });
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("engine answer", result.Text);
+        Assert.Equal(supported ? 0.4 : (double?)null, engine.LastRequest!.Temperature);
+    }
+
+    [Theory]
+    [InlineData(LlmOutputLimitEnforcement.Unsupported)]
+    [InlineData(LlmOutputLimitEnforcement.Unknown)]
+    [InlineData(LlmOutputLimitEnforcement.ProviderEnforced)]
+    public async Task OutputCapAdmissionPreservesTheEngineEnforcementFact(LlmOutputLimitEnforcement enforcement)
+    {
+        var engine = new Engine { Capabilities = new() { OutputLimitEnforcement = enforcement } };
+        await using var service = new LlmProviderService(new Source(), [new SelfHostLlmClient(new Host(engine))]);
+        ILlmInference inference = service.Bind("connection");
+        bool supported = enforcement != LlmOutputLimitEnforcement.Unsupported;
+        LlmRequestAccounting measurement = await service.MeasureRequestAsync("connection", new()
+        { ModelId = "model", Messages = [new("user", "hello")], MaxOutputTokens = 16 });
+        Assert.Equal(supported, measurement.IsSupported);
+        Assert.Equal(enforcement, measurement.OutputLimitEnforcement);
+        Assert.Null(engine.LastRequest);
+        if (!supported)
+        {
+            InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() => inference.CompleteAsync(new()
+            { ModelId = "model", Messages = [new("user", "hello")], MaxOutputTokens = 16 }));
+            Assert.Equal(InferenceFailureCode.UnsupportedFeature, failure.Code);
+            Assert.Null(engine.LastRequest);
+        }
+        LlmInferenceResult result = await inference.CompleteAsync(new()
+        { ModelId = "model", Messages = [new("user", "hello")], MaxOutputTokens = supported ? 16 : null });
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("engine answer", result.Text);
+        Assert.Equal(supported ? 16 : (int?)null, engine.LastRequest!.MaxOutputTokens);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task UnsupportedReasoningRefusesBeforeGenerationOrAccounting(bool accounting)
     {
         var engine = new Engine
