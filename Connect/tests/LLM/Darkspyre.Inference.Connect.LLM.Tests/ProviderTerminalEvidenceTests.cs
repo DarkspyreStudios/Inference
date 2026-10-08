@@ -1003,6 +1003,32 @@ public sealed class ProviderTerminalEvidenceTests
             : CheckOriginalSchemaValidation(JsonElement.Parse(schema.ToJsonString()), validOutput: true, "1");
     }
 
+    [Theory]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "{\"relative-vocabulary\":false}", true)]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "{\"http://[\":true}", true)]
+    [InlineData("http://json-schema.org/draft-07/schema#", "{\"relative-vocabulary\":false}", false)]
+    [InlineData("http://json-schema.org/draft-07/schema#", "{\"http://[\":true}", false)]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "{\"urn:example:custom\":false}", false)]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "{\"https://schemas.example.test/custom\":false}", false)]
+    public Task GrokVocabularyIdentityShapeFollowsDeclaredDialect(string dialect, string vocabulary, bool malformed)
+    {
+        var schema = new JsonObject { ["$schema"] = dialect, ["type"] = "object", ["$vocabulary"] = JsonNode.Parse(vocabulary) };
+        return malformed ? CheckInvalidSchemaAdmission(schema.ToJsonString())
+            : CheckOriginalSchemaValidation(JsonElement.Parse(schema.ToJsonString()), validOutput: true, "1");
+    }
+
+    [Theory]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "[]", true, false)]
+    [InlineData("http://json-schema.org/draft-07/schema#", "[]", false, false)]
+    [InlineData("https://json-schema.org/draft/2020-12/schema", "[{}]", false, true)]
+    public Task GrokPrefixItemsShapeFollowsDeclaredDialect(string dialect, string prefix, bool malformed, bool guaranteed)
+    {
+        var schema = new JsonObject { ["$schema"] = dialect, ["type"] = "object", ["prefixItems"] = JsonNode.Parse(prefix) };
+        if (malformed) return CheckInvalidSchemaAdmission(schema.ToJsonString());
+        return guaranteed ? CheckReferenceAdmission(JsonElement.Parse(schema.ToJsonString()), guaranteed: true)
+            : CheckOriginalSchemaValidation(JsonElement.Parse(schema.ToJsonString()), validOutput: true, "1");
+    }
+
     private static async Task CheckOriginalSchemaValidation(JsonElement schema, bool validOutput, string outputValue)
     {
         JsonNode body = JsonNode.Parse("""

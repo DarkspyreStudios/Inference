@@ -3348,6 +3348,10 @@ Explicit Draft-07 admission does not interpret `$defs`, newer applicators, ancho
 declarations or `deprecated` payloads as that draft's keyword shapes. Explicit Draft 2020-12 does
 not interpret retired `additionalItems` or `dependencies` payloads as active keywords. These names
 remain outside native guarantees, and their literal payloads are not traversed as schemas.
+Active vocabulary names must parse as absolute URIs, and active `prefixItems` arrays must be nonempty,
+as specified by [Draft 2020-12 Core](https://json-schema.org/draft/2020-12/json-schema-core).
+Invalid shapes use the existing invalid-keyword error before dispatch, including with local validation
+selected. This check does not normalize vocabulary names or interpret their declarations.
 Draft-07 `dependencies` validates property-dependency arrays and indexes schema dependencies through
 the same position-aware worklist. Dependencies remain outside native guarantees. Unknown declared
 dialects remain unproven without applying a known dialect's keyword-container shapes. This boundary

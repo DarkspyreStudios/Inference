@@ -112,7 +112,8 @@ internal static class XaiSchemaLimits
                 return value.ValueKind == JsonValueKind.Object && value.EnumerateObject().All(dependency => UniqueStrings(dependency.Value))
                         ? SchemaDisposition.OutsideGuarantee : SchemaDisposition.InvalidSchema;
             case "$vocabulary":
-                return value.ValueKind == JsonValueKind.Object && value.EnumerateObject().All(vocabulary => vocabulary.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
+                return value.ValueKind == JsonValueKind.Object && value.EnumerateObject().All(vocabulary =>
+                    Uri.TryCreate(vocabulary.Name, UriKind.Absolute, out _) && vocabulary.Value.ValueKind is JsonValueKind.True or JsonValueKind.False)
                         ? SchemaDisposition.OutsideGuarantee : SchemaDisposition.InvalidSchema;
             case "minimum":
             case "maximum":
@@ -145,6 +146,8 @@ internal static class XaiSchemaLimits
                     : DisjointTypes(value) ? SchemaDisposition.Guaranteed : SchemaDisposition.OutsideGuarantee;
             case "items":
                 return value.ValueKind == JsonValueKind.Array ? SchemaDisposition.ProviderRejected : SchemaDisposition.Guaranteed;
+            case "prefixItems":
+                return value.GetArrayLength() == 0 ? SchemaDisposition.InvalidSchema : SchemaDisposition.Guaranteed;
             case "$schema":
             case "$id":
             case "$anchor":
@@ -166,7 +169,6 @@ internal static class XaiSchemaLimits
             case "$defs":
             case "definitions":
             case "additionalProperties":
-            case "prefixItems":
                 return SchemaDisposition.Guaranteed;
             case "$dynamicRef":
                 return value.ValueKind == JsonValueKind.String ? SchemaDisposition.OutsideGuarantee : SchemaDisposition.InvalidSchema;
