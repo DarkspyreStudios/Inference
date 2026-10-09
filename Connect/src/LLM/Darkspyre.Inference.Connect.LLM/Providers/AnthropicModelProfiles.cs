@@ -13,7 +13,9 @@ internal enum AnthropicThinkingMode
     None,
     Adaptive,
     EffortOnly,
-    Budget
+    Budget,
+    /// <summary>No model observation identifies a thinking mode.</summary>
+    Unknown
 }
 
 /// <summary>How <see cref="LlmReasoningLevel.None"/> reaches a Claude model, or that the model has no such setting.</summary>
@@ -163,7 +165,7 @@ internal static class AnthropicModelProfiles
 
     /// <summary>A model with neither a catalog entry nor a family row offers no levels.</summary>
     private static readonly AnthropicModelProfile Unknown = new(
-        AnthropicThinkingMode.None, AnthropicNoneMapping.Unsupported, LlmReasoningEffort.Levels(),
+        AnthropicThinkingMode.Unknown, AnthropicNoneMapping.Disabled, LlmReasoningEffort.Levels(),
         AllowsSampling: InferenceSupport.Unknown, AllowsForcedToolChoice: true, SupportsStructuredOutputs: null,
         MaxInputTokens: null, MaxOutputTokens: null);
 
@@ -177,8 +179,14 @@ internal static class AnthropicModelProfiles
         if (catalogEntry is { ValueKind: JsonValueKind.Object } entry)
         {
             (AnthropicThinkingMode thinking, HashSet<LlmReasoningLevel> levels) = CatalogReasoning(entry);
-            AnthropicNoneMapping none = row?.NoneMapping ?? AnthropicNoneMapping.Unsupported;
-            if (none != AnthropicNoneMapping.Unsupported && levels.Count > 0)
+            if (thinking == AnthropicThinkingMode.Unknown && row is not null)
+            {
+                thinking = row.Thinking;
+                levels = [.. row.Levels];
+            }
+            AnthropicNoneMapping none = thinking == AnthropicThinkingMode.None
+                ? AnthropicNoneMapping.OmitThinking : row?.NoneMapping ?? AnthropicNoneMapping.Disabled;
+            if (row is not null && none != AnthropicNoneMapping.Unsupported && levels.Count > 0)
             {
                 levels.Add(LlmReasoningLevel.None);
             }
@@ -205,14 +213,43 @@ internal static class AnthropicModelProfiles
             { ThinksByDefault = row.ThinksByDefault, DisplayDefaultsToOmitted = row.DisplayDefaultsToOmitted };
     }
 
+    /// <summary>Maps caller effort through explicit Messages-native choices for the selected model.</summary>
+    public static LlmReasoningLevel? MapReasoning(AnthropicModelProfile profile, LlmReasoningLevel? requested)
+    {
+        if (requested is null) return null;
+        LlmReasoningLevel[] row = requested.Value switch
+        {
+            LlmReasoningLevel.None or LlmReasoningLevel.Minimal =>
+                [LlmReasoningLevel.None, LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.Low =>
+                [LlmReasoningLevel.Low, LlmReasoningLevel.None, LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.Medium =>
+                [LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.None, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.High =>
+                [LlmReasoningLevel.High, LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.None, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.ExtraHigh =>
+                [LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.High, LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.None, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.Maximum =>
+                [LlmReasoningLevel.Maximum, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.High, LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.None],
+            _ => throw new ArgumentOutOfRangeException(nameof(requested), requested, "Unknown reasoning level.")
+        };
+        foreach (LlmReasoningLevel native in row)
+        {
+            if (native == LlmReasoningLevel.None && profile.NoneMapping == AnthropicNoneMapping.Unsupported) continue;
+            if (profile.ReasoningLevels.Count == 0 || profile.ReasoningLevels.Contains(native)) return native;
+        }
+        throw new NotSupportedException("The selected Claude effort choices contain no mapped native effort.");
+    }
+
     /// <summary>
-    /// The fields a level or summary request adds. Validation has already confirmed the profile offers the level.
+    /// The fields a mapped level or summary request adds. Native effort choices stay in this adapter.
     /// <paramref name="maxOutputTokens"/> is the request's output allowance; a thinking budget is added to it so
     /// neither is reduced.
     /// </summary>
     public static AnthropicReasoningFields Fields(AnthropicModelProfile profile, LlmReasoningLevel? level,
         int maxOutputTokens, bool requestReasoningText)
     {
+        level = MapReasoning(profile, level);
         if (level is null)
         {
             return profile.ThinksByDefault && requestReasoningText
@@ -242,6 +279,8 @@ internal static class AnthropicModelProfiles
                 new JsonObject { ["type"] = "enabled", ["budget_tokens"] = Budgets[level.Value] },
                 null,
                 checked(maxOutputTokens + Budgets[level.Value])),
+            AnthropicThinkingMode.Unknown => new(
+                null, new JsonObject { ["effort"] = LlmReasoningEffort.Word(level.Value) }, null),
             _ => new(null, null, null)
         };
     }
@@ -285,9 +324,14 @@ internal static class AnthropicModelProfiles
         {
             return (AnthropicThinkingMode.Budget, [.. Budgets.Keys]);
         }
-        return Supported(entry, "capabilities", "effort") == true
-            ? (AnthropicThinkingMode.EffortOnly, EffortLevels(entry))
-            : (AnthropicThinkingMode.None, []);
+        if (Supported(entry, "capabilities", "effort") == true)
+            return (AnthropicThinkingMode.EffortOnly, EffortLevels(entry));
+        bool noThinking = Supported(entry, "capabilities", "thinking") == false
+            || Supported(entry, "capabilities", "thinking", "types", "adaptive") == false
+                && Supported(entry, "capabilities", "thinking", "types", "enabled") == false;
+        return noThinking && Supported(entry, "capabilities", "effort") == false
+            ? (AnthropicThinkingMode.None, [LlmReasoningLevel.None])
+            : (AnthropicThinkingMode.Unknown, []);
     }
 
     private static HashSet<LlmReasoningLevel> EffortLevels(JsonElement entry)

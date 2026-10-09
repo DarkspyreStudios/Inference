@@ -855,8 +855,8 @@ terminal format and the current Apple, Antigravity and Bedrock protocols report 
 level below it; a level does not cost the same on two different models. Null leaves the provider's
 default in place. Each model reports the levels it accepts in `LlmCapabilities.ReasoningLevels`, and
 `SupportsReasoning` is `Supported` when that set contains a level above `None`, `Unsupported` when
-it contains only `None`, and `Unknown` when the set is empty. Direct Codex and Claude CLI map desired
-effort inside their adapters. Other adapters currently reject a level outside their declared set with
+it contains only `None`, and `Unknown` when the set is empty. Direct Codex, Anthropic Messages and
+Claude CLI map desired effort inside their adapters. Other adapters currently reject a level outside their declared set with
 `InferenceFailureCode.InvalidRequest` before any provider call. Each adapter owns its provider's wire form.
 `LlmCapabilityOverrides.ReasoningLevels` replaces a transport's set for a connection or one model,
 and the setup editor exposes it as one Default/Enabled/Disabled choice per level. The design is
@@ -4536,6 +4536,21 @@ permits zero through 128. Nova accepts zero through the shared sampling validato
 retain its positive top-k requirement. Nova 1.0 classification adds no reasoning levels or fields.
 
 ### Reasoning
+
+`AnthropicModelProfiles.MapReasoning` owns explicit Messages-native choice rows. The selected model's
+effective native levels select the mapped value before thinking/tool-choice validation and payload
+projection. `ExtraHigh` maps down to `high` on the Claude 4.6 profile; `Maximum` maps to `high` on the
+effort-only Claude 4.5 profile. Budget models keep their existing token budgets and output allowance
+addition. `Minimal` maps to `None` when the profile permits disabling or omitting thinking; `None`
+and `Minimal` map to the lowest available positive effort on always-on models. Null leaves defaults
+unchanged. The mapping does not change the caller request, selected model or reported native choices.
+
+Missing model/catalog reasoning facts remain Unknown. An unknown positive effort uses the existing
+`output_config.effort` field without inventing a thinking mode. An explicit `None` attempts the
+existing `thinking.type = disabled` form. This is a native attempt, not a support claim. A catalog
+that explicitly reports both thinking and effort unsupported offers only `None`; positive requests
+map down to that native no-reasoning form. Missing facts never take that negative path. No shared
+rank/distance calculation runs.
 
 Direct API-key requests map a reasoning level per model. Current models take
 `thinking: {type: "adaptive"}` with `output_config.effort` (`low`, `medium`, `high`, `xhigh`, `max`),

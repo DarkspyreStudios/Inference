@@ -11,6 +11,89 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class AnthropicAdmissionTests
 {
+    [Theory]
+    [InlineData("claude-opus-4-6", LlmReasoningLevel.ExtraHigh, "adaptive", "high", null)]
+    [InlineData("claude-opus-4-5", LlmReasoningLevel.Maximum, null, "high", null)]
+    [InlineData("claude-haiku-4-5", LlmReasoningLevel.High, "enabled", null, 16384)]
+    [InlineData("claude-haiku-4-5", LlmReasoningLevel.Minimal, null, null, null)]
+    [InlineData("claude-sonnet-5-5", LlmReasoningLevel.None, "adaptive", "low", null)]
+    [InlineData("unfamiliar-claude-model", LlmReasoningLevel.High, null, "high", null)]
+    [InlineData("unfamiliar-claude-model", LlmReasoningLevel.None, "disabled", null, null)]
+    public async Task MessagesAdapterMapsEffortIntoItsNativeFormWithoutChangingCallerIntent(
+        string model, LlmReasoningLevel effort, string? thinkingType, string? effortWord, int? budget)
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        var request = new LlmChatRequest
+        { ModelId = model, Messages = [new("user", "answer")], ReasoningLevel = effort, MaxOutputTokens = 123 };
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(Connection(), request)) { }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement payload = sent.RootElement;
+        Assert.Equal(model, payload.GetProperty("model").GetString());
+        Assert.Equal(thinkingType is not null, payload.TryGetProperty("thinking", out JsonElement thinking));
+        if (thinkingType is not null) Assert.Equal(thinkingType, thinking.GetProperty("type").GetString());
+        bool hasEffort = payload.TryGetProperty("output_config", out JsonElement config)
+            && config.TryGetProperty("effort", out _);
+        Assert.Equal(effortWord is not null, hasEffort);
+        if (effortWord is not null) Assert.Equal(effortWord, config.GetProperty("effort").GetString());
+        if (budget is not null) Assert.Equal(budget, thinking.GetProperty("budget_tokens").GetInt32());
+        Assert.Equal(123 + (budget ?? 0), payload.GetProperty("max_tokens").GetInt32());
+        Assert.Equal(effort, request.ReasoningLevel);
+        Assert.Equal(123, request.MaxOutputTokens);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task MessagesCatalogSeparatesMissingEffortFactsFromAnExplicitNoReasoningFact(bool negative)
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        LlmConnection connection = Connection() with
+        {
+            Catalog = [new("unfamiliar-claude-model", "Model")
+            { CatalogEntry = JsonElement.Parse(negative
+                ? """{"capabilities":{"thinking":{"supported":false},"effort":{"supported":false}}}"""
+                : """{"id":"unfamiliar-claude-model"}""") }]
+        };
+        var request = new LlmChatRequest
+        { ModelId = "unfamiliar-claude-model", Messages = [new("user", "answer")], ReasoningLevel = LlmReasoningLevel.Maximum };
+        Assert.Equal(negative ? InferenceSupport.Unsupported : InferenceSupport.Unknown,
+            client.GetCapabilities(connection, request.ModelId).SupportsReasoning);
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        bool hasEffort = sent.RootElement.TryGetProperty("output_config", out JsonElement config)
+            && config.TryGetProperty("effort", out _);
+        Assert.Equal(!negative, hasEffort);
+        if (!negative) Assert.Equal("max", config.GetProperty("effort").GetString());
+        Assert.False(sent.RootElement.TryGetProperty("thinking", out _));
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task MessagesReasoningUsesTheEffectiveCallerNativeChoices()
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        LlmConnection connection = Connection() with
+        { CapabilityOverrides = Connection().CapabilityOverrides! with { ReasoningLevels = LlmReasoningEffort.Levels(LlmReasoningLevel.Low) } };
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, new()
+        { ModelId = "claude-opus-5-5", Messages = [new("user", "answer")], ReasoningLevel = LlmReasoningLevel.Maximum })) { }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        Assert.Equal("low", sent.RootElement.GetProperty("output_config").GetProperty("effort").GetString());
+        Assert.Equal(1, handler.Calls);
+    }
+
     [Fact]
     public void UnknownAnnotationsDoNotDisableKnownConstraintValidation()
     {

@@ -121,7 +121,9 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities, AnthropicTools.Resolve(connection, request).NativeNames);
         AnthropicModelProfile profile = AnthropicModelProfiles.Resolve(
-            ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId));
+            ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId))
+            with { ReasoningLevels = capabilities.ReasoningLevels };
+        request = request with { ReasoningLevel = AnthropicModelProfiles.MapReasoning(profile, request.ReasoningLevel) };
         // First-party post-4.6 models accept these defaults without offering controllable sampling.
         LlmChatRequest samplingRequest = Transport == LlmTransport.AnthropicMessages
             && profile.AllowsSampling == InferenceSupport.Unsupported
@@ -135,6 +137,11 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         LlmStructuredOutputEnforcement? enforcement = AnthropicSchemas.Enforcement(request, capabilities);
         return (capabilities, enforcement);
     }
+
+    protected override void ValidateReasoningRequest(LlmConnection connection, LlmChatRequest request,
+        LlmProviderCapabilities capabilities) => _ = AnthropicModelProfiles.MapReasoning(
+            AnthropicModelProfiles.Resolve(ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId))
+                with { ReasoningLevels = capabilities.ReasoningLevels }, request.ReasoningLevel);
 
     public string? EstimateDiagnostic =>
         "Estimated from the Messages plaintext projection with a general-purpose tokenizer; media and opaque provider state remain unknown.";
@@ -840,7 +847,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         AnthropicReasoningFields fields = AnthropicModelProfiles.Fields(
             AnthropicModelProfiles.Resolve(
                 ReasoningModelId(request.ModelId),
-                ILlmCatalogCapabilities.EntryFor(connection, request.ModelId)),
+                ILlmCatalogCapabilities.EntryFor(connection, request.ModelId))
+                with { ReasoningLevels = GetCapabilities(connection, request.ModelId).ReasoningLevels },
             request.ReasoningLevel,
             request.MaxOutputTokens ?? DefaultMaxOutputTokens,
             (GetCapabilities(connection, request.ModelId).SupportsReasoningText != InferenceSupport.Unsupported));
