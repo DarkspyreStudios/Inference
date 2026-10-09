@@ -82,13 +82,14 @@ public sealed class ProviderStreamFailureTests
     /// <summary>Only a broken HTTP body or premature valid SSE EOF receives the interruption classification.</summary>
     [Theory]
     [InlineData("http")]
+    [InlineData("io")]
     [InlineData("eof")]
     [InlineData("malformed")]
     public async Task ResponsesClassifiesOnlyInterruptedBodyReads(string kind)
     {
         const string partial = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n";
-        using MemoryStream body = kind == "http"
-            ? new BrokenResponseBody(System.Text.Encoding.UTF8.GetBytes(partial))
+        using MemoryStream body = kind is "http" or "io"
+            ? new BrokenResponseBody(System.Text.Encoding.UTF8.GetBytes(partial), kind == "io")
             : new MemoryStream(System.Text.Encoding.UTF8.GetBytes(kind == "eof" ? partial : "data: {invalid-json}\n\n"));
         using var handler = new ResponseHandler(body);
         using var http = new HttpClient(handler);
@@ -110,14 +111,17 @@ public sealed class ProviderStreamFailureTests
             Assert.Equal(HttpStatusCode.OK, failure.StatusCode);
         }
         if (kind == "http") Assert.IsType<HttpIOException>(failure.InnerException);
+        if (kind == "io") Assert.IsType<IOException>(failure.InnerException);
     }
 
-    private sealed class BrokenResponseBody(byte[] bytes) : MemoryStream(bytes)
+    private sealed class BrokenResponseBody(byte[] bytes, bool plainIoFailure) : MemoryStream(bytes)
     {
-        /// <summary>Returns the partial body, then reports a premature HTTP response end.</summary>
+        /// <summary>Returns the partial body, then reports an HTTP or TLS response read failure.</summary>
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
             Position == Length
-                ? ValueTask.FromException<int>(new HttpIOException(HttpRequestError.ResponseEnded, "The HTTP response ended prematurely."))
+                ? ValueTask.FromException<int>(plainIoFailure
+                    ? new IOException("The TLS response read failed.")
+                    : new HttpIOException(HttpRequestError.ResponseEnded, "The HTTP response ended prematurely."))
                 : base.ReadAsync(buffer, cancellationToken);
     }
 

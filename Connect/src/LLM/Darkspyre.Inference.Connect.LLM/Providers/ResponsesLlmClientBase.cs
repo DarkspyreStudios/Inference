@@ -300,7 +300,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         {
             bool moved;
             try { moved = await data.MoveNextAsync().ConfigureAwait(false); }
-            catch (HttpIOException error) when (!cancellationToken.IsCancellationRequested)
+            catch (IOException error) when (!cancellationToken.IsCancellationRequested)
             {
                 throw new LlmProviderException("The model response stream was interrupted.", Transport,
                     statusCode: response.StatusCode, innerException: error, isResponseStreamInterrupted: true);

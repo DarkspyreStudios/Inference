@@ -3005,8 +3005,8 @@ Express mode counts Gemini input with its projectless API-key endpoint.
 ### Host-owned managed agent runtime
 
 [DSA-905](https://darkspyre.atlassian.net/browse/DSA-905) recovers interrupted Responses model steps.
-A streamed HTTP body read that throws `HttpIOException`, or valid SSE that ends without a terminal
-response, carries `LlmProviderException.IsResponseStreamInterrupted`. Provider rejection, malformed
+A streamed HTTP body read that throws `IOException` (including `HttpIOException`), or valid SSE
+that ends without a terminal response, carries `LlmProviderException.IsResponseStreamInterrupted`. Provider rejection, malformed
 content, resource-cleanup failures and native CLI failures do not receive this classification.
 The managed runtime retries only the current uncommitted model request, with three total attempts
 and cancellable waits of one and two seconds. Completed application tools and their results remain
