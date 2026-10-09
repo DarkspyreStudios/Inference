@@ -85,15 +85,14 @@ internal static class RichContentRoutes
         AllowsEmpty = InferenceSupport.Unsupported
     };
 
-    /// <summary>Gemini 3 functionResponse media referenced by nested inlineData display names.</summary>
+    /// <summary>Gemini functionResponse media referenced by nested inlineData display names.</summary>
     public static LlmRichContentSupported GeminiFunctionResponse { get; } = TextOnly with
     {
         Images = LlmRichContentCarriage.Native,
         ImageMediaTypes = new[] { "image/png", "image/jpeg", "image/webp" }.ToFrozenSet(StringComparer.Ordinal),
         PdfDocuments = LlmRichContentCarriage.Native,
         ErrorFlag = LlmRichContentCarriage.Native,
-        PreservesOrder = InferenceSupport.Unsupported,
-        MaxBinaryBytes = 7 * 1024 * 1024
+        PreservesOrder = InferenceSupport.Unsupported
     };
 
     /// <summary>

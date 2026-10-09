@@ -12,6 +12,82 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class GeminiAdmissionTests
 {
+    [Theory]
+    [InlineData(false, "gemini-unfamiliar")]
+    [InlineData(true, "gemini-unfamiliar")]
+    [InlineData(false, "gemini-3-flash-preview")]
+    [InlineData(true, "gemini-3-flash-preview")]
+    public async Task NativeToolMediaIsNotOmittedForMissingModelFactsOrAnUnevidencedSizeLimit(bool vertex, string model)
+    {
+        // This real tool-result size crosses the removed 7 MiB cutoff.
+        var pdf = new byte[7 * 1024 * 1024 + 1];
+        "%PDF-"u8.CopyTo(pdf);
+        byte[] png = [0x89, 0x50, 0x4e, 0x47];
+        var output = new LlmToolOutput
+        {
+            Parts = [new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", png, "chart.png"),
+                new LlmToolOutputBinary(LlmBinaryKind.Document, "application/pdf", pdf, "report.pdf")]
+        };
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = (LlmClientBase)Client(http, vertex);
+        LlmConnection connection = Connection(vertex);
+        string modelId = vertex ? "google/" + model : model;
+        Assert.Equal(model == "gemini-unfamiliar" ? InferenceSupport.Unknown : InferenceSupport.Supported,
+            GeminiModelProfiles.Get(model, null).MultimodalFunctionResponses);
+        ProjectedToolOutput projected = client.ProjectToolOutput(connection, modelId, output);
+        Assert.All(projected.Report.Parts, part => Assert.Equal(LlmToolPartDelivery.Delivered, part.Delivery));
+        var request = new LlmChatRequest
+        {
+            ModelId = modelId, UnboundContinuationState = LlmUnboundContinuationState.Omit,
+            Messages = [new("user", "read the files"),
+                new("assistant", "") { ToolCalls = [new LlmToolCall("call", "files", "{}")] },
+                new("user", "") { ToolResults = [new LlmToolResult("call", output)] }]
+        };
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement function = sent.RootElement.GetProperty("contents")[2].GetProperty("parts")[0].GetProperty("functionResponse");
+        JsonElement references = function.GetProperty("response").GetProperty("attachments");
+        JsonElement parts = function.GetProperty("parts");
+        Assert.Equal(2, parts.GetArrayLength());
+        Assert.Equal("image/png", parts[0].GetProperty("inlineData").GetProperty("mimeType").GetString());
+        Assert.Equal(Convert.ToBase64String(png), parts[0].GetProperty("inlineData").GetProperty("data").GetString());
+        Assert.Equal("application/pdf", parts[1].GetProperty("inlineData").GetProperty("mimeType").GetString());
+        Assert.Equal(Convert.ToBase64String(pdf), parts[1].GetProperty("inlineData").GetProperty("data").GetString());
+        for (int index = 0; index < parts.GetArrayLength(); index++)
+            Assert.Equal(parts[index].GetProperty("inlineData").GetProperty("displayName").GetString(), references[index].GetProperty("$ref").GetString());
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ExplicitToolMediaRestrictionsRemainEffective(bool vertex)
+    {
+        using var http = new HttpClient();
+        var client = (LlmClientBase)Client(http, vertex);
+        LlmConnection connection = Connection(vertex);
+        var output = new LlmToolOutput
+        { Parts = [new LlmToolOutputBinary(LlmBinaryKind.Document, "application/pdf", "%PDF-"u8.ToArray(), "report.pdf")] };
+        string modelId = vertex ? "google/gemini-unfamiliar" : "gemini-unfamiliar";
+        ProjectedToolOutput disabled = client.ProjectToolOutput(connection with
+        { CapabilityOverrides = connection.CapabilityOverrides! with { SupportsToolResultDocuments = InferenceSupport.Unsupported } }, modelId, output);
+        Assert.Equal(LlmToolPartOmission.UnsupportedByRoute, Assert.Single(disabled.Report.Parts).Omission);
+        Assert.Empty(disabled.Parts);
+
+        LlmRichContentSupported route = client.GetCapabilities(connection, modelId).RichContentSupported;
+        ProjectedToolOutput limited = ToolOutputProjector.Project(output, route, route with { MaxBinaryBytes = 4 });
+        Assert.Equal(LlmToolPartOmission.InvalidContent, Assert.Single(limited.Report.Parts).Omission);
+        Assert.Empty(limited.Parts);
+
+        string olderModel = vertex ? "google/gemini-2.5-flash" : "gemini-2.5-flash";
+        ProjectedToolOutput unsupported = client.ProjectToolOutput(connection, olderModel, output);
+        Assert.Equal(LlmToolPartOmission.UnsupportedByModel, Assert.Single(unsupported.Report.Parts).Omission);
+        Assert.Empty(unsupported.Parts);
+    }
+
     [Fact]
     public async Task GenerateContentCatalogEntriesDoNotRequireTheGeminiBrandPrefix()
     {

@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
@@ -20,7 +21,7 @@ internal sealed record GeminiModelProfile(
     IReadOnlyDictionary<LlmReasoningLevel, int> Budgets)
 {
     public bool AllowsSampling { get; init; } = true;
-    public bool MultimodalFunctionResponses { get; init; }
+    public InferenceSupport MultimodalFunctionResponses { get; init; }
     public bool RequiresThoughtSignatures { get; init; }
     public bool StreamedFunctionArguments { get; init; }
 }
@@ -88,7 +89,11 @@ internal static class GeminiModelProfiles
         return resolved with
         {
             AllowsSampling = !ignoredSampling,
-            MultimodalFunctionResponses = gemini3,
+            MultimodalFunctionResponses = gemini3 ? InferenceSupport.Supported
+                : bareModelId.StartsWith("gemini-2.5-", StringComparison.Ordinal)
+                    || bareModelId.StartsWith("gemini-2.0-", StringComparison.Ordinal)
+                    || bareModelId.StartsWith("gemini-1.5-", StringComparison.Ordinal)
+                    ? InferenceSupport.Unsupported : InferenceSupport.Unknown,
             RequiresThoughtSignatures = gemini3,
             StreamedFunctionArguments = gemini3 && !bareModelId.StartsWith("gemini-3.1-flash-lite", StringComparison.Ordinal)
         };

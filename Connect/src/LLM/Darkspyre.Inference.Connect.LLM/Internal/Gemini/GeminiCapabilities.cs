@@ -9,7 +9,7 @@ internal static class GeminiCapabilities
 {
     public static LlmProviderCapabilities Create(GeminiModelProfile profile, InferenceSupport supportsTopK)
     {
-        LlmRichContentSupported rich = profile.MultimodalFunctionResponses ? RichContentRoutes.GeminiFunctionResponse
+        LlmRichContentSupported rich = profile.MultimodalFunctionResponses != InferenceSupport.Unsupported ? RichContentRoutes.GeminiFunctionResponse
             : RichContentRoutes.TextOnly with { ErrorFlag = LlmRichContentCarriage.Native };
         return new()
         {

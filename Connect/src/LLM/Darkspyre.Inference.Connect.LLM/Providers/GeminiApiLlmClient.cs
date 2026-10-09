@@ -34,7 +34,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     {
         Validate(connection);
         GeminiModelProfile profile = modelId is null
-            ? GeminiModelProfiles.Get(string.Empty, null) with { MultimodalFunctionResponses = true }
+            ? GeminiModelProfiles.Get(string.Empty, null)
             : Reasoning(connection, modelId);
         InferenceSupport supportsTopK = modelId is not null && ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } entry
             ? entry.TryGetProperty("topK", out JsonElement topK) && topK.ValueKind == JsonValueKind.Number

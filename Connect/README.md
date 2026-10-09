@@ -2887,9 +2887,15 @@ Gemini API and Vertex Gemini accept visible foreign tool-call groups with explic
 places the documented dummy thought signature on the first imported call; original bound native
 signatures remain unchanged. A function call with omitted arguments exposes typed `{}` arguments;
 its native continuation keeps the omission. Explicit null, array or scalar arguments are rejected.
-Tool results follow their original call order. Gemini 3 carries PNG,
-JPEG, WebP and PDF tool results as nested function-response media, bounded at 7 MiB per binary.
-Earlier Gemini models omit those unsupported binary results through the existing projection report.
+Tool results follow their original call order. The shared Gemini serializer carries PNG,
+JPEG, WebP and PDF tool results as nested function-response media. The adapter has no known per-binary
+size limit for this field. Explicit caller projection limits still apply. Gemini 3 model profiles
+support this path. The documented pre-3 Gemini 1.5, 2.0 and 2.5 families omit binary function responses
+through the projection report. Unfamiliar model profiles retain Unknown support and attempt the existing
+media path; this carriage describes serialization, not verified provider acceptance. Gemini API's
+[function-calling guide](https://ai.google.dev/gemini-api/docs/generate-content/function-calling?hl=en)
+and Vertex's [function-calling guide](https://docs.cloud.google.com/vertex-ai/generative-ai/docs/multimodal/function-calling)
+document the native model scope and MIME types separately.
 Vertex's supported Gemini 3 streaming profiles request preview path-based function arguments and
 emit the tool name early. They retain complete reconstructed calls for replay; the route does not
 advertise JSON-text argument streaming. Gemini API and non-streaming requests do not send that flag.
