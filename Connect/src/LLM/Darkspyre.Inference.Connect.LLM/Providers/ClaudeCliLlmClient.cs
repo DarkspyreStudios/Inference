@@ -668,6 +668,10 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     public string? EstimateDiagnostic => LocalTokenCount.CliDiagnostic;
 
     /// <summary>Counts the prompt this client would send. Attachment content is not countable here.</summary>
+    // Claude's tokenizer counts more tokens than the local one. On a real 321-entry session history, Haiku 5.5, Sonnet 5.5
+    // and Opus 5.5 each charged 1.50 input tokens per locally counted token (measured through this CLI, 2026-10-09).
+    private const double ClaudeTokensPerLocalToken = 1.5;
+
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
         // Another provider's continuation state is never sent to the CLI: an agent opening drops it, and chat refuses it
@@ -693,7 +697,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                         _ => 0,
                     };
         }
-        return new ContextEstimate(LocalTokenCount.Count(BuildClaudePrompt(connection, request)) + attachments);
+        long text = (long)Math.Ceiling(LocalTokenCount.Count(BuildClaudePrompt(connection, request)) * ClaudeTokensPerLocalToken);
+        return new ContextEstimate(text + attachments);
     }
 
     private string BuildClaudePrompt(LlmConnection connection, LlmChatRequest request)
