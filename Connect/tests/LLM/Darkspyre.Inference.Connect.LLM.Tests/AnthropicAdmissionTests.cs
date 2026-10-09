@@ -12,6 +12,48 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class AnthropicAdmissionTests
 {
     [Fact]
+    public async Task FirstPartyDeprecatedSamplingDefaultsReachTheProviderWithDefaultThinking()
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        var request = new LlmChatRequest
+        { ModelId = "claude-opus-5-5", Messages = [new("user", "answer")], Temperature = 1, TopP = 0.99 };
+        Assert.Equal(InferenceSupport.Unknown, client.GetCapabilities(Connection(), request.ModelId).SupportsTemperature);
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(Connection(), request)) { }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        Assert.Equal(1, sent.RootElement.GetProperty("temperature").GetDouble());
+        Assert.Equal(0.99, sent.RootElement.GetProperty("top_p").GetDouble());
+        Assert.Equal("adaptive", sent.RootElement.GetProperty("thinking").GetProperty("type").GetString());
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(0.7, null, null, false)]
+    [InlineData(null, 0.98, null, false)]
+    [InlineData(null, null, 1, false)]
+    [InlineData(1.0, null, null, true)]
+    public async Task KnownSamplingRestrictionsAndExplicitCallerDenialStillRejectBeforeSending(
+        double? temperature, double? topP, int? topK, bool callerDenial)
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        LlmConnection connection = Connection();
+        if (callerDenial) connection = connection with
+        { CapabilityOverrides = connection.CapabilityOverrides! with { SupportsTemperature = InferenceSupport.Unsupported } };
+        var request = new LlmChatRequest
+        { ModelId = "claude-opus-5-5", Messages = [new("user", "answer")], Temperature = temperature, TopP = topP, TopK = topK };
+
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        { await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { } });
+
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
     public void UnqualifiedCodeExecutionDefinitionCanReplayItsProgrammaticCall()
     {
         var payload = JsonNode.Parse("""

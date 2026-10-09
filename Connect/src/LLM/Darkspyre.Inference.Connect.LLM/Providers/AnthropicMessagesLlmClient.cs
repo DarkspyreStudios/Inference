@@ -70,6 +70,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     {
         LlmProviderCapabilities capabilities = base.GetCapabilities(connection, modelId);
         AnthropicModelProfile profile = AnthropicModelProfiles.Resolve(modelId, ILlmCatalogCapabilities.EntryFor(connection, modelId));
+        InferenceSupport sampling = Transport == LlmTransport.AnthropicMessages
+            && profile.AllowsSampling == InferenceSupport.Unsupported ? InferenceSupport.Unknown : profile.AllowsSampling;
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         if (credential?.OAuth is not null || credential?.Aws is not null)
         {
@@ -92,12 +94,12 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 }
             },
             SupportsAccountUsage = InferenceSupport.Unsupported,
-            SupportsTemperature = LlmProviderCapabilities.Intersect(profile.AllowsSampling,
+            SupportsTemperature = LlmProviderCapabilities.Intersect(sampling,
                 LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTemperature)
-                    ? capabilities.SupportsTemperature : profile.AllowsSampling),
-            SupportsTopP = LlmProviderCapabilities.Intersect(profile.AllowsSampling,
+                    ? capabilities.SupportsTemperature : sampling),
+            SupportsTopP = LlmProviderCapabilities.Intersect(sampling,
                 LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTopP)
-                    ? capabilities.SupportsTopP : profile.AllowsSampling),
+                    ? capabilities.SupportsTopP : sampling),
             SupportsTopK = LlmProviderCapabilities.Intersect(profile.AllowsSampling,
                 LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTopK)
                     ? capabilities.SupportsTopK : profile.AllowsSampling),
@@ -118,8 +120,18 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities, AnthropicTools.Resolve(connection, request).NativeNames);
-        AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(
-            ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId)));
+        AnthropicModelProfile profile = AnthropicModelProfiles.Resolve(
+            ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId));
+        // First-party post-4.6 models accept these defaults without offering controllable sampling.
+        LlmChatRequest samplingRequest = Transport == LlmTransport.AnthropicMessages
+            && profile.AllowsSampling == InferenceSupport.Unsupported
+                ? request with
+                {
+                    Temperature = request.Temperature == 1 ? null : request.Temperature,
+                    TopP = request.TopP is >= 0.99 ? null : request.TopP
+                }
+                : request;
+        AnthropicModelProfiles.ValidateSampling(samplingRequest, profile);
         LlmStructuredOutputEnforcement? enforcement = AnthropicSchemas.Enforcement(request, capabilities);
         return (capabilities, enforcement);
     }

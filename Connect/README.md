@@ -4537,6 +4537,16 @@ the catalog lists but the family table does not know therefore gains its reporte
 a library change. Without a catalog entry, the family table alone applies. A model with neither accepts
 no level unless a capability override supplies the set.
 
+### Sampling Defaults
+
+First-party post-Opus-4.6 Messages models accept explicit `Temperature = 1` and `TopP >= 0.99`
+within the API's upper bound of 1. Connect sends those values unchanged, including with default
+thinking. Custom temperature, lower top-p and every top-k remain rejected for these known profiles,
+as the [Messages reference](https://platform.claude.com/docs/en/api/messages/create) documents.
+Temperature and top-p capability states remain `Unknown`, not a promise of controllable sampling.
+An explicit caller `Unsupported` override still blocks the field. Vertex and Bedrock do not inherit
+this first-party acceptance exception.
+
 ### Maximum output tokens
 
 For direct API-key requests, omitting `MaxOutputTokens` sends `max_tokens` of 8192. Adaptive thinking is on by default on current Claude models, and thinking tokens count against `max_tokens`, so a lower ceiling can truncate the response before visible text and return `LlmCompletionStatus.Incomplete`.
