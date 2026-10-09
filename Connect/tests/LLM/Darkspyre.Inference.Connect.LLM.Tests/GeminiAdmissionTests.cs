@@ -13,6 +13,31 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class GeminiAdmissionTests
 {
     [Theory]
+    [InlineData("image/heic")]
+    [InlineData("image/x-unreviewed")]
+    public async Task VertexPromptImagesDoNotRequireAnExhaustiveMimeQualificationList(string mime)
+    {
+        byte[] data = Convert.FromHexString("000000186674797068656963000000006d69663168656963");
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new VertexLlmClient(http, new VertexAuthenticationBoundary());
+        var request = new LlmChatRequest
+        {
+            ModelId = "google/gemini-3-flash-preview",
+            Messages = [new("user", "describe")
+            { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "photo.bin", Data = data, MediaType = mime }] }]
+        };
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(Connection(true), request)) { }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement inline = sent.RootElement.GetProperty("contents")[0].GetProperty("parts")[1].GetProperty("inlineData");
+        Assert.Equal(mime, inline.GetProperty("mimeType").GetString());
+        Assert.Equal(Convert.ToBase64String(data), inline.GetProperty("data").GetString());
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
     [InlineData("000000186674797068656963000000006d69663168656963", "image/heic", false)]
     [InlineData("000000186674797068656963000000006d69663168656963", "image/heic", true)]
     [InlineData("00000014667479706d696631000000006d696631", "image/heif", false)]

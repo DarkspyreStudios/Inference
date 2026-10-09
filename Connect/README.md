@@ -505,9 +505,11 @@ filename or scan outside that box. Detection does not widen another adapter's fo
 The Gemini API filter has no per-image 7 MiB limit; its
 [image guide](https://ai.google.dev/gemini-api/docs/generate-content/image-understanding) describes a
 total request limit, which the provider adjudicates. Connect does not upload or split an inline
-request automatically. Vertex retains its separate PNG/JPEG/WebP inline image filter and existing
-7 MiB cutoff. Its [inference reference](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/models/inference?hl=en)
-separately documents a 7 MB image bound; Connect does not apply that bound to Gemini API images.
+request automatically. Vertex permits `image/*` MIME values through its existing inline writer,
+including unverified formats. Its [inference reference](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/models/inference?hl=en)
+lists PNG/JPEG/WebP without establishing a negative for every omitted type. Gemini API's positive
+HEIC/HEIF evidence does not qualify Vertex. Vertex retains its existing 7 MiB cutoff; its reference
+documents a 7 MB image bound. Connect does not apply that bound to Gemini API images.
 Neither route applies that image bound to UTF-8 text documents. Their existing 50 MiB PDF bound
 remains separate. Gemini API cache-file staging uses the same prompt image MIME types. A resource
 also used in a tool result follows the narrower function-response MIME contract. The additional
