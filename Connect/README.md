@@ -4595,9 +4595,8 @@ Schema analysis retains an unknown model's support state; passing local checks d
 to supported. Schemas are not rewritten. A request must explicitly permit `LocalValidation` to use a schema
 outside that subset or a model without native support. That path omits the native format and
 validates the response against the original schema, including its omitted constraints.
-Response validation permits unfamiliar keywords in its default dialect without mutating the
-library's global defaults. It evaluates recognized constraints and does not establish semantics
-for a provider-specific keyword. An explicit schema dialect retains its own rules.
+Response validation retains the selected JSON Schema dialect and its keyword rules. Admission
+of an unfamiliar keyword does not establish that the local evaluator can evaluate it.
 
 Strict tools use the same subset check and a maximum of 20 strict tools per request. Ordinary tools
 do not count toward that limit and retain their original schemas. Unsupported strict schemas are

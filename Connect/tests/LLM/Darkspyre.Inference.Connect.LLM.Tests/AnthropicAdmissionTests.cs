@@ -17,7 +17,7 @@ public sealed class AnthropicAdmissionTests
         var output = new LlmStructuredOutputRequest
         {
             Name = "answer",
-            Schema = JsonElement.Parse("""{"type":"object","properties":{"value":{"type":"integer","x-note":"opaque"}},"required":["value"],"additionalProperties":false}""")
+            Schema = JsonElement.Parse("""{"type":"object","properties":{"value":{"type":"integer","$comment":"retained"}},"required":["value"],"additionalProperties":false}""")
         };
 
         LlmStructuredOutputValidation result = StructuredOutput.Validate("""{"value":"wrong-type"}""",
@@ -148,9 +148,11 @@ public sealed class AnthropicAdmissionTests
         using var handler = new Handler();
         using var http = new HttpClient(handler);
         var client = new AnthropicMessagesLlmClient(http);
-        JsonElement schema = JsonElement.Parse("""
-            {"type":"object","properties":{"value":{"type":"string","$comment":"retained","examples":["answer"],"x-provider-note":{"opaque":true}}},"required":["value"],"additionalProperties":false}
-            """);
+        JsonObject original = JsonNode.Parse("""
+            {"type":"object","properties":{"value":{"type":"string","$comment":"retained","examples":["answer"]}},"required":["value"],"additionalProperties":false}
+            """)!.AsObject();
+        if (strictTool) original["properties"]!["value"]!["x-provider-note"] = new JsonObject { ["opaque"] = true };
+        JsonElement schema = JsonElement.Parse(original.ToJsonString());
         var request = new LlmChatRequest
         {
             ModelId = "unfamiliar-claude-model",

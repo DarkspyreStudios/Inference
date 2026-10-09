@@ -53,7 +53,7 @@ internal static class StructuredOutput
             JsonSchema schema = JsonSchema.FromText(request.Schema.GetRawText(), new BuildOptions
             {
                 SchemaRegistry = new SchemaRegistry(),
-                Dialect = BuildOptions.Default.Dialect.With([], allowUnknownKeywords: true),
+                Dialect = BuildOptions.Default.Dialect,
                 DialectRegistry = BuildOptions.Default.DialectRegistry,
                 VocabularyRegistry = BuildOptions.Default.VocabularyRegistry
             });
