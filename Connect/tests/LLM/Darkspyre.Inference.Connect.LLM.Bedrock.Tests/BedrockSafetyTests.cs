@@ -23,6 +23,49 @@ namespace Darkspyre.Inference.Connect.LLM.Bedrock.Tests;
 public sealed class BedrockSafetyTests
 {
     [Theory]
+    [InlineData(false, "anthropic.claude-opus-4-6-v1", LlmReasoningLevel.ExtraHigh, "high", false)]
+    [InlineData(true, "anthropic.claude-opus-4-6-v1", LlmReasoningLevel.ExtraHigh, "high", false)]
+    [InlineData(false, "anthropic.claude-sonnet-5-5-v1", LlmReasoningLevel.None, "low", false)]
+    [InlineData(true, "anthropic.claude-unfamiliar-v1:0", LlmReasoningLevel.Maximum, "max", false)]
+    [InlineData(false, "anthropic.claude-unfamiliar-v1:0", LlmReasoningLevel.Maximum, "low", true)]
+    public async Task ClaudeEffortMappingReachesConverseAfterAdmission(
+        bool streaming, string model, LlmReasoningLevel effort, string expected, bool narrow)
+    {
+        await using var factory = new BedrockClientFactory(_ => throw new NotSupportedException(),
+            _ => new StreamControl(), _ => throw new NotSupportedException());
+        await using var guard = new BedrockLoggingGuard();
+        var invoker = new StubConverseInvoker
+        {
+            Response = StubConverseInvoker.Converse([new() { Text = "answer" }], "end_turn", null),
+            Events = [new ContentBlockDeltaEvent { ContentBlockIndex = 0, Delta = new() { Text = "answer" } },
+                new MessageStopEvent { StopReason = new("end_turn") }]
+        };
+        var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
+        LlmConnection connection = ResourceConnection(streaming) with
+        {
+            CapabilityOverrides = new()
+            {
+                SupportsStreaming = streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported,
+                ReasoningLevels = narrow ? Darkspyre.Inference.Connect.LLM.Providers.LlmReasoningEffort.Levels(LlmReasoningLevel.Low) : null
+            }
+        };
+        LlmChatRequest request = Request() with { ModelId = model, ReasoningLevel = effort };
+        var events = new List<LlmStreamEvent>();
+
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request)) events.Add(item);
+
+        var wire = streaming
+            ? ConverseStreamRequestMarshaller.Instance.Marshall(Assert.Single(invoker.StreamRequests))
+            : ConverseRequestMarshaller.Instance.Marshall(Assert.Single(invoker.ConverseRequests));
+        using Stream body = wire.ContentStream;
+        using JsonDocument sent = JsonDocument.Parse(body);
+        Assert.Equal(expected, sent.RootElement.GetProperty("additionalModelRequestFields")
+            .GetProperty("output_config").GetProperty("effort").GetString());
+        Assert.Equal(effort, request.ReasoningLevel);
+        Assert.Equal("answer", Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Text);
+    }
+
+    [Theory]
     [InlineData("amazon.nova-micro-v1:0")]
     [InlineData("amazon.nova-lite-v1:0")]
     [InlineData("amazon.nova-pro-v1:0")]

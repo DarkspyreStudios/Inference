@@ -154,8 +154,8 @@ internal sealed class BedrockLlmClient(
         {
             throw new NotSupportedException("Bedrock capability overrides cannot enable image or document input for this text-only model.");
         }
-        // An override can narrow the model family's levels but never widen them: Converse maps no other level.
-        if (capabilities.ReasoningLevels.Any(level => !offered.Contains(level)))
+        // Non-Claude families retain their own native field mappings.
+        if (family != BedrockModelFamily.AnthropicClaude && capabilities.ReasoningLevels.Any(level => !offered.Contains(level)))
         {
             throw new NotSupportedException(
                 "Bedrock capability overrides cannot offer a reasoning level the model family does not accept.");
@@ -183,7 +183,7 @@ internal sealed class BedrockLlmClient(
 
     /// <summary>
     /// The levels a model takes through additional model request fields. Only the qualified gpt-oss identities
-    /// offer effort controls; DeepSeek-R1 and unknown models take none.
+    /// offer effort controls; DeepSeek-R1 and unknown non-Claude families report no offered levels.
     /// </summary>
     internal static IReadOnlySet<LlmReasoningLevel> ReasoningLevels(string modelId)
     {
@@ -458,8 +458,12 @@ internal sealed class BedrockLlmClient(
             throw new NotSupportedException("This Bedrock connection does not support temperature.");
         }
 
-        LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
         BedrockModelFamily family = BedrockModelFamilies.Classify(request.ModelId).Family;
+        if (family == BedrockModelFamily.AnthropicClaude)
+            request = request with { ReasoningLevel = AnthropicModelProfiles.MapReasoning(
+                ClaudeReasoningProfile(connection, request.ModelId), request.ReasoningLevel) };
+        else
+            LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
         bool nova = family is BedrockModelFamily.AmazonNova1 or BedrockModelFamily.AmazonNova2;
         LlmClientBase.ValidateSampling(request, capabilities, allowZeroTopK: nova);
         if (request.Temperature is { } temperature && (!double.IsFinite(temperature) || temperature is < 0 or > 1))
@@ -998,7 +1002,7 @@ internal sealed class BedrockLlmClient(
 
         JsonObject additional = new();
         if (request.ReasoningLevel is { } level
-            && ReasoningFields(request.ModelId, level, request.MaxOutputTokens) is var (fields, raisedMaxTokens))
+            && ReasoningFields(connection, request.ModelId, level, request.MaxOutputTokens) is var (fields, raisedMaxTokens))
         {
             if (fields.Count > 0)
             {
@@ -1078,9 +1082,10 @@ internal sealed class BedrockLlmClient(
 
     /// <summary>
     /// The additional model request fields a reasoning level adds, and the raised maximum output tokens a Claude
-    /// thinking budget needs. Validation has already confirmed the model family offers the level.
+    /// thinking budget needs. Claude maps desired effort; other families take their validated native level.
     /// </summary>
-    private static (JsonObject Fields, int? MaxTokens) ReasoningFields(string modelId, LlmReasoningLevel level, int? maxOutputTokens)
+    private static (JsonObject Fields, int? MaxTokens) ReasoningFields(LlmConnection connection, string modelId,
+        LlmReasoningLevel level, int? maxOutputTokens)
     {
         (BedrockModelFamily family, string baseModelId) = BedrockModelFamilies.Classify(modelId);
         var fields = new JsonObject();
@@ -1088,7 +1093,7 @@ internal sealed class BedrockLlmClient(
         {
             case BedrockModelFamily.AnthropicClaude:
                 AnthropicReasoningFields claude = AnthropicModelProfiles.Fields(
-                    AnthropicModelProfiles.Resolve(BedrockModelFamilies.AnthropicModelId(baseModelId), catalogEntry: null),
+                    ClaudeReasoningProfile(connection, modelId),
                     level,
                     maxOutputTokens ?? ClaudeDefaultMaxOutputTokens,
                     requestReasoningText: false);
@@ -1113,6 +1118,17 @@ internal sealed class BedrockLlmClient(
             default:
                 return (fields, null);
         }
+    }
+
+    private static AnthropicModelProfile ClaudeReasoningProfile(LlmConnection connection, string modelId)
+    {
+        AnthropicModelProfile profile = AnthropicModelProfiles.Resolve(
+            BedrockModelFamilies.AnthropicModelId(BedrockModelFamilies.Classify(modelId).BaseModelId), null);
+        return profile with
+        {
+            ReasoningLevels = LlmCapabilityOverrideLookup.Apply(
+                new() { ReasoningLevels = profile.ReasoningLevels }, connection, modelId).ReasoningLevels
+        };
     }
 
     /// <summary>The ConverseStream form of a built request. It carries every property <see cref="BuildRequest"/> sets.</summary>

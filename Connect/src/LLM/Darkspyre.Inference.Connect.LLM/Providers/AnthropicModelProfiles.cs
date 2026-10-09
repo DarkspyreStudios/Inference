@@ -233,6 +233,7 @@ internal static class AnthropicModelProfiles
                 [LlmReasoningLevel.Maximum, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.High, LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.None],
             _ => throw new ArgumentOutOfRangeException(nameof(requested), requested, "Unknown reasoning level.")
         };
+        if (profile.Thinking == AnthropicThinkingMode.None) return LlmReasoningLevel.None;
         foreach (LlmReasoningLevel native in row)
         {
             if (native == LlmReasoningLevel.None && profile.NoneMapping == AnthropicNoneMapping.Unsupported) continue;

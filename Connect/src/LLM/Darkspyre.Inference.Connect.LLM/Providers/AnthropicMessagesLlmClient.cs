@@ -108,7 +108,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             SupportsFrequencyPenalty = InferenceSupport.Unsupported,
             MaxStopSequences = LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.MaxStopSequences)
                 ? capabilities.MaxStopSequences : int.MaxValue,
-            ReasoningLevels = LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.ReasoningLevels)
+            ReasoningLevels = profile.Thinking == AnthropicThinkingMode.None ? profile.ReasoningLevels
+                : LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.ReasoningLevels)
                 ? capabilities.ReasoningLevels
                 : profile.ReasoningLevels
         };

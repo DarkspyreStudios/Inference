@@ -6,11 +6,46 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Darkspyre.Inference.Connect.LLM.Vertex;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class AnthropicAdmissionTests
 {
+    [Theory]
+    [InlineData("anthropic/claude-opus-4-6", LlmReasoningLevel.ExtraHigh, "high", false)]
+    [InlineData("anthropic/claude-sonnet-5-5", LlmReasoningLevel.None, "low", false)]
+    [InlineData("anthropic/claude-unfamiliar", LlmReasoningLevel.Maximum, "max", false)]
+    [InlineData("anthropic/claude-unfamiliar", LlmReasoningLevel.Maximum, "low", true)]
+    public async Task VertexClaudeMapsEffortBeforeOuterAdmissionAndMessagesProjection(
+        string model, LlmReasoningLevel effort, string expected, bool narrow)
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new VertexLlmClient(http, new VertexAuthenticationBoundary());
+        var connection = new LlmConnection
+        {
+            Version = "1", Transport = LlmTransport.GoogleVertexAi, Endpoint = "https://aiplatform.googleapis.com",
+            Vertex = new() { ProjectId = "project", Location = "global", AuthenticationMode = LlmGoogleAuthenticationMode.ApplicationDefault },
+            CapabilityOverrides = new()
+            {
+                SupportsStreaming = InferenceSupport.Unsupported,
+                ReasoningLevels = narrow ? LlmReasoningEffort.Levels(LlmReasoningLevel.Low) : null
+            }
+        };
+        var request = new LlmChatRequest
+        { ModelId = model, Messages = [new("user", "answer")], ReasoningLevel = effort };
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        Assert.Equal(expected, sent.RootElement.GetProperty("output_config").GetProperty("effort").GetString());
+        Assert.Equal("vertex-2023-10-16", sent.RootElement.GetProperty("anthropic_version").GetString());
+        Assert.False(sent.RootElement.TryGetProperty("model", out _));
+        Assert.Equal(effort, request.ReasoningLevel);
+        Assert.Equal(1, handler.Calls);
+    }
+
     [Theory]
     [InlineData("claude-opus-4-6", LlmReasoningLevel.ExtraHigh, "adaptive", "high", null)]
     [InlineData("claude-opus-4-5", LlmReasoningLevel.Maximum, null, "high", null)]
@@ -56,6 +91,8 @@ public sealed class AnthropicAdmissionTests
         var client = new AnthropicMessagesLlmClient(http);
         LlmConnection connection = Connection() with
         {
+            CapabilityOverrides = Connection().CapabilityOverrides! with
+            { ReasoningLevels = negative ? LlmReasoningEffort.Levels(LlmReasoningLevel.Low) : null },
             Catalog = [new("unfamiliar-claude-model", "Model")
             { CatalogEntry = JsonElement.Parse(negative
                 ? """{"capabilities":{"thinking":{"supported":false},"effort":{"supported":false}}}"""
@@ -316,6 +353,12 @@ public sealed class AnthropicAdmissionTests
         Credential = new LlmCredential { ApiKey = "test-key" }.Serialize(),
         CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported }
     };
+
+    private sealed class VertexAuthenticationBoundary : IVertexAuthentication
+    {
+        public Task<VertexAccess> ResolveAsync(LlmConnection connection, CancellationToken cancellationToken) =>
+            Task.FromResult(new VertexAccess("test-token", "test-scope"));
+    }
 
     private sealed class Handler : HttpMessageHandler
     {

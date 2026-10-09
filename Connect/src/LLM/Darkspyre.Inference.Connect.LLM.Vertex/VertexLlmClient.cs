@@ -47,11 +47,22 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
             || capabilities.SupportsPresencePenalty == InferenceSupport.Supported && implemented.SupportsPresencePenalty == InferenceSupport.Unsupported
             || capabilities.SupportsFrequencyPenalty == InferenceSupport.Supported && implemented.SupportsFrequencyPenalty == InferenceSupport.Unsupported
             || capabilities.MaxStopSequences > implemented.MaxStopSequences
-            || modelId is not null && capabilities.ReasoningLevels.Any(level =>
+            || modelId is not null && !VertexModelProfiles.Get(modelId).IsClaude && capabilities.ReasoningLevels.Any(level =>
                 !VertexModelProfiles.Get(modelId).ReasoningLevels.Contains(level))
             || express && capabilities.SupportsModelListing == InferenceSupport.Supported)
         { throw new NotSupportedException("Vertex capability overrides cannot enable unimplemented controls."); }
         return capabilities;
+    }
+
+    protected override void ValidateReasoningRequest(LlmConnection connection, LlmChatRequest request,
+        LlmProviderCapabilities capabilities)
+    {
+        if (VertexModelProfiles.Get(request.ModelId).IsClaude)
+            _ = AnthropicModelProfiles.MapReasoning(
+                AnthropicModelProfiles.Resolve(VertexEndpoints.ParseModel(request.ModelId).Model, null)
+                    with { ReasoningLevels = capabilities.ReasoningLevels }, request.ReasoningLevel);
+        else
+            base.ValidateReasoningRequest(connection, request, capabilities);
     }
 
     public async Task<LlmConnection> PrepareAsync(LlmConnection connection, CancellationToken cancellationToken)
@@ -285,7 +296,10 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         if (profile.IsClaude)
         {
             AnthropicPromptCache.ValidateOptions(connection, request);
-            AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(VertexEndpoints.ParseModel(request.ModelId).Model, null));
+            AnthropicModelProfile claude = AnthropicModelProfiles.Resolve(VertexEndpoints.ParseModel(request.ModelId).Model, null)
+                with { ReasoningLevels = capabilities.ReasoningLevels };
+            AnthropicModelProfiles.ValidateSampling(
+                request with { ReasoningLevel = AnthropicModelProfiles.MapReasoning(claude, request.ReasoningLevel) }, claude);
             _ = AnthropicSchemas.Enforcement(request, capabilities);
         }
         else if (request.PresencePenalty is < -2 or > 2 || request.FrequencyPenalty is < -2 or > 2)

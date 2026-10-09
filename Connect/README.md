@@ -855,8 +855,8 @@ terminal format and the current Apple, Antigravity and Bedrock protocols report 
 level below it; a level does not cost the same on two different models. Null leaves the provider's
 default in place. Each model reports the levels it accepts in `LlmCapabilities.ReasoningLevels`, and
 `SupportsReasoning` is `Supported` when that set contains a level above `None`, `Unsupported` when
-it contains only `None`, and `Unknown` when the set is empty. Direct Codex, Anthropic Messages and
-Claude CLI map desired effort inside their adapters. Other adapters currently reject a level outside their declared set with
+it contains only `None`, and `Unknown` when the set is empty. Direct Codex and the Claude transports
+map desired effort inside their adapters. Other adapters currently reject a level outside their declared set with
 `InferenceFailureCode.InvalidRequest` before any provider call. Each adapter owns its provider's wire form.
 `LlmCapabilityOverrides.ReasoningLevels` replaces a transport's set for a connection or one model,
 and the setup editor exposes it as one Default/Enabled/Disabled choice per level. The design is
@@ -4144,9 +4144,11 @@ Nova 2 and the qualified gpt-oss models, classified from the model or inference-
 | gpt-oss (`openai.gpt-oss-20b-1:0`, `openai.gpt-oss-120b-1:0`) | `Low`, `Medium`, `High` | `reasoning_effort` with `low`, `medium` or `high` |
 
 The gpt-oss controls apply to those exact base IDs after geographic-prefix removal. Safeguard and
-unqualified gpt-oss versions, DeepSeek-R1, other models and ARNs offer no level. A capability override
-can narrow a family's set but cannot widen it. A Claude request with a level above `None` rejects temperature and forced tool
-choice, and a Nova 2 request at `High` rejects temperature and `MaxOutputTokens`, before the call.
+unqualified gpt-oss versions, DeepSeek-R1, other non-Claude models and ARNs offer no level. A capability
+override can narrow a non-Claude family's set but cannot widen it. Claude uses the Messages-native
+mapping before sampling and tool-choice validation; a mapped adaptive or budget thinking request
+rejects temperature and forced tool choice. A Nova 2 request at `High` rejects temperature and
+`MaxOutputTokens` before the call.
 
 Nova Lite 1.5 uses the exact base ID in the [AWS Version 1 reasoning guide](https://docs.aws.amazon.com/nova/latest/userguide/extended-thinking.html)
 and its geographic profiles. It retains caller temperature and maximum output tokens at `High`;
@@ -4552,6 +4554,12 @@ that explicitly reports both thinking and effort unsupported offers only `None`;
 map down to that native no-reasoning form. Missing facts never take that negative path. No shared
 rank/distance calculation runs.
 
+Vertex Claude and Bedrock Converse's Claude branch use the same Messages-native mapping. Their
+outer admission and sampling checks use the mapped effort before dispatch; their existing Vertex
+Messages and Converse field builders send that value. Model-level caller choices use their existing
+override precedence on each route. Unknown Claude model facts do not prohibit the existing effort
+field mapping. These changes do not alter Gemini, Nova or gpt-oss reasoning admission or fields.
+
 Direct API-key requests map a reasoning level per model. Current models take
 `thinking: {type: "adaptive"}` with `output_config.effort` (`low`, `medium`, `high`, `xhigh`, `max`),
 and `None` sends `thinking: {type: "disabled"}` where the model accepts it. Sonnet 5.5, Opus 5.5 and
@@ -4564,8 +4572,8 @@ The levels of an API-key connection come from `GET /v1/models`. A model that rep
 offers the effort levels its entry marks supported; a model that reports only budget thinking offers
 `Low` to `Maximum`. `None` is added where the model family accepts disabled or omitted thinking. A model
 the catalog lists but the family table does not know therefore gains its reported effort levels without
-a library change. Without a catalog entry, the family table alone applies. A model with neither accepts
-no level unless a capability override supplies the set.
+a library change. Missing catalog facts retain a known family row. A model with neither reports Unknown
+and permits the existing native effort attempt without requiring a capability override.
 
 ### Sampling Defaults
 
