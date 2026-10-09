@@ -17,11 +17,14 @@ internal static class GeminiCacheFiles
     internal const long MaximumBytes = 2_147_483_648;
     internal sealed record File(string Name, string Uri, string MimeType, string State, long? Bytes = null);
 
-    internal static void ValidateDescriptor(InferenceResourceDescriptor descriptor)
+    internal static void ValidateDescriptor(InferenceResourceDescriptor descriptor, bool toolResult)
     {
         if (descriptor.FileName is { } name && name.EnumerateRunes().Count() > 512)
             throw new ArgumentException("The staging display name exceeds the documented Unicode-character bound.", nameof(descriptor));
-        if (descriptor.ContentType is not ("text/plain" or "application/pdf" or "image/png" or "image/jpeg" or "image/webp"))
+        bool image = descriptor.ContentType is { } mime && (toolResult
+            ? RichContentRoutes.GeminiFunctionResponse.ImageMediaTypes.Contains(mime)
+            : GeminiCapabilities.AcceptsImageMediaType(mime, vertex: false));
+        if (!image && descriptor.ContentType is not ("text/plain" or "application/pdf"))
             throw new NotSupportedException("The cache prefix destination requires an observed supported MIME type.");
         if (descriptor.Bytes is { } size) ArgumentOutOfRangeException.ThrowIfGreaterThan(size, MaximumBytes);
         if (descriptor.ContentType == "application/pdf" && descriptor.Bytes is { } pdfBytes)
@@ -32,7 +35,7 @@ internal static class GeminiCacheFiles
         InferenceResourceDescriptor descriptor, Stream source, Action<CancellationToken> fence, CancellationToken token,
         Func<TimeSpan, CancellationToken, Task>? wait = null)
     {
-        ValidateDescriptor(descriptor);
+        ValidateDescriptor(descriptor, toolResult: false);
         string key = GeminiApiLlmClient.Key(connection);
         var metadata = new JsonObject();
         if (descriptor.FileName is { Length: > 0 } name) metadata["displayName"] = name;

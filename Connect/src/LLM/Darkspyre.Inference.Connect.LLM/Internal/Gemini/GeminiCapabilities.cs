@@ -55,9 +55,12 @@ internal static class GeminiCapabilities
     {
         string mime = LlmAttachments.ResolveMediaType(attachment);
         if (attachment.Kind == LlmBinaryKind.Image)
-            return (mime is "image/png" or "image/jpeg" or "image/webp"
-                || !vertex && mime is "image/heic" or "image/heif")
+            return AcceptsImageMediaType(mime, vertex)
                 && (!vertex || attachment.Data.Length <= 7 * 1024 * 1024);
         return mime == "application/pdf" ? attachment.Data.Length <= 50 * 1024 * 1024 : LlmAttachments.IsTextMediaType(mime);
     }
+
+    /// <summary>Prompt image MIME types on the selected Google route, independently of tool-result formats.</summary>
+    public static bool AcceptsImageMediaType(string mime, bool vertex) =>
+        mime is "image/png" or "image/jpeg" or "image/webp" || !vertex && mime is "image/heic" or "image/heif";
 }

@@ -97,6 +97,8 @@ internal sealed partial class GeminiApiLlmClient
         ValidateGeminiRequest(binary, capabilities);
         var promptResources = chat.Messages.Where(message => message.ContinuationState is null)
             .SelectMany(message => message.Attachments).OfType<LlmResourceAttachment>().Select(attachment => attachment.Resource).ToHashSet();
+        var toolResources = chat.Messages.SelectMany(message => message.ToolResults).OfType<LlmToolResult>()
+            .SelectMany(result => result.Output.Parts).OfType<LlmToolOutputSessionResource>().Select(part => part.Resource).ToHashSet();
         if (promptResources.Count > 0 && (capabilities.SupportsPromptImages == InferenceSupport.Unsupported) && (capabilities.SupportsPromptDocuments == InferenceSupport.Unsupported))
             throw new NotSupportedException("The selected connection disables named prompt media.");
         if (!capabilities.RichContentSupported.Equals(RichContentRoutes.GeminiFunctionResponse)
@@ -141,7 +143,7 @@ internal sealed partial class GeminiApiLlmClient
                 phase = InferenceResourceOperationPhase.OpenRead;
                 var opened = await reading.OpenNamedAsync(request.Resources!, reference, descriptor =>
                 {
-                    GeminiCacheFiles.ValidateDescriptor(descriptor);
+                    GeminiCacheFiles.ValidateDescriptor(descriptor, toolResources.Contains(reference));
                     if (promptResources.Contains(reference)
                         && (descriptor.ContentType!.StartsWith("image/", StringComparison.Ordinal) ? (capabilities.SupportsPromptImages == InferenceSupport.Unsupported) : (capabilities.SupportsPromptDocuments == InferenceSupport.Unsupported)))
                         throw new NotSupportedException("The selected connection disables this named prompt media.");

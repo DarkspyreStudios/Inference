@@ -509,8 +509,9 @@ request automatically. Vertex retains its separate PNG/JPEG/WebP inline image fi
 7 MiB cutoff. Its [inference reference](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/models/inference?hl=en)
 separately documents a 7 MB image bound; Connect does not apply that bound to Gemini API images.
 Neither route applies that image bound to UTF-8 text documents. Their existing 50 MiB PDF bound
-remains separate. The Gemini API's additional prompt image formats do not widen function-response
-media or cache-file staging.
+remains separate. Gemini API cache-file staging uses the same prompt image MIME types. A resource
+also used in a tool result follows the narrower function-response MIME contract. The additional
+prompt formats do not widen function-response media.
 
 Gemini API and Vertex Gemini generation errors retain observed HTTP status and retry intervals,
 including provider error objects inside successful HTTP responses. Their diagnostics keep fixed

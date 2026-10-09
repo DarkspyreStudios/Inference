@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -9,6 +10,60 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ContextCacheLifetimeTests
 {
+    [Theory]
+    [InlineData("image/heic")]
+    [InlineData("image/heif")]
+    public async Task GeminiPromptImageStagingPreservesHeifMimeAndBorrowedBytes(string mime)
+    {
+        byte[] data = Convert.FromHexString("000000186674797068656963000000006d69663168656963");
+        var handler = new Boundary(async (request, token) =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("https://generativelanguage.googleapis.com/upload/v1beta/files?uploadType=multipart", request.RequestUri!.AbsoluteUri);
+            HttpContent[] parts = Assert.IsType<MultipartContent>(request.Content).ToArray();
+            Assert.Equal(mime, parts[1].Headers.ContentType!.MediaType);
+            Assert.Equal(data, await parts[1].ReadAsByteArrayAsync(token));
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent(new JsonObject
+                {
+                    ["file"] = new JsonObject
+                    {
+                        ["name"] = "files/photo", ["uri"] = "https://generativelanguage.googleapis.com/v1beta/files/photo",
+                        ["mimeType"] = mime, ["state"] = "ACTIVE", ["sizeBytes"] = "24"
+                    }
+                }.ToJsonString())
+            };
+        });
+        using var http = new HttpClient(handler);
+        using var source = new MemoryStream(data);
+        var connection = new LlmConnection
+        {
+            Version = "1", Transport = LlmTransport.GoogleGeminiApi,
+            Endpoint = GeminiApiLlmClient.DefaultEndpoint,
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
+        };
+        var descriptor = new InferenceResourceDescriptor(new("workspace", "reference"), "session", "photo.heif", mime, data.Length);
+
+        GeminiCacheFiles.File file = await GeminiCacheFiles.UploadAsync(http, connection, descriptor, source, _ => { }, CancellationToken.None);
+
+        Assert.Equal(mime, file.MimeType);
+        Assert.Equal(data.Length, file.Bytes);
+        Assert.Equal("ACTIVE", file.State);
+        Assert.Equal(1, handler.Sends);
+        Assert.True(source.CanRead);
+    }
+
+    [Theory]
+    [InlineData("image/heic")]
+    [InlineData("image/heif")]
+    public void GeminiPromptImageFormatsDoNotWidenCachedFunctionResponseFormats(string mime)
+    {
+        var descriptor = new InferenceResourceDescriptor(new("workspace", "reference"), "session", "photo.heif", mime, 24);
+        GeminiCacheFiles.ValidateDescriptor(descriptor, toolResult: false);
+        Assert.Throws<NotSupportedException>(() => GeminiCacheFiles.ValidateDescriptor(descriptor, toolResult: true));
+    }
+
     [Fact]
     public async Task FailedGeminiPrefixUploadPreservesRetryFactsWithoutRetryOrBorrowedStreamDisposal()
     {
