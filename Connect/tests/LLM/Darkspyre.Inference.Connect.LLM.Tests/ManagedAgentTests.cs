@@ -311,7 +311,7 @@ public sealed class ManagedAgentTests
     [Fact]
     public async Task ProviderRejectionDoesNotRetry()
     {
-        var harness = new Harness { Failure = new LlmProviderException("Provider overloaded.", LlmTransport.OpenAiCodex, HttpStatusCode.ServiceUnavailable) };
+        var harness = new Harness { ExposeBeforeFailure = true, Failure = new LlmProviderException("Provider overloaded.", LlmTransport.OpenAiCodex, HttpStatusCode.ServiceUnavailable) };
         await using var session = harness.Create();
         var events = await Read(session.RunTurnAsync(Turn("hello")));
         Assert.Single(harness.Requests);
