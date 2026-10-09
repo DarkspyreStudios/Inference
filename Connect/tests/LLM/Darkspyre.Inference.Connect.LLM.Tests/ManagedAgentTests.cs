@@ -13,6 +13,39 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ManagedAgentTests
 {
     [Fact]
+    public async Task UnevaluableToolSchemaReturnsAnErrorWithoutInvokingTheHostHandler()
+    {
+        var harness = new Harness();
+        harness.Results.Enqueue(new()
+        {
+            Diagnostics = new(200, null, null), Text = string.Empty, Status = LlmCompletionStatus.RequiresAction,
+            ToolCalls = [new LlmToolCall("call-1", "echo", "{}")]
+        });
+        harness.Results.Enqueue(new()
+        { Diagnostics = new(200, null, null), Text = "tool rejected", Status = LlmCompletionStatus.Completed });
+        int toolsRun = 0;
+        await using var session = harness.Create(Options() with
+        {
+            Tools = [new LlmAgentToolDefinition
+            { Name = "echo", InputSchema = JsonElement.Parse("""{"type":"object","x-provider-note":true}""") }],
+            ToolHandler = (_, _) =>
+            {
+                toolsRun++;
+                return Task.FromResult(LlmToolOutput.FromText("unexpected"));
+            }
+        });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        Assert.Equal(0, toolsRun);
+        Assert.Equal("tool rejected", events.OfType<LlmAgentMessageCompletedEvent>().Last().Text);
+        Assert.Equal(2, harness.Requests.Count);
+        LlmToolResult failure = Assert.IsType<LlmToolResult>(
+            Assert.Single(harness.Requests[1].Messages.SelectMany(message => message.ToolResults)));
+        Assert.True(failure.Output.IsError);
+    }
+
+    [Fact]
     public async Task UnknownToolTailSurvivesInvalidStructuredOutputWithoutExecutingToolsOrAnotherStep()
     {
         var harness = new Harness();

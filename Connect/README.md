@@ -4597,6 +4597,11 @@ outside that subset or a model without native support. That path omits the nativ
 validates the response against the original schema, including its omitted constraints.
 Response validation retains the selected JSON Schema dialect and its keyword rules. Admission
 of an unfamiliar keyword does not establish that the local evaluator can evaluate it.
+When the schema evaluator throws `JsonSchemaException`, the result retains the provider's answer
+and reports `WasEvaluated = false`, `IsValid = false`, and the evaluator diagnostic in `Errors`.
+This result does not assert that the answer violates the schema. It does not change the dialect,
+remove constraints, or retry the provider request. Host tool arguments still require `IsValid = true`
+before the tool handler runs.
 
 Strict tools use the same subset check and a maximum of 20 strict tools per request. Ordinary tools
 do not count toward that limit and retain their original schemas. Unsupported strict schemas are

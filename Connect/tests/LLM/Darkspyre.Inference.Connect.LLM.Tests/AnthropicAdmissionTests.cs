@@ -27,6 +27,38 @@ public sealed class AnthropicAdmissionTests
     }
 
     [Fact]
+    public async Task UnevaluableSchemaRetainsTheProviderAnswerAndReportsTheEvaluatorFailure()
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        JsonElement schema = JsonElement.Parse("""
+            {"type":"object","properties":{"value":{"type":"string","x-provider-note":{"opaque":true}}},"required":["value"],"additionalProperties":false}
+            """);
+        var request = new LlmChatRequest
+        {
+            ModelId = "unfamiliar-claude-model", Messages = [new("user", "answer")],
+            StructuredOutput = new() { Name = "answer", Schema = schema }
+        };
+        var events = new List<LlmStreamEvent>();
+
+        await foreach (LlmStreamEvent item in client.StreamAsync(Connection(), request)) events.Add(item);
+
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal("""{"value":"answer"}""", result.Text);
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        LlmStructuredOutputValidation validation = Assert.IsType<LlmStructuredOutputValidation>(result.StructuredOutput);
+        Assert.False(validation.WasEvaluated);
+        Assert.False(validation.IsValid);
+        Assert.Contains("could not be evaluated", Assert.Single(validation.Errors), StringComparison.Ordinal);
+        Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, validation.Enforcement);
+        using var sent = JsonDocument.Parse(handler.Body!);
+        Assert.True(JsonElement.DeepEquals(schema,
+            sent.RootElement.GetProperty("output_config").GetProperty("format").GetProperty("schema")));
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
     public async Task FirstPartyDeprecatedSamplingDefaultsReachTheProviderWithDefaultThinking()
     {
         using var handler = new Handler();

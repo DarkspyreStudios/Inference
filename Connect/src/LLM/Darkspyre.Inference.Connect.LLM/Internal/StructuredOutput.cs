@@ -66,6 +66,11 @@ internal static class StructuredOutput
         {
             return Invalid(enforcement, $"The response is not valid JSON: {exception.Message}");
         }
+        catch (JsonSchemaException exception)
+        {
+            return new(enforcement, false, false,
+                [$"The response schema could not be evaluated locally: {exception.Message}"]);
+        }
     }
 
     private static LlmStructuredOutputValidation Invalid(
