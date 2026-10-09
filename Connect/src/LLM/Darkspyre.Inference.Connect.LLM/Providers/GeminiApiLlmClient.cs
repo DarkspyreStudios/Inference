@@ -284,7 +284,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
     private LlmModel? Describe(LlmConnection connection, JsonElement entry)
     {
         string? name = LlmJson.GetString(entry, "name");
-        if (name?.StartsWith("models/gemini-", StringComparison.Ordinal) != true) { return null; }
+        if (name?.StartsWith("models/", StringComparison.Ordinal) != true) { return null; }
         string id = name["models/".Length..];
         if (!ModelSegment().IsMatch(id) || !GeminiModels.IsTextChat(id)) { return null; }
         if (!entry.TryGetProperty("supportedGenerationMethods", out JsonElement methods) || methods.ValueKind != JsonValueKind.Array
@@ -297,7 +297,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             MaxOutputTokens = LlmJson.GetInt(entry, "outputTokenLimit"),
             Availability = LlmModelAvailability.Unknown,
             AvailabilityReason = IsReviewed(id) ? "Catalog entry; invocation access has not been tested."
-                : "Catalog entry in an unreviewed family; reasoning control and provider schema enforcement are not offered."
+                : "Catalog entry in an unreviewed family; model-specific capabilities and invocation access remain unverified."
         };
         // The listed capabilities come from this entry, as generation's do once the catalog is kept.
         return model with { Capabilities = GetCapabilities(connection with { Catalog = [model] }, id) };

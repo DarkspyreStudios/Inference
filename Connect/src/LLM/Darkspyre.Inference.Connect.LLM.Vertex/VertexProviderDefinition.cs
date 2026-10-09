@@ -24,7 +24,7 @@ internal static class VertexProviderDefinition
             new SetupStep
             {
                 Id = "select-model", Title = "Choose a publisher model",
-                Instructions = "Choose a google/gemini-* text model or anthropic/claude-* model ID. Express mode requires manual Gemini model entry. Catalog entries have unknown invocation access until tested.",
+                Instructions = "Choose a google/model text model or anthropic/claude-* model ID. Express mode requires manual Google model entry. Catalog entries have unknown invocation access until tested.",
                 CompletionRequirement = "Select a supported model in the configured location.",
                 Troubleshooting = "Model Garden catalog membership does not guarantee access in this project or region."
             },

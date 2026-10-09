@@ -21,10 +21,11 @@ internal static class VertexModelProfiles
         {
             var (context, output) = GeminiModels.VertexLimits(model);
             return new(modelId, context, output,
-                GeminiCapabilities.Create(GeminiModelProfiles.Get(model, catalogThinking: null), supportsTopK: InferenceSupport.Supported));
+                GeminiCapabilities.Create(GeminiModelProfiles.Get(model, catalogThinking: null), supportsTopK: InferenceSupport.Supported)
+                    with { SupportsJsonSchema = GeminiApiLlmClient.IsReviewed(model) ? InferenceSupport.Supported : InferenceSupport.Unknown });
         }
         if (publisher != "anthropic" || !model.StartsWith("claude-", StringComparison.Ordinal))
-            throw new NotSupportedException("Vertex serves google/gemini-* and anthropic/claude-* text models.");
+            throw new NotSupportedException("The selected Vertex model has no implemented text-response decoder.");
 
         AnthropicModelProfile profile = AnthropicModelProfiles.Resolve(model.Split('@')[0], null);
         LlmRichContentSupported rich = RichContentRoutes.Anthropic with { MaxBinaryBytes = 5 * 1024 * 1024 };

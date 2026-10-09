@@ -68,6 +68,8 @@ internal static class GeminiModelProfiles
     public static GeminiModelProfile Get(string bareModelId, bool? catalogThinking)
     {
         GeminiModelProfile resolved = UnknownControl;
+        if (bareModelId is "gemma-4-31b-it" or "gemma-4-26b-a4b-it")
+            resolved = Level(new[] { LlmReasoningLevel.Minimal, LlmReasoningLevel.High }.ToFrozenSet());
         foreach ((string prefix, GeminiModelProfile profile) in Rows)
         {
             if (bareModelId.StartsWith(prefix, StringComparison.Ordinal))

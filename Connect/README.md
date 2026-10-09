@@ -461,7 +461,7 @@ The Apple on-device adapter is registered by `AddLlmConnect`. Its separately bui
 helper and release gates are described in the [connector design](docs/apple-foundation-models-design.md).
 This source implementation has not been published as a signed helper release.
 
-Google Vertex AI accepts Gemini text and Claude model IDs through shared provider profiles.
+Google Vertex AI accepts Google text and Claude model IDs through shared provider profiles.
 Register `AddLlmConnectVertex()` alongside `AddLlmConnect()` and supply a typed `LlmConnection.Vertex`
 with project, location and ADC or service-account authentication. `ApiKey` selects global projectless
 express mode for Gemini only; `ProjectId` and `Location` are null and the protected credential holds
@@ -487,6 +487,15 @@ Provider options go into
 `generationConfig` and cannot replace fields written by the canonical builder. See the
 [Gemini API design](docs/gemini-api-tech-design.md) for model discovery, capabilities and limits. Live
 qualification remains.
+
+Gemini API discovery accepts syntactically valid `models/` entries whose catalog methods include
+`generateContent`; a `gemini-` brand prefix is not required. Known Gemini non-text output families
+retain their decoder exclusions. Vertex likewise accepts Google text model IDs without requiring
+that prefix. Unknown IDs retain unverified invocation access; neither discovery nor a local payload
+proves model availability on the selected account or Vertex location. The two documented hosted
+Gemma 4 IDs, `gemma-4-31b-it` and `gemma-4-26b-a4b-it`, map reasoning to native minimal/high choices.
+`Medium` maps to minimal, `Maximum` to high, and `None` to minimal. Google documents their Gemini API
+text and thinking protocol in [Gemma on the Gemini API](https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api).
 
 Gemini API and Vertex Gemini generation errors retain observed HTTP status and retry intervals,
 including provider error objects inside successful HTTP responses. Their diagnostics keep fixed
@@ -2936,7 +2945,7 @@ The facade retains the adapter's failure as the cancellation cause when both occ
 Failures expose safe status/retry information without response bodies or nested transport diagnostics.
 Vertex Claude uses `count-tokens:rawPredict` with the bare model ID. Its count regions differ from
 generation regions; an unsupported selected location fails without rerouting or changing the model.
-Vertex accepts Gemini text and Claude model IDs without a local model or generation-location allowlist.
+Vertex accepts Google text and Claude model IDs without a local model or generation-location allowlist.
 Express mode counts Gemini input with its projectless API-key endpoint.
 
 ### Host-owned managed agent runtime

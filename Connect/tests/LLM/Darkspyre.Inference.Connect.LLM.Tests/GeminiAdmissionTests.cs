@@ -12,6 +12,39 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class GeminiAdmissionTests
 {
+    [Fact]
+    public async Task GenerateContentCatalogEntriesDoNotRequireTheGeminiBrandPrefix()
+    {
+        const string catalog = """
+            {"models":[
+              {"name":"models/gemma-4-31b-it","displayName":"Gemma 4","thinking":true,"supportedGenerationMethods":["generateContent"]},
+              {"name":"models/future-text","supportedGenerationMethods":["generateContent"]},
+              {"name":"models/embedding-only","supportedGenerationMethods":["embedContent"]},
+              {"name":"models/gemini-2.5-flash-preview-tts","supportedGenerationMethods":["generateContent"]},
+              {"name":"models/invalid/name","supportedGenerationMethods":["generateContent"]}
+            ]}
+            """;
+        using var handler = new Handler(catalog: catalog);
+        using var http = new HttpClient(handler);
+        var client = new GeminiApiLlmClient(http);
+        LlmConnection connection = Connection(false);
+
+        IReadOnlyList<LlmModel> models = await client.ListModelsAsync(connection);
+
+        Assert.Collection(models, model => Assert.Equal("gemma-4-31b-it", model.Id), model => Assert.Equal("future-text", model.Id));
+        Assert.Equal(InferenceSupport.Unknown, models[1].Capabilities!.SupportsReasoning);
+        Assert.Equal(InferenceSupport.Unknown, models[0].Capabilities!.SupportsJsonSchema);
+        var request = new LlmChatRequest
+        { ModelId = models[0].Id, Messages = [new("user", "answer")], ReasoningLevel = LlmReasoningLevel.Medium };
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection with { Catalog = models }, request)) { }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        Assert.EndsWith("/models/gemma-4-31b-it:generateContent", handler.Uri!.AbsolutePath, StringComparison.Ordinal);
+        Assert.Equal("MINIMAL", sent.RootElement.GetProperty("generationConfig").GetProperty("thinkingConfig").GetProperty("thinkingLevel").GetString());
+        Assert.Equal(LlmReasoningLevel.Medium, request.ReasoningLevel);
+        Assert.Equal(2, handler.Calls);
+    }
+
     [Theory]
     [InlineData(false, """{"type":"object","$comment":"retained","examples":[{"enabled":true}],"x-provider-note":"retained","properties":{"enabled":{"type":"boolean"}}}""", LlmStructuredOutputFallback.None)]
     [InlineData(true, """{"type":"object","$comment":"retained","examples":[{"enabled":true}],"x-provider-note":"retained","properties":{"enabled":{"type":"boolean"}}}""", LlmStructuredOutputFallback.LocalValidation)]
@@ -92,6 +125,8 @@ public sealed class GeminiAdmissionTests
     [InlineData(true, "gemini-2.5-flash", LlmReasoningLevel.ExtraHigh, null, 24576)]
     [InlineData(true, "gemini-2.5-pro", LlmReasoningLevel.None, null, 1024)]
     [InlineData(true, "gemini-unfamiliar", LlmReasoningLevel.Maximum, "HIGH", null)]
+    [InlineData(true, "gemma-4-26b-a4b-it", LlmReasoningLevel.Low, "MINIMAL", null)]
+    [InlineData(true, "future-text", LlmReasoningLevel.Maximum, "HIGH", null)]
     public async Task DesiredEffortReachesGenerationInTheModelsNativeForm(
         bool vertex, string model, LlmReasoningLevel effort, string? word, int? budget)
     {
@@ -212,16 +247,19 @@ public sealed class GeminiAdmissionTests
             Task.FromResult(new VertexAccess("test-token", "test-scope"));
     }
 
-    private sealed class Handler(string text = "OK") : HttpMessageHandler
+    private sealed class Handler(string text = "OK", string? catalog = null) : HttpMessageHandler
     {
         public string? Body { get; private set; }
         public int Calls { get; private set; }
+        public Uri? Uri { get; private set; }
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Calls++;
-            Body = await request.Content!.ReadAsStringAsync(cancellationToken);
-            string response = request.RequestUri!.AbsolutePath.EndsWith(":countTokens", StringComparison.Ordinal)
+            Uri = request.RequestUri;
+            Body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+            string response = request.Method == HttpMethod.Get ? catalog!
+                : request.RequestUri!.AbsolutePath.EndsWith(":countTokens", StringComparison.Ordinal)
                 ? """{"totalTokens":12}"""
                 : $$$"""{"candidates":[{"finishReason":"STOP","content":{"role":"model","parts":[{"text":{{{JsonValue.Create(text)!.ToJsonString()}}}}]}}]}""";
             return new(HttpStatusCode.OK) { Content = new StringContent(response, Encoding.UTF8, "application/json") };
