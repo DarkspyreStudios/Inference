@@ -2864,6 +2864,19 @@ Express mode counts Gemini input with its projectless API-key endpoint.
 
 ### Host-owned managed agent runtime
 
+[DSA-905](https://darkspyre.atlassian.net/browse/DSA-905) recovers interrupted Responses model steps.
+A streamed HTTP body read that throws `HttpIOException`, or valid SSE that ends without a terminal
+response, carries `LlmProviderException.IsResponseStreamInterrupted`. Provider rejection, malformed
+content, resource-cleanup failures and native CLI failures do not receive this classification.
+The managed runtime retries only the current uncommitted model request, with three total attempts
+and cancellable waits of one and two seconds. Completed application tools and their results remain
+in history and never run again through recovery. Requests enabling provider-hosted tools do not retry.
+A failure after a terminal result does not retry. Interrupted usage leaves the exact run total unknown.
+`LlmAgentResponseRecoveryEvent` names the failed attempt and the next attempt, or null when recovery
+ends. Consumers discard unfinished text and reasoning without changing completed messages. The first
+replacement event clears transient recovery progress through an empty `LlmAgentActivityEvent`.
+After three interruptions, the turn reports that recovery failed and completed tool results are retained.
+
 **Accounting extension (11.14.0-rc.1):** the library includes
 `LlmProviderService.MeasureRequestAsync(connectionId, request, policy, ct)` and
 `ILlmAgentSession.MeasureContextAsync(proposedContext, ct)`, both returning `LlmRequestAccounting`.

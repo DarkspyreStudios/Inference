@@ -5,6 +5,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>A provider or protocol failure with diagnostics safe to display and persist.</summary>
 public sealed class LlmProviderException : Exception
 {
+    /// <summary>Creates a provider failure with safe display text and explicit failure classifications.</summary>
     public LlmProviderException(
         string message,
         LlmTransport transport,
@@ -14,7 +15,8 @@ public sealed class LlmProviderException : Exception
         TimeSpan? retryAfter = null,
         string? sanitizedResponseBody = null,
         Exception? innerException = null,
-        bool isContextOverflow = false)
+        bool isContextOverflow = false,
+        bool isResponseStreamInterrupted = false)
         : base(message, innerException)
     {
         Transport = transport;
@@ -24,6 +26,7 @@ public sealed class LlmProviderException : Exception
         RetryAfter = retryAfter;
         SanitizedResponseBody = sanitizedResponseBody;
         IsContextOverflow = isContextOverflow;
+        IsResponseStreamInterrupted = isResponseStreamInterrupted;
     }
 
     public LlmTransport Transport { get; }
@@ -40,4 +43,8 @@ public sealed class LlmProviderException : Exception
 
     /// <summary>The provider rejected input that exceeds the model's context window.</summary>
     public bool IsContextOverflow { get; }
+
+    /// <summary>The response body stream is interrupted before its terminal response arrives.</summary>
+    /// <gotcha>This classification does not authorize replay of requests enabling provider-hosted tools.</gotcha>
+    public bool IsResponseStreamInterrupted { get; }
 }

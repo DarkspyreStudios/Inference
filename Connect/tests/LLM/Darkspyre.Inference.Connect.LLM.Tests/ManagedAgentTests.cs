@@ -247,6 +247,96 @@ public sealed class ManagedAgentTests
         Assert.Equal(2, harness.Requests.Count);
     }
 
+    /// <summary>A disconnected step retains completed tools and retries the same committed history.</summary>
+    [Fact]
+    public async Task InterruptedStepRecoversWithoutReplayingCompletedTools()
+    {
+        var harness = new Harness { RequestFailure = number => number == 2 ? Interrupted() : null, ExposeBeforeFailure = true };
+        harness.Results.Enqueue(new()
+        {
+            Diagnostics = new(200, null, null), Status = LlmCompletionStatus.Completed,
+            ToolCalls = [new LlmToolCall("call-1", "echo", "{}")], Text = "tool step"
+        });
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Status = LlmCompletionStatus.Completed, Text = "recovered" });
+        int calls = 0;
+        await using var session = harness.Create(ToolsOptions(_ => { calls++; return LlmToolOutput.FromText("retained result"); }));
+
+        var events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        Assert.Equal(1, calls);
+        Assert.Equal(3, harness.Requests.Count);
+        Assert.Same(harness.Requests[1], harness.Requests[2]);
+        Assert.Contains(harness.Requests[2].Messages.SelectMany(message => message.ToolResults),
+            result => result is LlmToolResult { ToolCallId: "call-1" });
+        var recovery = Assert.Single(events.OfType<LlmAgentResponseRecoveryEvent>());
+        Assert.Equal(2, recovery.NextAttempt);
+        Assert.Contains(events.OfType<LlmAgentTextDeltaEvent>(), item => item.ItemId == recovery.ItemId);
+        Assert.Contains(events.OfType<LlmAgentActivityEvent>(), item => item.ItemId != recovery.ItemId && item.Activity == string.Empty);
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        var captured = await session.CaptureContextAsync();
+        Assert.DoesNotContain(captured.Entries, entry => entry.Message.Content == "partial");
+        Assert.Equal("recovered", captured.Entries[^1].Message.Content);
+    }
+
+    /// <summary>Three interrupted attempts terminate without admitting unfinished output.</summary>
+    [Fact]
+    public async Task InterruptedStepExhaustsThreeAttempts()
+    {
+        var harness = new Harness { Failure = Interrupted(), ExposeBeforeFailure = true };
+        await using var session = harness.Create();
+        var events = await Read(session.RunTurnAsync(Turn("hello")));
+        Assert.Equal(3, harness.Requests.Count);
+        var resets = events.OfType<LlmAgentResponseRecoveryEvent>().ToArray();
+        Assert.Equal(new int?[] { 2, 3, null }, resets.Select(item => item.NextAttempt));
+        Assert.Equal(3, resets.Select(item => item.ItemId).Distinct().Count());
+        var completed = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal(LlmAgentCompletionReason.ProviderFailure, completed.Reason);
+        Assert.Equal("The model response stream was interrupted. Recovery failed after 3 attempts. Completed tool results are retained. Resume to continue.", completed.Error);
+        Assert.Empty(events.OfType<LlmAgentMessageCompletedEvent>());
+    }
+
+    /// <summary>A hosted-tool request is never replayed even without observed hosted activity.</summary>
+    [Fact]
+    public async Task InterruptedHostedToolRequestDoesNotReplay()
+    {
+        var harness = new Harness { Failure = Interrupted() };
+        await using var session = harness.Create(Options() with { HostedTools = [new LlmWebSearchTool()] });
+        var events = await Read(session.RunTurnAsync(Turn("hello")));
+        Assert.Single(harness.Requests);
+        Assert.Null(Assert.Single(events.OfType<LlmAgentResponseRecoveryEvent>()).NextAttempt);
+        Assert.Contains("Provider-side work may already have run", Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Error);
+    }
+
+    /// <summary>A rejected request is not an interrupted response body and does not retry.</summary>
+    [Fact]
+    public async Task ProviderRejectionDoesNotRetry()
+    {
+        var harness = new Harness { Failure = new LlmProviderException("Provider overloaded.", LlmTransport.OpenAiCodex, HttpStatusCode.ServiceUnavailable) };
+        await using var session = harness.Create();
+        var events = await Read(session.RunTurnAsync(Turn("hello")));
+        Assert.Single(harness.Requests);
+        Assert.Empty(events.OfType<LlmAgentResponseRecoveryEvent>());
+        Assert.Equal(LlmAgentCompletionReason.ProviderFailure, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+    }
+
+    /// <summary>Stop during the retry wait prevents a replacement request.</summary>
+    [Fact]
+    public async Task CancellationDuringRecoveryWaitDoesNotSendAnotherRequest()
+    {
+        var harness = new Harness { Failure = Interrupted() };
+        await using var session = harness.Create();
+        using var cancellation = new CancellationTokenSource();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var item in session.RunTurnAsync(Turn("hello"), cancellation.Token))
+                if (item is LlmAgentResponseRecoveryEvent) cancellation.Cancel();
+        });
+        Assert.Single(harness.Requests);
+    }
+
+    private static LlmProviderException Interrupted() => new("The model response stream was interrupted.",
+        LlmTransport.OpenAiCodex, isResponseStreamInterrupted: true);
+
     private static LlmAgentTurnRequest Turn(string text) => new() { Input = [new LlmAgentTextContent(text)] };
     private static LlmAgentSessionOptions Options() => new() { ModelId = "test" };
     private static LlmAgentSessionOptions ToolsOptions(Func<LlmAgentToolCall, LlmToolOutput> handler) => Options() with
@@ -269,6 +359,8 @@ public sealed class ManagedAgentTests
         public List<LlmChatRequest> Requests { get; } = [];
         public List<LlmChatRequest> Estimates { get; } = [];
         public Exception? Failure { get; set; }
+        /// <summary>An optional scripted failure for each numbered model request.</summary>
+        public Func<int, Exception?>? RequestFailure { get; init; }
         public IReadOnlyList<JsonElement> Snapshots { get; init; } = [];
         public bool UnknownEstimate { get; init; }
         public bool ExposeBeforeFailure { get; init; }
@@ -281,6 +373,7 @@ public sealed class ManagedAgentTests
                 SupportsAgentToolUse = true,
                 SupportsAgentTurnInstructions = true,
                 RichContentSupported = RichContentRoutes.Responses,
+                HostedTools = new HashSet<LlmHostedToolKind> { LlmHostedToolKind.WebSearch },
                 Agent = ManagedAgentPolicy.Capabilities
             }).GetAwaiter().GetResult();
         public string? EstimateDiagnostic => null;
@@ -298,7 +391,8 @@ public sealed class ManagedAgentTests
             Requests.Add(request);
             await Task.Yield();
             if (ExposeBeforeFailure) { yield return new LlmTextDeltaEvent("partial"); }
-            if (Failure is not null) { throw Failure; }
+            Exception? failure = RequestFailure is null ? Failure : RequestFailure(Requests.Count);
+            if (failure is not null) { throw failure; }
             foreach (var snapshot in Snapshots) yield return new LlmStructuredOutputSnapshotEvent(snapshot);
             if (UsageObservations.TryDequeue(out var usage))
             {

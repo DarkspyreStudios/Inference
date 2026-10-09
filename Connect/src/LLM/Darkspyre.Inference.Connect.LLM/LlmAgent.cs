@@ -328,6 +328,24 @@ public sealed record LlmAgentToolEvent(
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
 
+/// <summary>Discards the interrupted attempt's unfinished output and reports an optional replacement attempt.</summary>
+/// <param name="ThreadId">The owning conversation.</param>
+/// <param name="TurnId">The active turn.</param>
+/// <param name="ItemId">The failed model attempt.</param>
+/// <param name="NextAttempt">The next attempt, or null when no automatic replacement follows.</param>
+/// <gotcha>Completed messages and application-tool results remain intact. This event is not transcript content.</gotcha>
+public sealed record LlmAgentResponseRecoveryEvent(
+    string ThreadId,
+    string TurnId,
+    string ItemId,
+    int? NextAttempt)
+    : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    /// <summary>The normalized identity of the active turn.</summary>
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+}
+
 /// <summary>Adapter-owned progress text. It is not assistant transcript content.</summary>
 public sealed record LlmAgentActivityEvent(
     string ThreadId,

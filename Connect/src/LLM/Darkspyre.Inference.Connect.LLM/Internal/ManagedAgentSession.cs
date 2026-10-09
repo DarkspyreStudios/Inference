@@ -710,55 +710,90 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 LlmChatResult? result = null;
                 try
                 {
-                    await foreach (var item in StreamModelAsync(run, request, token))
+                    for (int attempt = 1; ; attempt++)
                     {
-                        if (request.Resources is not null)
+                        bool replacementStarted = false;
+                        try
                         {
-                            try { FenceResourceCallback(token); }
-                            catch (Exception error) { ExceptionDispatchInfo.Capture(LlmResourcePreparation.AsResourceFailure(error, token)).Throw(); throw; }
+                            await foreach (var item in StreamModelAsync(run, request, token))
+                            {
+                                if (request.Resources is not null)
+                                {
+                                    try { FenceResourceCallback(token); }
+                                    catch (Exception error) { ExceptionDispatchInfo.Capture(LlmResourcePreparation.AsResourceFailure(error, token)).Throw(); throw; }
+                                }
+                                if (result is not null) { throw new InvalidOperationException("Model emitted an event after completion."); }
+                                if (attempt > 1 && !replacementStarted)
+                                {
+                                    await writer.WriteAsync(new LlmAgentActivityEvent(ThreadId, run.Id, stepId, string.Empty), token);
+                                    replacementStarted = true;
+                                }
+                                switch (item)
+                                {
+                                    case LlmUsageDeltaEvent usage:
+                                        LlmUsage? runningTotal = run.UsageUnknown ? null
+                                            : UsageTotals.Add(run.Usage, usage.Cumulative, run.UsageCalls == 0);
+                                        await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId,
+                                            usage.Cumulative, runningTotal), token);
+                                        break;
+                                    case LlmTextDeltaEvent text:
+                                        await writer.WriteAsync(new LlmAgentTextDeltaEvent(ThreadId, run.Id, stepId, text.Delta), token);
+                                        break;
+                                    case LlmStructuredOutputSnapshotEvent snapshot:
+                                        await writer.WriteAsync(new LlmAgentStructuredOutputSnapshotEvent(
+                                            ThreadId, run.Id, stepId, snapshot.Content.Clone()), token);
+                                        break;
+                                    case LlmReasoningDeltaEvent reasoning:
+                                        await writer.WriteAsync(new LlmAgentReasoningDeltaEvent(ThreadId, run.Id, stepId,
+                                            reasoning.Delta, reasoning.IsSummary), token);
+                                        break;
+                                    case LlmHostedToolCallStartedEvent hosted:
+                                        await writer.WriteAsync(new LlmAgentHostedToolCallStartedEvent(
+                                            ThreadId, run.Id, stepId, hosted.CallId, hosted.Kind, hosted.Name), token);
+                                        break;
+                                    case LlmHostedToolCallProgressEvent hosted:
+                                        await writer.WriteAsync(new LlmAgentHostedToolCallProgressEvent(
+                                            ThreadId, run.Id, stepId, hosted.CallId, hosted.Phase), token);
+                                        break;
+                                    case LlmHostedToolCallCompletedEvent hosted:
+                                        await writer.WriteAsync(new LlmAgentHostedToolCallCompletedEvent(
+                                            ThreadId, run.Id, stepId, HostedTools.Snapshot(hosted.Call)), token);
+                                        break;
+                                    case LlmCitationEvent citation:
+                                        await writer.WriteAsync(new LlmAgentCitationEvent(
+                                            ThreadId, run.Id, stepId, citation.Citation), token);
+                                        break;
+                                    case LlmChatCompletionEvent completion:
+                                        result = completion.Result;
+                                        await writer.WriteAsync(new LlmAgentCitationsSnapshotEvent(
+                                            ThreadId, run.Id, stepId, result.Citations), token);
+                                        break;
+                                }
+                            }
+                            break;
                         }
-                        if (result is not null) { throw new InvalidOperationException("Model emitted an event after completion."); }
-                        switch (item)
+                        catch (Exception error) when (result is null && !token.IsCancellationRequested &&
+                            (error is LlmProviderException { IsResponseStreamInterrupted: true }
+                            || error is InferenceResourceOperationException
+                            {
+                                Failure: { Phase: InferenceResourceOperationPhase.Materialize, CommitOutcome: InferenceResourceCommitOutcome.NotAttempted },
+                                InnerException: LlmProviderException { IsResponseStreamInterrupted: true }
+                            }))
                         {
-                            case LlmUsageDeltaEvent usage:
-                                LlmUsage? runningTotal = run.UsageUnknown ? null
-                                    : UsageTotals.Add(run.Usage, usage.Cumulative, run.UsageCalls == 0);
-                                await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId,
-                                    usage.Cumulative, runningTotal), token);
-                                break;
-                            case LlmTextDeltaEvent text:
-                                await writer.WriteAsync(new LlmAgentTextDeltaEvent(ThreadId, run.Id, stepId, text.Delta), token);
-                                break;
-                            case LlmStructuredOutputSnapshotEvent snapshot:
-                                await writer.WriteAsync(new LlmAgentStructuredOutputSnapshotEvent(
-                                    ThreadId, run.Id, stepId, snapshot.Content.Clone()), token);
-                                break;
-                            case LlmReasoningDeltaEvent reasoning:
-                                await writer.WriteAsync(new LlmAgentReasoningDeltaEvent(ThreadId, run.Id, stepId,
-                                    reasoning.Delta, reasoning.IsSummary), token);
-                                break;
-                            case LlmHostedToolCallStartedEvent hosted:
-                                await writer.WriteAsync(new LlmAgentHostedToolCallStartedEvent(
-                                    ThreadId, run.Id, stepId, hosted.CallId, hosted.Kind, hosted.Name), token);
-                                break;
-                            case LlmHostedToolCallProgressEvent hosted:
-                                await writer.WriteAsync(new LlmAgentHostedToolCallProgressEvent(
-                                    ThreadId, run.Id, stepId, hosted.CallId, hosted.Phase), token);
-                                break;
-                            case LlmHostedToolCallCompletedEvent hosted:
-                                await writer.WriteAsync(new LlmAgentHostedToolCallCompletedEvent(
-                                    ThreadId, run.Id, stepId, HostedTools.Snapshot(hosted.Call)), token);
-                                break;
-                            case LlmCitationEvent citation:
-                                await writer.WriteAsync(new LlmAgentCitationEvent(
-                                    ThreadId, run.Id, stepId, citation.Citation), token);
-                                break;
-                            case LlmChatCompletionEvent completion:
-                                if (result is not null) { throw new InvalidOperationException("Duplicate model completion."); }
-                                result = completion.Result;
-                                await writer.WriteAsync(new LlmAgentCitationsSnapshotEvent(
-                                    ThreadId, run.Id, stepId, result.Citations), token);
-                                break;
+                            bool hostedTools = request.HostedTools.Count > 0;
+                            int? nextAttempt = hostedTools || attempt == 3 ? null : attempt + 1;
+                            run.UsageUnknown = true;
+                            await writer.WriteAsync(new LlmAgentResponseRecoveryEvent(ThreadId, run.Id, stepId, nextAttempt), token);
+                            if (nextAttempt is null)
+                            {
+                                string message = hostedTools
+                                    ? "The model response stream was interrupted. Provider-side work may already have run. This request was not replayed because provider-hosted tools are enabled. Completed application-tool results are retained."
+                                    : "The model response stream was interrupted. Recovery failed after 3 attempts. Completed tool results are retained. Resume to continue.";
+                                await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, message);
+                                return;
+                            }
+                            await Task.Delay(TimeSpan.FromSeconds(attempt), token);
+                            stepId = NewId();
                         }
                     }
                 }

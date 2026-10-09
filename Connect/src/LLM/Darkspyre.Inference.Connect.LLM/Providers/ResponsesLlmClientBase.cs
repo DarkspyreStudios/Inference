@@ -291,6 +291,24 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         }
     }
 
+    private async IAsyncEnumerable<string> ReadResponseDataAsync(Stream stream, HttpResponseMessage response,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await using var data = Sse.ReadDataPayloadsAsync(stream, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        while (true)
+        {
+            bool moved;
+            try { moved = await data.MoveNextAsync().ConfigureAwait(false); }
+            catch (HttpIOException error) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new LlmProviderException("The model response stream was interrupted.", Transport,
+                    statusCode: response.StatusCode, innerException: error, isResponseStreamInterrupted: true);
+            }
+            if (!moved) yield break;
+            yield return data.Current;
+        }
+    }
+
     private async IAsyncEnumerable<LlmStreamEvent> ReadResponseBodyAsync(LlmConnection connection, LlmChatRequest request,
         HttpResponseMessage response, Stream? stream, LlmProviderCapabilities capabilities, LlmStructuredOutputEnforcement? enforcement,
         LlmCredential? credential, SdkHttpConsumption.Operation consumption, bool compaction,
@@ -321,7 +339,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         bool completed = false;
         string? observedModel = null;
 
-        await foreach (string data in Sse.ReadDataPayloadsAsync(stream!, cancellationToken))
+        await foreach (string data in ReadResponseDataAsync(stream!, response, cancellationToken))
         {
             if (data == "[DONE]")
             {
@@ -496,11 +514,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             }
         }
 
-        throw ProtocolException(
-            $"{ResponseName} ended without a terminal event.",
-            response,
-            string.Empty,
-            credential, extraSecrets: secrets);
+        throw new LlmProviderException("The model response stream was interrupted.", Transport,
+            statusCode: response.StatusCode, isResponseStreamInterrupted: true);
     }
 
     protected virtual LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
