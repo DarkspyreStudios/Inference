@@ -37,7 +37,7 @@ internal sealed partial class VertexLlmClient
             throw new NotSupportedException("This model cannot carry named resource content in function responses.");
         foreach (LlmAttachment attachment in binary.Messages.Where(message => message.ContinuationState is null)
             .SelectMany(message => message.Attachments).Select(LlmAttachments.RequireBinary))
-            VertexCacheFiles.ValidateMedia(LlmAttachments.ResolveMediaType(attachment), attachment.Data.Length);
+            VertexCacheFiles.ValidateMedia(LlmAttachments.ResolveMediaType(attachment), attachment.Data.Length, toolResult: false);
         if (connection.Vertex!.CacheStaging is null)
         {
             long total = 0;
@@ -101,6 +101,8 @@ internal sealed partial class VertexLlmClient
             var occurrences = new Dictionary<InferenceResourceReference, int>();
             var promptReferences = chat.Messages.Where(message => message.ContinuationState is null)
                 .SelectMany(message => message.Attachments).OfType<LlmResourceAttachment>().Select(attachment => attachment.Resource).ToHashSet();
+            var toolReferences = chat.Messages.SelectMany(message => message.ToolResults).OfType<LlmToolResult>()
+                .SelectMany(result => result.Output.Parts).OfType<LlmToolOutputSessionResource>().Select(part => part.Resource).ToHashSet();
             long usedInline = 0;
             foreach (LlmChatMessage message in chat.Messages)
             {
@@ -143,7 +145,7 @@ internal sealed partial class VertexLlmClient
                     long available = (InlineCacheMediaBytes - usedInline) / count;
                     var opened = await reading.OpenNamedAsync(request.Resources!, reference, descriptor =>
                     {
-                        if (descriptor.ContentType is not null) VertexCacheFiles.ValidateDescriptor(descriptor);
+                        if (descriptor.ContentType is not null) VertexCacheFiles.ValidateDescriptor(descriptor, toolReferences.Contains(reference));
                         if (promptReferences.Contains(reference) && descriptor.ContentType is not null
                             && (descriptor.ContentType!.StartsWith("image/", StringComparison.Ordinal) ? (capabilities.SupportsPromptImages == InferenceSupport.Unsupported) : (capabilities.SupportsPromptDocuments == InferenceSupport.Unsupported)))
                             throw new NotSupportedException("The selected connection disables this named prompt media.");
@@ -152,7 +154,7 @@ internal sealed partial class VertexLlmClient
                     }, () => fence(token), token).ConfigureAwait(false);
                     content = opened.Content;
                     phase = InferenceResourceOperationPhase.Materialize;
-                    VertexCacheFiles.ValidateDescriptor(opened.Descriptor);
+                    VertexCacheFiles.ValidateDescriptor(opened.Descriptor, toolReferences.Contains(reference));
                     if (promptReferences.Contains(reference)
                         && (opened.Descriptor.ContentType!.StartsWith("image/", StringComparison.Ordinal) ? (capabilities.SupportsPromptImages == InferenceSupport.Unsupported) : (capabilities.SupportsPromptDocuments == InferenceSupport.Unsupported)))
                         throw new NotSupportedException("The selected connection disables this named prompt media.");
@@ -214,7 +216,7 @@ internal sealed partial class VertexLlmClient
             void AddOccurrence(InferenceResourceReference reference) => occurrences[reference] = checked(occurrences.GetValueOrDefault(reference) + 1);
             void AddRaw(string mime, ReadOnlyMemory<byte> data)
             {
-                VertexCacheFiles.ValidateMedia(mime, data.Length);
+                VertexCacheFiles.ValidateMedia(mime, data.Length, toolResult: false);
                 media.TryAdd((mime, data), new(mime, data, null));
                 if (Connection.Vertex!.CacheStaging is null) usedInline = checked(usedInline + data.Length);
             }

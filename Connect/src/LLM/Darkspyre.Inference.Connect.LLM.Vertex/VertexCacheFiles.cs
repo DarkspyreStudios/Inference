@@ -16,14 +16,17 @@ internal static class VertexCacheFiles
         public override string ToString() => "VertexCacheFile { <derived-object> }";
     }
 
-    internal static void ValidateDescriptor(InferenceResourceDescriptor descriptor)
+    internal static void ValidateDescriptor(InferenceResourceDescriptor descriptor, bool toolResult)
     {
-        ValidateMedia(descriptor.ContentType, descriptor.Bytes);
+        ValidateMedia(descriptor.ContentType, descriptor.Bytes, toolResult);
     }
 
-    internal static void ValidateMedia(string? mime, long? bytes)
+    internal static void ValidateMedia(string? mime, long? bytes, bool toolResult)
     {
-        if (mime is not ("text/plain" or "application/pdf" or "image/png" or "image/jpeg" or "image/webp" or "image/gif"))
+        bool image = mime is not null && (toolResult
+            ? RichContentRoutes.GeminiFunctionResponse.ImageMediaTypes.Contains(mime)
+            : GeminiCapabilities.AcceptsImageMediaType(mime, vertex: true));
+        if (!image && mime is not ("text/plain" or "application/pdf"))
             throw new NotSupportedException("Vertex cache staging requires an observed supported MIME type.");
         if (bytes is { } known) ArgumentOutOfRangeException.ThrowIfGreaterThan(known, MaximumObjectBytes);
     }
@@ -33,7 +36,7 @@ internal static class VertexCacheFiles
         string mimeType, long? length, InferenceResourceReference? reference, Stream source,
         Action<CancellationToken> fence, CancellationToken token)
     {
-        ValidateMedia(mimeType, length); token.ThrowIfCancellationRequested(); fence(token);
+        ValidateMedia(mimeType, length, toolResult: false); token.ThrowIfCancellationRequested(); fence(token);
         using var consumption = SdkHttpConsumption.Enter(http, token); token = consumption.Token;
         void Check() { token.ThrowIfCancellationRequested(); fence(token); consumption.Fence(); }
         Check();

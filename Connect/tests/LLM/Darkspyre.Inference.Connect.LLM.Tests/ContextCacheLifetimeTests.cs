@@ -1,15 +1,65 @@
 using System.Net;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Darkspyre.Inference.Connect.LLM.Vertex;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ContextCacheLifetimeTests
 {
+    [Theory]
+    [InlineData("image/heic")]
+    [InlineData("image/x-unreviewed")]
+    public async Task VertexPromptImageStagingDoesNotRequireMimeQualification(string mime)
+    {
+        byte[] data = Convert.FromHexString("000000186674797068656963000000006d69663168656963");
+        var handler = new Boundary(async (request, token) =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("https://storage.googleapis.com/upload/storage/v1/b/test-bucket/o", request.RequestUri!.GetLeftPart(UriPartial.Path));
+            var query = System.Web.HttpUtility.ParseQueryString(request.RequestUri.Query);
+            Assert.Equal("media", query["uploadType"]);
+            Assert.Equal("0", query["ifGenerationMatch"]);
+            Assert.StartsWith("cache/", query["name"], StringComparison.Ordinal);
+            Assert.Equal(mime, request.Content!.Headers.ContentType!.MediaType);
+            Assert.Equal(data, await request.Content.ReadAsByteArrayAsync(token));
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent(new JsonObject
+                {
+                    ["bucket"] = "test-bucket", ["name"] = query["name"], ["generation"] = "1",
+                    ["size"] = data.Length.ToString(CultureInfo.InvariantCulture), ["contentType"] = mime
+                }.ToJsonString())
+            };
+        });
+        using var http = new HttpClient(handler);
+        using var source = new MemoryStream(data);
+
+        VertexCacheFiles.File file = await VertexCacheFiles.UploadAsync(http, new("test-token", "test-scope"),
+            new("test-bucket", "cache/"), mime, data.Length, null, source, _ => { }, CancellationToken.None);
+
+        Assert.Equal(mime, file.MimeType);
+        Assert.Equal(data.Length, file.Bytes);
+        Assert.StartsWith("gs://test-bucket/cache/", file.Uri, StringComparison.Ordinal);
+        Assert.Equal(1, handler.Sends);
+        Assert.True(source.CanRead);
+    }
+
+    [Theory]
+    [InlineData("image/heic")]
+    [InlineData("image/x-unreviewed")]
+    public void VertexPromptImageMimeAttemptsDoNotWidenCachedFunctionResponses(string mime)
+    {
+        var descriptor = new InferenceResourceDescriptor(new("workspace", "reference"), "session", "photo.bin", mime, 24);
+        VertexCacheFiles.ValidateDescriptor(descriptor, toolResult: false);
+        Assert.Throws<NotSupportedException>(() => VertexCacheFiles.ValidateDescriptor(descriptor, toolResult: true));
+    }
+
     [Theory]
     [InlineData("image/heic")]
     [InlineData("image/heif")]

@@ -511,9 +511,10 @@ lists PNG/JPEG/WebP without establishing a negative for every omitted type. Gemi
 HEIC/HEIF evidence does not qualify Vertex. Vertex retains its existing 7 MiB cutoff; its reference
 documents a 7 MB image bound. Connect does not apply that bound to Gemini API images.
 Neither route applies that image bound to UTF-8 text documents. Their existing 50 MiB PDF bound
-remains separate. Gemini API cache-file staging uses the same prompt image MIME types. A resource
-also used in a tool result follows the narrower function-response MIME contract. The additional
-prompt formats do not widen function-response media.
+remains separate. Each route's cache-prefix preparation uses its own prompt image MIME admission,
+including Gemini API Files uploads and Vertex inline/Cloud Storage staging. A resource also used
+in a tool result follows the narrower function-response MIME contract. The additional prompt
+formats do not widen function-response media.
 
 Gemini API and Vertex Gemini generation errors retain observed HTTP status and retry intervals,
 including provider error objects inside successful HTTP responses. Their diagnostics keep fixed
