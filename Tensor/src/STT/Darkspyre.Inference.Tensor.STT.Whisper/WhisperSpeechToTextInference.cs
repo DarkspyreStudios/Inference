@@ -69,7 +69,10 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
         TensorModelPackDefinition? known = (await _packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false)).FirstOrDefault(pack => pack.Key.ModelId == modelId
             && pack.RuntimeArchitecture == TensorSpeechModels.WhisperRuntimeArchitecture);
         SpeechModelInfo? info = known is null ? null : TensorSpeechModels.Info(known);
-        return new SpeechToTextCapabilities(info?.EnglishOnly,info?.SupportsTranslationToEnglish,            info?.EnglishOnly is bool english ? (!english ? InferenceSupport.Supported : InferenceSupport.Unsupported) : null,info?.EnglishOnly == true ? Array.AsReadOnly<string>(["en"]) : null,            WhisperPcm.MinimumRate,WhisperPcm.MaximumRate,WhisperPcm.MaximumChannels);
+        return new SpeechToTextCapabilities(info?.EnglishOnly, info?.SupportsTranslationToEnglish,
+            info?.EnglishOnly is bool english ? (!english ? InferenceSupport.Supported : InferenceSupport.Unsupported) : null,
+            info?.EnglishOnly == true ? Array.AsReadOnly<string>(["en"]) : null,
+            WhisperPcm.MinimumRate, WhisperPcm.MaximumRate, WhisperPcm.MaximumChannels);
     }
 
     public async Task LoadAsync(TensorModelKey model, CancellationToken cancellationToken = default)

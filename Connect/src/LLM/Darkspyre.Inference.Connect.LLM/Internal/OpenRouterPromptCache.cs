@@ -21,7 +21,7 @@ internal static class OpenRouterPromptCache
         if (model is null) return new();
         if (model.StartsWith("anthropic/claude-", StringComparison.Ordinal)) return PromptCaching.Claude;
         if (model.StartsWith("openai/", StringComparison.Ordinal))
-            return (OpenAiModelProfiles.Get(model[7..]).SupportsPromptCacheOptions != InferenceSupport.Unsupported) ? PromptCaching.OpenAi : PromptCaching.Automatic;
+            return OpenAiModelProfiles.Get(model[7..]).SupportsPromptCacheOptions == InferenceSupport.Supported ? PromptCaching.OpenAi : PromptCaching.Automatic;
         if (model.StartsWith("google/gemini-2.5", StringComparison.Ordinal)
             || model.StartsWith("google/gemini-3", StringComparison.Ordinal))
             return DefaultRetention with { Automatic = InferenceSupport.Supported };

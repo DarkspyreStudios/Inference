@@ -8,7 +8,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// model without a profile row; it keeps the adapter's former default levels and accepts temperature at any level.
 /// </summary>
 internal sealed record OpenAiModelProfile(IReadOnlySet<LlmReasoningLevel> ReasoningLevels, bool Verified = true,
-    InferenceSupport SupportsPromptCacheOptions = InferenceSupport.Unsupported)
+    InferenceSupport SupportsPromptCacheOptions = InferenceSupport.Unknown)
 {
     public bool IsReasoning => ReasoningLevels.Count > 0;
 

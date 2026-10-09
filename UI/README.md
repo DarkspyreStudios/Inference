@@ -13,6 +13,11 @@ Among Inference products, the package references `Darkspyre.Inference.Common` on
 settings managers and passes the Common types to `InferenceSettingsEditor`. No provider selection or
 connection listing is built into the library.
 
+Capability support uses Common's `InferenceSupport`: `Unknown`, `Supported`, or `Unsupported`.
+Unknown leaves an explicit attempt available; it does not claim qualification. Connect's capability
+override choices distinguish Default (inherit) from Unknown, Enabled (Supported), and Disabled
+(Unsupported). Ordinary binary settings remain checkboxes.
+
 The host supplies `IInferenceSettingsInteractionHost` to authorize declared side effects and
 run provider actions through `ExecuteAsync(manager, settings, action, progress, token)`. The component
 does not own the settings, the manager, or any engine behind it. The host must register

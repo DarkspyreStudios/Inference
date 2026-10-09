@@ -195,7 +195,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
     protected override bool ReasonsByDefault(LlmConnection connection, string modelId) =>
         CatalogLevels(ILlmCatalogCapabilities.EntryFor(connection, modelId)) is { } levels
             ? levels.Any(level => level > LlmReasoningLevel.None)
-            : (GetCapabilities(connection, modelId).SupportsReasoning != InferenceSupport.Unsupported);
+            : GetCapabilities(connection, modelId).SupportsReasoning == InferenceSupport.Supported;
 
     protected override void ApplyRequestHeaders(
         HttpRequestMessage message, LlmConnection connection, LlmChatRequest request)

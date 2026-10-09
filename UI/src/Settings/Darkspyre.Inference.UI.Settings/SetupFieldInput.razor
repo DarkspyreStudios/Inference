@@ -1,3 +1,4 @@
+@using Darkspyre.Inference.Common
 @implements IDisposable
 
 @if (Field.Description.IsVisible)
@@ -66,7 +67,7 @@
                     break;
                 case SetupChoiceField choice:
                     @* The combobox filters loaded choices itself; provider search matters only while more remain. *@
-                    @if (choice.Capabilities.SupportsSearch && (_continuation is not null || _search.Length > 0))
+                    @if (choice.Capabilities.SupportsSearch != InferenceSupport.Unsupported && (_continuation is not null || _search.Length > 0))
                     {
                     <div class="inference-settings-editor__choice-actions">
                         <Input @bind-Value="_search" Placeholder="Search choices" Disabled="@Unavailable" />
@@ -74,7 +75,7 @@
                                 OnClick="SearchChoicesAsync">Search</Button>
                     </div>
                     }
-                    @if (!choice.Capabilities.SupportsSearch && !choice.Capabilities.SupportsPaging && !choice.AllowsManualEntry)
+                    @if (choice.Capabilities.SupportsSearch == InferenceSupport.Unsupported && choice.Capabilities.SupportsPaging == InferenceSupport.Unsupported && !choice.AllowsManualEntry)
                     {
                         <Select Value="@_value" ValueChanged="@(value => SetChoiceAsync(choice, value))" Disabled="@Unavailable" @bind-Open="_choiceOpen">
                             <SelectTrigger />
@@ -106,10 +107,10 @@
                     @if (_choices.Count == 0 && choice.AllowsManualEntry)
                     { <Input Value="@_value" ValueChanged="@(value => SetChoiceAsync(choice, value))" Disabled="@Unavailable" /> }
                     <div class="inference-settings-editor__choice-actions">
-                        @if (choice.Capabilities.SupportsRefresh)
+                        @if (choice.Capabilities.SupportsRefresh != InferenceSupport.Unsupported)
                         { <Button Variant="Button.ButtonVariant.Ghost" Disabled="@(_loading || Unavailable)"
                                   OnClick="RefreshChoicesAsync">Refresh choices</Button> }
-                        @if (_continuation is not null && choice.Capabilities.SupportsPaging)
+                        @if (_continuation is not null && choice.Capabilities.SupportsPaging != InferenceSupport.Unsupported)
                         { <Button Variant="Button.ButtonVariant.Ghost" Disabled="@(_loading || Unavailable)" OnClick="LoadMoreAsync">Load more</Button> }
                     </div>
                     @if (_loading) { <p role="status">Loading choices…</p> }
@@ -316,14 +317,14 @@
             { if (IsCurrent()) { _choiceIssue = "Choice loading was not authorized."; } return; }
             if (!IsCurrent()) { return; }
             SetupChoicePage page = await Manager.QueryChoicesAsync(Settings, choice.Description.Id, new(search, continuation,
-                choice.Capabilities.SupportsPaging ? 50 : 200), cancellation.Token);
+                choice.Capabilities.SupportsPaging != InferenceSupport.Unsupported ? 50 : 200), cancellation.Token);
             if (!IsCurrent()) { return; }
             if (page.State == SetupChoiceState.Completed)
             {
                 _choices = _choices.Concat(page.Choices).DistinctBy(item => item.Value).ToList();
                 _continuation = page.Continuation;
                 _loadedVersion = version;
-                if (page.Continuation is not null && !choice.Capabilities.SupportsPaging)
+                if (page.Continuation is not null && choice.Capabilities.SupportsPaging == InferenceSupport.Unsupported)
                 { _choiceIssue = "The provider returned an incomplete bounded list."; }
             }
             else { _choiceIssue = page.Issues?.FirstOrDefault()?.Message ?? page.State.ToString(); }

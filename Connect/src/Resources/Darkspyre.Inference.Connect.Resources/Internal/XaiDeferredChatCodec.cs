@@ -46,9 +46,9 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
         LlmProviderCapabilities defaults = DefaultCapabilities with
         {
             ReasoningLevels = profile.ReasoningLevels,
-            SupportsTemperature = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
-            SupportsTopP = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
-            SupportsPromptImages = (profile.AcceptsImages ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTemperature = profile.AllowsSampling,
+            SupportsTopP = profile.AllowsSampling,
+            SupportsPromptImages = profile.AcceptsImages,
             SupportsPresencePenalty = (!reasoning ? InferenceSupport.Supported : InferenceSupport.Unsupported),
             SupportsFrequencyPenalty = (!reasoning ? InferenceSupport.Supported : InferenceSupport.Unsupported),
             MaxStopSequences = reasoning ? 0 : 4
@@ -60,7 +60,7 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
             SupportsStreamingUsage = InferenceSupport.Unsupported,
             SupportsTopK = InferenceSupport.Unsupported,
             SupportsExplicitCache = InferenceSupport.Unsupported,
-            SupportsPromptImages = ((capabilities.SupportsPromptImages != InferenceSupport.Unsupported) && profile.AcceptsImages ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsPromptImages = LlmProviderCapabilities.Intersect(capabilities.SupportsPromptImages, profile.AcceptsImages),
             SupportsShellTools = InferenceSupport.Unsupported,
             HostedTools = FrozenSet<LlmHostedToolKind>.Empty
         };

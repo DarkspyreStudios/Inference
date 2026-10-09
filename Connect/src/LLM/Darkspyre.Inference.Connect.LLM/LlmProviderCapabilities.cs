@@ -21,9 +21,9 @@ public sealed record LlmProviderCapabilities
     public LlmOutputLimitEnforcement OutputLimitEnforcement { get; init; }
 
     /// <summary>
-    /// True when the adapter streams provider output as the model generates it. False makes the adapter send the
+    /// Supported means the adapter streams provider output as the model generates it. Unsupported makes it send the
     /// provider's non-streaming request and emit the complete response as events after it arrives. A transport whose
-    /// provider has no non-streaming request rejects every request while this is false.
+    /// provider has no non-streaming request rejects every request while this is Unsupported. Unknown permits an attempt.
     /// </summary>
     public InferenceSupport SupportsStreaming { get; init; }
 
@@ -33,7 +33,7 @@ public sealed record LlmProviderCapabilities
     /// <summary>A streamed response can emit cumulative usage observations before completion.</summary>
     public InferenceSupport SupportsUsageDeltas { get; init; }
 
-    /// <summary>Public reasoning text can arrive separately from the answer. False suppresses display, not retained state.</summary>
+    /// <summary>Public reasoning text can arrive separately from the answer. Unsupported suppresses display, not retained state.</summary>
     public InferenceSupport SupportsReasoningText { get; init; }
 
     public InferenceSupport SupportsModelListing { get; init; }
@@ -52,7 +52,7 @@ public sealed record LlmProviderCapabilities
     /// <summary>The reasoning levels the model accepts. Empty when it accepts no reasoning control.</summary>
     public IReadOnlySet<LlmReasoningLevel> ReasoningLevels { get; init; } = FrozenSet<LlmReasoningLevel>.Empty;
 
-    /// <summary>True when the model accepts a reasoning level above <see cref="LlmReasoningLevel.None"/>.</summary>
+    /// <summary>Support for reasoning above <see cref="LlmReasoningLevel.None"/>. An empty level set leaves support unknown.</summary>
     public InferenceSupport SupportsReasoning => ReasoningLevels.Count == 0 ? InferenceSupport.Unknown
         : ReasoningLevels.Any(static level => level > LlmReasoningLevel.None) ? InferenceSupport.Supported : InferenceSupport.Unsupported;
 

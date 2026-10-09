@@ -56,15 +56,18 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
         OpenAiModelProfile profile = OpenAiModelProfiles.Get(modelId);
         return capabilities with
         {
-            PromptCache = (profile.SupportsPromptCacheOptions != InferenceSupport.Unsupported) ? PromptCaching.OpenAi : PromptCaching.Automatic,
+            PromptCache = profile.SupportsPromptCacheOptions == InferenceSupport.Supported ? PromptCaching.OpenAi : PromptCaching.Automatic,
             ReasoningLevels = LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.ReasoningLevels)
                 ? capabilities.ReasoningLevels
                 : profile.ReasoningLevels,
             SupportsTemperature = LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTemperature)
                 ? capabilities.SupportsTemperature
-                : (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
-            SupportsTopP = profile.AllowsSampling
-                ? capabilities.SupportsTopP : InferenceSupport.Unsupported,
+                : !profile.Verified ? InferenceSupport.Unknown
+                : profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported,
+            SupportsTopP = LlmProviderCapabilities.Intersect(
+                !profile.Verified ? InferenceSupport.Unknown
+                    : profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported,
+                capabilities.SupportsTopP),
             SupportsTopK = InferenceSupport.Unsupported,
             SupportsSeed = InferenceSupport.Unsupported,
             SupportsPresencePenalty = InferenceSupport.Unsupported,

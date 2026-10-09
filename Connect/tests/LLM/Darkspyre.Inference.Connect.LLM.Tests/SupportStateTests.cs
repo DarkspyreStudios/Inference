@@ -54,6 +54,29 @@ public sealed class SupportStateTests
         Assert.Equal(InferenceSupport.Unknown, new LlmProviderCapabilities().Apply(null).SupportsJsonSchema);
     }
 
+    [Fact]
+    public void MissingModelFactsDoNotBecomeNegativeEvidence()
+    {
+        Assert.Equal(InferenceSupport.Unknown, XaiModelProfiles.Get(Connection(), "unlisted-model").AllowsSampling);
+        Assert.Equal(InferenceSupport.Unknown, XaiModelProfiles.Get(Connection(), "unlisted-model").AcceptsImages);
+        Assert.Equal(InferenceSupport.Unknown, AnthropicModelProfiles.Resolve("unlisted-model", null).AllowsSampling);
+        Assert.Equal(InferenceSupport.Unknown, OpenAiModelProfiles.Get("unlisted-model").SupportsPromptCacheOptions);
+    }
+
+    [Fact]
+    public void KnownAnthropicSamplingRetainsAnExplicitUnknownOverride()
+    {
+        using var http = new HttpClient(new SchemaHandler());
+        var client = new AnthropicMessagesLlmClient(http);
+        var connection = Connection() with
+        {
+            Transport = LlmTransport.AnthropicMessages,
+            Endpoint = "https://api.anthropic.com/v1",
+            CapabilityOverrides = new() { SupportsTemperature = InferenceSupport.Unknown }
+        };
+        Assert.Equal(InferenceSupport.Unknown, client.GetCapabilities(connection, "claude-sonnet-4-5").SupportsTemperature);
+    }
+
     [Theory]
     [InlineData(InferenceSupport.Unknown)]
     [InlineData(InferenceSupport.Unsupported)]

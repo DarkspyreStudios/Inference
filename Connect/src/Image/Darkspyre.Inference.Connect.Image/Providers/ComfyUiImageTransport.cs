@@ -132,7 +132,9 @@ internal sealed class ComfyUiImageTransport(
         "ComfyUI",
         "ComfyUI workflow server with reference-image upload and live progress support.",
         new ImageTransportCapabilities(
-            SupportsProgress: InferenceSupport.Supported,            SupportsReferenceImages: InferenceSupport.Supported,            SupportsCancellation: InferenceSupport.Supported));
+            SupportsProgress: InferenceSupport.Supported,
+            SupportsReferenceImages: InferenceSupport.Supported,
+            SupportsCancellation: InferenceSupport.Supported));
 
     public Task<IReadOnlyList<ImageWorkflow>> GetWorkflowsAsync(
         ImageConnection connection, XaiFamilyBinding? xai = null,

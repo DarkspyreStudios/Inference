@@ -56,8 +56,8 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(Defaults, connection, modelId);
         return capabilities with
         {
-            SupportsTopP = (!string.Equals(modelId, DefaultModelId, StringComparison.OrdinalIgnoreCase)
-                && (capabilities.SupportsTopP != InferenceSupport.Unsupported) ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTopP = string.Equals(modelId, DefaultModelId, StringComparison.OrdinalIgnoreCase)
+                ? InferenceSupport.Unsupported : capabilities.SupportsTopP,
             SupportsTopK = InferenceSupport.Unsupported,
             SupportsSeed = InferenceSupport.Unsupported,
             SupportsPresencePenalty = InferenceSupport.Unsupported,

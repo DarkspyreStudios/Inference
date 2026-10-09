@@ -528,7 +528,7 @@ public sealed class BedrockSafetyTests
         foreach (string model in new[] { "openai.gpt-oss-20b-2:0", "anthropic.claude-haiku",
                      "arn:aws:bedrock:us-east-1:123456789012:inference-profile/unknown" })
         {
-            Assert.Equal(InferenceSupport.Unsupported, client.GetCapabilities(Connection(), model).SupportsJsonSchema);
+            Assert.Equal(InferenceSupport.Unknown, client.GetCapabilities(Connection(), model).SupportsJsonSchema);
             Assert.Equal(InferenceSupport.Supported, client.GetCapabilities(Connection() with
             { CapabilityOverrides = new() { SupportsJsonSchema = InferenceSupport.Supported } }, model).SupportsJsonSchema);
         }

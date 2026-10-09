@@ -143,6 +143,25 @@ public sealed class SetupEditorRegressionTests : BunitContext
     }
 
     [Fact]
+    public void UnknownChoiceSupportKeepsRefreshAndPagingAvailable()
+    {
+        var settings = new TestSettings { ChoiceCapabilities = new() };
+        var manager = new TestManager(new Target())
+        {
+            Loader = (_, _) => Task.FromResult(new SetupChoicePage([new("first", "First")], "next"))
+        };
+        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
+        IRenderedComponent<SetupFieldInput> choice = Field(editor, "choice");
+        choice.WaitForAssertion(() =>
+        {
+            Assert.Contains("Refresh choices", choice.Markup, StringComparison.Ordinal);
+            Assert.Contains("Load more", choice.Markup, StringComparison.Ordinal);
+            Assert.Contains("Search choices", choice.Markup, StringComparison.Ordinal);
+            Assert.DoesNotContain("incomplete bounded list", choice.Markup, StringComparison.Ordinal);
+        });
+    }
+
+    [Fact]
     public void MultiStepSettingsNameTheCurrentStepOnceInTheStepList()
     {
         var (settings, manager) = New();

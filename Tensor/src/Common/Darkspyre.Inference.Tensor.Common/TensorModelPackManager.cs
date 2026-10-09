@@ -223,7 +223,8 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                     }
 
                     Report(progress, new TensorModelInstallProgress(
-                        TensorModelInstallStage.Saving,                        artifact.Role,                        artifact.Length,                        artifact.Length,                        completed + artifact.Length,                        total));
+                        TensorModelInstallStage.Saving, artifact.Role, artifact.Length, artifact.Length,
+                        completed + artifact.Length, total));
                     _directory.Publish(temporaryPath, ArtifactName(definition.Key, artifact.RelativePath));
                     completed += artifact.Length;
                 }

@@ -36,8 +36,8 @@ public sealed record LlmCapabilities
     public LlmOutputLimitEnforcement OutputLimitEnforcement { get; init; }
 
     /// <summary>
-    /// True when <see cref="ILlmInference.StreamAsync"/> delivers events while the model generates. False when the
-    /// events arrive together after generation ends.
+    /// Supported means <see cref="ILlmInference.StreamAsync"/> delivers events while the model generates.
+    /// Unsupported means the events arrive together after generation ends. Unknown leaves timing unqualified.
     /// </summary>
     public InferenceSupport SupportsStreaming { get; init; }
 
@@ -64,7 +64,7 @@ public sealed record LlmCapabilities
     /// <summary>The reasoning levels the model accepts. Empty when the model accepts no reasoning control.</summary>
     public IReadOnlySet<LlmReasoningLevel> ReasoningLevels { get; init; } = FrozenSet<LlmReasoningLevel>.Empty;
 
-    /// <summary>True when the model accepts a reasoning level above <see cref="LlmReasoningLevel.None"/>.</summary>
+    /// <summary>Support for reasoning above <see cref="LlmReasoningLevel.None"/>. An empty level set leaves support unknown.</summary>
     public InferenceSupport SupportsReasoning => ReasoningLevels.Count == 0 ? InferenceSupport.Unknown
         : ReasoningLevels.Any(static level => level > LlmReasoningLevel.None) ? InferenceSupport.Supported : InferenceSupport.Unsupported;
 

@@ -38,9 +38,9 @@ internal static class VertexModelProfiles
             SupportsModelListing = InferenceSupport.Supported,
             OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
             SupportsJsonSchema = profile.SupportsStructuredOutputs ?? InferenceSupport.Unknown,
-            SupportsTemperature = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
-            SupportsTopP = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
-            SupportsTopK = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTemperature = profile.AllowsSampling,
+            SupportsTopP = profile.AllowsSampling,
+            SupportsTopK = profile.AllowsSampling,
             MaxStopSequences = int.MaxValue,
             SupportsToolUse = InferenceSupport.Supported,
             Tools = new()

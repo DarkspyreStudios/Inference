@@ -1,5 +1,6 @@
 using System.Collections.Frozen;
 using System.Text.Json;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -9,17 +10,17 @@ internal sealed record XaiMultiAgentProfile(IReadOnlyDictionary<string, int> Age
 internal sealed record XaiModelProfile(
     IReadOnlySet<LlmReasoningLevel> ReasoningLevels,
     LlmReasoningLevel? DefaultReasoningLevel,
-    bool AllowsSampling,
-    bool AcceptsImages = false,
+    InferenceSupport AllowsSampling,
+    InferenceSupport AcceptsImages = InferenceSupport.Unknown,
     XaiMultiAgentProfile? MultiAgent = null);
 
 /// <summary>Catalog facts take precedence over documented model-family fallbacks.</summary>
 internal static class XaiModelProfiles
 {
-    private static readonly XaiModelProfile Unknown = new(LlmReasoningEffort.Levels(), null, false);
-    private static readonly XaiModelProfile NonReasoning = new(LlmReasoningEffort.Levels(), null, true);
+    private static readonly XaiModelProfile Unknown = new(LlmReasoningEffort.Levels(), null, InferenceSupport.Unknown);
+    private static readonly XaiModelProfile NonReasoning = new(LlmReasoningEffort.Levels(), null, InferenceSupport.Supported);
     private static readonly XaiModelProfile Reasoning = new(LlmReasoningEffort.Levels(
-        LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh), LlmReasoningLevel.High, true);
+        LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh), LlmReasoningLevel.High, InferenceSupport.Supported);
 
     // https://docs.x.ai/developers/model-capabilities/text/reasoning
     // https://docs.x.ai/developers/model-capabilities/text/multi-agent
@@ -28,11 +29,11 @@ internal static class XaiModelProfiles
     [
         ("grok-4.20-0309-non-reasoning", NonReasoning),
         ("grok-4.20-non-reasoning", NonReasoning),
-        ("grok-4.20-multi-agent", new(LlmReasoningEffort.Levels(), null, true, MultiAgent: new(
+        ("grok-4.20-multi-agent", new(LlmReasoningEffort.Levels(), null, InferenceSupport.Supported, MultiAgent: new(
             new Dictionary<string, int>(StringComparer.Ordinal) { ["low"] = 4, ["medium"] = 4, ["high"] = 16, ["xhigh"] = 16 }.ToFrozenDictionary(StringComparer.Ordinal)))),
         ("grok-4.7", Reasoning),
         ("grok-4.6", Reasoning),
-        ("grok-4.5", new(LlmReasoningEffort.Levels(LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High), LlmReasoningLevel.High, true))
+        ("grok-4.5", new(LlmReasoningEffort.Levels(LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High), LlmReasoningLevel.High, InferenceSupport.Supported))
     ];
 
     internal static XaiModelProfile Get(LlmConnection connection, string? modelId)
@@ -41,7 +42,7 @@ internal static class XaiModelProfiles
         string? canonicalId = model?.Id ?? modelId;
         XaiModelProfile profile = Rows.FirstOrDefault(row => canonicalId?.StartsWith(row.Prefix, StringComparison.OrdinalIgnoreCase) == true).Profile ?? Unknown;
         if (model?.CatalogEntry is not { } catalog) return profile;
-        profile = profile with { AcceptsImages = Contains(catalog, "input_modalities", "image") };
+        profile = profile with { AcceptsImages = Modality(catalog, "image") };
         if (profile.MultiAgent is not null) return profile;
         if (catalog.TryGetProperty("capabilities", out JsonElement capabilities) && capabilities.ValueKind == JsonValueKind.Object
             && capabilities.TryGetProperty("reasoning_effort", out JsonElement efforts) && efforts.ValueKind == JsonValueKind.Array)
@@ -71,8 +72,10 @@ internal static class XaiModelProfiles
         _ => null
     };
 
-    private static bool Contains(JsonElement entry, string property, string value) =>
-        entry.ValueKind == JsonValueKind.Object && entry.TryGetProperty(property, out JsonElement values)
-        && values.ValueKind == JsonValueKind.Array && values.EnumerateArray()
-            .Any(item => item.ValueKind == JsonValueKind.String && item.GetString() == value);
+    private static InferenceSupport Modality(JsonElement entry, string value) =>
+        entry.ValueKind == JsonValueKind.Object && entry.TryGetProperty("input_modalities", out JsonElement values)
+        && values.ValueKind == JsonValueKind.Array
+            ? values.EnumerateArray().Any(item => item.ValueKind == JsonValueKind.String && item.GetString() == value)
+                ? InferenceSupport.Supported : InferenceSupport.Unsupported
+            : InferenceSupport.Unknown;
 }

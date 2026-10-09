@@ -92,12 +92,15 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 }
             },
             SupportsAccountUsage = InferenceSupport.Unsupported,
-            SupportsTemperature = (profile.AllowsSampling
-                && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTemperature) || (capabilities.SupportsTemperature != InferenceSupport.Unsupported)) ? InferenceSupport.Supported : InferenceSupport.Unsupported),
-            SupportsTopP = (profile.AllowsSampling
-                && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTopP) || (capabilities.SupportsTopP != InferenceSupport.Unsupported)) ? InferenceSupport.Supported : InferenceSupport.Unsupported),
-            SupportsTopK = (profile.AllowsSampling
-                && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTopK) || (capabilities.SupportsTopK != InferenceSupport.Unsupported)) ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTemperature = LlmProviderCapabilities.Intersect(profile.AllowsSampling,
+                LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTemperature)
+                    ? capabilities.SupportsTemperature : profile.AllowsSampling),
+            SupportsTopP = LlmProviderCapabilities.Intersect(profile.AllowsSampling,
+                LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTopP)
+                    ? capabilities.SupportsTopP : profile.AllowsSampling),
+            SupportsTopK = LlmProviderCapabilities.Intersect(profile.AllowsSampling,
+                LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTopK)
+                    ? capabilities.SupportsTopK : profile.AllowsSampling),
             SupportsSeed = InferenceSupport.Unsupported,
             SupportsPresencePenalty = InferenceSupport.Unsupported,
             SupportsFrequencyPenalty = InferenceSupport.Unsupported,

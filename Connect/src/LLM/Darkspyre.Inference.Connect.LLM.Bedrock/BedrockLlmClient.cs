@@ -92,8 +92,15 @@ internal sealed class BedrockLlmClient(
             or "amazon.nova-pro-v1:0" or "amazon.nova-2-lite-v1:0";
         bool nativeTools = baseModelId != "deepseek.r1-v1:0";
         LlmRichContentSupported richContent = ModelRichContent(modelId);
-        bool claudeSampling = family != BedrockModelFamily.AnthropicClaude
-            || AnthropicModelProfiles.Resolve(BedrockModelFamilies.AnthropicModelId(baseModelId), null).AllowsSampling;
+        InferenceSupport claudeSampling = family == BedrockModelFamily.AnthropicClaude
+            ? AnthropicModelProfiles.Resolve(BedrockModelFamilies.AnthropicModelId(baseModelId), null).AllowsSampling
+            : family == BedrockModelFamily.Unknown ? InferenceSupport.Unknown : InferenceSupport.Supported;
+        InferenceSupport topK = family switch
+        {
+            BedrockModelFamily.AmazonNova1 or BedrockModelFamily.AmazonNova2 => InferenceSupport.Supported,
+            BedrockModelFamily.AnthropicClaude => claudeSampling,
+            _ => InferenceSupport.Unsupported
+        };
         LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(
             Defaults with
             {
@@ -107,16 +114,16 @@ internal sealed class BedrockLlmClient(
                     or "anthropic.claude-sonnet-4-6" or "anthropic.claude-opus-4-6-v1"
                     or "anthropic.claude-sonnet-4-5-20250929-v1:0"
                     or "anthropic.claude-haiku-4-5-20251001-v1:0"
-                    or "anthropic.claude-opus-4-5-20251101-v1:0" ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+                    or "anthropic.claude-opus-4-5-20251101-v1:0" ? InferenceSupport.Supported
+                    : indiaHaiku || novaWithoutStructuredOutput ? InferenceSupport.Unsupported : InferenceSupport.Unknown),
                 SupportsPromptImages = (richContent.Images == LlmRichContentCarriage.Native ? InferenceSupport.Supported : InferenceSupport.Unsupported),
                 SupportsPromptDocuments = (richContent.PdfDocuments == LlmRichContentCarriage.Native ? InferenceSupport.Supported : InferenceSupport.Unsupported),
                 RichContentSupported = richContent,
                 Agent = Defaults.Agent with { RichContentSupported = richContent },
                 PromptCache = BedrockPromptCache.Capabilities(modelId ?? string.Empty),
-                SupportsTemperature = (claudeSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
-                SupportsTopP = (claudeSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
-                SupportsTopK = (family is BedrockModelFamily.AmazonNova1 or BedrockModelFamily.AmazonNova2
-                    || family == BedrockModelFamily.AnthropicClaude && claudeSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+                SupportsTemperature = claudeSampling,
+                SupportsTopP = claudeSampling,
+                SupportsTopK = topK,
                 MaxStopSequences = family == BedrockModelFamily.DeepSeekR1 ? 10 : 2500
             }, connection, modelId) with
         {
@@ -153,9 +160,8 @@ internal sealed class BedrockLlmClient(
             throw new NotSupportedException(
                 "Bedrock capability overrides cannot offer a reasoning level the model family does not accept.");
         }
-        if ((!claudeSampling && ((capabilities.SupportsTemperature != InferenceSupport.Unsupported) || (capabilities.SupportsTopP != InferenceSupport.Unsupported)))
-            || (capabilities.SupportsTopK != InferenceSupport.Unsupported) && !(family is BedrockModelFamily.AmazonNova1 or BedrockModelFamily.AmazonNova2
-                || family == BedrockModelFamily.AnthropicClaude && claudeSampling)
+        if ((claudeSampling == InferenceSupport.Unsupported && (capabilities.SupportsTemperature == InferenceSupport.Supported || capabilities.SupportsTopP == InferenceSupport.Supported))
+            || capabilities.SupportsTopK == InferenceSupport.Supported && topK == InferenceSupport.Unsupported
             || capabilities.MaxStopSequences > (family == BedrockModelFamily.DeepSeekR1 ? 10 : 2500))
         {
             throw new NotSupportedException("Bedrock capability overrides cannot enable unsupported sampling controls.");

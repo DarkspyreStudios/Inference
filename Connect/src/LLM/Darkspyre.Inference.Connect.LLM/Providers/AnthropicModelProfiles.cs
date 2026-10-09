@@ -32,7 +32,7 @@ internal sealed record AnthropicModelProfile(
     AnthropicThinkingMode Thinking,
     AnthropicNoneMapping NoneMapping,
     IReadOnlySet<LlmReasoningLevel> ReasoningLevels,
-    bool AllowsSampling,
+    InferenceSupport AllowsSampling,
     bool AllowsForcedToolChoice,
     InferenceSupport? SupportsStructuredOutputs,
     long? MaxInputTokens,
@@ -54,7 +54,7 @@ internal static class AnthropicModelProfiles
     internal static void ValidateSampling(LlmChatRequest request, AnthropicModelProfile profile)
     {
         ValidateThinkingAndToolChoice(request, profile);
-        if (!profile.AllowsSampling && (request.Temperature is not null || request.TopP is not null || request.TopK is not null))
+        if (profile.AllowsSampling == InferenceSupport.Unsupported && (request.Temperature is not null || request.TopP is not null || request.TopK is not null))
         { throw new NotSupportedException("This Claude model does not accept temperature, top-p or top-k."); }
         if (request.Temperature is < 0 or > 1)
         { throw new ArgumentOutOfRangeException(nameof(request), "Claude temperature must be between 0 and 1."); }
@@ -164,7 +164,7 @@ internal static class AnthropicModelProfiles
     /// <summary>A model with neither a catalog entry nor a family row offers no levels.</summary>
     private static readonly AnthropicModelProfile Unknown = new(
         AnthropicThinkingMode.None, AnthropicNoneMapping.Unsupported, LlmReasoningEffort.Levels(),
-        AllowsSampling: false, AllowsForcedToolChoice: true, SupportsStructuredOutputs: null,
+        AllowsSampling: InferenceSupport.Unknown, AllowsForcedToolChoice: true, SupportsStructuredOutputs: null,
         MaxInputTokens: null, MaxOutputTokens: null);
 
     /// <summary>
@@ -183,7 +183,8 @@ internal static class AnthropicModelProfiles
                 levels.Add(LlmReasoningLevel.None);
             }
             return new AnthropicModelProfile(
-                thinking, none, levels.ToFrozenSet(), row?.AllowsSampling ?? false, row?.AllowsForcedToolChoice ?? true,
+                thinking, none, levels.ToFrozenSet(), row is null ? InferenceSupport.Unknown
+                    : row.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported, row?.AllowsForcedToolChoice ?? true,
                 Supported(entry, "capabilities", "structured_outputs") switch
                 {
                     true => InferenceSupport.Supported,
@@ -198,7 +199,9 @@ internal static class AnthropicModelProfiles
 
         return row is null
             ? Unknown
-            : new AnthropicModelProfile(row.Thinking,row.NoneMapping,row.Levels,row.AllowsSampling,                row.AllowsForcedToolChoice,SupportsStructuredOutputs: null,MaxInputTokens: null,MaxOutputTokens: null)
+            : new AnthropicModelProfile(row.Thinking, row.NoneMapping, row.Levels,
+                row.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported,
+                row.AllowsForcedToolChoice, SupportsStructuredOutputs: null, MaxInputTokens: null, MaxOutputTokens: null)
             { ThinksByDefault = row.ThinksByDefault, DisplayDefaultsToOmitted = row.DisplayDefaultsToOmitted };
     }
 

@@ -90,14 +90,14 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
         XaiModelProfile profile = XaiModelProfiles.Get(connection, modelId);
         LlmRichContentSupported richContent = DefaultCapabilities.RichContentSupported with
         {
-            Images = modelId is null || profile.AcceptsImages ? LlmRichContentCarriage.Native : LlmRichContentCarriage.Unsupported
+            Images = profile.AcceptsImages != InferenceSupport.Unsupported ? LlmRichContentCarriage.Native : LlmRichContentCarriage.Unsupported
         };
         LlmProviderCapabilities defaults = DefaultCapabilities with
         {
             ReasoningLevels = profile.ReasoningLevels,
-            SupportsTemperature = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
-            SupportsTopP = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
-            SupportsPromptImages = (profile.AcceptsImages ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTemperature = profile.AllowsSampling,
+            SupportsTopP = profile.AllowsSampling,
+            SupportsPromptImages = profile.AcceptsImages,
             RichContentSupported = richContent,
             Agent = DefaultCapabilities.Agent with { RichContentSupported = richContent }
         };
@@ -107,7 +107,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             ReasoningLevels = profile.MultiAgent is null ? capabilities.ReasoningLevels.Where(level => level is
                 LlmReasoningLevel.Low or LlmReasoningLevel.Medium or LlmReasoningLevel.High or LlmReasoningLevel.ExtraHigh).ToFrozenSet()
                 : LlmReasoningEffort.Levels(),
-            SupportsPromptImages = ((capabilities.SupportsPromptImages != InferenceSupport.Unsupported) && profile.AcceptsImages ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsPromptImages = LlmProviderCapabilities.Intersect(capabilities.SupportsPromptImages, profile.AcceptsImages),
             SupportsTopK = InferenceSupport.Unsupported,
             SupportsSeed = InferenceSupport.Unsupported,
             SupportsPresencePenalty = InferenceSupport.Unsupported,

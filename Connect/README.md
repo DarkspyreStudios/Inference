@@ -960,7 +960,7 @@ are not provider limits. Session commands complete after ordered transport send,
 acknowledgment or event consumption. One event consumer drains the feed; disposal closes the
 feed before draining admitted work. No automatic replay/reconnect is part of these contracts.
 
-PocketTTS implements neither streaming interface, advertises all new capability flags false and
+PocketTTS implements neither streaming interface, advertises the streaming capabilities as `Unsupported` and
 leaves unknown rate lists null. `AddTtsConnect()` registers PocketTTS and `XaiTtsProvider`.
 The xAI adapter implements REST synthesis and reusable streaming sessions; OAuth and actual
 provider readiness remain unqualified. `Bind(TtsConnection, XaiFamilyBinding?,
@@ -2426,7 +2426,7 @@ have exact type-name getters on `ConnectLlmJson`. The provider facade implements
 with the selected routes described in [Files and Skills facade](#files-and-skills-facade).
 Borrowed Skills upload inputs carry explicit caller limits and remain runtime-only, not data-codec
 roots. Their nonnull serialization refuses without reading their streams or exposing their policy.
-Unimplemented operations retain false capability flags.
+Unimplemented operations report `Unsupported` capability values.
 
 Files pages preserve their returned token and an explicit `IsKnownLastPage` fact. Skills pages
 preserve their distinct first/last-ID and `HasMore` observations. Required response values do not
