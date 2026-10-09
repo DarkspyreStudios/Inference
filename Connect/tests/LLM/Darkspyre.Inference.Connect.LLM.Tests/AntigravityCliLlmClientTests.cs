@@ -170,7 +170,7 @@ public sealed class AntigravityCliLlmClientTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task PinnedModelRejectsConflictingEffortBeforeInvocationAndAcceptsItsOwnLevel(bool streaming)
+    public async Task PinnedModelMapsDesiredEffortWithoutChangingTheSelectedModel(bool streaming)
     {
         const string model = "gemini-3.8-flash-low";
         string output = streaming
@@ -193,19 +193,61 @@ public sealed class AntigravityCliLlmClientTests
             ReasoningLevel = LlmReasoningLevel.Medium
         };
 
-        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() => ReadAllAsync(client.StreamAsync(connection, request)));
-        Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
-        Assert.Empty(runner.Invocations);
         Assert.Equal(LlmReasoningLevel.Low, Assert.Single(client.GetCapabilities(connection, model).ReasoningLevels));
 
-        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection,
-            request with { ReasoningLevel = LlmReasoningLevel.Low }));
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection, request));
         LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.Completed, result.Status);
         Assert.Equal("OK", result.Text);
         AntigravityCliInvocation invocation = Assert.Single(runner.Invocations);
         Assert.Equal(model, invocation.Arguments[invocation.Arguments.ToList().IndexOf("--model") + 1]);
         Assert.Equal("low", invocation.Arguments[invocation.Arguments.ToList().IndexOf("--effort") + 1]);
+        Assert.Equal(LlmReasoningLevel.Medium, request.ReasoningLevel);
+    }
+
+    [Theory]
+    [InlineData(true, LlmReasoningLevel.Maximum, "max")]
+    [InlineData(false, LlmReasoningLevel.ExtraHigh, "xhigh")]
+    [InlineData(true, LlmReasoningLevel.None, "low")]
+    [InlineData(false, LlmReasoningLevel.Minimal, "low")]
+    public async Task UnprofiledChatEffortUsesTheExistingNativeCliVocabulary(bool streaming, LlmReasoningLevel effort, string word)
+    {
+        string output = streaming
+            ? """{"event":"result","result":{"status":"SUCCESS","response":"OK"}}"""
+            : """{"status":"SUCCESS","response":"OK"}""";
+        var runner = new RecordingRunner(new(0, output, string.Empty));
+        var client = new AntigravityCliLlmClient(runner);
+        LlmConnection connection = Connection() with
+        { CapabilityOverrides = new() { SupportsStreaming = streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported } };
+        var request = new LlmChatRequest
+        { ModelId = "custom-model", Messages = [new("user", "answer")], ReasoningLevel = effort };
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection, request));
+
+        Assert.Equal("OK", Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Text);
+        AntigravityCliInvocation invocation = Assert.Single(runner.Invocations);
+        Assert.Equal(word, invocation.Arguments[invocation.Arguments.ToList().IndexOf("--effort") + 1]);
+        Assert.Equal(effort, request.ReasoningLevel);
+    }
+
+    [Theory]
+    [InlineData("custom-model", LlmReasoningLevel.Maximum, "max")]
+    [InlineData("gemini-3.8-flash-low", LlmReasoningLevel.Maximum, "low")]
+    [InlineData("gemini-3.8-flash-high", LlmReasoningLevel.None, "high")]
+    public async Task NativeTurnUsesTheSameModelMappingBeforeReopening(string model, LlmReasoningLevel effort, string word)
+    {
+        var process = new TerminalProcess();
+        await using ILlmAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
+            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), CancellationToken.None);
+        var request = new LlmAgentTurnRequest { ModelId = model, ReasoningLevel = effort, Input = [new LlmAgentTextContent("answer")] };
+
+        IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(request));
+
+        IReadOnlyList<string> arguments = process.Invocations[1];
+        Assert.Equal(model, arguments[arguments.ToList().IndexOf("--model") + 1]);
+        Assert.Equal(word, arguments[arguments.ToList().IndexOf("--effort") + 1]);
+        Assert.Equal(effort, request.ReasoningLevel);
+        Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
     }
 
     [Fact]
@@ -277,11 +319,14 @@ public sealed class AntigravityCliLlmClientTests
     private sealed class TerminalProcess : IAntigravityCliSessionProcessFactory, IAntigravityCliSessionProcess
     {
         private readonly Channel<string> _lines = Channel.CreateUnbounded<string>();
+        public List<IReadOnlyList<string>> Invocations { get; } = [];
 
         public IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory)
         {
-            _lines.Writer.TryWrite("""{"event":"init","conversation_id":"conversation-1"}""");
-            return this;
+            Invocations.Add(arguments);
+            var process = new TerminalProcess();
+            process._lines.Writer.TryWrite("""{"event":"init","conversation_id":"conversation-1"}""");
+            return process;
         }
 
         public ValueTask WriteAsync(string text, CancellationToken cancellationToken = default)

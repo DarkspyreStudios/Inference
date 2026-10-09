@@ -855,7 +855,8 @@ terminal format and the current Apple, Antigravity and Bedrock protocols report 
 level below it; a level does not cost the same on two different models. Null leaves the provider's
 default in place. Each model reports the levels it accepts in `LlmCapabilities.ReasoningLevels`, and
 `SupportsReasoning` is `Supported` when that set contains a level above `None`, `Unsupported` when
-it contains only `None`, and `Unknown` when the set is empty. Direct Codex, Gemini API, Vertex Gemini and the Claude transports
+it contains only `None`, and `Unknown` when the set is empty. Direct Codex, Gemini API, Vertex Gemini,
+Antigravity CLI and the Claude transports
 map desired effort inside their adapters. Other adapters currently reject a level outside their declared set with
 `InferenceFailureCode.InvalidRequest` before any provider call. Each adapter owns its provider's wire form.
 `LlmCapabilityOverrides.ReasoningLevels` replaces a transport's set for a connection or one model,
@@ -4838,11 +4839,17 @@ the native result does not turn unsuccessful process cleanup into success.
 
 The shared Antigravity capability resolver restricts the published fixed-effort Gemini 3.8/3.7/3.6
 Flash, Gemini 3.1 Pro and GPT-OSS 120B slugs to their pinned level. Discovery, chat and native turn
-admission use that resolver. Overrides cannot widen a pinned level. A conflicting effort fails before
-CLI invocation or native conversation reopening; the adapter never changes the selected model slug.
+admission use that resolver. Overrides cannot widen a pinned level. Chat and native turns use
+`AntigravityCliLlmClient.MapReasoning` before CLI invocation or native conversation reopening.
+Its explicit rows map desired effort down to a native choice, or to the lowest available choice
+when none is at or below the request. A fixed-effort slug maps every explicit effort to its pinned
+level; the adapter never changes the selected model slug. Null leaves the default unchanged.
 The verified `claude-sonnet-4-6` and `claude-opus-4-6-thinking` slugs expose no selectable effort because
 the CLI rejects that flag. Omitted effort preserves their native default. Overrides cannot enable it.
-Other model IDs retain their existing controls. Google documents
+Other model IDs use the installed CLI's low/medium/high/xhigh/max vocabulary. `None` and `Minimal`
+map to the lowest available effort; this does not disable thinking. Missing observations remain
+attemptable, including xhigh and max. The installed `agy --help` documents those spellings; the public
+headless guide lists only low/medium/high. No live acceptance is inferred from help. Google documents
 [pinned model slugs and effort selection](https://www.antigravity.google/docs/cli/headless/).
 
 `LlmAgentProviderService` starts and resumes native AGY conversations. AGY owns the conversation, its

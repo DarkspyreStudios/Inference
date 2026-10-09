@@ -407,8 +407,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             request.ModelId ?? _defaults.ModelId,
             request.ReasoningLevel ?? _defaults.Effort,
             request.OutputSchema?.GetRawText());
-        LlmReasoningEffort.Validate(launch.Effort,
-            AntigravityCliLlmClient.ResolveCapabilities(_connection, launch.ModelId));
+        launch = launch with { Effort = AntigravityCliLlmClient.MapReasoning(_connection, launch.ModelId, launch.Effort) };
         return (launch, prompt.ToString(), request.OutputSchema);
     }
 

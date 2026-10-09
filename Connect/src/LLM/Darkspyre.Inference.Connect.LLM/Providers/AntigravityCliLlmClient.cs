@@ -30,7 +30,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         SupportsJsonSchema = InferenceSupport.Supported,
         SupportsJsonObject = InferenceSupport.Unsupported,
         ReasoningLevels = LlmReasoningEffort.Levels(
-            LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High),
+            LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum),
         SupportsTemperature = InferenceSupport.Unsupported,
         SupportsToolUse = InferenceSupport.Unsupported,
         SupportsAgentSessions = InferenceSupport.Supported,
@@ -65,7 +65,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             ReasoningLevels = modelId is "claude-sonnet-4-6" or "claude-opus-4-6-thinking"
                 ? LlmReasoningEffort.Levels()
                 : pinnedEffort is { } pinned
-                    ? LlmReasoningEffort.Levels(capabilities.ReasoningLevels.Where(level => level == pinned).ToArray())
+                    ? LlmReasoningEffort.Levels(pinned)
                     : capabilities.ReasoningLevels,
             SupportsJsonObject = InferenceSupport.Unsupported,
             SupportsTemperature = InferenceSupport.Unsupported,
@@ -82,6 +82,30 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         };
     }
 
+    /// <summary>Maps desired effort to the selected Antigravity model's native CLI vocabulary.</summary>
+    internal static LlmReasoningLevel? MapReasoning(LlmConnection connection, string? modelId, LlmReasoningLevel? requested)
+    {
+        if (requested is null) return null;
+        LlmProviderCapabilities capabilities = ResolveCapabilities(connection, modelId);
+        if (modelId is "claude-sonnet-4-6" or "claude-opus-4-6-thinking")
+            LlmReasoningEffort.Validate(requested, capabilities);
+        IReadOnlySet<LlmReasoningLevel> choices = capabilities.ReasoningLevels.Count == 0
+            ? Capabilities.ReasoningLevels : capabilities.ReasoningLevels;
+        LlmReasoningLevel[] row = requested switch
+        {
+            LlmReasoningLevel.None or LlmReasoningLevel.Minimal or LlmReasoningLevel.Low =>
+                [LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.Medium => [LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.High => [LlmReasoningLevel.High, LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.ExtraHigh => [LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.High, LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.Maximum => [LlmReasoningLevel.Maximum, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.High, LlmReasoningLevel.Medium, LlmReasoningLevel.Low],
+            _ => throw new ArgumentOutOfRangeException(nameof(requested))
+        };
+        foreach (LlmReasoningLevel choice in row)
+            if (choices.Contains(choice)) return choice;
+        throw new NotSupportedException("The selected Antigravity native choices contain no mapped CLI effort.");
+    }
+
     public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         LlmConnection connection,
         LlmChatRequest request,
@@ -90,6 +114,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         LlmStructuredOutputEnforcement? enforcement = ValidateRequest(connection, request, capabilities);
+        request = request with { ReasoningLevel = MapReasoning(connection, request.ModelId, request.ReasoningLevel) };
         string prompt = BuildPrompt(request, enforcement);
         if (request.Tools.Count > 0
             || request.ToolChoice is not null
@@ -607,7 +632,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             throw new NotSupportedException("Antigravity CLI does not expose a maximum-output-token option.");
         }
 
-        LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
+        _ = MapReasoning(connection, request.ModelId, request.ReasoningLevel);
 
         if (request.ProviderOptions.Count > 0)
         {
