@@ -11,10 +11,10 @@ internal static class StructuredOutput
     {
         if (request.StructuredOutput is { } structured
             && (string.IsNullOrWhiteSpace(structured.Name)
-                || structured.Schema.ValueKind != JsonValueKind.Object))
+                || structured.Schema.ValueKind is not (JsonValueKind.Object or JsonValueKind.True)))
         {
             throw new ArgumentException(
-                "Structured output requires a name and a JSON object schema.", nameof(request));
+                "Structured output requires a name and an object or true JSON Schema.", nameof(request));
         }
     }
 

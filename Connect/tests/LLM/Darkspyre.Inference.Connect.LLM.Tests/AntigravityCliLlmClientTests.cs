@@ -1,5 +1,6 @@
 using Darkspyre.Inference.Connect.LLM.Internal;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Channels;
 using Darkspyre.Inference.Common;
@@ -12,6 +13,54 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class AntigravityCliLlmClientTests
 {
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    public async Task TrueSchemaReachesTheSelectedNativeOrLocalPath(bool streaming, bool local)
+    {
+        const string payload = """{"status":"SUCCESS","response":"17","structured_output":17}""";
+        var runner = new RecordingRunner(new(0, streaming ? "{\"event\":\"result\",\"result\":" + payload + "}" : payload, string.Empty));
+        var client = new AntigravityCliLlmClient(runner);
+        LlmConnection connection = Connection() with
+        {
+            CapabilityOverrides = new()
+            {
+                SupportsStreaming = streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported,
+                SupportsJsonSchema = local ? InferenceSupport.Unsupported : InferenceSupport.Unknown
+            }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = "auto", Messages = [new("user", "Return 17 as JSON.")],
+            StructuredOutput = new()
+            {
+                Name = "answer", Schema = JsonElement.Parse("true"),
+                Fallback = local ? LlmStructuredOutputFallback.LocalValidation : LlmStructuredOutputFallback.None
+            }
+        };
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection, request));
+
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal("17", result.Text);
+        Assert.True(result.StructuredOutput!.WasEvaluated);
+        Assert.True(result.StructuredOutput.IsValid);
+        Assert.Equal(local ? LlmStructuredOutputEnforcement.LocalValidationOnly : LlmStructuredOutputEnforcement.ProviderJsonSchema,
+            result.StructuredOutput.Enforcement);
+        AntigravityCliInvocation invocation = Assert.Single(runner.Invocations);
+        if (local)
+        {
+            Assert.DoesNotContain("--json-schema", invocation.Arguments);
+            Assert.Null(runner.SchemaContent);
+            string prompt = streaming ? invocation.StandardInput! : invocation.Arguments[invocation.Arguments.ToList().IndexOf("-p") + 1];
+            Assert.Contains("true", prompt, StringComparison.Ordinal);
+        }
+        else Assert.Equal("true", runner.SchemaContent);
+        Assert.Equal(JsonValueKind.True, request.StructuredOutput.Schema.ValueKind);
+    }
+
     private const string ErrorDetail = """{"access_token":"diagnostic-secret","detail":"The selected model is unavailable in this region."}""";
 
     [Theory]

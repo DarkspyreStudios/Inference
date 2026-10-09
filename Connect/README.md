@@ -4670,6 +4670,16 @@ evidence, not an ordinary completed answer. Successful result text remains uncha
 
 ### Structured output
 
+Shared request validation accepts a named object schema or the JSON Schema `true`. The latter
+accepts any JSON instance, including a scalar, without changing the original schema. Antigravity
+uses this same validator. Native writers carry `true` unchanged when their route has no established
+negative; that attempt does not qualify provider acceptance. Explicit local fallback evaluates the
+returned JSON against the original schema. OpenAI Responses retains its documented native
+[object-root restriction](https://developers.openai.com/api/docs/guides/structured-outputs#root-objects-must-not-be-anyof-and-must-be-an-object):
+`true` uses only a caller-permitted JSON-object or local fallback there. Anthropic's existing native
+subset analysis remains separate. A false schema and non-schema JSON values remain refused by
+request admission; this change does not redefine them or weaken host tool schemas.
+
 Direct API-key connections use the Models API's `structured_outputs` evidence for native schema and
 strict tool support. A missing entry retains Unknown and permits an unchanged native schema attempt
 without advertising qualified support. A catalog rejection cannot be

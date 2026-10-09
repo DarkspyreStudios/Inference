@@ -12,6 +12,56 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class SupportStateTests
 {
     [Theory]
+    [InlineData(LlmStructuredOutputFallback.None)]
+    [InlineData(LlmStructuredOutputFallback.JsonObject)]
+    [InlineData(LlmStructuredOutputFallback.LocalValidation)]
+    public async Task OpenAiNativeObjectRootRestrictionDoesNotForbidPermittedTrueSchemaFallback(LlmStructuredOutputFallback fallback)
+    {
+        var handler = new SchemaHandler();
+        using var http = new HttpClient(handler);
+        var client = new OpenAiResponsesLlmClient(http);
+        LlmConnection connection = Connection() with
+        {
+            Transport = LlmTransport.OpenAiResponses, Endpoint = "https://api.openai.com/v1",
+            CapabilityOverrides = new()
+            {
+                SupportsStreaming = InferenceSupport.Unsupported,
+                SupportsJsonSchema = InferenceSupport.Unknown,
+                SupportsJsonObject = fallback == LlmStructuredOutputFallback.JsonObject
+                    ? InferenceSupport.Supported : InferenceSupport.Unsupported
+            }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = "unlisted-model", Messages = [new("user", "Return JSON.")],
+            StructuredOutput = new() { Name = "answer", Schema = JsonElement.Parse("true"), Fallback = fallback }
+        };
+        if (fallback == LlmStructuredOutputFallback.None)
+        {
+            await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            { await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { } });
+            Assert.Null(handler.Payload);
+            return;
+        }
+
+        LlmChatResult? result = null;
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request))
+            if (item is LlmChatCompletionEvent completion) result = completion.Result;
+
+        using var sent = JsonDocument.Parse(handler.Payload!);
+        if (fallback == LlmStructuredOutputFallback.JsonObject)
+            Assert.Equal("json_object", sent.RootElement.GetProperty("text").GetProperty("format").GetProperty("type").GetString());
+        else Assert.False(sent.RootElement.TryGetProperty("text", out _));
+        Assert.Equal("{}", result!.Text);
+        Assert.True(result.StructuredOutput!.WasEvaluated);
+        Assert.True(result.StructuredOutput.IsValid);
+        Assert.Equal(fallback == LlmStructuredOutputFallback.JsonObject
+            ? LlmStructuredOutputEnforcement.ProviderJsonObject : LlmStructuredOutputEnforcement.LocalValidationOnly,
+            result.StructuredOutput.Enforcement);
+        Assert.Equal(JsonValueKind.True, request.StructuredOutput.Schema.ValueKind);
+    }
+
+    [Theory]
     [InlineData(InferenceSupport.Unknown)]
     [InlineData(InferenceSupport.Supported)]
     [InlineData(InferenceSupport.Unsupported)]
@@ -336,7 +386,7 @@ public sealed class SupportStateTests
             {
                 Content = new StringContent(request.RequestUri!.Host is "generativelanguage.googleapis.com" or "aiplatform.googleapis.com"
                     ? "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"{}\"}]},\"finishReason\":\"STOP\"}]}"
-                    : request.RequestUri.Host == "api.x.ai"
+                    : request.RequestUri.Host is "api.x.ai" or "api.openai.com"
                     ? "{\"id\":\"response-fixture\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{}\"}]}]}"
                     : "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"{}\"},\"finish_reason\":\"stop\"}]}", Encoding.UTF8, "application/json")
             };

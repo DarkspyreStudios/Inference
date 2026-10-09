@@ -1,6 +1,7 @@
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using System.Collections.Frozen;
+using System.Text.Json;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -15,6 +16,14 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
 
     protected override bool OffersNonStreamingRequests => true;
     protected override bool SupportsResourcePreparation => true;
+
+    /// <summary>Retains the documented native object-root restriction without rejecting a valid local schema.</summary>
+    protected override LlmStructuredOutputEnforcement? ResolveStructuredOutputEnforcement(
+        LlmConnection connection, LlmChatRequest request, LlmProviderCapabilities capabilities) =>
+        base.ResolveStructuredOutputEnforcement(connection, request,
+            request.StructuredOutput?.Schema.ValueKind == JsonValueKind.True
+                ? capabilities with { SupportsJsonSchema = InferenceSupport.Unsupported }
+                : capabilities);
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = ProtocolCapabilities with
     {

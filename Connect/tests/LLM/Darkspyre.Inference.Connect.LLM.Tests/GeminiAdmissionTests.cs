@@ -13,6 +13,51 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class GeminiAdmissionTests
 {
     [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    [InlineData(true, true)]
+    public async Task TrueSchemaIsNotClassifiedAsMalformedBeforeNativeOrLocalEvaluation(bool vertex, bool local)
+    {
+        using var handler = new Handler("17");
+        using var http = new HttpClient(handler);
+        ILlmClient client = Client(http, vertex);
+        LlmConnection connection = Connection(vertex) with
+        {
+            CapabilityOverrides = Connection(vertex).CapabilityOverrides! with
+            { SupportsJsonSchema = local ? InferenceSupport.Unsupported : InferenceSupport.Unknown }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = vertex ? "google/gemini-unfamiliar" : "gemini-unfamiliar", Messages = [new("user", "Return 17 as JSON.")],
+            StructuredOutput = new()
+            {
+                Name = "answer", Schema = JsonElement.Parse("true"),
+                Fallback = local ? LlmStructuredOutputFallback.LocalValidation : LlmStructuredOutputFallback.None
+            }
+        };
+        LlmChatResult? result = null;
+
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request))
+            if (item is LlmChatCompletionEvent completion) result = completion.Result;
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement generation = sent.RootElement.GetProperty("generationConfig");
+        Assert.Equal(!local, generation.TryGetProperty("responseFormat", out JsonElement format));
+        if (!local)
+        {
+            if (vertex) format = format[0];
+            Assert.Equal(JsonValueKind.True, format.GetProperty("text").GetProperty("schema").ValueKind);
+        }
+        Assert.Equal("17", result!.Text);
+        Assert.True(result.StructuredOutput!.WasEvaluated);
+        Assert.True(result.StructuredOutput.IsValid);
+        Assert.Equal(local ? LlmStructuredOutputEnforcement.LocalValidationOnly : LlmStructuredOutputEnforcement.ProviderJsonSchema,
+            result.StructuredOutput.Enforcement);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
     [InlineData("image/heic")]
     [InlineData("image/x-unreviewed")]
     public async Task VertexPromptImagesDoNotRequireAnExhaustiveMimeQualificationList(string mime)

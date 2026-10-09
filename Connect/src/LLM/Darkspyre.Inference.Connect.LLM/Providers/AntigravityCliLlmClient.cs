@@ -646,14 +646,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             return null;
         }
 
-        if (string.IsNullOrWhiteSpace(structured.Name)
-            || structured.Schema.ValueKind != JsonValueKind.Object)
-        {
-            throw new ArgumentException(
-                "Structured output requires a name and a JSON object schema.",
-                nameof(request));
-        }
-
+        StructuredOutput.ValidateRequest(request);
         return StructuredOutput.ResolveEnforcement(structured, capabilities);
     }
 
