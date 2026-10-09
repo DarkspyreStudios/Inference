@@ -318,7 +318,7 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         {
             if (!profile.IsClaude)
             {
-                if (!GeminiCapabilities.AcceptsAttachment(attachment)) { throw new NotSupportedException("Unsupported Vertex attachment media type or size."); }
+                if (!GeminiCapabilities.AcceptsAttachment(attachment, vertex: true)) { throw new NotSupportedException("Unsupported Vertex attachment media type or size."); }
                 continue;
             }
             if (attachment.Data.Length > 5 * 1024 * 1024) { throw new NotSupportedException("Unsupported Vertex attachment media type or size."); }

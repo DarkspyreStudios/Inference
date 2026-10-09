@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Text;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Media;
@@ -193,8 +194,36 @@ internal static class LlmAttachments
             return "image/webp";
         }
 
+        if (ResolveHeifMediaType(data) is { } heif) return heif;
+
         throw new NotSupportedException(
-            "The attachment data is not a supported PNG, JPEG, GIF, or WebP image.");
+            "The attachment's image media type could not be detected. Supply MediaType explicitly.");
+    }
+
+    private static string? ResolveHeifMediaType(ReadOnlySpan<byte> data)
+    {
+        if (data.Length < 16 || !data.Slice(4, 4).SequenceEqual("ftyp"u8)) return null;
+        ulong size = BinaryPrimitives.ReadUInt32BigEndian(data);
+        int header = 8;
+        if (size == 1)
+        {
+            if (data.Length < 24) return null;
+            size = BinaryPrimitives.ReadUInt64BigEndian(data[8..]);
+            header = 16;
+        }
+        else if (size == 0) size = (ulong)data.Length;
+        if (size > (ulong)data.Length || size < (ulong)(header + 8) || (size - (ulong)header) % 4 != 0) return null;
+
+        // The IANA MIME registrations depend on compatible brands, not a filename or arbitrary byte match.
+        bool heif = false;
+        for (int offset = header + 8; offset < (int)size; offset += 4)
+        {
+            ReadOnlySpan<byte> brand = data.Slice(offset, 4);
+            if (brand.SequenceEqual("heic"u8) || brand.SequenceEqual("heix"u8)
+                || brand.SequenceEqual("heim"u8) || brand.SequenceEqual("heis"u8)) return "image/heic";
+            if (brand.SequenceEqual("mif1"u8)) heif = true;
+        }
+        return heif ? "image/heif" : null;
     }
 
     private static string ResolveDocumentMediaType(string fileName, ReadOnlySpan<byte> data)

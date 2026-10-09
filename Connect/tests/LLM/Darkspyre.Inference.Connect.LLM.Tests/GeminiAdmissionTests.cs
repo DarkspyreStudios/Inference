@@ -13,6 +13,87 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class GeminiAdmissionTests
 {
     [Theory]
+    [InlineData("000000186674797068656963000000006d69663168656963", "image/heic", false)]
+    [InlineData("000000186674797068656963000000006d69663168656963", "image/heic", true)]
+    [InlineData("00000014667479706d696631000000006d696631", "image/heif", false)]
+    [InlineData("00000014667479706d696631000000006d696631", "image/heif", true)]
+    [InlineData("0000000166747970000000000000002068656963000000006d69663168656963", "image/heic", false)]
+    public async Task GeminiApiPromptHeifMediaPreservesDeclaredOrDetectedMimeAndBytes(string hex, string mime, bool declared)
+    {
+        byte[] data = Convert.FromHexString(hex);
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new GeminiApiLlmClient(http);
+        var request = new LlmChatRequest
+        {
+            ModelId = "gemini-3-flash-preview",
+            Messages = [new("user", "describe")
+            { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "photo.bin", Data = data, MediaType = declared ? mime : null }] }]
+        };
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(Connection(false), request)) { }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement inline = sent.RootElement.GetProperty("contents")[0].GetProperty("parts")[1].GetProperty("inlineData");
+        Assert.Equal(mime, inline.GetProperty("mimeType").GetString());
+        Assert.Equal(Convert.ToBase64String(data), inline.GetProperty("data").GetString());
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false, LlmBinaryKind.Image)]
+    [InlineData(false, LlmBinaryKind.Document)]
+    [InlineData(true, LlmBinaryKind.Document)]
+    public async Task InlineMediaWithoutAPerPartLimitIsNotRefusedAtSevenMiB(bool vertex, LlmBinaryKind kind)
+    {
+        var data = new byte[8 * 1024 * 1024];
+        if (kind == LlmBinaryKind.Image) new byte[] { 0xff, 0xd8, 0xff }.CopyTo(data, 0);
+        else Array.Fill(data, (byte)'a');
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        ILlmClient client = Client(http, vertex);
+        var request = new LlmChatRequest
+        {
+            ModelId = vertex ? "google/gemini-3-flash-preview" : "gemini-3-flash-preview",
+            Messages = [new("user", "read")
+            { Attachments = [new LlmAttachment { Kind = kind, FileName = kind == LlmBinaryKind.Image ? "photo.jpg" : "notes.txt", Data = data }] }]
+        };
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(Connection(vertex), request)) { }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement inline = sent.RootElement.GetProperty("contents")[0].GetProperty("parts")[1].GetProperty("inlineData");
+        Assert.Equal(kind == LlmBinaryKind.Image ? "image/jpeg" : "text/plain", inline.GetProperty("mimeType").GetString());
+        Assert.Equal(Convert.ToBase64String(data), inline.GetProperty("data").GetString());
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task GeminiApiImageLimitsDoNotReplaceVertexsDocumentedInlineImageLimit()
+    {
+        var image = new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "photo.jpg", Data = new byte[8 * 1024 * 1024], MediaType = "image/jpeg" };
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new VertexLlmClient(http, new VertexAuthenticationBoundary());
+        var request = new LlmChatRequest
+        { ModelId = "google/gemini-3-flash-preview", Messages = [new("user", "describe") { Attachments = [image] }] };
+
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        { await foreach (LlmStreamEvent _ in client.StreamAsync(Connection(true), request)) { } });
+
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData("000000206674797068656963000000006d69663168656963")]
+    [InlineData("00000010667479706d703432000000006d69663168656963")]
+    public void ImageMimeDetectionDoesNotReadCompatibleBrandsOutsideTheFileTypeBox(string hex)
+    {
+        var image = new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "photo.heic", Data = Convert.FromHexString(hex) };
+        Assert.Throws<NotSupportedException>(() => LlmAttachments.ResolveMediaType(image));
+    }
+
+    [Theory]
     [InlineData(false, "gemini-unfamiliar")]
     [InlineData(true, "gemini-unfamiliar")]
     [InlineData(false, "gemini-3-flash-preview")]

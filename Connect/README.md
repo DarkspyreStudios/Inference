@@ -497,6 +497,21 @@ Gemma 4 IDs, `gemma-4-31b-it` and `gemma-4-26b-a4b-it`, map reasoning to native 
 `Medium` maps to minimal, `Maximum` to high, and `None` to minimal. Google documents their Gemini API
 text and thinking protocol in [Gemma on the Gemini API](https://ai.google.dev/gemma/docs/core/gemma_on_gemini_api).
 
+Gemini API prompt images accept PNG, JPEG, WebP, HEIC and HEIF through `inlineData`. An explicit MIME
+type remains unchanged. Without one, the shared attachment detector identifies HEIF/HEIC from the
+leading ISO BMFF file-type box's compatible brands, as registered by
+[IANA](https://www.iana.org/assignments/media-types/image/heic). It does not infer the type from a
+filename or scan outside that box. Detection does not widen another adapter's format contract.
+The Gemini API filter has no per-image 7 MiB limit; its
+[image guide](https://ai.google.dev/gemini-api/docs/generate-content/image-understanding) describes a
+total request limit, which the provider adjudicates. Connect does not upload or split an inline
+request automatically. Vertex retains its separate PNG/JPEG/WebP inline image filter and existing
+7 MiB cutoff. Its [inference reference](https://docs.cloud.google.com/gemini-enterprise-agent-platform/reference/models/inference?hl=en)
+separately documents a 7 MB image bound; Connect does not apply that bound to Gemini API images.
+Neither route applies that image bound to UTF-8 text documents. Their existing 50 MiB PDF bound
+remains separate. The Gemini API's additional prompt image formats do not widen function-response
+media or cache-file staging.
+
 Gemini API and Vertex Gemini generation errors retain observed HTTP status and retry intervals,
 including provider error objects inside successful HTTP responses. Their diagnostics keep fixed
 messages and omit raw provider bodies, provider codes, request IDs and nested payloads.

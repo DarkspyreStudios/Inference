@@ -313,7 +313,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         if (request.AllowParallelToolCalls is not null && (capabilities.Tools.SupportsParallelCallControl == InferenceSupport.Unsupported))
         { throw new NotSupportedException("This route cannot enforce parallel tool-call control."); }
         if (request.Messages.SelectMany(message => message.Attachments).Where(attachment => attachment is not LlmResourceAttachment)
-            .Select(LlmAttachments.RequireBinary).Any(attachment => !GeminiCapabilities.AcceptsAttachment(attachment)))
+            .Select(LlmAttachments.RequireBinary).Any(attachment => !GeminiCapabilities.AcceptsAttachment(attachment, vertex: false)))
         { throw new NotSupportedException("Unsupported Gemini API attachment media type or size."); }
     }
 

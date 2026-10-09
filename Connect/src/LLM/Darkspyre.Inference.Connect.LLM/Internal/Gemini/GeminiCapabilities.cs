@@ -50,14 +50,14 @@ internal static class GeminiCapabilities
         };
     }
 
-    /// <summary>Inline media the Gemini routes accept: PNG, JPEG and WebP images up to 7 MiB, PDFs up to 50 MiB, text up to 7 MiB.</summary>
-    public static bool AcceptsAttachment(LlmAttachment attachment)
+    /// <summary>Route-specific inline media. The Gemini API's total request limit is not a per-image limit.</summary>
+    public static bool AcceptsAttachment(LlmAttachment attachment, bool vertex)
     {
         string mime = LlmAttachments.ResolveMediaType(attachment);
-        bool supported = attachment.Kind == LlmBinaryKind.Image
-            ? mime is "image/png" or "image/jpeg" or "image/webp"
-            : mime == "application/pdf" || LlmAttachments.IsTextMediaType(mime);
-        int max = mime == "application/pdf" ? 50 * 1024 * 1024 : 7 * 1024 * 1024;
-        return supported && attachment.Data.Length <= max;
+        if (attachment.Kind == LlmBinaryKind.Image)
+            return (mime is "image/png" or "image/jpeg" or "image/webp"
+                || !vertex && mime is "image/heic" or "image/heif")
+                && (!vertex || attachment.Data.Length <= 7 * 1024 * 1024);
+        return mime == "application/pdf" ? attachment.Data.Length <= 50 * 1024 * 1024 : LlmAttachments.IsTextMediaType(mime);
     }
 }
