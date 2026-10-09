@@ -905,9 +905,9 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
             used = ManagedAgentPolicy.Estimate(estimator, connection, request,
                 request.Messages.Any(message => message.OmittedAttachments.Count > 0));
         }
-        catch (NotSupportedException)
+        catch (NotSupportedException error)
         {
-            return Unsupported("This route cannot project the requested features for accounting.");
+            return Unsupported("This route cannot project the requested features for accounting: " + error.Message);
         }
         LlmModel? model = null;
         string? metadataDiagnostic = null;

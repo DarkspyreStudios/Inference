@@ -670,6 +670,9 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     /// <summary>Counts the prompt this client would send. Attachment content is not countable here.</summary>
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
+        // Another provider's continuation state is never sent to the CLI: an agent opening drops it, and chat refuses it
+        // when sending. The estimate counts what the CLI receives.
+        request = request with { Messages = [.. request.Messages.Select(message => message with { ContinuationState = null })] };
         _ = ValidateChatRequest(connection, request);
         // Selected caller-owned content is unknown to local accounting.
         if (request.Resources is not null) return null;
