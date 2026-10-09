@@ -892,7 +892,7 @@ level below it; a level does not cost the same on two different models. Null lea
 default in place. Each model reports the levels it accepts in `LlmCapabilities.ReasoningLevels`, and
 `SupportsReasoning` is `Supported` when that set contains a level above `None`, `Unsupported` when
 it contains only `None`, and `Unknown` when the set is empty. Direct Codex, Gemini API, Vertex Gemini,
-Antigravity CLI and the Claude transports
+Antigravity CLI, Grok Responses/deferred Chat and the Claude transports
 map desired effort inside their adapters. Other adapters currently reject a level outside their declared set with
 `InferenceFailureCode.InvalidRequest` before any provider call. Each adapter owns its provider's wire form.
 `LlmCapabilityOverrides.ReasoningLevels` replaces a transport's set for a connection or one model,
@@ -921,6 +921,18 @@ Null leaves the provider default unchanged. Missing or empty native-level observ
 Unknown support and send an explicit requested effort with its existing native spelling.
 No shared distance/rank calculation or host-side native selection runs. The caller request and
 reported native-level catalog remain unchanged. Summary requests follow the mapped native effort.
+
+Grok's direct Responses and deferred Chat writers use `XaiModelProfiles.MapReasoning`. The Grok-owned
+literal rows select the requested native choice or a lower offered choice; a request below every
+offered choice selects the lowest one. `Maximum` sends `xhigh` for Grok 4.6/4.7 and `high` for 4.5.
+`None` sends `low` on these reasoning models; it does not disable their reasoning. Catalog observations
+and explicit overrides retain all seven native spellings, including `none`, `minimal` and `max`.
+Missing or empty observations remain Unknown and send the requested spelling unchanged. Null sends
+no effort, leaving the provider default unspecified. Validation, batch projection and managed requests
+use the same adapter mapping without changing caller effort or reported model choices.
+The known multi-agent model's effort field selects agent count, not independent reasoning depth.
+Its existing typed agent-count control retains that meaning; neutral depth has no independent mapping
+on that model and reports that specific adapter limitation.
 
 Gemini API and Vertex Gemini use `GeminiModelProfiles.MapReasoning` before admission and native
 projection, including token counting. Its explicit rows map `ExtraHigh` and `Maximum` to `High`,

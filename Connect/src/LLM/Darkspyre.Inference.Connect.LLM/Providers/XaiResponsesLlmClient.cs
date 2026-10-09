@@ -104,9 +104,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
         LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(defaults, connection, modelId, OffersUsageDeltas);
         return capabilities with
         {
-            ReasoningLevels = profile.MultiAgent is null ? capabilities.ReasoningLevels.Where(level => level is
-                LlmReasoningLevel.Low or LlmReasoningLevel.Medium or LlmReasoningLevel.High or LlmReasoningLevel.ExtraHigh).ToFrozenSet()
-                : LlmReasoningEffort.Levels(),
+            ReasoningLevels = profile.MultiAgent is null ? capabilities.ReasoningLevels : LlmReasoningEffort.Levels(),
             SupportsPromptImages = LlmProviderCapabilities.Intersect(capabilities.SupportsPromptImages, profile.AcceptsImages),
             SupportsTopK = InferenceSupport.Unsupported,
             SupportsSeed = InferenceSupport.Unsupported,
@@ -376,15 +374,21 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             XaiSchemaLimits.ValidateStrictTool(tool.InputSchema);
     }
 
+    protected override void ValidateReasoningRequest(LlmConnection connection, LlmChatRequest request,
+        LlmProviderCapabilities capabilities) => _ = XaiModelProfiles.MapReasoning(
+            XaiModelProfiles.Get(connection, request.ModelId), capabilities.ReasoningLevels, request.ReasoningLevel);
+
     protected override JsonObject BuildPayload(LlmConnection connection, LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement, bool stream, LlmResourcePreparation? resources = null)
     {
         request = ProviderControlPolicy.Resolve(connection, request);
 
         XaiModelProfile profile = XaiModelProfiles.Get(connection, request.ModelId);
-        if (request.ReasoningLevel is null && profile.DefaultReasoningLevel is { } defaultLevel
-            && GetCapabilities(connection, request.ModelId).ReasoningLevels.Contains(defaultLevel))
-            request = request with { ReasoningLevel = defaultLevel };
+        request = request with
+        {
+            ReasoningLevel = XaiModelProfiles.MapReasoning(profile,
+                GetCapabilities(connection, request.ModelId).ReasoningLevels, request.ReasoningLevel)
+        };
         JsonObject payload = base.BuildPayload(connection, request, enforcement, stream, resources);
         if (request.HostedTools.Count > 0)
         {

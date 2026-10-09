@@ -63,12 +63,43 @@ internal static class XaiModelProfiles
         throw new NotSupportedException("The selected multi-agent profile does not support the requested agent count.");
     }
 
+    internal static LlmReasoningLevel? MapReasoning(XaiModelProfile profile,
+        IReadOnlySet<LlmReasoningLevel> offered, LlmReasoningLevel? requested)
+    {
+        if (requested is null) return null;
+        if (profile.MultiAgent is not null)
+            throw new NotSupportedException("Grok multi-agent effort selects agent count; this adapter has no independent reasoning-depth mapping. Use typed agent-count controls.");
+        // Each row names Grok's downward mappings, then its below-minimum choices in ascending order.
+        LlmReasoningLevel[] row = requested.Value switch
+        {
+            LlmReasoningLevel.None => [LlmReasoningLevel.None, LlmReasoningLevel.Minimal, LlmReasoningLevel.Low,
+                LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.Minimal => [LlmReasoningLevel.Minimal, LlmReasoningLevel.None, LlmReasoningLevel.Low,
+                LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.Low => [LlmReasoningLevel.Low, LlmReasoningLevel.Minimal, LlmReasoningLevel.None,
+                LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.Medium => [LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.Minimal,
+                LlmReasoningLevel.None, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.High => [LlmReasoningLevel.High, LlmReasoningLevel.Medium, LlmReasoningLevel.Low,
+                LlmReasoningLevel.Minimal, LlmReasoningLevel.None, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.ExtraHigh => [LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.High, LlmReasoningLevel.Medium,
+                LlmReasoningLevel.Low, LlmReasoningLevel.Minimal, LlmReasoningLevel.None, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.Maximum => [LlmReasoningLevel.Maximum, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.High,
+                LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.Minimal, LlmReasoningLevel.None],
+            _ => throw new ArgumentOutOfRangeException(nameof(requested), requested, "Unknown reasoning level.")
+        };
+        return offered.Count == 0 ? requested : row.First(offered.Contains);
+    }
+
     private static LlmReasoningLevel? Level(string? word) => word switch
     {
+        "none" => LlmReasoningLevel.None,
+        "minimal" => LlmReasoningLevel.Minimal,
         "low" => LlmReasoningLevel.Low,
         "medium" => LlmReasoningLevel.Medium,
         "high" => LlmReasoningLevel.High,
         "xhigh" => LlmReasoningLevel.ExtraHigh,
+        "max" => LlmReasoningLevel.Maximum,
         _ => null
     };
 

@@ -56,6 +56,7 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
         LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(defaults, connection, modelId, false);
         return capabilities with
         {
+            ReasoningLevels = profile.MultiAgent is null ? capabilities.ReasoningLevels : LlmReasoningEffort.Levels(),
             SupportsStreaming = InferenceSupport.Unsupported,
             SupportsStreamingUsage = InferenceSupport.Unsupported,
             SupportsTopK = InferenceSupport.Unsupported,
@@ -99,11 +100,20 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
         _ = XaiSchemaLimits.ResolveEnforcement(request.StructuredOutput, GetCapabilities(connection, request.ModelId));
     }
 
+    protected override void ValidateReasoningRequest(LlmConnection connection, LlmChatRequest request,
+        LlmProviderCapabilities capabilities) => _ = XaiModelProfiles.MapReasoning(
+            XaiModelProfiles.Get(connection, request.ModelId), capabilities.ReasoningLevels, request.ReasoningLevel);
+
     protected override JsonObject BuildPayload(LlmConnection connection, LlmChatRequest request,
         LlmStructuredOutputEnforcement? enforcement, LlmProviderCapabilities capabilities,
         LlmResourcePreparation? resources = null)
     {
         request = ProviderControlPolicy.Resolve(connection, request);
+        request = request with
+        {
+            ReasoningLevel = XaiModelProfiles.MapReasoning(XaiModelProfiles.Get(connection, request.ModelId),
+                capabilities.ReasoningLevels, request.ReasoningLevel)
+        };
         JsonObject body = base.BuildPayload(connection, request, enforcement, capabilities, resources);
         body["deferred"] = true;
         if (connection.Xai?.ServiceTier == XaiServiceTier.Priority) body["service_tier"] = "priority";
@@ -114,5 +124,6 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
     }
 
     protected override bool UsePromptCacheKey(LlmConnection connection) => true;
+    protected override string ReasoningWord(LlmReasoningLevel level) => LlmReasoningEffort.OpenAiWord(level);
     protected override LlmUsage? ReadUsage(JsonElement root) => XaiUsage.Enrich(base.ReadUsage(root), root);
 }
