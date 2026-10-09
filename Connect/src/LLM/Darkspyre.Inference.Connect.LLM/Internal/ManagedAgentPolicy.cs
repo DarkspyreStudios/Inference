@@ -35,12 +35,16 @@ internal static class ManagedAgentPolicy
         }
     }
 
-    /// <summary>Retains Codex's projected-input approximation despite omission metadata; other routes require available bytes.</summary>
+    /// <summary>
+    /// Retains Codex's projected-input approximation and the Claude CLI's estimate despite omission metadata: neither sends
+    /// an omitted attachment's bytes. Other routes require available bytes.
+    /// </summary>
     public static ContextEstimate? Estimate(ILlmContextEstimator estimator, LlmConnection connection,
         LlmChatRequest request, bool hasOmittedAttachments)
     {
         ContextEstimate? used = estimator.EstimateInputTokens(connection, request);
-        return hasOmittedAttachments && connection.Transport != LlmTransport.OpenAiCodex ? null : used;
+        return hasOmittedAttachments && connection.Transport is not (LlmTransport.OpenAiCodex or LlmTransport.AnthropicClaudeCli)
+            ? null : used;
     }
 
     public static LlmAgentContextStatus Status(
