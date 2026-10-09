@@ -130,6 +130,37 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             value.ValueKind == JsonValueKind.String && value.GetString() == LlmReasoningEffort.Word(level))).ToFrozenSet();
     }
 
+    protected override void ValidateReasoningRequest(LlmConnection connection, LlmChatRequest request,
+        LlmProviderCapabilities capabilities) => _ = MapReasoning(connection, request.ModelId, request.ReasoningLevel);
+
+    /// <summary>Maps caller effort to the CLI's native effort vocabulary for both chat and agent turns.</summary>
+    internal static LlmReasoningLevel? MapReasoning(LlmConnection connection, string? modelId, LlmReasoningLevel? requested)
+    {
+        if (requested is null) return null;
+        if (ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } entry
+            && entry.TryGetProperty("supportsEffort", out JsonElement support) && support.ValueKind == JsonValueKind.False)
+            throw new InferenceException(InferenceFailureCode.InvalidRequest,
+                "The selected Claude CLI model reports no effort control.");
+        LlmReasoningLevel[] row = requested.Value switch
+        {
+            LlmReasoningLevel.None or LlmReasoningLevel.Minimal or LlmReasoningLevel.Low =>
+                [LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.Medium =>
+                [LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.High =>
+                [LlmReasoningLevel.High, LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.ExtraHigh =>
+                [LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.High, LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.Maximum],
+            LlmReasoningLevel.Maximum =>
+                [LlmReasoningLevel.Maximum, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.High, LlmReasoningLevel.Medium, LlmReasoningLevel.Low],
+            _ => throw new ArgumentOutOfRangeException(nameof(requested), requested, "Unknown reasoning level.")
+        };
+        IReadOnlySet<LlmReasoningLevel> offered = ResolveCapabilities(connection, modelId).ReasoningLevels;
+        foreach (LlmReasoningLevel native in row)
+            if (offered.Count == 0 || offered.Contains(native)) return native;
+        throw new NotSupportedException("The selected Claude CLI effort choices contain no mapped native effort.");
+    }
+
     public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         LlmConnection connection,
         LlmChatRequest request,
@@ -164,6 +195,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         (LlmProviderCapabilities capabilities, LlmStructuredOutputEnforcement? enforcement) = ValidateChatRequest(connection, request);
+        request = request with { ReasoningLevel = MapReasoning(connection, request.ModelId, request.ReasoningLevel) };
         string prompt = BuildClaudePrompt(connection, request);
         string executable = ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint);
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);

@@ -855,8 +855,8 @@ terminal format and the current Apple, Antigravity and Bedrock protocols report 
 level below it; a level does not cost the same on two different models. Null leaves the provider's
 default in place. Each model reports the levels it accepts in `LlmCapabilities.ReasoningLevels`, and
 `SupportsReasoning` is `Supported` when that set contains a level above `None`, `Unsupported` when
-it contains only `None`, and `Unknown` when the set is empty. Direct Codex maps desired effort inside
-its adapter. Other adapters currently reject a level outside their declared set with
+it contains only `None`, and `Unknown` when the set is empty. Direct Codex and Claude CLI map desired
+effort inside their adapters. Other adapters currently reject a level outside their declared set with
 `InferenceFailureCode.InvalidRequest` before any provider call. Each adapter owns its provider's wire form.
 `LlmCapabilityOverrides.ReasoningLevels` replaces a transport's set for a connection or one model,
 and the setup editor exposes it as one Default/Enabled/Disabled choice per level. The design is
@@ -4638,6 +4638,17 @@ Subscription connections use the Claude CLI's native `--json-schema` contract an
 `Medium`, `High`, `ExtraHigh` and `Maximum` reasoning levels. Darkspyre.Inference.Connect.LLM uses
 the terminal event's canonical `structured_output` value and validates it locally before returning
 completion.
+
+`ClaudeCliLlmClient.MapReasoning` owns explicit CLI-native choice rows. Chat sends the mapped value
+through `--effort`; native-agent turns send it through `apply_flag_settings.settings.effortLevel`.
+Both use the currently selected model's catalog and caller overrides. A model switch resolves effort
+for the new model before input is written. `ExtraHigh` maps to `high` for the explicit Claude 4.6
+profiles; `Maximum` retains their native `max`. `None` and `Minimal` map to the lowest available CLI
+effort because the CLI has no `none` or `minimal` effort spelling. This does not disable thinking.
+Null leaves effort unset. Missing effort choices use the CLI's existing native vocabulary and remain
+attemptable; an explicit catalog `supportsEffort: false` rejects an effort request before a process
+invocation or native turn write. No shared rank/distance calculation runs, and caller intent remains
+unchanged.
 Explicit `claude-sonnet-4-6` and `claude-opus-4-6` model IDs, including their `[1m]` forms, offer
 only `Low`, `Medium`, `High` and `Maximum`, matching the
 [Claude Code effort table](https://code.claude.com/docs/en/model-config#adjust-effort-level).

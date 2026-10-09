@@ -71,16 +71,25 @@ public sealed class ClaudeCliLlmClientTests
             Messages = [new("user", "Reply with OK.")],
             ReasoningLevel = LlmReasoningLevel.ExtraHigh
         };
-        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() =>
-            ReadAllAsync(service.StreamAsync("connection", request)));
-        Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
-        Assert.Empty(runner.Invocations);
+        if (supportsEffort)
+        {
+            await ReadAllAsync(service.StreamAsync("connection", request));
+            IReadOnlyList<string> mapped = Assert.Single(runner.Invocations).Arguments;
+            Assert.Equal("low", mapped[mapped.ToList().IndexOf("--effort") + 1]);
+        }
+        else
+        {
+            InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() =>
+                ReadAllAsync(service.StreamAsync("connection", request)));
+            Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
+            Assert.Empty(runner.Invocations);
+        }
 
         IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(service.StreamAsync("connection",
             request with { ReasoningLevel = supportsEffort ? LlmReasoningLevel.Low : null }));
         Assert.Equal(LlmCompletionStatus.Completed, Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Status);
         Assert.Equal(1, process.Initializations);
-        IReadOnlyList<string> arguments = Assert.Single(runner.Invocations).Arguments;
+        IReadOnlyList<string> arguments = runner.Invocations.Last().Arguments;
         Assert.Equal("cli-returned-alias", arguments[arguments.ToList().IndexOf("--model") + 1]);
     }
 
@@ -89,7 +98,7 @@ public sealed class ClaudeCliLlmClientTests
     [InlineData("claude-opus-4-6")]
     [InlineData("claude-sonnet-4-6[1m]")]
     [InlineData("claude-opus-4-6[1m]")]
-    public async Task ExplicitClaude46ProfilesRejectExtraHighBeforeInvocation(string model)
+    public async Task ExplicitClaude46ProfilesMapExtraHighDownBeforeInvocation(string model)
     {
         var runner = new RecordingRunner(new(0,
             """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
@@ -113,21 +122,42 @@ public sealed class ClaudeCliLlmClientTests
             ReasoningLevel = LlmReasoningLevel.ExtraHigh
         };
 
-        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() =>
-            ReadAllAsync(client.StreamAsync(connection, request)));
-        Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
-        Assert.Empty(runner.Invocations);
+        await ReadAllAsync(client.StreamAsync(connection, request));
+        IReadOnlyList<string> mapped = Assert.Single(runner.Invocations).Arguments;
+        Assert.Equal("high", mapped[mapped.ToList().IndexOf("--effort") + 1]);
 
         IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection,
             request with { ReasoningLevel = LlmReasoningLevel.Maximum }));
         Assert.Equal(LlmCompletionStatus.Completed, Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Status);
-        IReadOnlyList<string> arguments = Assert.Single(runner.Invocations).Arguments;
+        IReadOnlyList<string> arguments = runner.Invocations.Last().Arguments;
         Assert.Equal("max", arguments[arguments.ToList().IndexOf("--effort") + 1]);
         LlmConnection narrowed = CliConnection() with
         { CapabilityOverrides = new() { ReasoningLevels = LlmReasoningEffort.Levels(LlmReasoningLevel.Low) } };
         Assert.True(client.GetCapabilities(narrowed, model).ReasoningLevels.SetEquals([LlmReasoningLevel.Low]));
         Assert.Contains(LlmReasoningLevel.ExtraHigh, client.GetCapabilities(CliConnection(), "sonnet").ReasoningLevels);
         Assert.Contains(LlmReasoningLevel.ExtraHigh, client.GetCapabilities(CliConnection(), "unrecognized-model").ReasoningLevels);
+    }
+
+    [Theory]
+    [InlineData(false, LlmReasoningLevel.None)]
+    [InlineData(true, LlmReasoningLevel.Minimal)]
+    public async Task BelowMinimumEffortUsesTheLowestCliSettingForBothChatPaths(bool streaming, LlmReasoningLevel effort)
+    {
+        var runner = new RecordingRunner(new(0,
+            """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""", string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        LlmConnection connection = CliConnection() with
+        { CapabilityOverrides = new() { SupportsStreaming = streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported } };
+        var request = new LlmChatRequest
+        { ModelId = "unrecognized-model", Messages = [new("user", "test")], ReasoningLevel = effort };
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection, request));
+
+        Assert.Equal("OK", Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Text);
+        IReadOnlyList<string> arguments = Assert.Single(runner.Invocations).Arguments;
+        Assert.Equal("low", arguments[arguments.ToList().IndexOf("--effort") + 1]);
+        Assert.Equal(effort, request.ReasoningLevel);
     }
 
     [Theory]

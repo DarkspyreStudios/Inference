@@ -652,10 +652,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 lock (_route) { selectedModelId = _selectedModelId; }
                 LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(
                     _connection, request.ModelId ?? selectedModelId);
-                LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
+                LlmReasoningLevel? nativeEffort = ClaudeCliLlmClient.MapReasoning(
+                    _connection, request.ModelId ?? selectedModelId, request.ReasoningLevel);
                 (JsonArray input, string? openingNotice) = await PrepareInputAsync(request, selectedModelId, cancellationToken);
                 var settings = new JsonObject { ["showThinkingSummaries"] = (capabilities.SupportsReasoningText != InferenceSupport.Unsupported) };
-                if (request.ReasoningLevel is { } level)
+                if (nativeEffort is { } level)
                 {
                     settings["effortLevel"] = LlmReasoningEffort.Word(level);
                 }

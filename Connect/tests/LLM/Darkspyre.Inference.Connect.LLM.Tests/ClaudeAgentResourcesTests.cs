@@ -18,12 +18,12 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     public void Dispose() => Directory.Delete(_directory, recursive: true);
 
     [Fact]
-    public async Task InitializationEffortFactsRejectAnUnsupportedNativeTurnBeforeAnyWrite()
+    public async Task InitializationNoEffortFactRejectsANativeTurnBeforeAnyWrite()
     {
         var process = new ManualProcess
         {
             InitializationPayload = JsonElement.Parse(
-                """{"models":[{"value":"claude-test","displayName":"CLI model choice","supportsEffort":true,"supportedEffortLevels":["low"]}]}""")
+                """{"models":[{"value":"claude-test","displayName":"CLI model choice","supportsEffort":false}]}""")
         };
         LlmConnection connection = Connection() with
         { CapabilityOverrides = new() { ReasoningLevels = ClaudeCliLlmClient.ReasoningLevels } };
@@ -43,6 +43,48 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
         Assert.Equal(initializationWrites, process.RawWrites().Length);
         Assert.DoesNotContain(process.RawWrites().Select(line => JsonElement.Parse(line)), item => item.GetProperty("type").GetString() == "user");
+    }
+
+    [Theory]
+    [InlineData(false, "low")]
+    [InlineData(true, "medium")]
+    public async Task NativeTurnMapsEffortForTheSelectedModelBeforeWritingInput(bool switchModel, string expected)
+    {
+        var process = new ManualProcess
+        {
+            InitializationPayload = JsonElement.Parse("""
+                {"models":[{"value":"claude-test","displayName":"Initial","supportsEffort":true,"supportedEffortLevels":["low"]},
+                           {"value":"claude-other","displayName":"Other","supportsEffort":true,"supportedEffortLevels":["medium"]}]}
+                """)
+        };
+        await using ILlmAgentSession session = await Start(process);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        var request = new LlmAgentTurnRequest
+        {
+            Input = [new LlmAgentTextContent("Reply with OK.")],
+            ModelId = switchModel ? "claude-other" : null,
+            ReasoningLevel = LlmReasoningLevel.Maximum
+        };
+        await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(request, limit.Token).GetAsyncEnumerator(limit.Token);
+
+        Assert.True(await feed.MoveNextAsync());
+        Assert.IsType<LlmAgentTurnStartedEvent>(feed.Current);
+        string turnId = await process.WaitForUserMessage(limit.Token);
+        process.Push(new { type = "user", uuid = turnId, isReplay = true });
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "OK", stop_reason = "end_turn" });
+        await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+
+        JsonElement settings = process.Writes().Last(item => item.GetProperty("type").GetString() == "control_request"
+            && item.GetProperty("request").GetProperty("subtype").GetString() == "apply_flag_settings")
+            .GetProperty("request").GetProperty("settings");
+        Assert.Equal(expected, settings.GetProperty("effortLevel").GetString());
+        Assert.Equal(LlmReasoningLevel.Maximum, request.ReasoningLevel);
+        if (switchModel)
+        {
+            JsonElement model = Assert.Single(process.Writes(), item => item.GetProperty("type").GetString() == "control_request"
+                && item.GetProperty("request").GetProperty("subtype").GetString() == "set_model");
+            Assert.Equal("claude-other", model.GetProperty("request").GetProperty("model").GetString());
+        }
     }
 
     [Fact]
