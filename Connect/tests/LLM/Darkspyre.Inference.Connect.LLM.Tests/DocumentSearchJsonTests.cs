@@ -11,8 +11,10 @@ public sealed class DocumentSearchJsonTests
     private const string SearchResponse = "{\"matches\":[{\"file_id\":\"file-1\",\"chunk_id\":\"chunk-1\","
         + "\"chunk_content\":\"reference text\",\"score\":0.5,\"collection_ids\":[\"collection-b\",\"collection-a\"]}]}";
 
-    [Fact]
-    public async Task OrderedCollectionAndGroupingKeysReachTheSearchProtocol()
+    [Theory]
+    [InlineData(XaiServiceTier.Default)]
+    [InlineData(XaiServiceTier.Priority)]
+    public async Task OrderedCollectionAndGroupingKeysReachTheSearchProtocol(XaiServiceTier tier)
     {
         var handler = new Handler();
         using var http = new HttpClient(handler);
@@ -20,7 +22,7 @@ public sealed class DocumentSearchJsonTests
         {
             Version = "1",
             Transport = LlmTransport.XaiResponses,
-            Xai = new(),
+            Xai = new() { ServiceTier = tier },
             Endpoint = "https://api.x.ai/v1",
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize()
         };
@@ -32,6 +34,8 @@ public sealed class DocumentSearchJsonTests
         DocumentSearchResult result = await XaiDocumentSearch.SearchAsync(http, connection, restored, () => { }, CancellationToken.None);
 
         JsonElement sent = handler.Body;
+        Assert.False(sent.TryGetProperty("service_tier", out _));
+        Assert.Equal(tier, connection.Xai.ServiceTier);
         Assert.Equal(["collection-b", "collection-a"], sent.GetProperty("source").GetProperty("collection_ids")
             .EnumerateArray().Select(value => value.GetString()));
         Assert.Equal(["author", "topic"], sent.GetProperty("group_by").GetProperty("keys")

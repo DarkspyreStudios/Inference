@@ -18,6 +18,12 @@ Gemini and Vertex retain known missing JSON-object/account-usage operations as U
 An unfamiliar Gemini API model reports Unknown schema support and can use the existing unchanged
 `responseFormat.text.schema` request. Provider acceptance remains unqualified.
 
+Unknown native background-work observation permits the caller's explicit request without promising
+a resource feed. Explicit Unsupported still refuses it. Grok document search does not inherit the
+generation tier; its payload omits a tier field and leaves the saved choice unchanged. Realtime MCP
+labels retain periods unchanged. Chat Auto tool choice and explicit parallel-call controls can be
+sent without tool definitions; Required still needs an available tool and Specific must name one.
+
 ## SDK HTTP composition
 
 SDK HTTP registrations use one generation-owned pool for the finite SDK named pipelines,

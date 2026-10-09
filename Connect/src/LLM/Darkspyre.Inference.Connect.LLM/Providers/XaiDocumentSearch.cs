@@ -75,8 +75,6 @@ internal static class XaiDocumentSearch
     {
         ArgumentNullException.ThrowIfNull(connection);
         XaiRequestHeaders.ValidateEndpoint(connection);
-        if ((connection.Xai?.ServiceTier ?? XaiServiceTier.Default) != XaiServiceTier.Default)
-            throw new NotSupportedException("This document-search adapter does not implement a service-tier control.");
         ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
         _ = XaiAuthorization.Require(connection);
     }

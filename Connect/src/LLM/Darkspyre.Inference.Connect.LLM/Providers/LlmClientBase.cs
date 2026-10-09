@@ -282,17 +282,10 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
                 nameof(request));
         }
 
-        if (request.ToolChoice is { Mode: not LlmToolChoiceMode.None }
+        if (request.ToolChoice is { Mode: LlmToolChoiceMode.Required }
             && toolNames.Count == 0 && request.Tools.Count == 0)
         {
             throw new ArgumentException("Tool choice requires at least one request tool.", nameof(request));
-        }
-
-        if (request.AllowParallelToolCalls is not null && toolNames.Count == 0 && request.Tools.Count == 0)
-        {
-            throw new ArgumentException(
-                "Parallel tool-call control requires at least one request tool.",
-                nameof(request));
         }
 
         foreach (LlmChatMessage message in request.Messages)

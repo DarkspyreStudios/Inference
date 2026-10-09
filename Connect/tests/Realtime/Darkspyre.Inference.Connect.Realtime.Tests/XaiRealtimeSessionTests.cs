@@ -1,4 +1,5 @@
 using System.Text.Json.Nodes;
+using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Realtime;
@@ -10,6 +11,20 @@ namespace Darkspyre.Inference.Connect.Realtime.Tests;
 
 public sealed class XaiRealtimeSessionTests
 {
+    [Fact]
+    public async Task McpLabelWithAPeriodReachesTheSessionUpdateUnchanged()
+    {
+        var tool = new LlmRemoteMcpTool("https://tools.example.test/mcp", "tools.reference");
+        RealtimeSessionConfig config = XaiRealtimeProtocol.Config(new()
+        {
+            TurnDetection = new RealtimeManualTurnDetection(), HostedTools = [tool]
+        });
+        using JsonDocument sent = JsonDocument.Parse(await XaiRealtimeProtocol.UpdateAsync(config, () => { }, default));
+        JsonElement mapped = Assert.Single(sent.RootElement.GetProperty("session").GetProperty("tools").EnumerateArray());
+        Assert.Equal(tool.ServerLabel, mapped.GetProperty("server_label").GetString());
+        Assert.Equal(tool.ServerUrl, mapped.GetProperty("server_url").GetString());
+    }
+
     [Fact]
     public async Task FailedUpgradeRetainsSafeRequestIdAndRetryDelay()
     {

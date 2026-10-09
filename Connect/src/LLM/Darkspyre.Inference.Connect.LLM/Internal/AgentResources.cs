@@ -8,7 +8,7 @@ internal static class AgentResourceOptions
     public static void Validate(LlmAgentCapabilities agent, bool allowRuntimeBackgroundWork, long retentionBytes)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(retentionBytes);
-        if (allowRuntimeBackgroundWork && agent.ResourceObservation != LlmOperationSupport.Supported)
+        if (allowRuntimeBackgroundWork && agent.ResourceObservation == LlmOperationSupport.Unsupported)
         {
             throw new NotSupportedException("This runtime does not report background work of its own.");
         }

@@ -64,7 +64,7 @@ internal static class XaiRealtimeProtocol
                         if (search.FromDate > search.ToDate) throw Invalid();
                         break;
                     case LlmRemoteMcpTool mcp:
-                        if (mcp.DeferLoading || mcp.ServerLabel.Contains('.', StringComparison.Ordinal)) throw Unsupported();
+                        if (mcp.DeferLoading) throw Unsupported();
                         if (!Uri.TryCreate(mcp.ServerUrl, UriKind.Absolute, out Uri? uri) || uri.Scheme is not ("http" or "https") || uri.UserInfo.Length != 0) throw Invalid();
                         break;
                 }

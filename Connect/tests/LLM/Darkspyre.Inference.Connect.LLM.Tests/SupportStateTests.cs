@@ -5,6 +5,7 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using Darkspyre.Inference.Connect.LLM.Vertex;
+using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -151,6 +152,63 @@ public sealed class SupportStateTests
             _ => new AppleFoundationModelsClient(http, new AppleProcessRunner()).GetCapabilities(connection)
         };
         Assert.Equal(jsonObjectOverride ?? InferenceSupport.Unsupported, capabilities.SupportsJsonObject);
+    }
+
+    [Theory]
+    [InlineData(LlmOperationSupport.Unknown)]
+    [InlineData(LlmOperationSupport.Supported)]
+    [InlineData(LlmOperationSupport.Unsupported)]
+    public void BackgroundWorkAdmissionDistinguishesUnknownFromUnsupported(LlmOperationSupport support)
+    {
+        var capabilities = NativeAgentContract.AgentCore with { ResourceObservation = support };
+        var options = new LlmAgentSessionOptions
+        {
+            ModelId = "default",
+            Runtime = new()
+            {
+                WorkingDirectory = Environment.CurrentDirectory,
+                Policy = new LlmAgentHostRuntimePolicy { AllowRuntimeBackgroundWork = true }
+            }
+        };
+        if (support == LlmOperationSupport.Unsupported)
+        {
+            Assert.Throws<NotSupportedException>(() => NativeAgentContract.ValidateStart(options, capabilities));
+            return;
+        }
+        Assert.Same(options.Runtime, NativeAgentContract.ValidateStart(options, capabilities));
+        Assert.Equal(support, capabilities.ResourceObservation);
+    }
+
+    [Theory]
+    [InlineData(LlmToolChoiceMode.Auto, true)]
+    [InlineData(LlmToolChoiceMode.Auto, false)]
+    [InlineData(LlmToolChoiceMode.Required, true)]
+    public async Task NonRequiredToolControlsReachTheExistingWriterWithoutToolDefinitions(
+        LlmToolChoiceMode mode, bool parallel)
+    {
+        var handler = new SchemaHandler();
+        using var http = new HttpClient(handler);
+        var client = new OpenAiCompatibleChatLlmClient(http);
+        var connection = Connection() with { CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported } };
+        var request = new LlmChatRequest
+        {
+            ModelId = "unlisted-model", Messages = [new("user", "Hello")],
+            ToolChoice = new() { Mode = mode }, AllowParallelToolCalls = parallel
+        };
+        if (mode == LlmToolChoiceMode.Required)
+        {
+            await Assert.ThrowsAsync<ArgumentException>(async () =>
+            {
+                await foreach (var _ in client.StreamAsync(connection, request)) { }
+            });
+            Assert.Null(handler.Payload);
+            return;
+        }
+        await foreach (var _ in client.StreamAsync(connection, request)) { }
+        using var sent = JsonDocument.Parse(handler.Payload!);
+        Assert.Equal("auto", sent.RootElement.GetProperty("tool_choice").GetString());
+        Assert.Equal(parallel, sent.RootElement.GetProperty("parallel_tool_calls").GetBoolean());
+        Assert.False(sent.RootElement.TryGetProperty("tools", out _));
     }
 
     [Theory]
