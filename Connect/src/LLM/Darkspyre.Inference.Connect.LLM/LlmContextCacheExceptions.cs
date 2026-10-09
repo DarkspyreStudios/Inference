@@ -94,7 +94,7 @@ internal static class CacheMutationEvidence
             || (operation == LlmContextCacheMutation.Delete && update is not null))
             throw new ArgumentException("Cache mutation evidence does not match the operation.");
         if (update is not null && (update.Reference.ResourceName != reference.ResourceName
-            || update.Reference.ModelId != reference.ModelId || update.Reference.ScopeId != reference.ScopeId))
+            || update.Reference.ModelId != reference.ModelId))
             throw new ArgumentException("Cache mutation evidence does not match the selected reference.");
         if (update?.Reference.ExpiresAt is { } referenceExpiry && referenceExpiry != update.ExpiresAt)
             throw new ArgumentException("Cache mutation evidence contains conflicting observed expiry.");

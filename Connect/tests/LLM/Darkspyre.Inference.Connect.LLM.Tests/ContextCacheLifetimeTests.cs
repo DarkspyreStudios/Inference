@@ -2,6 +2,7 @@ using System.Net;
 using System.Globalization;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -12,6 +13,156 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ContextCacheLifetimeTests
 {
+    [Fact]
+    public async Task ReplacedCacheCredentialUsesCurrentOperationWithoutAutomaticRevalidation()
+    {
+        int cacheReads = 0;
+        int counts = 0;
+        var handler = new Boundary((request, _) =>
+        {
+            string body;
+            if (request.Method == HttpMethod.Get && request.RequestUri!.AbsolutePath.Contains("cachedContents", StringComparison.Ordinal))
+            {
+                cacheReads++;
+                Assert.Equal("test-key", Assert.Single(request.Headers.GetValues("x-goog-api-key")));
+                body = """
+                    {"name":"cachedContents/imported","model":"models/gemini-2.5-flash","expireTime":"2030-01-01T00:00:00Z"}
+                    """;
+            }
+            else if (request.Method == HttpMethod.Post)
+            {
+                counts++;
+                Assert.EndsWith(":countTokens", request.RequestUri!.AbsolutePath, StringComparison.Ordinal);
+                Assert.Equal("replacement-key", Assert.Single(request.Headers.GetValues("x-goog-api-key")));
+                body = "{\"totalTokens\":12}";
+            }
+            else body = "{\"models\":[]}";
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(body) });
+        });
+        using var http = new HttpClient(handler);
+        var source = new Source();
+        await using var service = new LlmProviderService(source, [new GeminiApiLlmClient(http)]);
+        ILlmContextCacheClient cache = await service.BindContextCacheAsync("connection");
+        LlmContextCache receipt = await cache.GetAsync(new("cachedContents/imported", "gemini-2.5-flash", "restored-scope"));
+        source.Connection = source.Connection with
+        {
+            Version = "2", Credential = new LlmCredential { ApiKey = "replacement-key" }.Serialize()
+        };
+
+        LlmProviderInputTokenCount result = await service.CountInputTokensAsync("connection", new()
+        {
+            ModelId = receipt.Reference.ModelId, ExplicitCache = receipt.Reference, Messages = [new("user", "Use the prefix.")]
+        });
+
+        Assert.Equal(12, result.InputTokens);
+        Assert.Equal(1, counts);
+        Assert.Equal(1, cacheReads);
+    }
+
+    [Theory]
+    [InlineData(false, "generate")]
+    [InlineData(true, "generate")]
+    [InlineData(false, "count")]
+    [InlineData(false, "measure")]
+    [InlineData(true, "measure")]
+    public async Task RestoredCacheReferenceDoesNotRequireAPreliminaryGet(bool vertex, string operation)
+    {
+        int posts = 0;
+        var reference = new LlmExplicitCacheReference(
+            vertex ? "projects/123/locations/global/cachedContents/imported" : "cachedContents/imported",
+            vertex ? "google/gemini-2.5-flash" : "gemini-2.5-flash", "restored-scope");
+        var handler = new Boundary(async (message, token) =>
+        {
+            if (message.Method == HttpMethod.Get)
+            {
+                Assert.DoesNotContain("cachedContents", message.RequestUri!.AbsoluteUri, StringComparison.Ordinal);
+                return new(HttpStatusCode.OK) { Content = new StringContent("{\"models\":[]}") };
+            }
+            Assert.Equal(HttpMethod.Post, message.Method);
+            posts++;
+            JsonElement body = JsonElement.Parse(await message.Content!.ReadAsStringAsync(token));
+            if (operation == "count") body = body.GetProperty("generateContentRequest");
+            Assert.Equal(reference.ResourceName, body.GetProperty("cachedContent").GetString());
+            Assert.Equal(vertex ? "Bearer test-token" : null, message.Headers.Authorization?.ToString());
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent(operation == "count" ? "{\"totalTokens\":12}" : """
+                    {"candidates":[{"finishReason":"STOP","content":{"role":"model","parts":[{"text":"OK"}]}}]}
+                    """)
+            };
+        });
+        using var http = new HttpClient(handler);
+        var source = new Source();
+        if (vertex) source.Connection = source.Connection with
+        {
+            Transport = LlmTransport.GoogleVertexAi, Endpoint = "https://aiplatform.googleapis.com",
+            Credential = null, Vertex = new() { ProjectId = "123", Location = "global", AuthenticationMode = LlmGoogleAuthenticationMode.ApplicationDefault }
+        };
+        source.Connection = source.Connection with { CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported } };
+        ILlmClient client = vertex ? new VertexLlmClient(http, new CacheAuthentication()) : new GeminiApiLlmClient(http);
+        await using var service = new LlmProviderService(source, [client]);
+        var request = new LlmChatRequest
+        { ModelId = reference.ModelId, ExplicitCache = reference, Messages = [new("user", "Use the saved prefix.")] };
+
+        if (operation == "generate") Assert.Equal("OK", (await service.CompleteAsync("connection", request)).Text);
+        else if (operation == "count") Assert.Equal(12, (await service.CountInputTokensAsync("connection", request)).InputTokens);
+        else Assert.Null((await service.MeasureRequestAsync("connection", request)).UsedContextTokens);
+
+        Assert.Equal(operation == "measure" ? 0 : 1, posts);
+        Assert.Equal("restored-scope", request.ExplicitCache.ScopeId);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task RestoredCacheMutationSendsOnlyTheExplicitOperation(bool vertex, bool delete)
+    {
+        string name = vertex ? "projects/123/locations/global/cachedContents/imported" : "cachedContents/imported";
+        string model = vertex ? "google/gemini-2.5-flash" : "gemini-2.5-flash";
+        var reference = new LlmExplicitCacheReference(name, model, "restored-scope");
+        var handler = new Boundary(async (request, token) =>
+        {
+            Assert.Equal(delete ? HttpMethod.Delete : HttpMethod.Patch, request.Method);
+            Assert.EndsWith("/cachedContents/imported", request.RequestUri!.GetLeftPart(UriPartial.Path), StringComparison.Ordinal);
+            if (!delete)
+            {
+                JsonElement body = JsonElement.Parse(await request.Content!.ReadAsStringAsync(token));
+                Assert.Equal("2030-01-01T00:00:00Z", body.GetProperty("expireTime").GetString());
+            }
+            return new(delete ? HttpStatusCode.NotFound : HttpStatusCode.OK)
+            {
+                Content = new StringContent(delete ? "{}" : new JsonObject
+                {
+                    ["name"] = name, ["model"] = "models/gemini-2.5-flash", ["expireTime"] = "2030-01-01T00:00:00Z"
+                }.ToJsonString())
+            };
+        });
+        using var http = new HttpClient(handler);
+        var source = new Source();
+        if (vertex) source.Connection = source.Connection with
+        {
+            Transport = LlmTransport.GoogleVertexAi, Endpoint = "https://aiplatform.googleapis.com",
+            Credential = null, Vertex = new() { ProjectId = "123", Location = "global", AuthenticationMode = LlmGoogleAuthenticationMode.ApplicationDefault }
+        };
+        ILlmClient client = vertex ? new VertexLlmClient(http, new CacheAuthentication()) : new GeminiApiLlmClient(http);
+        await using var service = new LlmProviderService(source, [client]);
+        ILlmContextCacheClient cache = await service.BindContextCacheAsync("connection");
+
+        if (delete) Assert.True((await cache.DeleteAsync(reference)).AlreadyAbsent);
+        else
+        {
+            LlmContextCache receipt = await cache.UpdateExpiryAsync(reference, new(2030, 1, 1, 0, 0, 0, TimeSpan.Zero));
+            Assert.Equal(new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero), receipt.ExpiresAt);
+            Assert.Equal(reference.ResourceName, receipt.Reference.ResourceName);
+            Assert.Equal(reference.ModelId, receipt.Reference.ModelId);
+            Assert.NotEqual(reference.ScopeId, receipt.Reference.ScopeId);
+        }
+
+        Assert.Equal(1, handler.Sends);
+    }
+
     [Fact]
     public async Task CacheCreationWithoutExpirationUsesProviderDefaultAndObservedReceipt()
     {
@@ -324,19 +475,25 @@ public sealed class ContextCacheLifetimeTests
     {
         public int Reads { get; private set; }
         public bool Disposed { get; private set; }
+        public LlmConnection Connection { get; set; } = new()
+        {
+            Version = "1", Transport = LlmTransport.GoogleGeminiApi,
+            Endpoint = GeminiApiLlmClient.DefaultEndpoint,
+            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
+        };
         public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default)
         {
             Reads++;
-            return Task.FromResult<LlmConnection?>(new()
-            {
-                Version = "1",
-                Transport = LlmTransport.GoogleGeminiApi,
-                Endpoint = GeminiApiLlmClient.DefaultEndpoint,
-                Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
-            });
+            return Task.FromResult<LlmConnection?>(Connection);
         }
         public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public void Dispose() => Disposed = true;
+    }
+
+    private sealed class CacheAuthentication : IVertexAuthentication
+    {
+        public Task<VertexAccess> ResolveAsync(LlmConnection connection, CancellationToken cancellationToken) =>
+            Task.FromResult(new VertexAccess("test-token", "test-scope"));
     }
 }

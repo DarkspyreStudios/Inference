@@ -2562,9 +2562,11 @@ transfers or falls back from a paid cache implicitly.
 Each Google cache operation resolves one selected connection snapshot. The same facade retains
 only derived provider-validated receipt facts, swept at observed expiry and cleared at retirement;
 it retains neither prefixes nor complete listings. Scope IDs are data, not account authority.
-Matching owned record/JSON copies can reuse that receipt evidence. Unknown or new-owner imports
-require explicit `Get`; observed credential/configuration replacement revalidates a known receipt
-through the current fixed-route `Get` before use. Credential equality is only change detection,
+Matching owned record/JSON copies can reuse that receipt evidence. Restored references and references
+with no current receipt observation can attempt the selected operation through the current authenticated
+fixed route. Missing or uncertain receipt evidence does not require a preliminary `Get`.
+Credential/configuration replacement discards prior receipt proof without automatically revalidating it.
+Credential equality is only change detection,
 never a claim of rotation-stable principal identity. List does not authorize generation.
 
 Vertex requests use the fixed configured project/location route. An authorized create, get or
@@ -2578,8 +2580,8 @@ Google generation and exact Gemini API counting use the same canonical cached-co
 suffixes cannot replace system instructions, tools or tool configuration. Advisory occupancy is
 unknown rather than a suffix-only total, and it never performs cache revalidation. Actual usage
 remains the provider's observation. Create, expiry-only update and delete are explicit operations;
-dispatched acknowledgement failures preserve mutation uncertainty without retry. A same-owner
-successful-delete tombstone permits repeat deletion only under unchanged configuration, and
+dispatched acknowledgement failures preserve mutation uncertainty without retry. A current-binding
+successful-delete tombstone prevents generation but permits explicit repeat deletion, and
 `AlreadyAbsent` requires an actual authorized 404. Expired selections and fixed-route not-found
 reads use distinct typed unavailable reasons; authentication failures do not imply absence.
 
@@ -2703,8 +2705,9 @@ contradictory authentication or transport status. Expiry does not establish dele
 `LlmContextCacheMutationUncertainException` and `LlmContextCacheMutationCancelledException` identify
 an expiry update or deletion that may have committed. They retain the selected reference, actual
 request ID and optional matching late update or deletion evidence without declaring success or
-authorizing another mutation. Update evidence preserves the same resource, model and scope while
-allowing changed expiry; a supplied reference expiry must match that receipt's observed expiry.
+authorizing another mutation. Update evidence preserves the same native resource and model while
+allowing changed expiry and the current facade's receipt scope. A local scope ID is not provider
+identity. A supplied reference expiry must match that receipt's observed expiry.
 Cancellation retains its token. The existing create errors remain
 distinct. These runtime exceptions have fixed diagnostics and retain already-safe inner failures;
 the adapter boundary must sanitize untrusted failures before construction. They are not portable

@@ -61,40 +61,26 @@ internal sealed class GeminiCacheBindings
         {
             ObjectDisposedException.ThrowIf(_stopped, this);
             if (!_bindings.TryGetValue(connectionId, out Binding? binding))
-                throw new ArgumentException("The selected cache requires explicit Get validation.", nameof(reference));
+                return;
             // Advisory measurement must not resolve credentials or invalidate admitted evidence.
             var snapshot = connection with { CacheCredentialEvidence = binding.Connection.CacheCredentialEvidence };
             if (!SameSelection(binding.Connection, snapshot)) return;
-            _ = RequireKnown(Capture(binding, snapshot, sequence), reference, false);
+            _ = SelectReference(Capture(binding, snapshot, sequence), reference, false);
         }
     }
 
-    internal Observation RequireKnown(Admission operation, LlmExplicitCacheReference reference, bool allowDeleted)
+    internal Admission SelectReference(Admission operation, LlmExplicitCacheReference reference, bool allowDeleted)
     {
         lock (_gate)
         {
             Check(operation);
             if (reference.ExpiresAt is { } expiry && expiry <= DateTimeOffset.UtcNow)
                 throw new LlmContextCacheUnavailableException(LlmContextCacheUnavailableReason.Expired, reference);
-            if (!operation.Binding.Observed.TryGetValue(reference, out Observation? observed))
-                throw new ArgumentException("The selected cache requires explicit Get validation.", nameof(reference));
-            if (observed.Deleted && !allowDeleted || observed.Uncertain)
-                throw new ArgumentException("The selected cache requires explicit reconciliation.", nameof(reference));
-            return observed;
-        }
-    }
-
-    // Recognizing a tuple precedes credential callbacks; final admission still validates the acquired snapshot.
-    internal void RequireObserved(string connectionId, LlmExplicitCacheReference reference, bool allowDeleted)
-    {
-        lock (_gate)
-        {
-            ObjectDisposedException.ThrowIf(_stopped, this);
-            if (reference.ExpiresAt is { } expiry && expiry <= DateTimeOffset.UtcNow)
-                throw new LlmContextCacheUnavailableException(LlmContextCacheUnavailableReason.Expired, reference);
-            if (!_bindings.TryGetValue(connectionId, out Binding? binding) || !binding.Observed.TryGetValue(reference, out Observation? known)
-                || known.Uncertain || known.Deleted && !allowDeleted)
-                throw new ArgumentException("The selected cache requires explicit Get validation.", nameof(reference));
+            operation.Binding.Observed.TryGetValue(reference, out Observation? observed);
+            if (observed?.Epoch != operation.Epoch || observed.Uncertain) observed = null;
+            if (observed is { Deleted: true } && !allowDeleted)
+                throw new LlmContextCacheUnavailableException(LlmContextCacheUnavailableReason.Missing, reference);
+            return operation with { Reference = reference, Proof = observed, AllowDeleted = allowDeleted };
         }
     }
 
