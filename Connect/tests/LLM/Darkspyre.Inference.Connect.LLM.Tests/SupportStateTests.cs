@@ -212,6 +212,61 @@ public sealed class SupportStateTests
     }
 
     [Theory]
+    [InlineData(LlmTransport.GoogleGeminiApi)]
+    [InlineData(LlmTransport.GoogleVertexAi)]
+    public async Task FlashSamplingDeprecationDoesNotDenyUnknownPenaltyControls(LlmTransport transport)
+    {
+        var handler = new SchemaHandler();
+        using var http = new HttpClient(handler);
+        await using var authentication = new VertexAuthentication();
+        ILlmClient client = transport == LlmTransport.GoogleGeminiApi
+            ? new GeminiApiLlmClient(http) : new VertexLlmClient(http, authentication);
+        string model = transport == LlmTransport.GoogleGeminiApi ? "gemini-3.6-flash" : "google/gemini-3.6-flash";
+        var connection = Connection() with
+        {
+            Transport = transport,
+            Endpoint = transport == LlmTransport.GoogleGeminiApi ? GeminiApiLlmClient.DefaultEndpoint : VertexEndpoints.BaseEndpoint,
+            Vertex = transport == LlmTransport.GoogleVertexAi ? new() { AuthenticationMode = LlmGoogleAuthenticationMode.ApiKey } : null,
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported }
+        };
+        var capabilities = client.GetCapabilities(connection, model);
+        Assert.Equal(InferenceSupport.Unsupported, capabilities.SupportsTemperature);
+        Assert.Equal(InferenceSupport.Unknown, capabilities.SupportsPresencePenalty);
+        Assert.Equal(InferenceSupport.Unknown, capabilities.SupportsFrequencyPenalty);
+        await foreach (var _ in client.StreamAsync(connection, new()
+        {
+            ModelId = model, Messages = [new("user", "Hello")], PresencePenalty = 2, FrequencyPenalty = 2
+        })) { }
+        using var sent = JsonDocument.Parse(handler.Payload!);
+        JsonElement config = sent.RootElement.GetProperty("generationConfig");
+        Assert.Equal(2, config.GetProperty("presencePenalty").GetDouble());
+        Assert.Equal(2, config.GetProperty("frequencyPenalty").GetDouble());
+    }
+
+    [Fact]
+    public async Task ExplicitNullAgentCountSuppressesTheSavedCountOnAnUnlistedModel()
+    {
+        var handler = new SchemaHandler();
+        using var http = new HttpClient(handler);
+        var client = new XaiResponsesLlmClient(http);
+        var connection = Connection() with
+        {
+            Transport = LlmTransport.XaiResponses, Endpoint = "https://api.x.ai/v1",
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "fixture-token" } }.Serialize(),
+            Xai = new() { MultiAgent = new(4) },
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported }
+        };
+        await foreach (var _ in client.StreamAsync(connection, new()
+        {
+            ModelId = "unlisted-model", Messages = [new("user", "Hello")], ProviderControls = new XaiMultiAgentControls()
+        })) { }
+        using var sent = JsonDocument.Parse(handler.Payload!);
+        Assert.False(sent.RootElement.TryGetProperty("reasoning", out _));
+        Assert.False(sent.RootElement.TryGetProperty("agent_count", out _));
+        Assert.Equal(4, connection.Xai.MultiAgent!.AgentCount);
+    }
+
+    [Theory]
     [InlineData(InferenceSupport.Unknown)]
     [InlineData(InferenceSupport.Unsupported)]
     public async Task SchemaAdmissionDistinguishesAnAttemptFromAnExplicitRestriction(InferenceSupport support)
@@ -279,8 +334,10 @@ public sealed class SupportStateTests
             Payload = await request.Content!.ReadAsStringAsync(token);
             return new(HttpStatusCode.OK)
             {
-                Content = new StringContent(request.RequestUri!.Host == "generativelanguage.googleapis.com"
+                Content = new StringContent(request.RequestUri!.Host is "generativelanguage.googleapis.com" or "aiplatform.googleapis.com"
                     ? "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"{}\"}]},\"finishReason\":\"STOP\"}]}"
+                    : request.RequestUri.Host == "api.x.ai"
+                    ? "{\"id\":\"response-fixture\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{}\"}]}]}"
                     : "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"{}\"},\"finish_reason\":\"stop\"}]}", Encoding.UTF8, "application/json")
             };
         }

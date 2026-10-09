@@ -288,8 +288,8 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
             AnthropicModelProfiles.ValidateSampling(request, AnthropicModelProfiles.Resolve(VertexEndpoints.ParseModel(request.ModelId).Model, null));
             _ = AnthropicSchemas.Enforcement(request, capabilities);
         }
-        else if (request.PresencePenalty is < -2 or >= 2 || request.FrequencyPenalty is < -2 or >= 2)
-            throw new ArgumentOutOfRangeException(nameof(request), "Vertex Gemini penalties must be in [-2, 2).");
+        else if (request.PresencePenalty is < -2 or > 2 || request.FrequencyPenalty is < -2 or > 2)
+            throw new ArgumentOutOfRangeException(nameof(request), "Vertex Gemini penalties must be in [-2, 2].");
         if (request.MaxOutputTokens > profile.OutputTokens || request.Temperature is < 0 or > 2
             || profile.IsClaude && request.Temperature > 1)
         { throw new ArgumentException("The output limit or temperature exceeds the selected model's range."); }

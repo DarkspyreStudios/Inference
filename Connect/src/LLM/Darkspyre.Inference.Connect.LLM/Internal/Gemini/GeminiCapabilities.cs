@@ -27,8 +27,8 @@ internal static class GeminiCapabilities
             SupportsTopP = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
             SupportsTopK = profile.AllowsSampling ? supportsTopK : InferenceSupport.Unsupported,
             SupportsSeed = InferenceSupport.Supported,
-            SupportsPresencePenalty = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
-            SupportsFrequencyPenalty = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsPresencePenalty = profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unknown,
+            SupportsFrequencyPenalty = profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unknown,
             MaxStopSequences = 5,
             SupportsToolUse = InferenceSupport.Supported,
             Tools = new()

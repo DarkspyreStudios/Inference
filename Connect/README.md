@@ -24,6 +24,9 @@ generation tier; its payload omits a tier field and leaves the saved choice unch
 labels retain periods unchanged. Chat Auto tool choice and explicit parallel-call controls can be
 sent without tool definitions; Required still needs an available tool and Specific must name one.
 
+An explicit Grok null agent count suppresses the saved count without requiring a model profile.
+A non-null count still requires an implemented count-to-effort mapping.
+
 ## SDK HTTP composition
 
 SDK HTTP registrations use one generation-owned pool for the finite SDK named pipelines,
@@ -4499,8 +4502,9 @@ Nonstandard extension options retain request-over-connection precedence.
 
 Claude Opus 4.7 and newer non-sampling profiles reject temperature/top-p/top-k even with an override.
 Earlier sampling-capable Claude profiles enable these controls by default; overrides can disable them.
-Gemini Flash 3.6 and later ignore temperature/top-p/top-k and reject penalties, so Connect rejects
-explicit values. Vertex Gemini penalties use [-2, 2); Gemini API requires finite penalties.
+Gemini Flash 3.6 and later ignore temperature/top-p/top-k, so Connect rejects those explicit values.
+Their penalty support remains Unknown and permits unchanged attempts. Vertex Gemini penalties use
+[-2, 2]; the disputed upper boundary remains attemptable. Gemini API requires finite penalties.
 Compatible endpoint settings expose typed sampling overrides and a nullable maximum-stop count;
 zero disables stops, and blank uses detection. Raw provider options cannot inject these typed fields.
 

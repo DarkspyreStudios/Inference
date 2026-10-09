@@ -14,9 +14,12 @@ internal static class ProviderControlPolicy
         if (controls is null) return request;
         if (controls is not XaiMultiAgentControls multiAgent || connection.Transport != LlmTransport.XaiResponses)
             throw new NotSupportedException("The selected route does not implement these provider controls.");
-        XaiMultiAgentProfile profile = XaiModelProfiles.Get(connection, request.ModelId).MultiAgent
-            ?? throw new NotSupportedException("The selected model does not declare multi-agent count support.");
-        if (multiAgent.AgentCount is { } count) _ = XaiModelProfiles.MultiAgentEffort(profile, count);
+        if (multiAgent.AgentCount is { } count)
+        {
+            XaiMultiAgentProfile profile = XaiModelProfiles.Get(connection, request.ModelId).MultiAgent
+                ?? throw new NotSupportedException("The adapter has no multi-agent count mapping for the selected model.");
+            _ = XaiModelProfiles.MultiAgentEffort(profile, count);
+        }
         if (request.ReasoningLevel is not null
             || connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(key => key is "reasoning" or "reasoning_effort"))
             throw new ArgumentException("Typed multi-agent controls cannot be combined with neutral or raw reasoning controls.", nameof(request));
