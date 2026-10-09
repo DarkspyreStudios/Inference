@@ -35,6 +35,9 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     private static readonly SetupChoice[] OverrideChoices =
         [new("default", "Default"), new("enabled", "Enabled"), new("disabled", "Disabled")];
 
+    private static readonly SetupChoice[] SupportChoices =
+        [new("default", "Default"), new("unknown", "Unknown"), new("enabled", "Supported"), new("disabled", "Unsupported")];
+
     private readonly LlmProviderDefinition _definition;
     private readonly Func<LlmConnection, SetupValidation>? _validateEnvironment;
     private readonly bool _hasEnvironment;
@@ -361,7 +364,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     private SetupSection AdvancedCapabilities()
     {
         LlmCapabilityOverrides current = _draft.CapabilityOverrides ?? new();
-        SetupChoiceField Override(string id, string label, bool? value,
+        SetupChoiceField ReasoningOverride(string id, string label, bool? value,
             Func<LlmCapabilityOverrides, bool?, LlmCapabilityOverrides> update, string? helpText = null)
         {
             _overrideFields.Add(id);
@@ -373,6 +376,26 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
                     { return new(SetupEditState.Invalid, [new("override-invalid", "Select default, enabled or disabled.", id)]); }
                     return Edit(() => _draft = _draft with
                     { CapabilityOverrides = update(_draft.CapabilityOverrides ?? new(), selection == "default" ? null : selection == "enabled") });
+                }, false);
+        }
+        SetupChoiceField Override(string id, string label, InferenceSupport? value,
+            Func<LlmCapabilityOverrides, InferenceSupport?, LlmCapabilityOverrides> update, string? helpText = null)
+        {
+            _overrideFields.Add(id);
+            return new(new(id, label) { HelpText = helpText ?? "Default uses the adapter's evidence. Unknown permits an explicit attempt." },
+                value switch { null => "default", InferenceSupport.Unknown => "unknown", InferenceSupport.Supported => "enabled", _ => "disabled" },
+                "default", selection =>
+                {
+                    if (selection is not ("default" or "unknown" or "enabled" or "disabled"))
+                        return new(SetupEditState.Invalid, [new("override-invalid", "Select default, unknown, enabled or disabled.", id)]);
+                    InferenceSupport? support = selection switch
+                    {
+                        "default" => null,
+                        "unknown" => InferenceSupport.Unknown,
+                        "enabled" => InferenceSupport.Supported,
+                        _ => InferenceSupport.Unsupported
+                    };
+                    return Edit(() => _draft = _draft with { CapabilityOverrides = update(_draft.CapabilityOverrides ?? new(), support) });
                 }, false);
         }
         SetupSection section = new("capabilities", "Endpoint capability overrides",
@@ -413,7 +436,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             Override("json-schema", "JSON schema output", current.SupportsJsonSchema, (value, selection) => value with { SupportsJsonSchema = selection }),
             Override("json-object", "JSON object output", current.SupportsJsonObject, (value, selection) => value with { SupportsJsonObject = selection }),
             Override("reasoning-text", "Reasoning text", current.SupportsReasoningText, (value, selection) => value with { SupportsReasoningText = selection }),
-            .. Enum.GetValues<LlmReasoningLevel>().Select(level => Override(
+            .. Enum.GetValues<LlmReasoningLevel>().Select(level => ReasoningOverride(
                 "reasoning-level-" + level.ToString().ToLowerInvariant(), "Reasoning level: " + level,
                 current.ReasoningLevels?.Contains(level),
                 (value, selection) => value with { ReasoningLevels = WithReasoningLevel(value.ReasoningLevels, level, selection) })),
@@ -491,7 +514,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             : fieldId == "output-limit-field" && _draft.Transport is LlmTransport.OpenAiCompatibleChat or LlmTransport.AzureOpenAiChat
                 ? Page(query, [new("default", "Default"), new("max_tokens", "max_tokens"), new("max_completion_tokens", "max_completion_tokens")])
             : fieldId == "prompt-cache-key" && _draft.Transport is LlmTransport.OpenAiCompatibleChat or LlmTransport.AzureOpenAiChat ? Page(query, OverrideChoices)
-            : _overrideFields.Contains(fieldId) ? Page(query, OverrideChoices) : null;
+            : _overrideFields.Contains(fieldId) ? Page(query, fieldId.StartsWith("reasoning-level-", StringComparison.Ordinal) ? OverrideChoices : SupportChoices) : null;
     }
 
     protected override IReadOnlyList<SetupActionDescriptor> CreateActions()
@@ -846,7 +869,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
                     Fence(cancellationToken);
                     LlmProviderCapabilities capabilities = await service.GetCapabilitiesAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
                     Fence(cancellationToken);
-                    if (!capabilities.SupportsModelListing)
+                    if ((capabilities.SupportsModelListing == InferenceSupport.Unsupported))
                     {
                         return new([], State: SetupChoiceState.Unavailable,
                             Issues: [new("manual-model", "This connection requires manual model entry.", "model", Severity: SetupIssueSeverity.Warning)]);
@@ -959,7 +982,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         {
             LlmProviderCapabilities capabilities = await service.GetCapabilitiesAsync(settings.Identity.Id, token).ConfigureAwait(false);
             Fence(token);
-            if (!capabilities.SupportsModelListing)
+            if ((capabilities.SupportsModelListing == InferenceSupport.Unsupported))
             {
                 return new(SetupActionState.Unavailable, [new("explicit-test-required", "This provider requires an explicit inference test to confirm remote access.")]);
             }

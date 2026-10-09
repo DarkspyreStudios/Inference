@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Text.Json;
 using Darkspyre.Inference.Common.Resources;
@@ -131,10 +132,10 @@ public sealed record LlmPromptCacheHint
 public sealed record LlmPromptCacheCapabilities
 {
     /// <summary>The provider caches repeated prefixes without a hint.</summary>
-    public bool Automatic { get; init; }
+    public InferenceSupport Automatic { get; init; }
 
     /// <summary>The route converts cache hints into provider cache markers.</summary>
-    public bool AcceptsHints { get; init; }
+    public InferenceSupport AcceptsHints { get; init; }
 
     /// <summary>Retentions the route honours for a hint. Empty when it accepts no hints.</summary>
     public IReadOnlySet<LlmPromptCacheRetention> Retentions { get; init; } = FrozenSet<LlmPromptCacheRetention>.Empty;

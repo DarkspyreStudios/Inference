@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -13,7 +14,7 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
 {
     public override LlmTransport Transport => LlmTransport.GoogleVertexAi;
     public override LlmProviderDefinition ProviderDefinition => VertexProviderDefinition.Value;
-    protected override LlmProviderCapabilities DefaultCapabilities => new() { SupportsModelListing = true };
+    protected override LlmProviderCapabilities DefaultCapabilities => new() { SupportsModelListing = InferenceSupport.Supported };
     protected override bool OffersNonStreamingRequests => true;
     protected override bool SupportsResourcePreparation => true;
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => Capabilities(connection, modelId);
@@ -27,26 +28,26 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         bool express = connection.Vertex!.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey;
         if (express && modelId is not null && VertexModelProfiles.Get(modelId).IsClaude)
             throw new NotSupportedException("Vertex express mode serves Gemini models only.");
-        if (express) capabilities = capabilities with { SupportsModelListing = false };
+        if (express) capabilities = capabilities with { SupportsModelListing = InferenceSupport.Unsupported };
         capabilities = capabilities with
         {
-            SupportsExplicitCache = !express && connection.CacheBindings is not null
-            && (modelId is null || !VertexModelProfiles.Get(modelId).IsClaude)
+            SupportsExplicitCache = (!express && connection.CacheBindings is not null
+            && (modelId is null || !VertexModelProfiles.Get(modelId).IsClaude) ? InferenceSupport.Supported : InferenceSupport.Unsupported)
         };
         LlmProviderCapabilities implemented = capabilities;
         capabilities = LlmCapabilityOverrideLookup.Apply(capabilities, connection, modelId);
-        if (capabilities.SupportsJsonObject || capabilities.SupportsAccountUsage
-            || capabilities.SupportsExplicitCache && !implemented.SupportsExplicitCache
-            || capabilities.SupportsTemperature && !implemented.SupportsTemperature
-            || capabilities.SupportsTopP && !implemented.SupportsTopP
-            || capabilities.SupportsTopK && !implemented.SupportsTopK
-            || capabilities.SupportsSeed && !implemented.SupportsSeed
-            || capabilities.SupportsPresencePenalty && !implemented.SupportsPresencePenalty
-            || capabilities.SupportsFrequencyPenalty && !implemented.SupportsFrequencyPenalty
+        if ((capabilities.SupportsJsonObject != InferenceSupport.Unsupported) || (capabilities.SupportsAccountUsage != InferenceSupport.Unsupported)
+            || (capabilities.SupportsExplicitCache != InferenceSupport.Unsupported) && (implemented.SupportsExplicitCache == InferenceSupport.Unsupported)
+            || (capabilities.SupportsTemperature != InferenceSupport.Unsupported) && (implemented.SupportsTemperature == InferenceSupport.Unsupported)
+            || (capabilities.SupportsTopP != InferenceSupport.Unsupported) && (implemented.SupportsTopP == InferenceSupport.Unsupported)
+            || (capabilities.SupportsTopK != InferenceSupport.Unsupported) && (implemented.SupportsTopK == InferenceSupport.Unsupported)
+            || (capabilities.SupportsSeed != InferenceSupport.Unsupported) && (implemented.SupportsSeed == InferenceSupport.Unsupported)
+            || (capabilities.SupportsPresencePenalty != InferenceSupport.Unsupported) && (implemented.SupportsPresencePenalty == InferenceSupport.Unsupported)
+            || (capabilities.SupportsFrequencyPenalty != InferenceSupport.Unsupported) && (implemented.SupportsFrequencyPenalty == InferenceSupport.Unsupported)
             || capabilities.MaxStopSequences > implemented.MaxStopSequences
             || modelId is not null && capabilities.ReasoningLevels.Any(level =>
                 !VertexModelProfiles.Get(modelId).ReasoningLevels.Contains(level))
-            || express && capabilities.SupportsModelListing)
+            || express && (capabilities.SupportsModelListing != InferenceSupport.Unsupported))
         { throw new NotSupportedException("Vertex capability overrides cannot enable unimplemented controls."); }
         return capabilities;
     }
@@ -95,7 +96,7 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         { throw new InvalidOperationException("The Google credential identity changed before dispatch."); }
         connection = connection with { ContinuationCodec = new VertexContinuationCodec(), ResolvedContinuationScope = access.Scope };
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
-        LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is { } structured && !capabilities.SupportsJsonSchema
+        LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is { } structured && (capabilities.SupportsJsonSchema == InferenceSupport.Unsupported)
             ? StructuredOutput.ResolveEnforcement(structured, capabilities)
             : VertexSchemas.Enforcement(request, capabilities, profile.IsClaude);
         return (profile, capabilities, access, connection, request, enforcement, omitted);
@@ -121,7 +122,7 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         {
             JsonObject payload = GeminiRequest.Build(built.Connection, built.Request, built.Enforcement,
                 output => ProjectToolOutput(built.Connection, request.ModelId, output),
-                GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), built.Capabilities.SupportsReasoningText);
+                GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), (built.Capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
             payload.Remove("toolConfig");
             using var message = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = RequestJson.Content(payload) };
             built.Access.Authorize(message);
@@ -148,10 +149,11 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
             ? new VertexClaudeProtocol(Http, access).StreamAsync(connection, request, cancellationToken)
             : GeminiStream.ReadAsync(Http, GeminiMessage(connection, request,
                 GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
-                    GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), capabilities.SupportsReasoningText,
-                    streamArguments: capabilities.SupportsStreaming),
-                access, capabilities.SupportsStreaming), GeminiRoute, connection, request, enforcement,
-                capabilities.SupportsStreaming, capabilities.SupportsUsageDeltas, capabilities.SupportsReasoningText, cancellationToken);
+                    GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), (capabilities.SupportsReasoningText != InferenceSupport.Unsupported),
+                    streamArguments: (capabilities.SupportsStreaming != InferenceSupport.Unsupported)),
+                access, capabilities.SupportsStreaming != InferenceSupport.Unsupported), GeminiRoute, connection, request, enforcement,
+                capabilities.SupportsStreaming != InferenceSupport.Unsupported, capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported,
+                capabilities.SupportsReasoningText != InferenceSupport.Unsupported, cancellationToken);
         await using IAsyncEnumerator<LlmStreamEvent> iterator = source.GetAsyncEnumerator(cancellationToken);
         while (true)
         {
@@ -291,7 +293,7 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         { throw new ArgumentException("The output limit or temperature exceeds the selected model's range."); }
         if (request.Tools.Any(tool => tool is LlmToolDefinition { Strict: true }) && capabilities.Tools.StrictInputSchema == LlmStrictInputSchemaSupport.Unsupported)
         { throw new NotSupportedException("This model does not offer strict tool-schema enforcement. Ordinary non-strict tools are supported."); }
-        if (request.AllowParallelToolCalls is not null && !capabilities.Tools.SupportsParallelCallControl)
+        if (request.AllowParallelToolCalls is not null && (capabilities.Tools.SupportsParallelCallControl == InferenceSupport.Unsupported))
         { throw new NotSupportedException("This route cannot enforce parallel tool-call control."); }
         foreach (LlmAttachment attachment in request.Messages.SelectMany(message => message.Attachments)
             .Where(attachment => attachment is not LlmResourceAttachment).Select(LlmAttachments.RequireBinary))

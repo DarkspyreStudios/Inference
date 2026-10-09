@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -22,7 +23,7 @@ public sealed class ContentFilteredStructuredOutputTests
             Transport = LlmTransport.OpenAiCompatibleChat,
             Endpoint = "https://compatible.example.test/v1",
             Credential = new LlmCredential { ApiKey = "test-key" }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = streaming, SupportsJsonSchema = true }
+            CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported), SupportsJsonSchema = InferenceSupport.Supported }
         };
         var request = new LlmChatRequest
         {

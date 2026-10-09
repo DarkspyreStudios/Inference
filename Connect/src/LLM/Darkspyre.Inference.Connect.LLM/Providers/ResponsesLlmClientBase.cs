@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Text;
@@ -21,7 +22,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         var enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
         // Selected caller-owned content is unknown to local accounting. Accounting never reads or uploads it.
         if (request.Resources is not null) return null;
-        JsonObject payload = BuildPayload(connection, request, enforcement, capabilities.SupportsStreaming);
+        JsonObject payload = BuildPayload(connection, request, enforcement, (capabilities.SupportsStreaming != InferenceSupport.Unsupported));
         RequestJson.ApplyProviderOptions(payload, connection, request);
 
         // The provider's own count covers the history up to the last response that reported one, including
@@ -75,7 +76,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 output => ProjectToolOutput(connection, request.ModelId, output), reported + 1).Count
             : ((JsonArray)BuildPayload(connection,
                 request with { Messages = [.. request.Messages.Take(reported + 1)] }, enforcement,
-                capabilities.SupportsStreaming)["input"]!).Count;
+                (capabilities.SupportsStreaming != InferenceSupport.Unsupported))["input"]!).Count;
         var tail = new JsonArray([.. full.Skip(prefixItems).Select(item => item?.DeepClone())]);
         LlmContinuationState state = request.Messages[reported].ContinuationState!;
         return new ContextEstimate(state.InputTokens!.Value + state.OutputTokens!.Value
@@ -120,7 +121,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             request = request with { StructuredOutput = null, AllowParallelToolCalls = true };
         }
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
-        if (compaction && !capabilities.SupportsStreaming) throw new NotSupportedException("Codex compaction requires streaming support.");
+        if (compaction && (capabilities.SupportsStreaming == InferenceSupport.Unsupported)) throw new NotSupportedException("Codex compaction requires streaming support.");
         ValidateRequest(connection, request, capabilities);
         ValidateModelSampling(connection, request);
         LlmStructuredOutputEnforcement? enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
@@ -154,7 +155,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                     Fence();
                     request = resources.Request;
                 }
-                JsonObject payload = BuildPayload(connection, request, enforcement, capabilities.SupportsStreaming, resources);
+                JsonObject payload = BuildPayload(connection, request, enforcement, (capabilities.SupportsStreaming != InferenceSupport.Unsupported), resources);
                 RequestJson.ApplyProviderOptions(payload, connection, request);
                 if (Transport == LlmTransport.XaiResponses)
                     hostedPreparation = await XaiHostedToolPreparation.PrepareAsync(payload, request,
@@ -248,7 +249,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 else
                     await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, credential, "OpenAI Responses request",
                         secrets, cancellationToken).ConfigureAwait(false);
-                if (capabilities.SupportsStreaming)
+                if ((capabilities.SupportsStreaming != InferenceSupport.Unsupported))
                     stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken).ConfigureAwait(false);
                 body = ReadResponseBodyAsync(connection, request, response, stream, capabilities, enforcement, credential, consumption, compaction, preparation, secrets, cancellationToken)
                     .GetAsyncEnumerator(cancellationToken);
@@ -314,11 +315,11 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         LlmCredential? credential, SdkHttpConsumption.Operation consumption, bool compaction,
         XaiHostedToolPreparation? preparation, IReadOnlyList<string> secrets, [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        if (!capabilities.SupportsStreaming)
+        if ((capabilities.SupportsStreaming == InferenceSupport.Unsupported))
         {
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             foreach (LlmStreamEvent completeEvent in await ReadCompleteResponseAsync(
-                         body, response, request, enforcement, credential, connection, capabilities.SupportsReasoningText,
+                         body, response, request, enforcement, credential, connection, (capabilities.SupportsReasoningText != InferenceSupport.Unsupported),
                          preparation, secrets, cancellationToken).ConfigureAwait(false))
             {
                 yield return consumption.Publish<LlmStreamEvent>(completeEvent);
@@ -394,7 +395,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 
                     case "response.reasoning_summary_text.delta":
                     case "response.reasoning_text.delta":
-                        if (capabilities.SupportsReasoningText && LlmJson.GetString(root, "delta") is { Length: > 0 } reasoning)
+                        if ((capabilities.SupportsReasoningText != InferenceSupport.Unsupported) && LlmJson.GetString(root, "delta") is { Length: > 0 } reasoning)
                         {
                             yield return consumption.Publish<LlmStreamEvent>(new LlmReasoningDeltaEvent(reasoning,
                                 type == "response.reasoning_summary_text.delta"));
@@ -676,7 +677,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         {
             payload["reasoning"] = new JsonObject { ["effort"] = LlmReasoningEffort.OpenAiWord(level) };
         }
-        if (GetCapabilities(connection, request.ModelId).SupportsReasoningText
+        if ((GetCapabilities(connection, request.ModelId).SupportsReasoningText != InferenceSupport.Unsupported)
             && request.ReasoningLevel != LlmReasoningLevel.None
             && (request.ReasoningLevel is not null || ReasonsByDefault(connection, request.ModelId)))
         {
@@ -712,7 +713,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             payload["prompt_cache_key"] = request.ConversationKey;
         }
         if (Transport == LlmTransport.OpenAiResponses && request.PromptCache is { } hint
-            && OpenAiModelProfiles.Get(request.ModelId).SupportsPromptCacheOptions)
+            && (OpenAiModelProfiles.Get(request.ModelId).SupportsPromptCacheOptions != InferenceSupport.Unsupported))
         {
             PromptCaching.RejectRawOption(connection, request, "prompt_cache_options");
             if (hint.Retention == LlmPromptCacheRetention.Extended)

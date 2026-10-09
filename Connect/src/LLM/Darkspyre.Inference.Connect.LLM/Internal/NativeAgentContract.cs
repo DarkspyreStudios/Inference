@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 
@@ -17,10 +18,10 @@ internal static class NativeAgentContract
     {
         ContextOwnership = LlmAgentOwnership.Provider,
         ContextImport = LlmAgentContextImport.OpeningContext,
-        SupportsNativeResume = true,
+        SupportsNativeResume = InferenceSupport.Supported,
         NativeFork = LlmAgentNativeFork.CurrentPosition,
         CompactionOwnership = LlmAgentOwnership.Provider,
-        SupportsInterrupt = true,
+        SupportsInterrupt = InferenceSupport.Supported,
         ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed,
         RichContentSupported = RichContentRoutes.ClaudeMcp,
         SupportedRuntimePolicies = HostControlled,
@@ -31,7 +32,7 @@ internal static class NativeAgentContract
     {
         ContextOwnership = LlmAgentOwnership.Provider,
         ContextImport = LlmAgentContextImport.OpeningContext,
-        SupportsNativeResume = true,
+        SupportsNativeResume = InferenceSupport.Supported,
         CompactionOwnership = LlmAgentOwnership.Provider,
         ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed,
         RichContentSupported = RichContentRoutes.AgentCore,
@@ -43,7 +44,7 @@ internal static class NativeAgentContract
     public static LlmAgentCapabilities Antigravity { get; } = new()
     {
         ContextOwnership = LlmAgentOwnership.Provider,
-        SupportsNativeResume = true,
+        SupportsNativeResume = InferenceSupport.Supported,
         CompactionOwnership = LlmAgentOwnership.Provider,
         ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Provider,
         RichContentSupported = RichContentRoutes.TextOnly,
@@ -128,8 +129,8 @@ internal static class NativeAgentContract
         ProviderControlPolicy.Validate(connection, new() { ModelId = modelId ?? string.Empty });
         var implemented = new LlmProviderCapabilities
         {
-            SupportsAgentSessions = true,
-            SupportsAgentToolUse = supportsAgentToolUse,
+            SupportsAgentSessions = InferenceSupport.Supported,
+            SupportsAgentToolUse = (supportsAgentToolUse ? InferenceSupport.Supported : InferenceSupport.Unsupported),
             Agent = agent
         };
         var effective = implemented.Apply(connection.CapabilityOverrides);
@@ -137,7 +138,7 @@ internal static class NativeAgentContract
         {
             effective = effective.Apply(modelOverrides);
         }
-        if (!effective.SupportsAgentSessions || (!effective.SupportsAgentToolUse
+        if ((effective.SupportsAgentSessions == InferenceSupport.Unsupported) || ((effective.SupportsAgentToolUse == InferenceSupport.Unsupported)
             && (tools.Count > 0 || toolHandler is not null)))
         {
             throw new NotSupportedException("The connection/model configuration disables the requested agent operation.");

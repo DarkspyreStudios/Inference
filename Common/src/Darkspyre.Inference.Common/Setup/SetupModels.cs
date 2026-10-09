@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 namespace Darkspyre.Inference.Common.Setup;
 
 public sealed record InferenceSetupDefinition(
@@ -5,8 +6,8 @@ public sealed record InferenceSetupDefinition(
     string Description,
     int DisplayOrder = 0,
     bool IsGuidedSetupOption = true,
-    bool SupportsCreate = true,
-    bool SupportsEdit = true)
+    InferenceSupport SupportsCreate = InferenceSupport.Supported,
+    InferenceSupport SupportsEdit = InferenceSupport.Supported)
 {
     public IReadOnlyList<string> Prerequisites { get; init; } = [];
 }

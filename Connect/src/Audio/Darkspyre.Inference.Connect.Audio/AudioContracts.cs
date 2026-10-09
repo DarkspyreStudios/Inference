@@ -36,7 +36,7 @@ public sealed record AudioGenerationRequest
 public sealed record AudioGenerationCapabilities(
     TimeSpan MinimumDuration, TimeSpan MaximumDuration,
     int MinimumSteps, int MaximumSteps, double MinimumGuidanceScale, double MaximumGuidanceScale,
-    bool SupportsSeed, bool SupportsCachePreference, bool SupportsModelListing, bool SupportsHealthCheck,
+    InferenceSupport SupportsSeed, InferenceSupport SupportsCachePreference, InferenceSupport SupportsModelListing, InferenceSupport SupportsHealthCheck,
     IReadOnlyList<string> ContentTypes);
 
 /// <summary>Audio plus provenance. MeasuredDuration is null when not measured; it is never the requested duration.</summary>

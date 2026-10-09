@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -59,10 +60,10 @@ internal sealed class ManagedXaiAgentClient(XaiResponsesLlmClient client, LlmPro
                     ManagedAgentContext.ValidateRuntimeResources(context);
             }
             LlmProviderCapabilities capabilities = client.GetCapabilities(selected, options.ModelId);
-            if (!capabilities.SupportsAgentSessions || (options.Tools.Count > 0 && !capabilities.SupportsAgentToolUse))
+            if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported) || (options.Tools.Count > 0 && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported)))
                 throw new NotSupportedException("The selected model/connection disables the requested agent operation.");
             HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities.HostedTools);
-            ClientTools.ValidateManagedOpening(options, capabilities, supportsResources: capabilities.SupportsPromptDocuments);
+            ClientTools.ValidateManagedOpening(options, capabilities, supportsResources: (capabilities.SupportsPromptDocuments != InferenceSupport.Unsupported));
             AgentResourceOptions.Validate(capabilities.Agent, allowRuntimeBackgroundWork: false, options.ResourceOutputRetentionBytes);
             ManagedAgentPolicy.Validate(options.ExecutionOptions ?? new(), XaiCatalog.FindModel(selected.Catalog, options.ModelId));
             client.PreflightManagedOpeningRequest(selected, openingRequest);

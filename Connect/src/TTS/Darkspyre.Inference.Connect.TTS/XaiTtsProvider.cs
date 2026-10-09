@@ -78,19 +78,19 @@ public sealed class XaiTtsProvider : ITtsProvider
         public Task<TtsCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
         {
             using var lease = _lifetime.Enter(cancellationToken);
-            return Task.FromResult(new TtsCapabilities(_binding!.HasCatalogService, true, Enum.GetValues<TtsAudioFormat>())
+            return Task.FromResult(new TtsCapabilities((_binding!.HasCatalogService ? InferenceSupport.Supported : InferenceSupport.Unsupported),InferenceSupport.Supported,Enum.GetValues<TtsAudioFormat>())
             {
-                SupportsLanguage = true,
-                SupportsSampleRate = true,
-                SupportsBitRate = true,
-                SupportsTimestamps = true,
-                SupportsStreaming = true,
-                SupportsRepeatedUtterances = true,
-                SupportsReplacementUpdates = true,
-                SupportsUtteranceClearing = true,
-                SupportsTextNormalization = true,
-                SupportsTextReplacement = true,
-                SupportsOptimizeStreamingLatency = true,
+                SupportsLanguage = InferenceSupport.Supported,
+                SupportsSampleRate = InferenceSupport.Supported,
+                SupportsBitRate = InferenceSupport.Supported,
+                SupportsTimestamps = InferenceSupport.Supported,
+                SupportsStreaming = InferenceSupport.Supported,
+                SupportsRepeatedUtterances = InferenceSupport.Supported,
+                SupportsReplacementUpdates = InferenceSupport.Supported,
+                SupportsUtteranceClearing = InferenceSupport.Supported,
+                SupportsTextNormalization = InferenceSupport.Supported,
+                SupportsTextReplacement = InferenceSupport.Supported,
+                SupportsOptimizeStreamingLatency = InferenceSupport.Supported,
                 SampleRates = XaiTtsProtocol.Rates,
                 BitRates = XaiTtsProtocol.BitRates
             });

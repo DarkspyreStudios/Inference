@@ -114,7 +114,7 @@ public sealed class XaiSttSessionTests
         Assert.NotNull(sentUri);
         Assert.Equal("/v1/stt", sentUri.AbsolutePath);
         Assert.Equal(query, sentUri.Query);
-        Assert.True((await client.GetCapabilitiesAsync()).Streaming.SupportsTextNormalization);
+        Assert.Equal(InferenceSupport.Supported, (await client.GetCapabilitiesAsync()).Streaming.SupportsTextNormalization);
     }
 
     [Fact]

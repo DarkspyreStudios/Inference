@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -152,8 +153,8 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
                 : [new LlmAgentTextContent(opening.Text), .. request.Input]);
             string modelId = request.ModelId ?? _initialModelId;
             LlmProviderCapabilities capabilities = BedrockAgentCoreLlmClient.ResolveCapabilities(_connection, modelId);
-            bool reasoningText = capabilities.SupportsReasoningText;
-            var usage = new BedrockHarnessUsage(capabilities.SupportsUsageDeltas);
+            bool reasoningText = (capabilities.SupportsReasoningText != InferenceSupport.Unsupported);
+            var usage = new BedrockHarnessUsage((capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported));
 
             for (int round = 0; round < MaximumInlineToolRounds; round++)
             {

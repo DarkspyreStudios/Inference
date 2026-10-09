@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 using Json.Schema;
@@ -21,13 +22,13 @@ internal static class StructuredOutput
         LlmStructuredOutputRequest request,
         LlmProviderCapabilities capabilities)
     {
-        if (capabilities.SupportsJsonSchema)
+        if ((capabilities.SupportsJsonSchema != InferenceSupport.Unsupported))
         {
             return LlmStructuredOutputEnforcement.ProviderJsonSchema;
         }
 
         if (request.Fallback >= LlmStructuredOutputFallback.JsonObject
-            && capabilities.SupportsJsonObject)
+            && (capabilities.SupportsJsonObject != InferenceSupport.Unsupported))
         {
             return LlmStructuredOutputEnforcement.ProviderJsonObject;
         }

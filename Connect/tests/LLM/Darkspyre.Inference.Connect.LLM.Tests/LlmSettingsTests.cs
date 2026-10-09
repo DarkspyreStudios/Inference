@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Runtime.CompilerServices;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Setup;
@@ -9,6 +10,25 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class LlmSettingsTests
 {
+    [Fact]
+    public async Task SupportOverrideChoicesKeepUnknownSeparateFromInheritance()
+    {
+        using var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiCompatible)]);
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiCompatibleChat,
+            new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
+        using (manager)
+        {
+            var page = await manager.QueryChoicesAsync(settings, "json-schema", new());
+            Assert.Equal(["default", "unknown", "enabled", "disabled"], page.Choices.Select(item => item.Value));
+            var field = Assert.IsType<SetupChoiceField>(Fields(settings).Single(item => item.Description.Id == "json-schema"));
+            Assert.Equal(SetupEditState.Applied, field.SetValue("unknown").State);
+            Assert.Equal(InferenceSupport.Unknown, settings.CurrentConnection().CapabilityOverrides!.SupportsJsonSchema);
+            field = Assert.IsType<SetupChoiceField>(Fields(settings).Single(item => item.Description.Id == "json-schema"));
+            Assert.Equal(SetupEditState.Applied, field.SetValue("default").State);
+            Assert.Null(settings.CurrentConnection().CapabilityOverrides?.SupportsJsonSchema);
+        }
+    }
+
     [Fact]
     public async Task GrokSettingsReopenKeepsSavedRoutingAndSignInWithoutClaimingFreshAuthentication()
     {
@@ -214,7 +234,7 @@ public sealed class LlmSettingsTests
         public int Calls { get; private set; }
         public LlmTransport Transport => definition.Transport;
         public LlmProviderDefinition ProviderDefinition => definition;
-        public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => new() { SupportsModelListing = true };
+        public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => new() { SupportsModelListing = InferenceSupport.Supported };
         public Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
         { Calls++; return Task.FromResult<IReadOnlyList<LlmModel>>([new("model", "Model")]); }
         public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,

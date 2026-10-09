@@ -241,10 +241,10 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
     private static void ValidateCapabilities(ImageGenerationRequest request, InferenceMediaSource[] references, ImageCapabilities capabilities)
     {
         if (request.Count > capabilities.MaximumImageCount
-            || (!string.IsNullOrEmpty(request.NegativePrompt) && !capabilities.SupportsNegativePrompt)
-            || (request.Seed is not null && !capabilities.SupportsSeed)
-            || (request.Steps is not null && !capabilities.SupportsSteps)
-            || (request.GuidanceScale is not null && !capabilities.SupportsGuidanceScale)
+            || (!string.IsNullOrEmpty(request.NegativePrompt) && (capabilities.SupportsNegativePrompt == InferenceSupport.Unsupported))
+            || (request.Seed is not null && (capabilities.SupportsSeed == InferenceSupport.Unsupported))
+            || (request.Steps is not null && (capabilities.SupportsSteps == InferenceSupport.Unsupported))
+            || (request.GuidanceScale is not null && (capabilities.SupportsGuidanceScale == InferenceSupport.Unsupported))
             || (capabilities.MaximumReferences is { } maximum && references.Length > maximum)
             || references.Any(source => !capabilities.SupportedReferenceKinds.Contains(source switch
             {

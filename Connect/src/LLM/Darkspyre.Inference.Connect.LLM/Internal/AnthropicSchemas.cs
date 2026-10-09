@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Darkspyre.Inference.Common.LLM;
@@ -25,9 +26,9 @@ internal static class AnthropicSchemas
         if (request.StructuredOutput is not { } output) return null;
         return StructuredOutput.ResolveEnforcement(output, capabilities with
         {
-            SupportsJsonSchema = capabilities.SupportsJsonSchema && Analyze(output.Schema, out SchemaCost cost)
-                && tools.Add(cost).Fits,
-            SupportsJsonObject = false
+            SupportsJsonSchema = ((capabilities.SupportsJsonSchema != InferenceSupport.Unsupported) && Analyze(output.Schema, out SchemaCost cost)
+                && tools.Add(cost).Fits ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsJsonObject = InferenceSupport.Unsupported
         });
     }
 

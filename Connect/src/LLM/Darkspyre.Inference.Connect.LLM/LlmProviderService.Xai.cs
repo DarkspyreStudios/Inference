@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 

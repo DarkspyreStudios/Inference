@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Collections.ObjectModel;
 using System.Text.Json;
@@ -9,8 +10,8 @@ internal static class ClientTools
 {
     internal static LlmAgentCapabilities ManagedCapabilities(LlmProviderCapabilities capabilities) => capabilities.Agent with
     {
-        SupportsShellTools = capabilities.SupportsShellTools && capabilities.Agent.SupportsShellTools,
-        SupportedCallerServices = capabilities.SupportsShellTools && capabilities.Agent.SupportsShellTools
+        SupportsShellTools = LlmProviderCapabilities.Intersect(capabilities.SupportsShellTools, capabilities.Agent.SupportsShellTools),
+        SupportedCallerServices = (capabilities.SupportsShellTools != InferenceSupport.Unsupported) && (capabilities.Agent.SupportsShellTools != InferenceSupport.Unsupported)
             ? new[] { LlmAgentCallerServiceKind.ShellExecution }.ToFrozenSet()
             : FrozenSet<LlmAgentCallerServiceKind>.Empty
     };
@@ -34,7 +35,7 @@ internal static class ClientTools
         ValidateCallerServices(options.CallerServices, managed, supportsResources);
         if (options.Tools.Any(tool => tool is LlmAgentShellTool))
         {
-            if (!managed.SupportsShellTools)
+            if ((managed.SupportsShellTools == InferenceSupport.Unsupported))
                 throw new NotSupportedException("This route does not implement shell tools.");
             if (options.CallerServices?.ShellExecutor is null)
                 throw new ArgumentException("Managed shell tools require a borrowed caller shell executor.");

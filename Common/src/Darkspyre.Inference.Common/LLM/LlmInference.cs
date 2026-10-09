@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -38,64 +39,65 @@ public sealed record LlmCapabilities
     /// True when <see cref="ILlmInference.StreamAsync"/> delivers events while the model generates. False when the
     /// events arrive together after generation ends.
     /// </summary>
-    public bool SupportsStreaming { get; init; }
+    public InferenceSupport SupportsStreaming { get; init; }
 
     /// <summary>A streamed response can report final token usage. Independent of running usage observations.</summary>
-    public bool SupportsStreamingUsage { get; init; }
+    public InferenceSupport SupportsStreamingUsage { get; init; }
 
     /// <summary>A streamed response can report cumulative usage before completion.</summary>
-    public bool SupportsUsageDeltas { get; init; }
+    public InferenceSupport SupportsUsageDeltas { get; init; }
 
     /// <summary>Public reasoning text can arrive separately from the answer. Independent of reasoning-level control.</summary>
-    public bool SupportsReasoningText { get; init; }
+    public InferenceSupport SupportsReasoningText { get; init; }
 
-    public bool SupportsModelListing { get; init; }
+    public InferenceSupport SupportsModelListing { get; init; }
 
-    public bool SupportsJsonSchema { get; init; }
+    public InferenceSupport SupportsJsonSchema { get; init; }
 
-    public bool SupportsJsonObject { get; init; }
+    public InferenceSupport SupportsJsonObject { get; init; }
 
     public LlmPromptCacheCapabilities PromptCache { get; init; } = new();
 
     /// <summary>The selected route implements explicit native cache selection.</summary>
-    public bool SupportsExplicitCache { get; init; }
+    public InferenceSupport SupportsExplicitCache { get; init; }
 
     /// <summary>The reasoning levels the model accepts. Empty when the model accepts no reasoning control.</summary>
     public IReadOnlySet<LlmReasoningLevel> ReasoningLevels { get; init; } = FrozenSet<LlmReasoningLevel>.Empty;
 
     /// <summary>True when the model accepts a reasoning level above <see cref="LlmReasoningLevel.None"/>.</summary>
-    public bool SupportsReasoning => ReasoningLevels.Any(static level => level > LlmReasoningLevel.None);
+    public InferenceSupport SupportsReasoning => ReasoningLevels.Count == 0 ? InferenceSupport.Unknown
+        : ReasoningLevels.Any(static level => level > LlmReasoningLevel.None) ? InferenceSupport.Supported : InferenceSupport.Unsupported;
 
-    public bool SupportsTemperature { get; init; }
+    public InferenceSupport SupportsTemperature { get; init; }
 
-    public bool SupportsTopP { get; init; }
+    public InferenceSupport SupportsTopP { get; init; }
 
-    public bool SupportsTopK { get; init; }
+    public InferenceSupport SupportsTopK { get; init; }
 
-    public bool SupportsSeed { get; init; }
+    public InferenceSupport SupportsSeed { get; init; }
 
-    public bool SupportsPresencePenalty { get; init; }
+    public InferenceSupport SupportsPresencePenalty { get; init; }
 
-    public bool SupportsFrequencyPenalty { get; init; }
+    public InferenceSupport SupportsFrequencyPenalty { get; init; }
 
     /// <summary>Zero disables string stops; int.MaxValue means no adapter-imposed limit.</summary>
     public int MaxStopSequences { get; init; }
 
-    public bool SupportsToolUse { get; init; }
+    public InferenceSupport SupportsToolUse { get; init; }
 
     /// <summary>The route implements shell definitions, calls and typed results.</summary>
-    public bool SupportsShellTools { get; init; }
+    public InferenceSupport SupportsShellTools { get; init; }
 
     public LlmToolCapabilities Tools { get; init; } = new();
 
     public IReadOnlySet<LlmHostedToolKind> HostedTools { get; init => field = value.ToFrozenSet(); } = FrozenSet<LlmHostedToolKind>.Empty;
 
-    public bool SupportsPromptImages { get; init; }
+    public InferenceSupport SupportsPromptImages { get; init; }
 
-    public bool SupportsPromptDocuments { get; init; }
+    public InferenceSupport SupportsPromptDocuments { get; init; }
 
     /// <summary>The selected route accepts provider-native file references.</summary>
-    public bool SupportsFileReferences { get; init; }
+    public InferenceSupport SupportsFileReferences { get; init; }
 }
 
 public sealed record LlmModelInfo(

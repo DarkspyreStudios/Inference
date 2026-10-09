@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
@@ -45,7 +46,7 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
         LlmConnection frozen = catalogClient is null ? snapshot : CatalogConnectionData.FreezeXai(snapshot);
         CatalogConnectionData.Evidence? evidence = catalogClient is null ? null : new(frozen);
         bool listingDisabled = catalogClient is not null && family == ModelCatalogFamily.Chat
-            && !client.GetCapabilities(frozen).SupportsModelListing;
+            && (client.GetCapabilities(frozen).SupportsModelListing == InferenceSupport.Unsupported);
         ThrowIfCanceled(admission.Token);
         Task<IReadOnlyList<LlmModel>> listing;
         lock (_gate)

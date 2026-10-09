@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
@@ -635,11 +636,11 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         connection = WithContextCache(EmbeddingRequestData.Snapshot(connection), client);
         if (client is GeminiApiLlmClient) GeminiApiLlmClient.ValidateCachedSuffix(request);
         if (request.ExplicitCache is not null)
-            ExplicitCaches.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
-        LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences,
+            ExplicitCaches.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache != InferenceSupport.Unsupported));
+        LlmAttachments.ValidateReferences(request, () => (client.GetCapabilities(connection, request.ModelId).SupportsFileReferences != InferenceSupport.Unsupported),
             client is ILlmResourcePreparationClient { CanPrepareResources: true });
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
-        ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);
+        ClientTools.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsShellTools != InferenceSupport.Unsupported));
         if (client is Providers.XaiResponsesLlmClient resourceDestination)
         {
             if (publishCompaction is not null)
@@ -692,7 +693,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         if (expectedScope is not null)
         {
             var capabilities = client.GetCapabilities(connection, request.ModelId);
-            if (!capabilities.SupportsAgentSessions || (request.Tools.Count > 0 && !capabilities.SupportsAgentToolUse))
+            if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported) || (request.Tools.Count > 0 && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported)))
             {
                 throw new LlmProviderException("The connection now disables the requested agent operation.", connection.Transport);
             }
@@ -823,10 +824,10 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         connection = WithContextCache(EmbeddingRequestData.Snapshot(connection), client);
         if (client is GeminiApiLlmClient) GeminiApiLlmClient.ValidateCachedSuffix(request);
         if (request.ExplicitCache is not null)
-            ExplicitCaches.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
-        LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
+            ExplicitCaches.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache != InferenceSupport.Unsupported));
+        LlmAttachments.ValidateReferences(request, () => (client.GetCapabilities(connection, request.ModelId).SupportsFileReferences != InferenceSupport.Unsupported));
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
-        ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);
+        ClientTools.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsShellTools != InferenceSupport.Unsupported));
         (connection, request) = await AdmitContextCacheAsync(connectionId, connection, client, request, cacheSequence, cancellationToken).ConfigureAwait(false);
         connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken);
         if (client is ILlmConnectionPreparation preparation)
@@ -871,10 +872,10 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         ValidateCacheEstimate(connectionId, connection, client, request, cacheSequence);
         // Measure what would be sent: the same projection as the request path.
         if (request.ExplicitCache is not null)
-            ExplicitCaches.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache);
-        LlmAttachments.ValidateReferences(request, () => client.GetCapabilities(connection, request.ModelId).SupportsFileReferences);
+            ExplicitCaches.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache != InferenceSupport.Unsupported));
+        LlmAttachments.ValidateReferences(request, () => (client.GetCapabilities(connection, request.ModelId).SupportsFileReferences != InferenceSupport.Unsupported));
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
-        ClientTools.Validate(request, client.GetCapabilities(connection, request.ModelId).SupportsShellTools);
+        ClientTools.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsShellTools != InferenceSupport.Unsupported));
         // Ambient-credential adapters cannot decide state binding without resolving identity.
         // Their nonmutating estimator reports unknown for opaque state instead of dropping it.
         if (client is not ILlmConnectionPreparation)
@@ -910,7 +911,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         }
         LlmModel? model = null;
         string? metadataDiagnostic = null;
-        if (capabilities.SupportsModelListing)
+        if ((capabilities.SupportsModelListing != InferenceSupport.Unsupported))
         {
             // A catalog-capability adapter already had its listing attached above; a failed one is not repeated.
             IReadOnlyList<LlmModel>? models = connection.Catalog;
@@ -1051,7 +1052,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         ILlmClient client = ClientFor(connection.Transport);
         LlmProviderCapabilities capabilities = client.GetCapabilities(connection);
         ThrowIfOperationCanceled(cancellationToken);
-        if (!capabilities.SupportsAccountUsage
+        if ((capabilities.SupportsAccountUsage == InferenceSupport.Unsupported)
             || !_accountUsageClients.TryGetValue(
                 connection.Transport,
                 out ILlmAccountUsageClient? usageClient))

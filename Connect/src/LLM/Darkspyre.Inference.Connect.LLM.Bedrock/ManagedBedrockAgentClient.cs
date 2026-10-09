@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock;
@@ -22,8 +23,8 @@ internal sealed class ManagedBedrockAgentClient(BedrockLlmClient client, LlmProv
         }
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities.HostedTools);
         ClientTools.ValidateManagedOpening(options, capabilities,
-            supportsResources: client.CanPrepareResources && capabilities.SupportsPromptDocuments);
-        if (!capabilities.SupportsAgentSessions || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && !capabilities.SupportsAgentToolUse))
+            supportsResources: client.CanPrepareResources && (capabilities.SupportsPromptDocuments != InferenceSupport.Unsupported));
+        if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported) || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported)))
         {
             throw new NotSupportedException("The selected model/connection disables the requested agent operation.");
         }

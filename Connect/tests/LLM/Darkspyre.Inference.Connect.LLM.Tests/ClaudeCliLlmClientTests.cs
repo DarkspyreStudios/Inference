@@ -123,7 +123,7 @@ public sealed class ClaudeCliLlmClientTests
         LlmConnection connection = CliConnection() with
         {
             Credential = new LlmCredential { OAuth = new() { AccessToken = "catalog-secret" } }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = streaming }
+            CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) }
         };
 
         LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => ReadAllAsync(
@@ -160,7 +160,7 @@ public sealed class ClaudeCliLlmClientTests
         var runner = new RecordingRunner(new(0, output, string.Empty));
         using var http = new HttpClient(new UnexpectedHttpHandler());
         var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
-        LlmConnection connection = CliConnection() with { CapabilityOverrides = new() { SupportsStreaming = streaming } };
+        LlmConnection connection = CliConnection() with { CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) } };
         var request = new LlmChatRequest
         {
             ModelId = "claude-test",
@@ -317,7 +317,7 @@ public sealed class ClaudeCliLlmClientTests
         using var http = new HttpClient(new UnexpectedHttpHandler());
         var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
         LlmConnection connection = CliConnection() with
-        { CapabilityOverrides = restricted ? new() { SupportsToolResultImages = false, SupportsToolResultDocuments = false } : null };
+        { CapabilityOverrides = restricted ? new() { SupportsToolResultImages = InferenceSupport.Unsupported, SupportsToolResultDocuments = InferenceSupport.Unsupported } : null };
         byte[] image = [0xff, 0xd8, 0xff];
         byte[] pdf = "%PDF-1.7\nactual tool content"u8.ToArray();
         var output = new LlmToolOutput
@@ -349,7 +349,7 @@ public sealed class ClaudeCliLlmClientTests
             Assert.Equal(pdf, Convert.FromBase64String(content[2].GetProperty("source").GetProperty("data").GetString()!));
             Assert.Equal("tool.pdf", content[2].GetProperty("title").GetString());
         }
-        Assert.False(client.GetCapabilities(connection, request.ModelId).RichContentSupported.PreservesOrder);
+        Assert.Equal(InferenceSupport.Unsupported, client.GetCapabilities(connection, request.ModelId).RichContentSupported.PreservesOrder);
     }
 
     private static LlmChatMessage[] ToolHistory() =>

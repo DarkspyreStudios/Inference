@@ -73,24 +73,24 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         return new LlmCapabilities
         {
             OutputLimitEnforcement = LlmOutputLimitEnforcement.EngineEnforced,
-            SupportsStreaming = true,
-            SupportsModelListing = true,
-            SupportsJsonSchema = true,
-            SupportsJsonObject = true,
+            SupportsStreaming = InferenceSupport.Supported,
+            SupportsModelListing = InferenceSupport.Supported,
+            SupportsJsonSchema = InferenceSupport.Supported,
+            SupportsJsonObject = InferenceSupport.Supported,
             ReasoningLevels = ReasoningLevels,
-            SupportsReasoningText = true,
-            SupportsStreamingUsage = true,
-            SupportsTemperature = true,
-            SupportsTopP = true,
-            SupportsTopK = true,
-            SupportsSeed = true,
-            SupportsPresencePenalty = true,
-            SupportsFrequencyPenalty = true,
+            SupportsReasoningText = InferenceSupport.Supported,
+            SupportsStreamingUsage = InferenceSupport.Supported,
+            SupportsTemperature = InferenceSupport.Supported,
+            SupportsTopP = InferenceSupport.Supported,
+            SupportsTopK = InferenceSupport.Supported,
+            SupportsSeed = InferenceSupport.Supported,
+            SupportsPresencePenalty = InferenceSupport.Supported,
+            SupportsFrequencyPenalty = InferenceSupport.Supported,
             MaxStopSequences = 16,
-            SupportsToolUse = true,
-            Tools = new() { SupportsParallelCalls = true, StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported },
-            SupportsPromptImages = false,
-            SupportsPromptDocuments = false
+            SupportsToolUse = InferenceSupport.Supported,
+            Tools = new() { SupportsParallelCalls = InferenceSupport.Supported, StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported },
+            SupportsPromptImages = InferenceSupport.Unsupported,
+            SupportsPromptDocuments = InferenceSupport.Unsupported
         };
     }
 

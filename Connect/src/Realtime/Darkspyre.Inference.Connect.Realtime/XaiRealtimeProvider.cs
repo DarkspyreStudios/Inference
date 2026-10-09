@@ -38,14 +38,14 @@ public sealed class XaiRealtimeProvider(HttpClient httpClient) : IRealtimeProvid
             SupportedHostedToolKinds = XaiRealtimeProtocol.HostedKinds.ToHashSet(),
             InputSampleRates = XaiRealtimeProtocol.Rates,
             OutputSampleRates = XaiRealtimeProtocol.Rates,
-            SupportsManualTurns = true,
-            SupportsServerVad = true,
-            SupportsClientTools = true,
-            SupportsStructuredToolOutput = true,
-            SupportsResumption = true,
-            SupportsBinaryTransport = true,
-            SupportsPronunciationReplacement = true,
-            SupportsForcedMessages = true
+            SupportsManualTurns = InferenceSupport.Supported,
+            SupportsServerVad = InferenceSupport.Supported,
+            SupportsClientTools = InferenceSupport.Supported,
+            SupportsStructuredToolOutput = InferenceSupport.Supported,
+            SupportsResumption = InferenceSupport.Supported,
+            SupportsBinaryTransport = InferenceSupport.Supported,
+            SupportsPronunciationReplacement = InferenceSupport.Supported,
+            SupportsForcedMessages = InferenceSupport.Supported
         });
     }
     public async Task<IRealtimeVoiceSession> OpenSessionAsync(RealtimeConnection connection, RealtimeSessionConfig config,

@@ -93,8 +93,7 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
         public Task<TtsCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
         {
             using var lease = _lifetime.Enter(cancellationToken);
-            return Task.FromResult(new TtsCapabilities(true, _connection!.PocketTts.Protocol == PocketTtsProtocol.BridgeJson,
-                Array.AsReadOnly(new[] { TtsAudioFormat.Wav })));
+            return Task.FromResult(new TtsCapabilities(InferenceSupport.Supported,(_connection!.PocketTts.Protocol == PocketTtsProtocol.BridgeJson ? InferenceSupport.Supported : InferenceSupport.Unsupported),                Array.AsReadOnly(new[] { TtsAudioFormat.Wav })));
         }
 
         public async Task<IReadOnlyList<TtsVoice>> ListVoicesAsync(CancellationToken cancellationToken = default)

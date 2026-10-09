@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Globalization;
 using System.Diagnostics.CodeAnalysis;
@@ -47,29 +48,29 @@ internal sealed class BedrockLlmClient(
     private static readonly LlmProviderCapabilities Defaults = new()
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.ProviderEnforced,
-        SupportsStreaming = true,
-        SupportsReasoningText = true,
+        SupportsStreaming = InferenceSupport.Supported,
+        SupportsReasoningText = InferenceSupport.Supported,
         // ConverseStream reports usage in its final metadata event.
-        SupportsStreamingUsage = true,
-        SupportsModelListing = true,
-        SupportsJsonSchema = false,
-        SupportsJsonObject = false,
-        SupportsTemperature = true,
-        SupportsTopP = true,
+        SupportsStreamingUsage = InferenceSupport.Supported,
+        SupportsModelListing = InferenceSupport.Supported,
+        SupportsJsonSchema = InferenceSupport.Unsupported,
+        SupportsJsonObject = InferenceSupport.Unsupported,
+        SupportsTemperature = InferenceSupport.Supported,
+        SupportsTopP = InferenceSupport.Supported,
         MaxStopSequences = 2500,
-        SupportsToolUse = true,
+        SupportsToolUse = InferenceSupport.Supported,
         Tools = new()
         {
             ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
-            SupportsParallelCalls = true,
-            SupportsArgumentStreaming = true
+            SupportsParallelCalls = InferenceSupport.Supported,
+            SupportsArgumentStreaming = InferenceSupport.Supported
         },
-        SupportsPromptImages = true,
-        SupportsPromptDocuments = true,
+        SupportsPromptImages = InferenceSupport.Supported,
+        SupportsPromptDocuments = InferenceSupport.Supported,
         RichContentSupported = RichContentRoutes.BedrockConverse,
-        SupportsAgentSessions = true,
-        SupportsAgentToolUse = true,
-        SupportsAgentTurnInstructions = true,
+        SupportsAgentSessions = InferenceSupport.Supported,
+        SupportsAgentToolUse = InferenceSupport.Supported,
+        SupportsAgentTurnInstructions = InferenceSupport.Supported,
         // The managed engine runs Converse turns; tool output travels the Converse route.
         Agent = ManagedAgentPolicy.Capabilities with { RichContentSupported = RichContentRoutes.BedrockConverse }
     };
@@ -97,52 +98,52 @@ internal sealed class BedrockLlmClient(
             Defaults with
             {
                 ReasoningLevels = offered,
-                SupportsToolUse = nativeTools,
-                SupportsAgentToolUse = nativeTools,
+                SupportsToolUse = (nativeTools ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+                SupportsAgentToolUse = (nativeTools ? InferenceSupport.Supported : InferenceSupport.Unsupported),
                 Tools = !nativeTools ? new() { StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported }
                     : indiaHaiku || novaWithoutStructuredOutput ? Defaults.Tools with
                     { StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported } : Defaults.Tools,
-                SupportsJsonSchema = !indiaHaiku && baseModelId is "openai.gpt-oss-20b-1:0" or "openai.gpt-oss-120b-1:0"
+                SupportsJsonSchema = (!indiaHaiku && baseModelId is "openai.gpt-oss-20b-1:0" or "openai.gpt-oss-120b-1:0"
                     or "anthropic.claude-sonnet-4-6" or "anthropic.claude-opus-4-6-v1"
                     or "anthropic.claude-sonnet-4-5-20250929-v1:0"
                     or "anthropic.claude-haiku-4-5-20251001-v1:0"
-                    or "anthropic.claude-opus-4-5-20251101-v1:0",
-                SupportsPromptImages = richContent.Images == LlmRichContentCarriage.Native,
-                SupportsPromptDocuments = richContent.PdfDocuments == LlmRichContentCarriage.Native,
+                    or "anthropic.claude-opus-4-5-20251101-v1:0" ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+                SupportsPromptImages = (richContent.Images == LlmRichContentCarriage.Native ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+                SupportsPromptDocuments = (richContent.PdfDocuments == LlmRichContentCarriage.Native ? InferenceSupport.Supported : InferenceSupport.Unsupported),
                 RichContentSupported = richContent,
                 Agent = Defaults.Agent with { RichContentSupported = richContent },
                 PromptCache = BedrockPromptCache.Capabilities(modelId ?? string.Empty),
-                SupportsTemperature = claudeSampling,
-                SupportsTopP = claudeSampling,
-                SupportsTopK = family is BedrockModelFamily.AmazonNova1 or BedrockModelFamily.AmazonNova2
-                    || family == BedrockModelFamily.AnthropicClaude && claudeSampling,
+                SupportsTemperature = (claudeSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+                SupportsTopP = (claudeSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+                SupportsTopK = (family is BedrockModelFamily.AmazonNova1 or BedrockModelFamily.AmazonNova2
+                    || family == BedrockModelFamily.AnthropicClaude && claudeSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
                 MaxStopSequences = family == BedrockModelFamily.DeepSeekR1 ? 10 : 2500
             }, connection, modelId) with
         {
-            SupportsSeed = false,
-            SupportsPresencePenalty = false,
-            SupportsFrequencyPenalty = false
+            SupportsSeed = InferenceSupport.Unsupported,
+            SupportsPresencePenalty = InferenceSupport.Unsupported,
+            SupportsFrequencyPenalty = InferenceSupport.Unsupported
         };
-        if (capabilities.SupportsJsonObject)
+        if ((capabilities.SupportsJsonObject != InferenceSupport.Unsupported))
         {
             throw new NotSupportedException("Bedrock Converse does not expose JSON-object-only output enforcement.");
         }
-        if (!nativeTools && capabilities.SupportsToolUse)
+        if (!nativeTools && (capabilities.SupportsToolUse != InferenceSupport.Unsupported))
         {
             throw new NotSupportedException("Bedrock capability overrides cannot enable native tool use for DeepSeek-R1.");
         }
-        if (indiaHaiku && capabilities.SupportsJsonSchema)
+        if (indiaHaiku && (capabilities.SupportsJsonSchema != InferenceSupport.Unsupported))
         {
             throw new NotSupportedException(
                 "Bedrock capability overrides cannot enable JSON Schema output for the India Haiku 4.5 inference profile.");
         }
-        if (novaWithoutStructuredOutput && capabilities.SupportsJsonSchema)
+        if (novaWithoutStructuredOutput && (capabilities.SupportsJsonSchema != InferenceSupport.Unsupported))
         {
             throw new NotSupportedException(
                 "Bedrock capability overrides cannot enable JSON Schema output for this Nova model.");
         }
-        if ((richContent.Images == LlmRichContentCarriage.Unsupported && capabilities.SupportsPromptImages)
-            || (richContent.PdfDocuments == LlmRichContentCarriage.Unsupported && capabilities.SupportsPromptDocuments))
+        if ((richContent.Images == LlmRichContentCarriage.Unsupported && (capabilities.SupportsPromptImages != InferenceSupport.Unsupported))
+            || (richContent.PdfDocuments == LlmRichContentCarriage.Unsupported && (capabilities.SupportsPromptDocuments != InferenceSupport.Unsupported)))
         {
             throw new NotSupportedException("Bedrock capability overrides cannot enable image or document input for this text-only model.");
         }
@@ -152,8 +153,8 @@ internal sealed class BedrockLlmClient(
             throw new NotSupportedException(
                 "Bedrock capability overrides cannot offer a reasoning level the model family does not accept.");
         }
-        if ((!claudeSampling && (capabilities.SupportsTemperature || capabilities.SupportsTopP))
-            || capabilities.SupportsTopK && !(family is BedrockModelFamily.AmazonNova1 or BedrockModelFamily.AmazonNova2
+        if ((!claudeSampling && ((capabilities.SupportsTemperature != InferenceSupport.Unsupported) || (capabilities.SupportsTopP != InferenceSupport.Unsupported)))
+            || (capabilities.SupportsTopK != InferenceSupport.Unsupported) && !(family is BedrockModelFamily.AmazonNova1 or BedrockModelFamily.AmazonNova2
                 || family == BedrockModelFamily.AnthropicClaude && claudeSampling)
             || capabilities.MaxStopSequences > (family == BedrockModelFamily.DeepSeekR1 ? 10 : 2500))
         {
@@ -269,7 +270,7 @@ internal sealed class BedrockLlmClient(
             cancellationToken);
         control.ThrowIfCanceled();
         ConverseRequest built = BuildRequest(connection, request, modelId, enforcement);
-        if (!capabilities.SupportsStreaming)
+        if ((capabilities.SupportsStreaming == InferenceSupport.Unsupported))
         {
             ConverseResponse response = await invoker.ConverseAsync(aws, built, cancellationToken);
             control.ThrowIfCanceled();
@@ -297,7 +298,7 @@ internal sealed class BedrockLlmClient(
             control.ThrowIfCanceled();
             foreach (LlmStreamEvent item in accumulator.Observe(events.Current))
             {
-                if (item is LlmReasoningDeltaEvent && !capabilities.SupportsReasoningText) { continue; }
+                if (item is LlmReasoningDeltaEvent && (capabilities.SupportsReasoningText == InferenceSupport.Unsupported)) { continue; }
                 control.ThrowIfCanceled();
                 yield return item;
             }
@@ -444,9 +445,9 @@ internal sealed class BedrockLlmClient(
             _ = StructuredOutput.ResolveEnforcement(structured, capabilities);
         }
         HostedTools.Validate(request, capabilities);
-        ExplicitCaches.Validate(request, capabilities.SupportsExplicitCache);
+        ExplicitCaches.Validate(request, (capabilities.SupportsExplicitCache != InferenceSupport.Unsupported));
         ProviderControlPolicy.Validate(connection, request);
-        if (request.Temperature is not null && !capabilities.SupportsTemperature)
+        if (request.Temperature is not null && (capabilities.SupportsTemperature == InferenceSupport.Unsupported))
         {
             throw new NotSupportedException("This Bedrock connection does not support temperature.");
         }
@@ -536,7 +537,7 @@ internal sealed class BedrockLlmClient(
             .Where(block => block.Text.Length > 0)
             .Select(block => new LlmReasoningText(block.Text, IsSummary: false))];
         return CompleteResponseEvents.From(result,
-            LlmCapabilityOverrideLookup.Apply(Defaults, connection, request.ModelId).SupportsReasoningText ? reasoningText : []);
+            (LlmCapabilityOverrideLookup.Apply(Defaults, connection, request.ModelId).SupportsReasoningText != InferenceSupport.Unsupported) ? reasoningText : []);
     }
 
     /// <summary>

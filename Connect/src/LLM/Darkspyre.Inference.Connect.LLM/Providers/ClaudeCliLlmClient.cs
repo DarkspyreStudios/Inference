@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
@@ -52,23 +53,23 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unsupported,
         ToolHistory = LlmToolHistory.Text,
-        SupportsStreaming = true,
-        SupportsReasoningText = true,
-        SupportsStreamingUsage = true,
-        SupportsUsageDeltas = true,
-        SupportsModelListing = true,
-        SupportsAccountUsage = true,
+        SupportsStreaming = InferenceSupport.Supported,
+        SupportsReasoningText = InferenceSupport.Supported,
+        SupportsStreamingUsage = InferenceSupport.Supported,
+        SupportsUsageDeltas = InferenceSupport.Supported,
+        SupportsModelListing = InferenceSupport.Supported,
+        SupportsAccountUsage = InferenceSupport.Supported,
         PromptCache = PromptCaching.Automatic,
-        SupportsJsonSchema = true,
-        SupportsJsonObject = false,
+        SupportsJsonSchema = InferenceSupport.Supported,
+        SupportsJsonObject = InferenceSupport.Unsupported,
         ReasoningLevels = ReasoningLevels,
-        SupportsTemperature = false,
-        SupportsToolUse = false,
-        SupportsAgentSessions = true,
+        SupportsTemperature = InferenceSupport.Unsupported,
+        SupportsToolUse = InferenceSupport.Unsupported,
+        SupportsAgentSessions = InferenceSupport.Supported,
         Agent = NativeAgentContract.Claude,
-        SupportsAgentToolUse = true,
-        SupportsPromptImages = true,
-        SupportsPromptDocuments = true,
+        SupportsAgentToolUse = InferenceSupport.Supported,
+        SupportsPromptImages = InferenceSupport.Supported,
+        SupportsPromptDocuments = InferenceSupport.Supported,
         RichContentSupported = RichContentRoutes.ClaudePrompt
     };
 
@@ -92,27 +93,27 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             ReasoningLevels = offered is not null
                 ? capabilities.ReasoningLevels.Intersect(offered).ToFrozenSet()
                 : capabilities.ReasoningLevels,
-            SupportsModelListing = true,
-            SupportsJsonObject = false,
-            SupportsTemperature = false,
-            SupportsTopP = false,
-            SupportsTopK = false,
-            SupportsSeed = false,
-            SupportsPresencePenalty = false,
-            SupportsFrequencyPenalty = false,
+            SupportsModelListing = InferenceSupport.Supported,
+            SupportsJsonObject = InferenceSupport.Unsupported,
+            SupportsTemperature = InferenceSupport.Unsupported,
+            SupportsTopP = InferenceSupport.Unsupported,
+            SupportsTopK = InferenceSupport.Unsupported,
+            SupportsSeed = InferenceSupport.Unsupported,
+            SupportsPresencePenalty = InferenceSupport.Unsupported,
+            SupportsFrequencyPenalty = InferenceSupport.Unsupported,
             MaxStopSequences = 0,
-            SupportsToolUse = false,
+            SupportsToolUse = InferenceSupport.Unsupported,
             // Attachments travel only as stream-json content blocks; the non-streaming request reads plain text.
             SupportsPromptImages = capabilities.SupportsStreaming,
             SupportsPromptDocuments = capabilities.SupportsStreaming,
-            RichContentSupported = capabilities.SupportsStreaming ? capabilities.RichContentSupported
+            RichContentSupported = (capabilities.SupportsStreaming != InferenceSupport.Unsupported) ? capabilities.RichContentSupported
                 : capabilities.RichContentSupported with
                 {
                     Images = LlmRichContentCarriage.Unsupported,
                     PdfDocuments = LlmRichContentCarriage.Unsupported,
                     TextDocuments = capabilities.RichContentSupported.TextDocuments == LlmRichContentCarriage.Unsupported
                         ? LlmRichContentCarriage.Unsupported : LlmRichContentCarriage.Text,
-                    PreservesOrder = true
+                    PreservesOrder = InferenceSupport.Supported
                 }
         };
     }
@@ -147,7 +148,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
-        if (request.Resources is not null && !capabilities.SupportsPromptDocuments)
+        if (request.Resources is not null && (capabilities.SupportsPromptDocuments == InferenceSupport.Unsupported))
             throw new NotSupportedException("Claude CLI requires stream-json input to materialize caller-owned resources.");
         if (request.Messages.Any(message => message.ContinuationState is not null))
             throw new NotSupportedException("Claude CLI chat cannot import adapter continuation state.");
@@ -166,7 +167,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         string prompt = BuildClaudePrompt(connection, request);
         string executable = ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint);
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
-        if (!capabilities.SupportsStreaming)
+        if ((capabilities.SupportsStreaming == InferenceSupport.Unsupported))
         {
             LlmChatResult completeResult = await CompleteAsync(executable, prompt, request, enforcement, credential, cancellationToken);
             foreach (LlmStreamEvent completeEvent in CompleteResponseEvents.From(completeResult, []))
@@ -194,12 +195,12 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         ClaudeCliProcessResult? processResult = null;
         LlmProviderException? parseException = null;
         bool emittedText = false;
-        var usage = new ClaudeStreamUsage(capabilities.SupportsUsageDeltas);
+        var usage = new ClaudeStreamUsage((capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported));
         await foreach (ClaudeCliProcessEvent processEvent in InvokeClaudeStreamingAsync(
                            executable,
                            arguments,
                            standardInput,
-                           capabilities.SupportsReasoningText,
+                           (capabilities.SupportsReasoningText != InferenceSupport.Unsupported),
                            cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -242,7 +243,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
             if (accountObservation is not null) { yield return new AccountUsageObservedEvent(accountObservation); }
             if (observation is not null) { yield return observation; }
-            if (capabilities.SupportsReasoningText && parsed.ReasoningDelta is { Length: > 0 } reasoning)
+            if ((capabilities.SupportsReasoningText != InferenceSupport.Unsupported) && parsed.ReasoningDelta is { Length: > 0 } reasoning)
             { yield return new LlmReasoningDeltaEvent(reasoning, IsSummary: true); }
             if (!string.IsNullOrEmpty(parsed.Activity))
             {

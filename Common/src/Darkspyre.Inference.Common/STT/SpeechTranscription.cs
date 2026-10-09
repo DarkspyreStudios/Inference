@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Collections.ObjectModel;
 using System.Text.Json.Serialization;
@@ -149,17 +150,17 @@ public sealed record SpeechTranscriptionModeCapabilities
     public IReadOnlyList<int>? SampleRates { get; init => field = SpeechData.CopyOptional(value); }
     public IReadOnlyList<string>? Languages { get; init => field = SpeechData.CopyOptional(value); }
     public int? MaximumChannels { get; init; }
-    public bool SupportsLanguage { get; init; }
-    public bool SupportsMultichannel { get; init; }
-    public bool SupportsDiarization { get; init; }
-    public bool SupportsKeyTerms { get; init; }
-    public bool SupportsFillerWords { get; init; }
-    public bool SupportsVadThreshold { get; init; }
-    public bool SupportsTextNormalization { get; init; }
-    public bool SupportsInterimResults { get; init; }
-    public bool SupportsEndpointing { get; init; }
-    public bool SupportsSmartTurn { get; init; }
-    public bool SupportsFinalize { get; init; }
+    public InferenceSupport SupportsLanguage { get; init; }
+    public InferenceSupport SupportsMultichannel { get; init; }
+    public InferenceSupport SupportsDiarization { get; init; }
+    public InferenceSupport SupportsKeyTerms { get; init; }
+    public InferenceSupport SupportsFillerWords { get; init; }
+    public InferenceSupport SupportsVadThreshold { get; init; }
+    public InferenceSupport SupportsTextNormalization { get; init; }
+    public InferenceSupport SupportsInterimResults { get; init; }
+    public InferenceSupport SupportsEndpointing { get; init; }
+    public InferenceSupport SupportsSmartTurn { get; init; }
+    public InferenceSupport SupportsFinalize { get; init; }
 }
 
 /// <summary>Hosted audio session. Commands finish after ordered send, not provider acknowledgment.</summary>

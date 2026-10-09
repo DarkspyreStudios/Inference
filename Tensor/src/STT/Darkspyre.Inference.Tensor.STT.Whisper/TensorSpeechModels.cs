@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Tensor.Common;
 
 namespace Darkspyre.Inference.Tensor.STT.Whisper;
@@ -54,7 +55,9 @@ public static class TensorSpeechModels
     {
         TensorModelPackDefinition? known = KnownContent(definition);
         bool? english = known is null ? null : known.Key.ModelId.EndsWith(".en", StringComparison.Ordinal);
-        bool? translation = known is null ? null : english == false && !known.Key.ModelId.EndsWith("-turbo", StringComparison.Ordinal);
+        InferenceSupport translation = known is null ? InferenceSupport.Unknown
+            : english == false && !known.Key.ModelId.EndsWith("-turbo", StringComparison.Ordinal)
+                ? InferenceSupport.Supported : InferenceSupport.Unsupported;
         return new(definition.Key, known?.Key.ModelId ?? definition.Key.ModelId,
             definition.Artifacts.Sum(artifact => artifact.Length), english, translation);
     }

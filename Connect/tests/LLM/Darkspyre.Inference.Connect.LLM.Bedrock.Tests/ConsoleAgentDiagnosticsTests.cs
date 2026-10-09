@@ -470,7 +470,7 @@ public sealed class ConsoleAgentDiagnosticsTests
         XaiConnectionOptions xai = Assert.IsType<XaiConnectionOptions>(selected.Xai);
         Assert.Equal(region, xai.Region);
         Assert.Equal(XaiServiceTier.Default, xai.ServiceTier);
-        Assert.False(selected.CapabilityOverrides!.SupportsStreaming);
+        Assert.Equal(InferenceSupport.Unsupported, selected.CapabilityOverrides!.SupportsStreaming);
         Assert.Equal(TesterCredentials.Value, selected.Credential);
         LlmConnection original = Assert.IsType<LlmConnection>(
             await new SecureConnectionSource(store, providers).GetConnectionAsync(invocation.Provider.ConnectionId));

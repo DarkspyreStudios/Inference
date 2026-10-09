@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 using System.Text.Json.Serialization;
@@ -77,13 +78,13 @@ public sealed record ImageCapabilities
 
     public int? MaximumReferences { get; init; }
 
-    public bool SupportsNegativePrompt { get; init; }
+    public InferenceSupport SupportsNegativePrompt { get; init; }
 
-    public bool SupportsSeed { get; init; }
+    public InferenceSupport SupportsSeed { get; init; }
 
-    public bool SupportsSteps { get; init; }
+    public InferenceSupport SupportsSteps { get; init; }
 
-    public bool SupportsGuidanceScale { get; init; }
+    public InferenceSupport SupportsGuidanceScale { get; init; }
 
     public int MaximumImageCount { get; init; } = 1;
 }

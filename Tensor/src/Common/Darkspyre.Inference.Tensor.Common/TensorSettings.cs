@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 using System.Runtime.InteropServices;
 
@@ -125,7 +126,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
         var sections = new List<SetupSection>
         { new("model", "Selection", [
         new SetupChoiceField(new("model", "Model pack") { IsRequired = true }, _model?.ToString() ?? string.Empty,
-            string.Empty, SelectModel, false, capabilities: new(true, true)),
+            string.Empty, SelectModel, false, capabilities: new(InferenceSupport.Supported, InferenceSupport.Supported)),
         new SetupChoiceField(new("backend", "Execution backend") { IsRequired = true,
             HelpText = "Supported backend names are not a hardware availability guarantee. Load confirms actual runtime availability." },
             _backend.ToString(), TensorBackendKind.Auto.ToString(), SelectBackend, false),

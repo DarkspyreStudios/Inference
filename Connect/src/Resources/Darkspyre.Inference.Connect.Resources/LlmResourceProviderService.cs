@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
 using Darkspyre.Inference.Common.Resources;
@@ -75,7 +76,7 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
         var limits = new LlmMediaMaterializationOptions(materialization.MaximumInlineImageBytes, materialization.MaximumInlineResultBytes);
         Fence();
         LlmProviderService? core = _providerService;
-        if (core is null || !core.SupportsXaiSnapshot)
+        if (core is null || (core.SupportsXaiSnapshot == false))
             throw new NotSupportedException("The resource facade requires an implemented xAI LLM core route.");
         var observation = new XaiResourceHttp.Observation(LlmResourceOperation.GetBatchResults, entered);
         try
@@ -141,7 +142,7 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
         };
         Fence();
         LlmProviderService? core = _providerService;
-        if (core is null || !core.SupportsXaiSnapshot)
+        if (core is null || (core.SupportsXaiSnapshot == false))
             throw new NotSupportedException("The resource facade requires an implemented xAI LLM core route.");
         Fence();
         var observation = new XaiResourceHttp.Observation(LlmResourceOperation.SubmitDeferred);
@@ -199,7 +200,7 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
         LlmDeferredCompletion entered = completion with { Scope = completion.Scope with { } };
         Fence();
         LlmProviderService? core = _providerService;
-        if (core is null || !core.SupportsXaiSnapshot)
+        if (core is null || (core.SupportsXaiSnapshot == false))
             throw new NotSupportedException("The resource facade requires an implemented xAI LLM core route.");
         Fence();
         var observation = new XaiResourceHttp.Observation(LlmResourceOperation.GetDeferred) { SelectedDeferred = entered };
@@ -260,7 +261,7 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
         IReadOnlyList<LlmBatchRequest> entered = XaiBatchRequestPreparation.Snapshot(requests, resources);
         Fence();
         LlmProviderService? core = _providerService;
-        if (core is null || !core.SupportsXaiSnapshot)
+        if (core is null || (core.SupportsXaiSnapshot == false))
             throw new NotSupportedException("The resource facade requires an implemented xAI LLM core route.");
         var observation = new XaiResourceHttp.Observation(kind, batch);
         try
@@ -364,7 +365,7 @@ public sealed class LlmResourceProviderService : ILlmBatchClient, IDisposable, I
             ArgumentNullException.ThrowIfNull(page);
         LlmResourcePageRequest? enteredPage = page is null ? null : new(page.Limit, page.PaginationToken);
         LlmProviderService? core = _providerService;
-        if (core is null || !core.SupportsXaiSnapshot)
+        if (core is null || (core.SupportsXaiSnapshot == false))
             throw new NotSupportedException("The resource facade requires an implemented xAI LLM core route.");
         Fence();
         var observation = new XaiResourceHttp.Observation(kind, batch);

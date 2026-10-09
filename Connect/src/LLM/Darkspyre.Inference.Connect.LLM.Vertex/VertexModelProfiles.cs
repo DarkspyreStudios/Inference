@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -29,40 +30,40 @@ internal static class VertexModelProfiles
         LlmRichContentSupported rich = RichContentRoutes.Anthropic with { MaxBinaryBytes = 5 * 1024 * 1024 };
         var capabilities = new LlmProviderCapabilities
         {
-            SupportsStreaming = true,
-            SupportsReasoningText = true,
-            SupportsStreamingUsage = true,
-            SupportsUsageDeltas = true,
+            SupportsStreaming = InferenceSupport.Supported,
+            SupportsReasoningText = InferenceSupport.Supported,
+            SupportsStreamingUsage = InferenceSupport.Supported,
+            SupportsUsageDeltas = InferenceSupport.Supported,
             PromptCache = PromptCaching.Claude,
-            SupportsModelListing = true,
+            SupportsModelListing = InferenceSupport.Supported,
             OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
-            SupportsJsonSchema = profile.SupportsStructuredOutputs == true,
-            SupportsTemperature = profile.AllowsSampling,
-            SupportsTopP = profile.AllowsSampling,
-            SupportsTopK = profile.AllowsSampling,
+            SupportsJsonSchema = profile.SupportsStructuredOutputs ?? InferenceSupport.Unknown,
+            SupportsTemperature = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTopP = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTopK = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
             MaxStopSequences = int.MaxValue,
-            SupportsToolUse = true,
+            SupportsToolUse = InferenceSupport.Supported,
             Tools = new()
             {
                 ChoiceModes = Enum.GetValues<LlmToolChoiceMode>()
                     .Where(mode => profile.AllowsForcedToolChoice || mode is not (LlmToolChoiceMode.Required or LlmToolChoiceMode.Specific)).ToFrozenSet(),
                 StrictInputSchema = profile.SupportsStructuredOutputs switch
                 {
-                    true => LlmStrictInputSchemaSupport.Supported,
-                    false => LlmStrictInputSchemaSupport.Unsupported,
-                    null => LlmStrictInputSchemaSupport.Unknown
+                    InferenceSupport.Supported => LlmStrictInputSchemaSupport.Supported,
+                    InferenceSupport.Unsupported => LlmStrictInputSchemaSupport.Unsupported,
+                    _ => LlmStrictInputSchemaSupport.Unknown
                 },
-                SupportsParallelCalls = true,
-                SupportsParallelCallControl = true,
-                SupportsArgumentStreaming = true
+                SupportsParallelCalls = InferenceSupport.Supported,
+                SupportsParallelCallControl = InferenceSupport.Supported,
+                SupportsArgumentStreaming = InferenceSupport.Supported
             },
             ReasoningLevels = profile.ReasoningLevels,
-            SupportsPromptImages = true,
-            SupportsPromptDocuments = true,
+            SupportsPromptImages = InferenceSupport.Supported,
+            SupportsPromptDocuments = InferenceSupport.Supported,
             RichContentSupported = rich,
-            SupportsAgentSessions = true,
-            SupportsAgentToolUse = true,
-            SupportsAgentTurnInstructions = true,
+            SupportsAgentSessions = InferenceSupport.Supported,
+            SupportsAgentToolUse = InferenceSupport.Supported,
+            SupportsAgentTurnInstructions = InferenceSupport.Supported,
             Agent = ManagedAgentPolicy.Capabilities with { RichContentSupported = rich }
         };
         return new(modelId, profile.MaxInputTokens,

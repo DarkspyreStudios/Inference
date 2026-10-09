@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Globalization;
 using System.Text.Json;
 using Json.Pointer;
@@ -16,7 +17,7 @@ internal static class XaiSchemaLimits
         SchemaDisposition disposition = Analyze(output.Schema, requireObjectRoot: false);
         RefuseInvalid(disposition);
         return StructuredOutput.ResolveEnforcement(output, disposition == SchemaDisposition.Guaranteed
-            ? capabilities : capabilities with { SupportsJsonSchema = false, SupportsJsonObject = false });
+            ? capabilities : capabilities with { SupportsJsonSchema = InferenceSupport.Unsupported, SupportsJsonObject = InferenceSupport.Unsupported });
     }
 
     internal static void ValidateStrictTool(JsonElement schema)

@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -22,12 +23,12 @@ internal sealed class ManagedGeminiApiAgentClient(GeminiApiLlmClient client, Llm
         var openingCapabilities = client.GetCapabilities(connection, options.ModelId);
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, openingCapabilities.HostedTools);
         ClientTools.ValidateManagedOpening(options, openingCapabilities,
-            supportsResources: client.CanPrepareResources && openingCapabilities.SupportsPromptDocuments);
+            supportsResources: client.CanPrepareResources && (openingCapabilities.SupportsPromptDocuments != InferenceSupport.Unsupported));
         connection = await client.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         // The capability checks below and the session's per-model lookups read the provider catalog.
         connection = await providers.AttachCatalogAsync(connectionId, connection, client, cancellationToken).ConfigureAwait(false);
         var capabilities = client.GetCapabilities(connection, options.ModelId);
-        if (!capabilities.SupportsAgentSessions || options.Tools.Any(tool => tool is LlmAgentToolDefinition) && !capabilities.SupportsAgentToolUse)
+        if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported) || options.Tools.Any(tool => tool is LlmAgentToolDefinition) && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported))
         { throw new NotSupportedException("The selected Gemini API model disables the requested agent operation."); }
         var models = await providers.ListModelsAsync(connectionId, cancellationToken).ConfigureAwait(false);
         string scope = ProviderContinuationStateCodec.Scope(connection);

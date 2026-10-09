@@ -17,26 +17,26 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
-        SupportsStreaming = true,
-        SupportsModelListing = true,
-        SupportsJsonSchema = true,
-        SupportsTemperature = true,
-        SupportsTopP = true,
-        SupportsTopK = true,
-        SupportsSeed = true,
-        SupportsToolUse = true,
+        SupportsStreaming = InferenceSupport.Supported,
+        SupportsModelListing = InferenceSupport.Supported,
+        SupportsJsonSchema = InferenceSupport.Supported,
+        SupportsTemperature = InferenceSupport.Supported,
+        SupportsTopP = InferenceSupport.Supported,
+        SupportsTopK = InferenceSupport.Supported,
+        SupportsSeed = InferenceSupport.Supported,
+        SupportsToolUse = InferenceSupport.Supported,
         Tools = new()
         {
             ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None }.ToFrozenSet(),
             StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported,
-            SupportsParallelCalls = true,
-            SupportsParallelCallControl = false,
-            SupportsArgumentStreaming = false
+            SupportsParallelCalls = InferenceSupport.Supported,
+            SupportsParallelCallControl = InferenceSupport.Unsupported,
+            SupportsArgumentStreaming = InferenceSupport.Unsupported
         },
         ToolHistory = LlmToolHistory.Structured,
-        SupportsAgentSessions = true,
-        SupportsAgentToolUse = true,
-        SupportsAgentTurnInstructions = true,
+        SupportsAgentSessions = InferenceSupport.Supported,
+        SupportsAgentToolUse = InferenceSupport.Supported,
+        SupportsAgentTurnInstructions = InferenceSupport.Supported,
         Agent = ManagedAgentPolicy.Capabilities with { RichContentSupported = RichContentRoutes.TextOnly },
         RichContentSupported = RichContentRoutes.TextOnly,
         OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced
@@ -50,10 +50,10 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
         LlmProviderCapabilities result = base.GetCapabilities(connection, modelId);
         if (ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } hello
             && !AppleProtocol.SupportsSampling(hello))
-            result = result with { SupportsTopP = false, SupportsTopK = false, SupportsSeed = false };
-        if (result.SupportsJsonObject || result.SupportsPromptImages || result.SupportsPromptDocuments
-            || result.SupportsStreamingUsage || result.SupportsUsageDeltas || result.SupportsAccountUsage || result.ReasoningLevels.Count > 0
-            || result.SupportsPresencePenalty || result.SupportsFrequencyPenalty || result.MaxStopSequences > 0)
+            result = result with { SupportsTopP = InferenceSupport.Unsupported, SupportsTopK = InferenceSupport.Unsupported, SupportsSeed = InferenceSupport.Unsupported };
+        if ((result.SupportsJsonObject != InferenceSupport.Unsupported) || (result.SupportsPromptImages != InferenceSupport.Unsupported) || (result.SupportsPromptDocuments != InferenceSupport.Unsupported)
+            || (result.SupportsStreamingUsage != InferenceSupport.Unsupported) || (result.SupportsUsageDeltas != InferenceSupport.Unsupported) || (result.SupportsAccountUsage != InferenceSupport.Unsupported) || result.ReasoningLevels.Count > 0
+            || (result.SupportsPresencePenalty != InferenceSupport.Unsupported) || (result.SupportsFrequencyPenalty != InferenceSupport.Unsupported) || result.MaxStopSequences > 0)
             throw new NotSupportedException("Capability overrides cannot enable unsupported Apple model features.");
         return result;
     }
@@ -88,11 +88,11 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
     public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection, AppleProtocol.ModelId);
-        if (!capabilities.SupportsModelListing) return [];
+        if ((capabilities.SupportsModelListing == InferenceSupport.Unsupported)) return [];
         JsonElement hello = await ProbeAsync(connection, cancellationToken).ConfigureAwait(false);
         if (AppleProtocol.RequiredString(hello, "availability") != "available") return [];
         if (!AppleProtocol.SupportsSampling(hello))
-            capabilities = capabilities with { SupportsTopP = false, SupportsTopK = false, SupportsSeed = false };
+            capabilities = capabilities with { SupportsTopP = InferenceSupport.Unsupported, SupportsTopK = InferenceSupport.Unsupported, SupportsSeed = InferenceSupport.Unsupported };
         return [new(AppleProtocol.ModelId, "Apple System Language Model", "Apple", capabilities)
         { MaxContextTokens = AppleProtocol.RequiredInteger(hello, "contextSize"), CatalogEntry = hello.Clone() }];
     }
@@ -131,7 +131,7 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
             if (!Enum.IsDefined(structured.Fallback)) throw new ArgumentException("Unknown structured output fallback.");
             try
             {
-                if (!capabilities.SupportsJsonSchema) throw new NotSupportedException("Apple schema output is disabled.");
+                if ((capabilities.SupportsJsonSchema == InferenceSupport.Unsupported)) throw new NotSupportedException("Apple schema output is disabled.");
                 outputSchema = AppleSchema.Convert(structured.Schema);
                 string guidance = AppleSchema.Guidance(outputSchema);
                 if (guidance.Length > 0) instructions = $"{instructions}\nOutput schema guidance:\n{guidance}";
@@ -180,7 +180,7 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
             messages.Add(new(message.Role, message.Content, calls, results));
         }
         if (pending.Count > 0) throw new ArgumentException("Tool-call history is missing results.");
-        return new(new(instructions, messages, tools, outputSchema, request.Temperature, request.MaxOutputTokens, capabilities.SupportsStreaming,
+        return new(new(instructions, messages, tools, outputSchema, request.Temperature, request.MaxOutputTokens, (capabilities.SupportsStreaming != InferenceSupport.Unsupported),
                 request.TopP, request.TopK, request.Seed),
             structured, enforcement, schemas, names.Keys.ToHashSet(StringComparer.Ordinal));
     }

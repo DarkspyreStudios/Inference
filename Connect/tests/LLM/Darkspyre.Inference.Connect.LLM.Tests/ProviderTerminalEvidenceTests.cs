@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -81,7 +82,7 @@ public sealed class ProviderTerminalEvidenceTests
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = streaming }
+            CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) }
         };
         await using var service = new LlmProviderService(new ResourcePreparationTests.Source(connection), [client]);
         var request = new LlmChatRequest
@@ -193,7 +194,7 @@ public sealed class ProviderTerminalEvidenceTests
                 ? new LlmCredential { ApiKey = "test-token" }
                 : new LlmCredential { OAuth = new() { AccessToken = "test-token", AccountId = "test-account" } }).Serialize(),
             AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" },
-            CapabilityOverrides = new() { SupportsStreaming = streaming }
+            CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) }
         };
         var observations = new List<LlmStreamEvent>();
 
@@ -279,7 +280,7 @@ public sealed class ProviderTerminalEvidenceTests
             Endpoint = "https://provider.example.test/v1",
             Credential = new LlmCredential { ApiKey = "test-token" }.Serialize(),
             AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" },
-            CapabilityOverrides = new() { SupportsStreaming = streaming }
+            CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) }
         };
         var observations = new List<LlmStreamEvent>();
         async Task ReadAsync()
@@ -413,7 +414,7 @@ public sealed class ProviderTerminalEvidenceTests
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = streaming }
+            CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) }
         };
         await foreach (LlmStreamEvent _ in client.StreamAsync(connection, new()
         {
@@ -456,7 +457,7 @@ public sealed class ProviderTerminalEvidenceTests
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = streaming }
+            CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) }
         };
         var request = new LlmChatRequest
         {
@@ -532,7 +533,7 @@ public sealed class ProviderTerminalEvidenceTests
                 Endpoint = "https://api.x.ai/v1",
                 Xai = new(),
                 Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
-                CapabilityOverrides = new() { SupportsStreaming = streaming }
+                CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) }
             };
             var request = new LlmChatRequest
             {
@@ -597,7 +598,7 @@ public sealed class ProviderTerminalEvidenceTests
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = false },
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported },
             Catalog = [new("grok-4.20-0309-non-reasoning", "Grok 4.20 (Non-Reasoning)")
             {
                 CatalogEntry = JsonElement.Parse("""{"aliases":["grok-4.20-non-reasoning"],"capabilities":{"reasoning_effort":[]}}""")
@@ -605,8 +606,8 @@ public sealed class ProviderTerminalEvidenceTests
         };
 
         LlmProviderCapabilities capabilities = client.GetCapabilities(connection, modelId);
-        Assert.True(capabilities.SupportsTemperature);
-        Assert.True(capabilities.SupportsTopP);
+        Assert.Equal(InferenceSupport.Supported, capabilities.SupportsTemperature);
+        Assert.Equal(InferenceSupport.Supported, capabilities.SupportsTopP);
         Assert.Empty(capabilities.ReasoningLevels);
 
         var events = new List<LlmStreamEvent>();
@@ -646,7 +647,7 @@ public sealed class ProviderTerminalEvidenceTests
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = false }
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported }
         };
         string[] handles = Enumerable.Range(0, count).Select(index => $"handle-{index}").ToArray();
         var request = new LlmChatRequest
@@ -727,7 +728,7 @@ public sealed class ProviderTerminalEvidenceTests
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = false, SupportsJsonSchema = true }
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported, SupportsJsonSchema = InferenceSupport.Supported }
         };
         var request = new LlmChatRequest
         {
@@ -789,7 +790,7 @@ public sealed class ProviderTerminalEvidenceTests
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = false, SupportsJsonSchema = true }
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported, SupportsJsonSchema = InferenceSupport.Supported }
         };
         var output = new LlmStructuredOutputRequest { Name = "answer", Schema = JsonElement.Parse(schema) };
         var tool = new LlmToolDefinition { Name = "echo", Strict = true, InputSchema = output.Schema };
@@ -905,7 +906,7 @@ public sealed class ProviderTerminalEvidenceTests
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = false }
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported }
         };
         var tool = new LlmToolDefinition { Name = "echo", Strict = true, InputSchema = JsonElement.Parse(schema) };
         var request = new LlmChatRequest { ModelId = "selected-model", Messages = [new("user", "hello")], Tools = [tool] };
@@ -1027,7 +1028,7 @@ public sealed class ProviderTerminalEvidenceTests
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = false, SupportsJsonSchema = true }
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported, SupportsJsonSchema = InferenceSupport.Supported }
         };
         var request = new LlmChatRequest
         {
@@ -1146,7 +1147,7 @@ public sealed class ProviderTerminalEvidenceTests
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = false, SupportsJsonSchema = true }
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported, SupportsJsonSchema = InferenceSupport.Supported }
         };
         var request = new LlmChatRequest { ModelId = "selected-model", Messages = [new("user", "hello")] };
         var tool = new LlmToolDefinition { Name = "echo", Strict = true, InputSchema = schema };
@@ -1205,7 +1206,7 @@ public sealed class ProviderTerminalEvidenceTests
             Endpoint = "https://api.x.ai/v1",
             Xai = new(),
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = false, SupportsJsonSchema = true }
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported, SupportsJsonSchema = InferenceSupport.Supported }
         };
         var request = new LlmChatRequest
         {
@@ -1306,7 +1307,7 @@ public sealed class ProviderTerminalEvidenceTests
             Transport = LlmTransport.OpenAiCompatibleChat,
             Endpoint = "https://openrouter.ai/api/v1",
             Credential = new LlmCredential { ApiKey = "test-key" }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = streaming }
+            CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) }
         };
         var request = new LlmChatRequest
         {
@@ -2160,7 +2161,7 @@ public sealed class ProviderTerminalEvidenceTests
             Endpoint = transport == LlmTransport.GoogleGeminiApi ? GeminiApiLlmClient.DefaultEndpoint : VertexEndpoints.BaseEndpoint,
             Vertex = transport == LlmTransport.GoogleVertexAi ? new() { AuthenticationMode = LlmGoogleAuthenticationMode.ApiKey } : null,
             Credential = new LlmCredential { ApiKey = "test-key" }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = streaming }
+            CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) }
         };
         var events = new List<LlmStreamEvent>();
         LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
@@ -2302,7 +2303,7 @@ public sealed class ProviderTerminalEvidenceTests
                     ? new() { AccessToken = "test-token", AccountId = "test-account" } : null
             }.Serialize(),
             ResolvedContinuationScope = transport is LlmTransport.GoogleGeminiApi or LlmTransport.GoogleVertexAi ? "test-scope" : null,
-            CapabilityOverrides = new() { SupportsStreaming = streaming }
+            CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) }
         };
         var request = new LlmChatRequest
         {
@@ -2387,7 +2388,7 @@ public sealed class ProviderTerminalEvidenceTests
                 Endpoint = "https://api.x.ai/v1",
                 Xai = new(),
                 Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token", AccountId = "test-account" } }.Serialize(),
-                CapabilityOverrides = new() { SupportsStreaming = streaming }
+                CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) }
             };
             var events = new List<LlmStreamEvent>();
             LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
@@ -2435,7 +2436,7 @@ public sealed class ProviderTerminalEvidenceTests
                 Endpoint = "https://api.x.ai/v1",
                 Xai = new(),
                 Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token", AccountId = "test-account" } }.Serialize(),
-                CapabilityOverrides = new() { SupportsStreaming = streaming }
+                CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) }
             };
             var events = new List<LlmStreamEvent>();
             await foreach (LlmStreamEvent item in client.StreamAsync(connection,

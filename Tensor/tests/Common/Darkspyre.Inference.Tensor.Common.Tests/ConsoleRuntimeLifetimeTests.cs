@@ -76,7 +76,7 @@ public sealed class ConsoleRuntimeLifetimeTests
         public InferenceImplementationDescriptor Descriptor { get; } = new("test-engine", "Test engine",
             InferenceImplementationKind.Tensor, InferenceTask.TextGeneration);
         public Task<LlmCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new LlmCapabilities { SupportsToolUse = true });
+            Task.FromResult(new LlmCapabilities { SupportsToolUse = InferenceSupport.Supported });
         public Task<IReadOnlyList<LlmModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<LlmModelInfo>>([new("model", "Model")]);
         public Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(CancellationToken cancellationToken = default) =>

@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Text.Json.Serialization;
 using Darkspyre.Inference.Common.Resources;
 
@@ -82,13 +83,13 @@ public sealed record XaiPublicUrlRevocation(string Id, [property: JsonRequired] 
 
 public sealed record LlmFileCapabilities
 {
-    public bool Upload { get; init; }
-    public bool List { get; init; }
-    public bool Get { get; init; }
-    public bool Download { get; init; }
-    public bool Delete { get; init; }
-    public bool TextDownload { get; init; }
-    public bool PublicUrls { get; init; }
+    public InferenceSupport Upload { get; init; }
+    public InferenceSupport List { get; init; }
+    public InferenceSupport Get { get; init; }
+    public InferenceSupport Download { get; init; }
+    public InferenceSupport Delete { get; init; }
+    public InferenceSupport TextDownload { get; init; }
+    public InferenceSupport PublicUrls { get; init; }
 }
 
 /// <summary>Explicit native file operations. Source and destination streams remain borrowed.</summary>

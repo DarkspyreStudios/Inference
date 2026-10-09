@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Text.Json.Serialization;
 
 namespace Darkspyre.Inference.Connect.LLM;
@@ -36,8 +37,8 @@ public sealed record XaiSkillPage(IReadOnlyList<XaiSkill> Items, string? FirstId
 
 public sealed record XaiSkillCapabilities
 {
-    public bool ResourceOperations { get; init; }
-    public bool GenerationAttachment { get; init; }
+    public InferenceSupport ResourceOperations { get; init; }
+    public InferenceSupport GenerationAttachment { get; init; }
 }
 
 /// <summary>Borrowed runtime upload input. It is not a portable data contract.</summary>

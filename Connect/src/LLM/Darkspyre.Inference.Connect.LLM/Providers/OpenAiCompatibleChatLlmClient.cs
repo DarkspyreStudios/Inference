@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -11,9 +12,9 @@ internal sealed class OpenAiCompatibleChatLlmClient(HttpClient http) : ChatCompl
 
     protected override LlmProviderCapabilities DefaultCapabilities => base.DefaultCapabilities with
     {
-        SupportsAgentSessions = true,
-        SupportsAgentToolUse = true,
-        SupportsAgentTurnInstructions = true,
+        SupportsAgentSessions = InferenceSupport.Supported,
+        SupportsAgentToolUse = InferenceSupport.Supported,
+        SupportsAgentTurnInstructions = InferenceSupport.Supported,
         Agent = ManagedAgentPolicy.Capabilities with { RichContentSupported = base.DefaultCapabilities.RichContentSupported }
     };
 }

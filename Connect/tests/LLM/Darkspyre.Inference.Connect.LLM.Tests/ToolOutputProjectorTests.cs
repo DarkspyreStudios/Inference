@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
@@ -60,7 +61,7 @@ public sealed class ToolOutputProjectorTests
                     ? """{"input_modalities":["text","image"]}"""
                     : """{"input_modalities":["text"]}""")
             }],
-            CapabilityOverrides = restrictImages ? new() { SupportsToolResultImages = false } : null
+            CapabilityOverrides = restrictImages ? new() { SupportsToolResultImages = InferenceSupport.Unsupported } : null
         };
         var output = new LlmToolOutput
         { Parts = [new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", Png, "chart.png")] };
@@ -73,7 +74,7 @@ public sealed class ToolOutputProjectorTests
         Assert.Equal(deliversImage ? LlmRichContentCarriage.Native : LlmRichContentCarriage.Unsupported,
             agent.RichContentSupported.Images);
         Assert.Equal(capabilities.RichContentSupported, agent.RichContentSupported);
-        Assert.Equal(acceptsImages, capabilities.SupportsPromptImages);
+        Assert.Equal(acceptsImages ? InferenceSupport.Supported : InferenceSupport.Unsupported, capabilities.SupportsPromptImages);
         Assert.Equal(deliversImage ? LlmToolPartDelivery.Delivered : LlmToolPartDelivery.Omitted,
             Assert.Single(projected.Report.Parts).Delivery);
         if (deliversImage) Assert.IsType<SentImage>(Assert.Single(projected.Parts));
@@ -90,8 +91,8 @@ public sealed class ToolOutputProjectorTests
         EmbeddedTextResources = LlmRichContentCarriage.Native,
         StructuredContent = LlmRichContentCarriage.Native,
         ErrorFlag = LlmRichContentCarriage.Native,
-        PreservesOrder = true,
-        AllowsEmpty = true
+        PreservesOrder = InferenceSupport.Supported,
+        AllowsEmpty = InferenceSupport.Supported
     };
 
     [Fact]
@@ -141,7 +142,7 @@ public sealed class ToolOutputProjectorTests
                 new LlmToolOutputBinary(LlmBinaryKind.Other, "application/zip", new byte[] { 1 }, "files.zip")
             ]
         };
-        LlmRichContentSupported lowered = RichContentRoutes.Responses.Restrict(images: false, documents: false);
+        LlmRichContentSupported lowered = RichContentRoutes.Responses.Restrict(images: InferenceSupport.Unsupported, documents: InferenceSupport.Unsupported);
 
         ProjectedToolOutput projected = ToolOutputProjector.Project(output, RichContentRoutes.Responses, lowered);
 

@@ -479,7 +479,7 @@ internal static class Program
         if (!await CheckReadyAsync(llms, invocation, cancellationToken)) return 3;
         LlmProviderCapabilities capabilities = await llms.GetModelCapabilitiesAsync(
             invocation.Provider.ConnectionId, options.Model, cancellationToken);
-        if (!capabilities.SupportsAgentSessions)
+        if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported))
             throw new NotSupportedException("The selected provider does not support agent sessions.");
 
         string prompt = await ReadPromptAsync();
@@ -496,7 +496,7 @@ internal static class Program
             cancellationToken);
         // Host tools are offered only to a runtime that can call them back.
         var tools = new List<LlmAgentToolDefinition>();
-        if (capabilities.SupportsAgentToolUse)
+        if ((capabilities.SupportsAgentToolUse != InferenceSupport.Unsupported))
         {
             tools.Add(CreateEchoTool());
             LlmRichContentSupported richContent = capabilities.Agent.RichContentSupported;

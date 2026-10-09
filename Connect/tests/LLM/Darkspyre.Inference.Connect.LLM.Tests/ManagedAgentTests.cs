@@ -369,9 +369,9 @@ public sealed class ManagedAgentTests
             options ?? Options(), [new("test", "Test") { MaxContextTokens = 1000 }, new("other", "Other") { MaxContextTokens = 2000 }], this, Stream,
             _ => new()
             {
-                SupportsAgentSessions = true,
-                SupportsAgentToolUse = true,
-                SupportsAgentTurnInstructions = true,
+                SupportsAgentSessions = InferenceSupport.Supported,
+                SupportsAgentToolUse = InferenceSupport.Supported,
+                SupportsAgentTurnInstructions = InferenceSupport.Supported,
                 RichContentSupported = RichContentRoutes.Responses,
                 HostedTools = new HashSet<LlmHostedToolKind> { LlmHostedToolKind.WebSearch },
                 Agent = ManagedAgentPolicy.Capabilities

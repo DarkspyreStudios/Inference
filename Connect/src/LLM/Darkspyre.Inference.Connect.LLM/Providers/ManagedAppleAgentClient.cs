@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -19,7 +20,7 @@ internal sealed class ManagedAppleAgentClient(AppleFoundationModelsClient client
         AppleProtocol.Ready(await client.ProbeAsync(connection, cancellationToken).ConfigureAwait(false));
         var models = await providers.ListModelsAsync(connectionId, cancellationToken).ConfigureAwait(false);
         var capabilities = client.GetCapabilities(connection, options.ModelId);
-        if (!capabilities.SupportsAgentSessions || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && !capabilities.SupportsAgentToolUse))
+        if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported) || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported)))
             throw new NotSupportedException("The Apple connection disables this agent operation.");
         string scope = ProviderContinuationStateCodec.Scope(connection);
         return await ManagedAgentSession.CreateAsync(connection, options, models, client,

@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Net;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
@@ -40,7 +41,7 @@ public sealed class ProviderTokenCountCancellationTests
                 AuthenticationMode = LlmGoogleAuthenticationMode.ApplicationDefault
             } : null,
             Credential = vertex ? null : new LlmCredential { ApiKey = "test-key" }.Serialize(),
-            CapabilityOverrides = new() { SupportsStreaming = false }
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported }
         };
         var request = new LlmChatRequest
         {

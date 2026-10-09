@@ -76,7 +76,7 @@ public sealed class AntigravityCliLlmClientTests
             ? new JsonObject { ["event"] = "result", ["result"] = payload }.ToJsonString()
             : payload.ToJsonString();
         var client = new AntigravityCliLlmClient(new RecordingRunner(new(0, output, string.Empty)));
-        LlmConnection connection = Connection() with { CapabilityOverrides = new() { SupportsStreaming = streaming } };
+        LlmConnection connection = Connection() with { CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) } };
 
         LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => ReadAllAsync(
             client.StreamAsync(connection, new() { ModelId = "auto", Messages = [new("user", "test")] })));
@@ -182,7 +182,7 @@ public sealed class AntigravityCliLlmClientTests
         {
             CapabilityOverrides = new()
             {
-                SupportsStreaming = streaming,
+                SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported),
                 ReasoningLevels = LlmReasoningEffort.Levels(LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High)
             }
         };

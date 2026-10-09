@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -18,29 +19,29 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
-        SupportsStreaming = true,
-        SupportsReasoningText = true,
-        SupportsStreamingUsage = true,
-        SupportsModelListing = true,
-        SupportsJsonSchema = false,
-        SupportsJsonObject = false,
-        SupportsPromptImages = false,
-        SupportsPromptDocuments = false,
+        SupportsStreaming = InferenceSupport.Supported,
+        SupportsReasoningText = InferenceSupport.Supported,
+        SupportsStreamingUsage = InferenceSupport.Supported,
+        SupportsModelListing = InferenceSupport.Supported,
+        SupportsJsonSchema = InferenceSupport.Unknown,
+        SupportsJsonObject = InferenceSupport.Unknown,
+        SupportsPromptImages = InferenceSupport.Unknown,
+        SupportsPromptDocuments = InferenceSupport.Unknown,
         RichContentSupported = RichContentRoutes.TextOnly,
-        SupportsTemperature = true,
-        SupportsTopP = true,
-        SupportsSeed = true,
-        SupportsPresencePenalty = true,
-        SupportsFrequencyPenalty = true,
+        SupportsTemperature = InferenceSupport.Supported,
+        SupportsTopP = InferenceSupport.Supported,
+        SupportsSeed = InferenceSupport.Supported,
+        SupportsPresencePenalty = InferenceSupport.Supported,
+        SupportsFrequencyPenalty = InferenceSupport.Supported,
         MaxStopSequences = 4,
-        SupportsToolUse = true,
+        SupportsToolUse = InferenceSupport.Supported,
         Tools = new()
         {
             ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
             StrictInputSchema = LlmStrictInputSchemaSupport.Unknown,
-            SupportsParallelCalls = true,
-            SupportsParallelCallControl = true,
-            SupportsArgumentStreaming = true
+            SupportsParallelCalls = InferenceSupport.Supported,
+            SupportsParallelCallControl = InferenceSupport.Supported,
+            SupportsArgumentStreaming = InferenceSupport.Supported
         }
     };
 
@@ -51,12 +52,12 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         if (connection.ChatCompletions?.OutputLimitField is { } field && !Enum.IsDefined(field))
             throw new ArgumentOutOfRangeException(nameof(connection), "The Chat Completions output-limit field is invalid.");
         bool openRouter = IsOpenRouter(connection);
-        if (!openRouter && (connection.CapabilityOverrides?.SupportsAccountUsage == true
+        if (!openRouter && (connection.CapabilityOverrides?.SupportsAccountUsage == InferenceSupport.Supported
             || modelId is not null && connection.ModelCapabilityOverrides.TryGetValue(modelId, out var overrides)
-            && overrides.SupportsAccountUsage == true))
+            && overrides.SupportsAccountUsage == InferenceSupport.Supported))
         { throw new NotSupportedException("Account usage is implemented only for OpenRouter endpoints."); }
         LlmProviderCapabilities capabilities = base.GetCapabilities(connection, modelId);
-        bool enabled = openRouter;
+        InferenceSupport enabled = openRouter ? InferenceSupport.Supported : InferenceSupport.Unsupported;
         if (connection.CapabilityOverrides?.SupportsAccountUsage is { } routeEnabled) { enabled = routeEnabled; }
         if (modelId is not null && connection.ModelCapabilityOverrides.TryGetValue(modelId, out var modelOverrides)
             && modelOverrides.SupportsAccountUsage is { } modelEnabled) { enabled = modelEnabled; }
@@ -72,7 +73,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
 
     public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
-        if (!GetCapabilities(connection).SupportsAccountUsage) { throw new NotSupportedException("This connection does not expose account usage."); }
+        if ((GetCapabilities(connection).SupportsAccountUsage == InferenceSupport.Unsupported)) { throw new NotSupportedException("This connection does not expose account usage."); }
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         LlmAccountUsageSnapshot result;
         {
@@ -188,10 +189,10 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
             secrets,
             cancellationToken);
 
-        if (!capabilities.SupportsStreaming)
+        if ((capabilities.SupportsStreaming == InferenceSupport.Unsupported))
         {
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
-            foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(body, response, request, enforcement, credential, connection, secrets, omitted, capabilities.SupportsReasoningText))
+            foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(body, response, request, enforcement, credential, connection, secrets, omitted, (capabilities.SupportsReasoningText != InferenceSupport.Unsupported)))
             {
                 yield return consumption.Publish<LlmStreamEvent>(completeEvent);
             }
@@ -209,7 +210,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         string? lastEvent = null;
         bool sawDone = false;
         var toolCalls = new Dictionary<int, ToolCallBuilder>();
-        var usageDeltas = new UsageDeltas(capabilities.SupportsUsageDeltas);
+        var usageDeltas = new UsageDeltas((capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported));
         var reasoning = new ChatReasoning();
 
         await foreach (string data in Sse.ReadDataPayloadsAsync(stream, cancellationToken))
@@ -269,7 +270,7 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
                 }
 
                 string contentDelta = LlmJson.GetString(delta, "content") ?? string.Empty;
-                if (reasoning.Observe(delta, isDelta: true) is { } reasoningDelta && capabilities.SupportsReasoningText) { yield return consumption.Publish<LlmStreamEvent>(reasoningDelta); }
+                if (reasoning.Observe(delta, isDelta: true) is { } reasoningDelta && (capabilities.SupportsReasoningText != InferenceSupport.Unsupported)) { yield return consumption.Publish<LlmStreamEvent>(reasoningDelta); }
                 if (contentDelta.Length > 0)
                 {
                     text.Append(contentDelta);
@@ -678,14 +679,14 @@ internal abstract class ChatCompletionsLlmClientBase(HttpClient http) : LlmClien
         {
             ["model"] = request.ModelId,
             ["messages"] = messages,
-            ["stream"] = capabilities.SupportsStreaming
+            ["stream"] = (capabilities.SupportsStreaming != InferenceSupport.Unsupported)
         };
 
         // OpenAI accepts stream_options only on streaming requests; a non-streaming body always carries usage.
-        if (capabilities.SupportsStreaming && capabilities.SupportsStreamingUsage)
+        if ((capabilities.SupportsStreaming != InferenceSupport.Unsupported) && (capabilities.SupportsStreamingUsage != InferenceSupport.Unsupported))
         {
             var options = new JsonObject { ["include_usage"] = true };
-            if (capabilities.SupportsUsageDeltas)
+            if (capabilities.SupportsUsageDeltas == InferenceSupport.Supported)
             {
                 options["continuous_usage_stats"] = true;
             }

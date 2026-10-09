@@ -65,8 +65,8 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
                 DecisionQuestionKind.Boolean
             },
             MaximumInputTokens = _configuration?.MaximumLength,
-            SupportsCalibratedConfidence = true,
-            SupportsActionProbability = true
+            SupportsCalibratedConfidence = InferenceSupport.Supported,
+            SupportsActionProbability = InferenceSupport.Supported
         });
     }
 

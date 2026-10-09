@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -120,7 +121,7 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
         _clients.SingleOrDefault(value => value.Supports(transport))
         ?? throw new NotSupportedException($"The configured {transport} provider does not support embeddings in this client.");
 
-    private LlmProviderService RequireCatalogService() => _providerService?.SupportsXaiSnapshot is true
+    private LlmProviderService RequireCatalogService() => _providerService?.SupportsXaiSnapshot == true
         ? _providerService : throw new NotSupportedException("xAI embedding catalog operations require the explicitly shared LLM facade.");
 
     private static void ValidateCatalogConnection(LlmConnection connection)

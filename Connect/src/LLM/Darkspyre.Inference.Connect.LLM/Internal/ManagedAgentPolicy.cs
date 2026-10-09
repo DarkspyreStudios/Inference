@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
@@ -8,13 +9,13 @@ internal static class ManagedAgentPolicy
     {
         ContextOwnership = LlmAgentOwnership.Host,
         ContextImport = LlmAgentContextImport.Structured,
-        SupportsContextCapture = true,
-        SupportsContextReplacement = true,
-        SupportsContextStatus = true,
-        SupportsCompactionHandoff = true,
+        SupportsContextCapture = InferenceSupport.Supported,
+        SupportsContextReplacement = InferenceSupport.Supported,
+        SupportsContextStatus = InferenceSupport.Supported,
+        SupportsCompactionHandoff = InferenceSupport.Supported,
         CompactionOwnership = LlmAgentOwnership.Host,
         Steering = LlmAgentSteering.SafeBoundary,
-        SupportsInterrupt = true,
+        SupportsInterrupt = InferenceSupport.Supported,
         ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Host,
         // The managed runtime sends tool output through Direct Codex Responses.
         RichContentSupported = RichContentRoutes.Responses

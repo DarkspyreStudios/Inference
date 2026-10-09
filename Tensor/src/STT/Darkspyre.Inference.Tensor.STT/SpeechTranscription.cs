@@ -21,12 +21,12 @@ public sealed record SpeechAudioWindow(string Id, SpeechAudio Audio);
 /// <summary>A completed window, not a partial-token event. Timestamps in Transcription remain window-relative.</summary>
 public sealed record SpeechWindowTranscription(string WindowId, SpeechTranscriptionResult Transcription);
 
-public sealed record SpeechToTextCapabilities(bool? EnglishOnly, bool? SupportsTranslationToEnglish,
-    bool? SupportsLanguageDetection, IReadOnlyList<string>? Languages,
-    int MinimumSampleRate, int MaximumSampleRate, int MaximumChannels, bool SupportsWindowStreaming = true);
+public sealed record SpeechToTextCapabilities(bool? EnglishOnly, InferenceSupport? SupportsTranslationToEnglish,
+    InferenceSupport? SupportsLanguageDetection, IReadOnlyList<string>? Languages,
+    int MinimumSampleRate, int MaximumSampleRate, int MaximumChannels, InferenceSupport SupportsWindowStreaming = InferenceSupport.Supported);
 
 public sealed record SpeechModelInfo(TensorModelKey Key, string DisplayName, long DownloadBytes,
-    bool? EnglishOnly, bool? SupportsTranslationToEnglish);
+    bool? EnglishOnly, InferenceSupport? SupportsTranslationToEnglish);
 
 /// <summary>The interchangeable speech-transcription contract. Load is explicit; requests never download or load weights.</summary>
 public interface ITensorSpeechToTextInference : ITensorModelInstance

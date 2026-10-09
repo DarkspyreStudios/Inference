@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 namespace Darkspyre.Inference.Common.Setup;
 
 public enum SetupPathSelectionKind { File, Folder }
@@ -112,10 +113,10 @@ public sealed record SetupChoicePage(
     SetupChoiceState State = SetupChoiceState.Completed, IReadOnlyList<SetupIssue>? Issues = null);
 
 /// <summary>Choice-source behavior, independent of any UI framework or manual-entry permission.</summary>
-public sealed record SetupChoiceCapabilities(bool SupportsSearch = false, bool SupportsPaging = false, bool SupportsRefresh = false)
+public sealed record SetupChoiceCapabilities(InferenceSupport SupportsSearch = InferenceSupport.Unknown, InferenceSupport SupportsPaging = InferenceSupport.Unknown, InferenceSupport SupportsRefresh = InferenceSupport.Unknown)
 {
-    public static SetupChoiceCapabilities Bounded { get; } = new();
-    public static SetupChoiceCapabilities Searchable { get; } = new(true, true, true);
+    public static SetupChoiceCapabilities Bounded { get; } = new(InferenceSupport.Unsupported, InferenceSupport.Unsupported, InferenceSupport.Unsupported);
+    public static SetupChoiceCapabilities Searchable { get; } = new(InferenceSupport.Supported, InferenceSupport.Supported, InferenceSupport.Supported);
 }
 
 /// <summary>A choice field. Its choices come from <see cref="IInferenceSettingsManager.QueryChoicesAsync"/>.</summary>

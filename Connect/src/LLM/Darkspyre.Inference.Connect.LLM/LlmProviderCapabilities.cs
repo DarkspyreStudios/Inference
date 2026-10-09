@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using Darkspyre.Inference.Common.LLM;
 
@@ -24,47 +25,48 @@ public sealed record LlmProviderCapabilities
     /// provider's non-streaming request and emit the complete response as events after it arrives. A transport whose
     /// provider has no non-streaming request rejects every request while this is false.
     /// </summary>
-    public bool SupportsStreaming { get; init; }
+    public InferenceSupport SupportsStreaming { get; init; }
 
     /// <summary>A streamed response reports usage by its completion.</summary>
-    public bool SupportsStreamingUsage { get; init; }
+    public InferenceSupport SupportsStreamingUsage { get; init; }
 
     /// <summary>A streamed response can emit cumulative usage observations before completion.</summary>
-    public bool SupportsUsageDeltas { get; init; }
+    public InferenceSupport SupportsUsageDeltas { get; init; }
 
     /// <summary>Public reasoning text can arrive separately from the answer. False suppresses display, not retained state.</summary>
-    public bool SupportsReasoningText { get; init; }
+    public InferenceSupport SupportsReasoningText { get; init; }
 
-    public bool SupportsModelListing { get; init; }
+    public InferenceSupport SupportsModelListing { get; init; }
 
-    public bool SupportsAccountUsage { get; init; }
+    public InferenceSupport SupportsAccountUsage { get; init; }
 
-    public bool SupportsJsonSchema { get; init; }
+    public InferenceSupport SupportsJsonSchema { get; init; }
 
-    public bool SupportsJsonObject { get; init; }
+    public InferenceSupport SupportsJsonObject { get; init; }
 
     public LlmPromptCacheCapabilities PromptCache { get; init; } = new();
 
     /// <summary>The route implements explicit native cache selection. Overrides cannot enable it.</summary>
-    public bool SupportsExplicitCache { get; init; }
+    public InferenceSupport SupportsExplicitCache { get; init; }
 
     /// <summary>The reasoning levels the model accepts. Empty when it accepts no reasoning control.</summary>
     public IReadOnlySet<LlmReasoningLevel> ReasoningLevels { get; init; } = FrozenSet<LlmReasoningLevel>.Empty;
 
     /// <summary>True when the model accepts a reasoning level above <see cref="LlmReasoningLevel.None"/>.</summary>
-    public bool SupportsReasoning => ReasoningLevels.Any(static level => level > LlmReasoningLevel.None);
+    public InferenceSupport SupportsReasoning => ReasoningLevels.Count == 0 ? InferenceSupport.Unknown
+        : ReasoningLevels.Any(static level => level > LlmReasoningLevel.None) ? InferenceSupport.Supported : InferenceSupport.Unsupported;
 
-    public bool SupportsTemperature { get; init; }
+    public InferenceSupport SupportsTemperature { get; init; }
 
-    public bool SupportsTopP { get; init; }
+    public InferenceSupport SupportsTopP { get; init; }
 
-    public bool SupportsTopK { get; init; }
+    public InferenceSupport SupportsTopK { get; init; }
 
-    public bool SupportsSeed { get; init; }
+    public InferenceSupport SupportsSeed { get; init; }
 
-    public bool SupportsPresencePenalty { get; init; }
+    public InferenceSupport SupportsPresencePenalty { get; init; }
 
-    public bool SupportsFrequencyPenalty { get; init; }
+    public InferenceSupport SupportsFrequencyPenalty { get; init; }
 
     /// <summary>Zero disables string stops; int.MaxValue means no adapter-imposed limit.</summary>
     public int MaxStopSequences { get; init; }
@@ -73,10 +75,10 @@ public sealed record LlmProviderCapabilities
     /// Supports host-executed tools: the provider can return tool calls and accept their results
     /// on a subsequent chat request. The chat caller executes tools; managed agent loops invoke handlers.
     /// </summary>
-    public bool SupportsToolUse { get; init; }
+    public InferenceSupport SupportsToolUse { get; init; }
 
     /// <summary>The route implements shell definitions, calls and typed results.</summary>
-    public bool SupportsShellTools { get; init; }
+    public InferenceSupport SupportsShellTools { get; init; }
 
     public LlmToolCapabilities Tools { get; init; } = new();
 
@@ -86,23 +88,23 @@ public sealed record LlmProviderCapabilities
     public LlmToolHistory ToolHistory { get; init; }
 
     /// <summary>Supports the session-oriented <see cref="ILlmAgentClient"/> contract.</summary>
-    public bool SupportsAgentSessions { get; init; }
+    public InferenceSupport SupportsAgentSessions { get; init; }
 
     /// <summary>Agent sessions can invoke host-defined tools through an in-turn callback.</summary>
-    public bool SupportsAgentToolUse { get; init; }
+    public InferenceSupport SupportsAgentToolUse { get; init; }
 
-    public bool SupportsAgentTurnInstructions { get; init; }
+    public InferenceSupport SupportsAgentTurnInstructions { get; init; }
 
     public LlmAgentCapabilities Agent { get; init; } = new();
 
     /// <summary>User prompts can include provider-neutral image attachments.</summary>
-    public bool SupportsPromptImages { get; init; }
+    public InferenceSupport SupportsPromptImages { get; init; }
 
     /// <summary>User prompts can include provider-neutral document attachments.</summary>
-    public bool SupportsPromptDocuments { get; init; }
+    public InferenceSupport SupportsPromptDocuments { get; init; }
 
     /// <summary>The selected route accepts provider-native file references. Overrides cannot enable an unimplemented route.</summary>
-    public bool SupportsFileReferences { get; init; }
+    public InferenceSupport SupportsFileReferences { get; init; }
 
     /// <summary>Native file resource operations, independently of generation attachment support.</summary>
     public LlmFileCapabilities Files { get; init; } = new();
@@ -121,10 +123,10 @@ public sealed record LlmProviderCapabilities
         _ = Restrict(overrides?.SupportsAgentSessions, SupportsAgentSessions);
         _ = Restrict(overrides?.SupportsAgentToolUse, SupportsAgentToolUse);
         _ = Restrict(overrides?.SupportsAgentTurnInstructions, SupportsAgentTurnInstructions);
-        if ((!SupportsAgentSessions && (SupportsAgentToolUse || SupportsAgentTurnInstructions
+        if (((SupportsAgentSessions == InferenceSupport.Unsupported) && (SupportsAgentToolUse == InferenceSupport.Supported || SupportsAgentTurnInstructions == InferenceSupport.Supported
                 || !Agent.IsNone))
-            || (overrides?.SupportsAgentSessions is false
-                && (overrides.SupportsAgentToolUse is true || overrides.SupportsAgentTurnInstructions is true)))
+            || (overrides?.SupportsAgentSessions is InferenceSupport.Unsupported
+                && (overrides.SupportsAgentToolUse is InferenceSupport.Supported || overrides.SupportsAgentTurnInstructions is InferenceSupport.Supported)))
         {
             throw new ArgumentException("Agent operations require an enabled agent session lane.");
         }
@@ -150,13 +152,13 @@ public sealed record LlmProviderCapabilities
             SupportsFrequencyPenalty = overrides.SupportsFrequencyPenalty ?? SupportsFrequencyPenalty,
             MaxStopSequences = overrides.MaxStopSequences ?? MaxStopSequences,
             SupportsToolUse = overrides.SupportsToolUse ?? SupportsToolUse,
-            Tools = overrides.SupportsToolUse is false ? new() : Tools,
+            Tools = overrides.SupportsToolUse is InferenceSupport.Unsupported ? new() : Tools,
             SupportsAgentSessions = Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions),
-            SupportsAgentToolUse = Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions)
-                && Restrict(overrides.SupportsAgentToolUse, SupportsAgentToolUse),
-            SupportsAgentTurnInstructions = Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions)
-                && Restrict(overrides.SupportsAgentTurnInstructions, SupportsAgentTurnInstructions),
-            Agent = Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions)
+            SupportsAgentToolUse = Intersect(Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions),
+                Restrict(overrides.SupportsAgentToolUse, SupportsAgentToolUse)),
+            SupportsAgentTurnInstructions = Intersect(Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions),
+                Restrict(overrides.SupportsAgentTurnInstructions, SupportsAgentTurnInstructions)),
+            Agent = Restrict(overrides.SupportsAgentSessions, SupportsAgentSessions) != InferenceSupport.Unsupported
                 ? Agent with
                 {
                     RichContentSupported = Agent.RichContentSupported.Restrict(
@@ -170,9 +172,14 @@ public sealed record LlmProviderCapabilities
         };
     }
 
-    private static bool Restrict(bool? requested, bool implemented)
+    internal static InferenceSupport Intersect(InferenceSupport first, InferenceSupport second) =>
+        first == InferenceSupport.Unsupported || second == InferenceSupport.Unsupported ? InferenceSupport.Unsupported
+        : first == InferenceSupport.Unknown || second == InferenceSupport.Unknown ? InferenceSupport.Unknown
+        : InferenceSupport.Supported;
+
+    private static InferenceSupport Restrict(InferenceSupport? requested, InferenceSupport implemented)
     {
-        if (requested is true && !implemented)
+        if (requested is InferenceSupport.Supported && implemented == InferenceSupport.Unsupported)
         {
             throw new ArgumentException("Capability overrides cannot enable unimplemented agent operations.");
         }
@@ -185,56 +192,56 @@ public sealed record LlmProviderCapabilities
 public sealed record LlmCapabilityOverrides
 {
     /// <summary>False selects the provider's non-streaming request.</summary>
-    public bool? SupportsStreaming { get; init; }
+    public InferenceSupport? SupportsStreaming { get; init; }
 
-    public bool? SupportsStreamingUsage { get; init; }
+    public InferenceSupport? SupportsStreamingUsage { get; init; }
 
     /// <summary>Enables continuous usage on a compatible endpoint, or disables an adapter's running usage events.</summary>
-    public bool? SupportsUsageDeltas { get; init; }
+    public InferenceSupport? SupportsUsageDeltas { get; init; }
 
     /// <summary>False suppresses public reasoning events and summary requests without dropping continuation state.</summary>
-    public bool? SupportsReasoningText { get; init; }
+    public InferenceSupport? SupportsReasoningText { get; init; }
 
-    public bool? SupportsModelListing { get; init; }
+    public InferenceSupport? SupportsModelListing { get; init; }
 
-    public bool? SupportsAccountUsage { get; init; }
+    public InferenceSupport? SupportsAccountUsage { get; init; }
 
-    public bool? SupportsJsonSchema { get; init; }
+    public InferenceSupport? SupportsJsonSchema { get; init; }
 
-    public bool? SupportsJsonObject { get; init; }
+    public InferenceSupport? SupportsJsonObject { get; init; }
 
     /// <summary>The reasoning levels the endpoint accepts, replacing the transport's own set.</summary>
     public IReadOnlySet<LlmReasoningLevel>? ReasoningLevels { get; init; }
 
-    public bool? SupportsTemperature { get; init; }
+    public InferenceSupport? SupportsTemperature { get; init; }
 
-    public bool? SupportsTopP { get; init; }
+    public InferenceSupport? SupportsTopP { get; init; }
 
-    public bool? SupportsTopK { get; init; }
+    public InferenceSupport? SupportsTopK { get; init; }
 
-    public bool? SupportsSeed { get; init; }
+    public InferenceSupport? SupportsSeed { get; init; }
 
-    public bool? SupportsPresencePenalty { get; init; }
+    public InferenceSupport? SupportsPresencePenalty { get; init; }
 
-    public bool? SupportsFrequencyPenalty { get; init; }
+    public InferenceSupport? SupportsFrequencyPenalty { get; init; }
 
     public int? MaxStopSequences { get; init; }
 
-    public bool? SupportsToolUse { get; init; }
+    public InferenceSupport? SupportsToolUse { get; init; }
 
-    public bool? SupportsAgentSessions { get; init; }
+    public InferenceSupport? SupportsAgentSessions { get; init; }
 
-    public bool? SupportsAgentToolUse { get; init; }
+    public InferenceSupport? SupportsAgentToolUse { get; init; }
 
-    public bool? SupportsAgentTurnInstructions { get; init; }
+    public InferenceSupport? SupportsAgentTurnInstructions { get; init; }
 
-    public bool? SupportsPromptImages { get; init; }
+    public InferenceSupport? SupportsPromptImages { get; init; }
 
-    public bool? SupportsPromptDocuments { get; init; }
+    public InferenceSupport? SupportsPromptDocuments { get; init; }
 
     /// <summary>False stops sending tool-result images; an override cannot enable them.</summary>
-    public bool? SupportsToolResultImages { get; init; }
+    public InferenceSupport? SupportsToolResultImages { get; init; }
 
     /// <summary>False stops sending tool-result documents; an override cannot enable them.</summary>
-    public bool? SupportsToolResultDocuments { get; init; }
+    public InferenceSupport? SupportsToolResultDocuments { get; init; }
 }

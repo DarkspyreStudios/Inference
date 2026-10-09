@@ -119,17 +119,17 @@ internal static class XaiSttProtocol
         Encodings = (streaming ? Enum.GetValues<SpeechAudioEncoding>() : new[] { SpeechAudioEncoding.Pcm16LittleEndian, SpeechAudioEncoding.Mulaw, SpeechAudioEncoding.Alaw }).ToFrozenSet(),
         SampleRates = Rates,
         MaximumChannels = 8,
-        SupportsLanguage = true,
-        SupportsMultichannel = true,
-        SupportsDiarization = true,
-        SupportsKeyTerms = true,
-        SupportsFillerWords = true,
-        SupportsVadThreshold = true,
-        SupportsTextNormalization = true,
-        SupportsInterimResults = streaming,
-        SupportsEndpointing = streaming,
-        SupportsSmartTurn = streaming,
-        SupportsFinalize = streaming
+        SupportsLanguage = InferenceSupport.Supported,
+        SupportsMultichannel = InferenceSupport.Supported,
+        SupportsDiarization = InferenceSupport.Supported,
+        SupportsKeyTerms = InferenceSupport.Supported,
+        SupportsFillerWords = InferenceSupport.Supported,
+        SupportsVadThreshold = InferenceSupport.Supported,
+        SupportsTextNormalization = InferenceSupport.Supported,
+        SupportsInterimResults = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+        SupportsEndpointing = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+        SupportsSmartTurn = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+        SupportsFinalize = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported)
     };
     internal static SpeechTranscriptionResult Result(JsonElement root, InferenceProvenance provenance) => new(
         RequiredString(root, "text"), provenance, OptionalString(root, "language"), Seconds(root, "duration"), Words(root), Channels(root));

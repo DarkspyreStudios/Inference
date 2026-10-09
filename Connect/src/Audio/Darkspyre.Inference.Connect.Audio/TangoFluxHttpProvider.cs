@@ -66,8 +66,7 @@ public sealed class TangoFluxHttpProvider(HttpClient httpClient) : IAudioProvide
         public Task<AudioGenerationCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(new AudioGenerationCapabilities(TimeSpan.FromSeconds(1), TimeSpan.FromSeconds(30),
-                10, 100, 0.1, 20, true, true, false, false, ContentTypes));
+            return Task.FromResult(new AudioGenerationCapabilities(TimeSpan.FromSeconds(1),TimeSpan.FromSeconds(30),                10,100,0.1,20,InferenceSupport.Supported,InferenceSupport.Supported,InferenceSupport.Unsupported,InferenceSupport.Unsupported,ContentTypes));
         }
 
         public async Task<AudioGenerationResult> GenerateAsync(AudioGenerationRequest request, CancellationToken cancellationToken = default)

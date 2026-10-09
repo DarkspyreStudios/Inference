@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Security.Cryptography;
 using System.Text;
 using Darkspyre.Inference.Connect.LLM;
@@ -124,7 +125,7 @@ internal sealed class SecureConnectionSource(
             Endpoint = endpoint,
             Vertex = selected?.Vertex,
             Xai = selected?.Xai,
-            CapabilityOverrides = selected?.NonStreaming == true ? new() { SupportsStreaming = false } : null
+            CapabilityOverrides = selected?.NonStreaming == true ? new() { SupportsStreaming = InferenceSupport.Unsupported } : null
         };
     }
 

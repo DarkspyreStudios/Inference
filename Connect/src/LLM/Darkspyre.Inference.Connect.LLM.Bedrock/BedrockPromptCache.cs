@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using Amazon.BedrockRuntime;
 using Amazon.BedrockRuntime.Model;
@@ -11,12 +12,12 @@ internal static class BedrockPromptCache
 {
     private static readonly LlmPromptCacheCapabilities DefaultRetention = new()
     {
-        Automatic = true,
-        AcceptsHints = true,
+        Automatic = InferenceSupport.Supported,
+        AcceptsHints = InferenceSupport.Supported,
         Retentions = new[] { LlmPromptCacheRetention.Default }.ToFrozenSet()
     };
 
-    private static readonly LlmPromptCacheCapabilities ExtendedRetention = PromptCaching.Claude with { Automatic = true };
+    private static readonly LlmPromptCacheCapabilities ExtendedRetention = PromptCaching.Claude with { Automatic = InferenceSupport.Supported };
 
     // https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html
     private static LlmPromptCacheCapabilities Facts(string model) => model switch
@@ -45,7 +46,7 @@ internal static class BedrockPromptCache
         if (hint is null) return;
         string model = BedrockModelFamilies.Classify(modelId).BaseModelId;
         LlmPromptCacheCapabilities capabilities = Facts(model);
-        if (!capabilities.AcceptsHints) return;
+        if ((capabilities.AcceptsHints == InferenceSupport.Unsupported)) return;
         var point = new CachePointBlock
         {
             Type = CachePointType.Default,

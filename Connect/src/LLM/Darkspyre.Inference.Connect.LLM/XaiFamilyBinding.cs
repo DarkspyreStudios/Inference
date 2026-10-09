@@ -41,7 +41,7 @@ public sealed class XaiFamilyBinding
     public XaiConnectionSelection Selection { get; }
     public IProviderAuthorization Authorization { get; }
 
-    internal bool HasCatalogService => _service?.SupportsXaiSnapshot is true;
+    internal bool HasCatalogService => _service?.SupportsXaiSnapshot == true;
 
     internal void RequireCatalogService()
     {

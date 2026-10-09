@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -19,21 +20,21 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
 
     private static readonly LlmProviderCapabilities Defaults = new()
     {
-        SupportsStreaming = true,
-        SupportsReasoningText = true,
-        SupportsStreamingUsage = true,
-        SupportsUsageDeltas = true,
-        SupportsModelListing = false,
-        SupportsJsonSchema = false,
-        SupportsJsonObject = false,
-        SupportsTemperature = false,
-        SupportsTopP = true,
-        SupportsToolUse = false,
-        SupportsAgentSessions = true,
+        SupportsStreaming = InferenceSupport.Supported,
+        SupportsReasoningText = InferenceSupport.Supported,
+        SupportsStreamingUsage = InferenceSupport.Supported,
+        SupportsUsageDeltas = InferenceSupport.Supported,
+        SupportsModelListing = InferenceSupport.Unsupported,
+        SupportsJsonSchema = InferenceSupport.Unsupported,
+        SupportsJsonObject = InferenceSupport.Unsupported,
+        SupportsTemperature = InferenceSupport.Unsupported,
+        SupportsTopP = InferenceSupport.Supported,
+        SupportsToolUse = InferenceSupport.Unsupported,
+        SupportsAgentSessions = InferenceSupport.Supported,
         Agent = NativeAgentContract.AgentCore,
-        SupportsAgentToolUse = true,
-        SupportsPromptImages = false,
-        SupportsPromptDocuments = false,
+        SupportsAgentToolUse = InferenceSupport.Supported,
+        SupportsPromptImages = InferenceSupport.Unsupported,
+        SupportsPromptDocuments = InferenceSupport.Unsupported,
         RichContentSupported = RichContentRoutes.AgentCore
     };
 
@@ -55,12 +56,12 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(Defaults, connection, modelId);
         return capabilities with
         {
-            SupportsTopP = !string.Equals(modelId, DefaultModelId, StringComparison.OrdinalIgnoreCase)
-                && capabilities.SupportsTopP,
-            SupportsTopK = false,
-            SupportsSeed = false,
-            SupportsPresencePenalty = false,
-            SupportsFrequencyPenalty = false,
+            SupportsTopP = (!string.Equals(modelId, DefaultModelId, StringComparison.OrdinalIgnoreCase)
+                && (capabilities.SupportsTopP != InferenceSupport.Unsupported) ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTopK = InferenceSupport.Unsupported,
+            SupportsSeed = InferenceSupport.Unsupported,
+            SupportsPresencePenalty = InferenceSupport.Unsupported,
+            SupportsFrequencyPenalty = InferenceSupport.Unsupported,
             MaxStopSequences = 0
         };
     }
@@ -73,9 +74,9 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         HostedTools.Validate(request, capabilities);
-        ExplicitCaches.Validate(request, capabilities.SupportsExplicitCache);
+        ExplicitCaches.Validate(request, (capabilities.SupportsExplicitCache != InferenceSupport.Unsupported));
         ProviderControlPolicy.Validate(connection, request);
-        ClientTools.Validate(request, capabilities.SupportsShellTools);
+        ClientTools.Validate(request, (capabilities.SupportsShellTools != InferenceSupport.Unsupported));
         ValidateChatRequest(request, capabilities);
         if (request.Messages.Any(message => message.ContinuationState is not null))
         {
@@ -87,7 +88,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         LlmAwsCredentials aws = RequireAws(connection);
         InvokeHarnessRequest invokeRequest = BuildChatRequest(connection, request);
         var text = new StringBuilder();
-        var usage = new BedrockHarnessUsage(capabilities.SupportsUsageDeltas);
+        var usage = new BedrockHarnessUsage((capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported));
         string? stopReason = null;
 
         await foreach (IEventStreamEvent streamEvent in invoker.InvokeAsync(
@@ -107,7 +108,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
                 {
                     Delta.ReasoningContent.Text: { Length: > 0 } reasoning
                 }:
-                    if (capabilities.SupportsReasoningText) { yield return new LlmReasoningDeltaEvent(reasoning, IsSummary: false); }
+                    if ((capabilities.SupportsReasoningText != InferenceSupport.Unsupported)) { yield return new LlmReasoningDeltaEvent(reasoning, IsSummary: false); }
                     break;
                 case HarnessContentBlockStartEvent { Start.ToolUse: not null }:
                     throw new InvalidOperationException(
@@ -389,7 +390,7 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         {
             throw new ArgumentException("A model id is required.", nameof(request));
         }
-        if (!capabilities.SupportsStreaming)
+        if ((capabilities.SupportsStreaming == InferenceSupport.Unsupported))
         {
             throw new NotSupportedException(
                 "AgentCore Harness has no non-streaming request, so streaming cannot be turned off for this connection.");

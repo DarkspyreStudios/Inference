@@ -1,5 +1,16 @@
 # Darkspyre.Inference.Common
 
+## Support Evidence
+
+Capability support values use `InferenceSupport`: `Unknown`, `Supported`, or `Unsupported`.
+The default value is `Unknown`. An absent observation does not establish inability. An explicit
+attempt proceeds through an implemented mapper unless the selected feature is `Unsupported`.
+`Unknown` does not qualify provider support or provide a missing implementation.
+
+The enum includes capability facts without a `Supports` prefix: prompt-cache `Automatic` and
+`AcceptsHints`. Ordinary binary request options and current-state observations remain boolean.
+Owned JSON metadata serializes support values as their enum names, not booleans.
+
 `InferenceStreamLimits` supplies explicit positive caller-local event-count, buffered-payload-byte
 and assembled-message-byte budgets for streaming contracts. `InferenceJson.InferenceStreamLimits`
 owns its required data metadata. Omitted, null, zero and negative budgets refuse; no provider limit
@@ -90,7 +101,7 @@ the event base has no portable discriminator. Native stage strings and nullable 
 timing, status, configuration and usage are preserved. Omitted configuration values differ from
 explicit empty text/lists, and manual turn detection is distinct from omission.
 Input and output encoding sets are independent, frozen and empty by default; sample-rate lists
-remain nullable. All new support flags default to false. Collections/maps/audio data copy their
+remain nullable. Support flags default to `Unknown`. Collections/maps/audio data copy their
 inputs, diagnostics omit source content, and non-null live sessions or provider-specific options
 refuse Common serialization. Family metadata owns any fixed provider extensions. These declarations
 do not authorize native conversation reuse, reconnect, replay, tool execution or socket traffic.
@@ -118,7 +129,7 @@ progress, duration, expiry and content type; zero and false remain actual values
 `LlmExplicitCacheReference` carries a native cache resource name, model, opaque scope and optional
 observed expiry. `InferenceJson.LlmExplicitCacheReference` exports its data-only metadata. The
 reference grants no authority. `LlmInferenceRequest.ExplicitCache` selects this native receipt;
-`LlmCapabilities.SupportsExplicitCache` defaults to false. The nullable selection is independent
+`LlmCapabilities.SupportsExplicitCache` defaults to `Unknown`. The nullable selection is independent
 of advisory `PromptCache` hints. Owned request metadata preserves it and validates required
 resource, model and scope facts. Native cache identities do not become portable workspace content.
 
@@ -135,7 +146,7 @@ Lists copy their inputs at construction and `with` assignment. Skills contain ca
 constructing or serializing them does not read files or execute commands.
 
 Request definitions, message calls/results and terminal calls use one ordered function/shell union.
-`SupportsShellTools` defaults false. A union declaration grants no execution capability.
+`SupportsShellTools` defaults to `Unknown`. A union declaration grants no execution capability.
 `InferenceJson` exposes every fixed shell record and each mixed union with its exact type-name
 getter. Union discriminators are `function` and `shell`; outcomes use `exit` and `timeout`.
 
@@ -253,7 +264,7 @@ union under its exact type name. No reference contains invented bytes or grants 
 
 `LlmInferenceRequest.Resources` borrows caller authority. Non-null authority refuses owned JSON
 serialization and deserialization; null remains portable. Request diagnostics do not traverse it.
-`SupportsFileReferences` defaults to false and describes native file input, not automatic workspace
+`SupportsFileReferences` defaults to `Unknown` and describes native file input, not automatic workspace
 materialization. Current built-in LLM routes reject unimplemented reference inputs before provider
 effects. These contracts do not yet establish automatic provider switching.
 
@@ -297,7 +308,7 @@ An explicit unsupported control fails before generation. Top-p is finite and in 
 positive; seeds are non-negative. Penalties are finite, with ranges owned by the selected adapter.
 Stop strings are non-empty. A seed does not promise deterministic output.
 
-The corresponding capability flags default to false. `MaxStopSequences` is zero when unsupported
+The corresponding capability flags default to `Unknown`. `MaxStopSequences` is zero when unsupported
 and `int.MaxValue` when the adapter imposes no limit. Connect bindings and SelfHost preserve all
 controls and capabilities across the portable boundary. Qwen requires a positive temperature for
 top-p, top-k and seed; stops and penalties also work during greedy decoding.
@@ -310,7 +321,7 @@ and is the default scope. `Default` uses the provider's standard lifetime. `Exte
 longer lifetime, which can increase cache-write charges.
 
 `LlmCapabilities.PromptCache` declares automatic caching, hint acceptance and supported retentions.
-Unsupported implementations ignore the hint and report `AcceptsHints = false`. An unsupported
+Unsupported implementations ignore the hint and report `AcceptsHints = Unsupported`. An unsupported
 retention falls back to `Default`. A hint does not promise a cache hit or create a billed cache resource.
 Connect bindings and SelfHost preserve the hint and capability declaration.
 
@@ -323,18 +334,18 @@ and `StructuredOutput` for the final representation and validation. Ordinary tex
 
 `LlmCapabilities.SupportsReasoningText` describes separate public `LlmReasoningDeltaEvent` output.
 It is independent of `ReasoningLevels`, which describe control over reasoning effort. The flag
-defaults to false. Engines set it only when they implement public reasoning output. SelfHost and
+defaults to `Unknown`. Engines report `Supported` only when they implement public reasoning output. SelfHost and
 the portable Connect binding preserve the selected adapter's flag.
 
 `LlmCapabilities.SupportsStreamingUsage` describes final usage on a streamed completion. It defaults
-to false and is independent of running usage observations. Connect and SelfHost preserve the selected
+to `Unknown` and is independent of running usage observations. Connect and SelfHost preserve the selected
 adapter or engine's declaration.
 
 `LlmUsageDeltaEvent.Cumulative` reports running usage for the entire call. Each observation replaces
 the previous observation; never add them together. Null fields are unreported, not zero. Completion
 usage is authoritative and can differ from the last observation. An adapter emits changed observations
-only while streaming, when `LlmCapabilities.SupportsUsageDeltas` is true, and never after completion.
-Non-streaming responses report only final usage. Tensor engines report this capability as false
+only while streaming, when `LlmCapabilities.SupportsUsageDeltas` is not `Unsupported`, and never after completion.
+Non-streaming responses report only final usage. Tensor engines report this capability as `Unsupported`
 unless the selected engine implements running usage.
 
 `LlmCompletionStatus.Unknown` is terminal: the implementation returned output but cannot

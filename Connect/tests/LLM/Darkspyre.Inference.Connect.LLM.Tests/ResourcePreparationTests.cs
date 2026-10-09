@@ -25,7 +25,7 @@ public sealed class ResourcePreparationTests
         using var http = new HttpClient(handler);
         var client = new XaiResponsesLlmClient(http);
         LlmConnection connection = ResourceResults.Connection() with
-        { CapabilityOverrides = new() { SupportsStreaming = streaming } };
+        { CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) } };
         GeneratedWrite? write = null;
         var workspace = new Resources(new("workspace", "session", 3, []), [])
         {
@@ -401,7 +401,7 @@ public sealed class ResourcePreparationTests
 
         LlmConnection connection = InlineConnection(destination);
         bool streaming = destination != "openai-responses" || generatedByTool;
-        if (!streaming) connection = connection with { CapabilityOverrides = new() { SupportsStreaming = false } };
+        if (!streaming) connection = connection with { CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported } };
         string model = InlineModel(destination);
         var handler = new Documents(destination: destination, streaming: streaming);
         using var targetHttp = new HttpClient(handler);
@@ -521,7 +521,7 @@ public sealed class ResourcePreparationTests
         var reference = new InferenceResourceReference("workspace", "reference");
         var access = new Resources(new("workspace", "session", 1, [reference]),
             [(reference, "reference.txt", "reference text"u8.ToArray())]);
-        LlmConnection connection = InlineConnection("claude-cli") with { CapabilityOverrides = new() { SupportsStreaming = false } };
+        LlmConnection connection = InlineConnection("claude-cli") with { CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported } };
         var handler = new Documents();
         using var http = new HttpClient(handler);
         var runner = new CliDocuments();

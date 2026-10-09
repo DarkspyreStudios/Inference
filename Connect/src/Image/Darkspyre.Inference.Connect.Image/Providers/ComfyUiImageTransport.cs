@@ -132,9 +132,7 @@ internal sealed class ComfyUiImageTransport(
         "ComfyUI",
         "ComfyUI workflow server with reference-image upload and live progress support.",
         new ImageTransportCapabilities(
-            SupportsProgress: true,
-            SupportsReferenceImages: true,
-            SupportsCancellation: true));
+            SupportsProgress: InferenceSupport.Supported,            SupportsReferenceImages: InferenceSupport.Supported,            SupportsCancellation: InferenceSupport.Supported));
 
     public Task<IReadOnlyList<ImageWorkflow>> GetWorkflowsAsync(
         ImageConnection connection, XaiFamilyBinding? xai = null,
@@ -159,8 +157,8 @@ internal sealed class ComfyUiImageTransport(
         return Task.FromResult(new ImageCapabilities
         {
             SupportedSizes = [new(workflow.DefaultWidth, workflow.DefaultHeight)],
-            SupportsNegativePrompt = true,
-            SupportsSeed = true,
+            SupportsNegativePrompt = InferenceSupport.Supported,
+            SupportsSeed = InferenceSupport.Supported,
             MaximumImageCount = 1,
             SupportedReferenceKinds = new[] { InferenceMediaSourceKind.Binary, InferenceMediaSourceKind.Resource }.ToFrozenSet(),
             MaximumReferences = 1

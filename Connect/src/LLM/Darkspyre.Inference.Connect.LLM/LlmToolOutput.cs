@@ -1,4 +1,5 @@
 using System.Collections.Frozen;
+using Darkspyre.Inference.Common;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Darkspyre.Inference.Common.LLM;
@@ -43,10 +44,10 @@ public sealed record LlmRichContentSupported
     public LlmRichContentCarriage ErrorFlag { get; init; }
 
     /// <summary>Parts reach the provider in the order supplied.</summary>
-    public bool PreservesOrder { get; init; }
+    public InferenceSupport PreservesOrder { get; init; }
 
     /// <summary>An output with no parts is accepted.</summary>
-    public bool AllowsEmpty { get; init; }
+    public InferenceSupport AllowsEmpty { get; init; }
 
     /// <summary>The largest binary part the route accepts, when known.</summary>
     public long? MaxBinaryBytes { get; init; }
@@ -62,11 +63,11 @@ public sealed record LlmRichContentSupported
     }
 
     /// <summary>Lowers carriages that an override disables; an override never raises a carriage.</summary>
-    internal LlmRichContentSupported Restrict(bool? images, bool? documents) => this with
+    internal LlmRichContentSupported Restrict(InferenceSupport? images, InferenceSupport? documents) => this with
     {
-        Images = images == false ? LlmRichContentCarriage.Unsupported : Images,
-        PdfDocuments = documents == false ? LlmRichContentCarriage.Unsupported : PdfDocuments,
-        TextDocuments = documents == false ? LlmRichContentCarriage.Unsupported : TextDocuments
+        Images = images == InferenceSupport.Unsupported ? LlmRichContentCarriage.Unsupported : Images,
+        PdfDocuments = documents == InferenceSupport.Unsupported ? LlmRichContentCarriage.Unsupported : PdfDocuments,
+        TextDocuments = documents == InferenceSupport.Unsupported ? LlmRichContentCarriage.Unsupported : TextDocuments
     };
 }
 

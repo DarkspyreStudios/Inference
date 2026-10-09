@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Net;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
@@ -68,7 +69,7 @@ public sealed class DocumentSearchJsonTests
             Endpoint = "https://api.x.ai/v1",
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
             Catalog = [],
-            CapabilityOverrides = new() { SupportsStreaming = false }
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported }
         };
         var request = new LlmChatRequest
         {

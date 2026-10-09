@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -21,7 +22,7 @@ internal sealed class ManagedSelfHostAgentClient(SelfHostLlmClient client, LlmPr
         // Listing first surfaces an engine that is not loaded as ModelUnavailable before any turn.
         var models = await providers.ListModelsAsync(connectionId, cancellationToken);
         var capabilities = client.GetCapabilities(connection, options.ModelId);
-        if (!capabilities.SupportsAgentSessions || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && !capabilities.SupportsAgentToolUse))
+        if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported) || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported)))
         {
             throw new NotSupportedException("The selected engine or model disables the requested agent operation.");
         }

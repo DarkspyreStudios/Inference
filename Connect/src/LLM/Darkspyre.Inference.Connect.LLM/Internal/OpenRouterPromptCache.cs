@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
@@ -10,7 +11,7 @@ internal static class OpenRouterPromptCache
 {
     private static readonly LlmPromptCacheCapabilities DefaultRetention = new()
     {
-        AcceptsHints = true,
+        AcceptsHints = InferenceSupport.Supported,
         Retentions = new[] { LlmPromptCacheRetention.Default }.ToFrozenSet()
     };
 
@@ -20,10 +21,10 @@ internal static class OpenRouterPromptCache
         if (model is null) return new();
         if (model.StartsWith("anthropic/claude-", StringComparison.Ordinal)) return PromptCaching.Claude;
         if (model.StartsWith("openai/", StringComparison.Ordinal))
-            return OpenAiModelProfiles.Get(model[7..]).SupportsPromptCacheOptions ? PromptCaching.OpenAi : PromptCaching.Automatic;
+            return (OpenAiModelProfiles.Get(model[7..]).SupportsPromptCacheOptions != InferenceSupport.Unsupported) ? PromptCaching.OpenAi : PromptCaching.Automatic;
         if (model.StartsWith("google/gemini-2.5", StringComparison.Ordinal)
             || model.StartsWith("google/gemini-3", StringComparison.Ordinal))
-            return DefaultRetention with { Automatic = true };
+            return DefaultRetention with { Automatic = InferenceSupport.Supported };
         if (model is "deepseek/deepseek-v3.2" or "qwen/qwen3-max" or "qwen/qwen-plus"
             or "qwen/qwen3.6-plus" or "qwen/qwen3-coder-plus" or "qwen/qwen3-coder-flash")
             return DefaultRetention;
@@ -35,7 +36,7 @@ internal static class OpenRouterPromptCache
 
     internal static void Apply(JsonObject payload, LlmConnection connection, LlmChatRequest request)
     {
-        if (request.PromptCache is not { } hint || !Capabilities(request.ModelId).AcceptsHints) return;
+        if (request.PromptCache is not { } hint || (Capabilities(request.ModelId).AcceptsHints == InferenceSupport.Unsupported)) return;
         bool openAi = request.ModelId.StartsWith("openai/", StringComparison.Ordinal);
         bool claude = request.ModelId.StartsWith("anthropic/", StringComparison.Ordinal);
         PromptCaching.RejectRawOption(connection, request, openAi ? "prompt_cache_options" : "cache_control");

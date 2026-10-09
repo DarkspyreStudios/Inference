@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Diagnostics.CodeAnalysis;
@@ -180,7 +181,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     {
         ArgumentNullException.ThrowIfNull(request);
         (AntigravityLaunch launch, string prompt, JsonElement? schema) = Admit(request);
-        bool usageDeltas = AntigravityCliLlmClient.ResolveCapabilities(_connection, launch.ModelId).SupportsUsageDeltas;
+        bool usageDeltas = (AntigravityCliLlmClient.ResolveCapabilities(_connection, launch.ModelId).SupportsUsageDeltas != InferenceSupport.Unsupported);
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
         {

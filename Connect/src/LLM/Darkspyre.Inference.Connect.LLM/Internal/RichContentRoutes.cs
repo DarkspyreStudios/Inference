@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
@@ -22,8 +23,8 @@ internal static class RichContentRoutes
         EmbeddedTextResources = LlmRichContentCarriage.Text,
         StructuredContent = LlmRichContentCarriage.Text,
         ErrorFlag = LlmRichContentCarriage.Text,
-        PreservesOrder = true,
-        AllowsEmpty = true
+        PreservesOrder = InferenceSupport.Supported,
+        AllowsEmpty = InferenceSupport.Supported
     };
 
     /// <summary>Anthropic Messages <c>tool_result</c>.</summary>
@@ -37,8 +38,8 @@ internal static class RichContentRoutes
         EmbeddedTextResources = LlmRichContentCarriage.Text,
         StructuredContent = LlmRichContentCarriage.Text,
         ErrorFlag = LlmRichContentCarriage.Native,
-        PreservesOrder = true,
-        AllowsEmpty = true
+        PreservesOrder = InferenceSupport.Supported,
+        AllowsEmpty = InferenceSupport.Supported
     };
 
     /// <summary>Bedrock Converse <c>ToolResultBlock</c>.</summary>
@@ -52,7 +53,7 @@ internal static class RichContentRoutes
         EmbeddedTextResources = LlmRichContentCarriage.Text,
         StructuredContent = LlmRichContentCarriage.Native,
         ErrorFlag = LlmRichContentCarriage.Native,
-        PreservesOrder = true
+        PreservesOrder = InferenceSupport.Supported
     };
 
     /// <summary>Routes that carry a tool result as a single string or a text-only block.</summary>
@@ -63,8 +64,8 @@ internal static class RichContentRoutes
         EmbeddedTextResources = LlmRichContentCarriage.Text,
         StructuredContent = LlmRichContentCarriage.Text,
         ErrorFlag = LlmRichContentCarriage.Text,
-        PreservesOrder = true,
-        AllowsEmpty = true
+        PreservesOrder = InferenceSupport.Supported,
+        AllowsEmpty = InferenceSupport.Supported
     };
 
     /// <summary>Claude CLI stream-json prompt blocks appended to its flattened tool-history transcript.</summary>
@@ -74,14 +75,14 @@ internal static class RichContentRoutes
         ImageMediaTypes = CommonImageTypes,
         PdfDocuments = LlmRichContentCarriage.Native,
         TextDocuments = LlmRichContentCarriage.Native,
-        PreservesOrder = false
+        PreservesOrder = InferenceSupport.Unsupported
     };
 
     /// <summary>The AgentCore Harness tool result, which is text with a status.</summary>
     public static LlmRichContentSupported AgentCore { get; } = TextOnly with
     {
         ErrorFlag = LlmRichContentCarriage.Native,
-        AllowsEmpty = false
+        AllowsEmpty = InferenceSupport.Unsupported
     };
 
     /// <summary>Gemini 3 functionResponse media referenced by nested inlineData display names.</summary>
@@ -91,7 +92,7 @@ internal static class RichContentRoutes
         ImageMediaTypes = new[] { "image/png", "image/jpeg", "image/webp" }.ToFrozenSet(StringComparer.Ordinal),
         PdfDocuments = LlmRichContentCarriage.Native,
         ErrorFlag = LlmRichContentCarriage.Native,
-        PreservesOrder = false,
+        PreservesOrder = InferenceSupport.Unsupported,
         MaxBinaryBytes = 7 * 1024 * 1024
     };
 
@@ -109,7 +110,7 @@ internal static class RichContentRoutes
         EmbeddedTextResources = LlmRichContentCarriage.Native,
         StructuredContent = LlmRichContentCarriage.Text,
         ErrorFlag = LlmRichContentCarriage.Native,
-        PreservesOrder = true,
-        AllowsEmpty = true
+        PreservesOrder = InferenceSupport.Supported,
+        AllowsEmpty = InferenceSupport.Supported
     };
 }

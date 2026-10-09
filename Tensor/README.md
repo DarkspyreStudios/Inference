@@ -525,7 +525,7 @@ nullable discovered model limits and does not add a Tensor accounting/compaction
 Qwen follows the chat protocol TensorSharp registers for the loaded architecture. That protocol's
 output parser separates the answer, the thinking and the tool calls, which stream as
 `LlmTextDeltaEvent`, `LlmReasoningDeltaEvent` and the tool-call started, arguments and completed
-events. `SupportsToolUse` is true: request tools pass to TensorSharp, and history messages carry
+events. `SupportsToolUse` is `Supported`: request tools pass to TensorSharp, and history messages carry
 their tool calls and text tool results. `ToolChoice` and `AllowParallelToolCalls` fail as unsupported
 features, and a binary tool-result part fails as well. `ReasoningLevels` is `None` (thinking off) and
 `High` (thinking on). With structured output and thinking on, the schema's grammar starts after the
@@ -546,9 +546,9 @@ foreign generation and checks their assembly provenance and exact serialized sch
 
 Qwen rejects referenced prompt files, workspace tool-output resources and non-null request resource
 authority before model access or native execution. It does not materialize those inputs and reports
-`SupportsFileReferences = false`.
+`SupportsFileReferences = InferenceSupport.Unsupported`.
 
-Qwen reports `SupportsStreamingUsage = true` because streamed completions report final usage.
+Qwen reports `SupportsStreamingUsage = InferenceSupport.Supported` because streamed completions report final usage.
 Qwen requires the runtime's terminal update before publishing a completion. A stream that ends
 without that update fails as `ExecutionFailed`; it does not invent successful completion or zero
 usage. Cancellation is checked before final parsing and completion publication on every backend,
@@ -563,7 +563,7 @@ stream operation fails, the thrown aggregate retains the original operation and 
 exceptions. A single cleanup failure is rethrown directly when no operation failed.
 Qwen reports no automatic prompt caching, cache-hint acceptance or supported cache retentions in
 `LlmCapabilities.PromptCache`. It ignores the advisory `LlmInferenceRequest.PromptCache` hint.
-Qwen reports `SupportsExplicitCache=false` and rejects a supplied `ExplicitCache` selection
+Qwen reports `SupportsExplicitCache=InferenceSupport.Unsupported` and rejects a supplied `ExplicitCache` selection
 before model materialization or native entry. Provider-native cache receipts do not transfer
 to the local engine.
 Qwen rejects non-null `ProviderControls` before model materialization or native entry; it does not
@@ -574,7 +574,7 @@ without a structured-output grammar. Top-p, top-k and seed require a positive te
 or zero temperature decodes greedily. Stops and penalties remain effective with greedy decoding.
 Numeric controls must be finite and representable by the engine's float fields; penalty values
 have no adapter-imposed [-2, 2] limit. Seed does not guarantee identical output across backends.
-Qwen reports `SupportsReasoningText = true` because its registered output parser emits thinking
+Qwen reports `SupportsReasoningText = InferenceSupport.Supported` because its registered output parser emits thinking
 separately from the answer. Other engines keep the false capability default unless they implement
 that output. Running usage remains off for Tensor engines.
 
@@ -701,7 +701,7 @@ The host persists chosen definitions and reconstructs registrations after restar
 installation and configuration Save remain separate operations.
 
 Install progress includes per-artifact and overall byte counts, Completed/Failed/Cancelled terminal
-states, and `SupportsResume = false`. Duplicate installs serialize and verify existing artifacts.
+states, and `SupportsResume = InferenceSupport.Unsupported`. Duplicate installs serialize and verify existing artifacts.
 Active leases prevent removal or repair; interrupted repair invalidates its old install manifest.
 Progress observers cannot change the installation outcome. An installed manifest is not a substitute
 for content verification; use `VerifyAsync` before treating weights as verified.

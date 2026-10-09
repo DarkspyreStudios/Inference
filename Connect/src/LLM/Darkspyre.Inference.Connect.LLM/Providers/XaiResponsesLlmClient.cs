@@ -49,22 +49,22 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
     {
         // The native cap excludes reasoning and function tokens; it does not bound total output.
         OutputLimitEnforcement = LlmOutputLimitEnforcement.Unknown,
-        SupportsStreaming = true,
-        SupportsStreamingUsage = true,
-        SupportsReasoningText = true,
-        SupportsModelListing = true,
-        SupportsJsonSchema = true,
-        SupportsJsonObject = true,
-        SupportsToolUse = true,
-        SupportsAgentSessions = true,
-        SupportsAgentToolUse = true,
-        SupportsAgentTurnInstructions = true,
-        SupportsShellTools = true,
+        SupportsStreaming = InferenceSupport.Supported,
+        SupportsStreamingUsage = InferenceSupport.Supported,
+        SupportsReasoningText = InferenceSupport.Supported,
+        SupportsModelListing = InferenceSupport.Supported,
+        SupportsJsonSchema = InferenceSupport.Supported,
+        SupportsJsonObject = InferenceSupport.Supported,
+        SupportsToolUse = InferenceSupport.Supported,
+        SupportsAgentSessions = InferenceSupport.Supported,
+        SupportsAgentToolUse = InferenceSupport.Supported,
+        SupportsAgentTurnInstructions = InferenceSupport.Supported,
+        SupportsShellTools = InferenceSupport.Supported,
         Agent = ManagedAgentPolicy.Capabilities with
         {
-            SupportsCompactionHandoff = false,
+            SupportsCompactionHandoff = InferenceSupport.Unsupported,
             CompactionOwnership = LlmAgentOwnership.Provider,
-            SupportsShellTools = true,
+            SupportsShellTools = InferenceSupport.Supported,
             SupportedCallerServices = new[] { LlmAgentCallerServiceKind.ShellExecution }.ToFrozenSet(),
             RichContentSupported = RichContentRoutes.Responses
         },
@@ -74,13 +74,13 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
         {
             ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
             StrictInputSchema = LlmStrictInputSchemaSupport.Supported,
-            SupportsParallelCalls = true,
-            SupportsParallelCallControl = true,
-            SupportsArgumentStreaming = true
+            SupportsParallelCalls = InferenceSupport.Supported,
+            SupportsParallelCallControl = InferenceSupport.Supported,
+            SupportsArgumentStreaming = InferenceSupport.Supported
         },
-        SupportsPromptDocuments = true,
-        SupportsFileReferences = true,
-        Files = new() { Upload = true, List = true, Get = true, Download = true, Delete = true, TextDownload = true, PublicUrls = true },
+        SupportsPromptDocuments = InferenceSupport.Supported,
+        SupportsFileReferences = InferenceSupport.Supported,
+        Files = new() { Upload = InferenceSupport.Supported, List = InferenceSupport.Supported, Get = InferenceSupport.Supported, Download = InferenceSupport.Supported, Delete = InferenceSupport.Supported, TextDownload = InferenceSupport.Supported, PublicUrls = InferenceSupport.Supported },
         RichContentSupported = RichContentRoutes.Responses
     };
 
@@ -95,9 +95,9 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
         LlmProviderCapabilities defaults = DefaultCapabilities with
         {
             ReasoningLevels = profile.ReasoningLevels,
-            SupportsTemperature = profile.AllowsSampling,
-            SupportsTopP = profile.AllowsSampling,
-            SupportsPromptImages = profile.AcceptsImages,
+            SupportsTemperature = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTopP = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsPromptImages = (profile.AcceptsImages ? InferenceSupport.Supported : InferenceSupport.Unsupported),
             RichContentSupported = richContent,
             Agent = DefaultCapabilities.Agent with { RichContentSupported = richContent }
         };
@@ -107,11 +107,11 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             ReasoningLevels = profile.MultiAgent is null ? capabilities.ReasoningLevels.Where(level => level is
                 LlmReasoningLevel.Low or LlmReasoningLevel.Medium or LlmReasoningLevel.High or LlmReasoningLevel.ExtraHigh).ToFrozenSet()
                 : LlmReasoningEffort.Levels(),
-            SupportsPromptImages = capabilities.SupportsPromptImages && profile.AcceptsImages,
-            SupportsTopK = false,
-            SupportsSeed = false,
-            SupportsPresencePenalty = false,
-            SupportsFrequencyPenalty = false,
+            SupportsPromptImages = ((capabilities.SupportsPromptImages != InferenceSupport.Unsupported) && profile.AcceptsImages ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTopK = InferenceSupport.Unsupported,
+            SupportsSeed = InferenceSupport.Unsupported,
+            SupportsPresencePenalty = InferenceSupport.Unsupported,
+            SupportsFrequencyPenalty = InferenceSupport.Unsupported,
             // The Responses request schema publishes no string-stop field.
             MaxStopSequences = 0,
             HostedTools = capabilities.HostedTools.Intersect(DefaultCapabilities.HostedTools).ToFrozenSet()
@@ -152,7 +152,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
         ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
         ProviderControlPolicy.Validate(connection, request);
         RequestJson.ValidateSamplingOptions(connection, request);
-        LlmAttachments.ValidateReferences(request, () => GetCapabilities(connection, request.ModelId).SupportsFileReferences, supportsResources: true);
+        LlmAttachments.ValidateReferences(request, () => (GetCapabilities(connection, request.ModelId).SupportsFileReferences != InferenceSupport.Unsupported), supportsResources: true);
         ValidateAdditionalRequest(connection, request);
     }
 
@@ -361,7 +361,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
             throw new ArgumentException("A Grok client function cannot be named web_search.", nameof(request));
         foreach (LlmFileReference file in request.Messages.SelectMany(message => message.Attachments).OfType<LlmFileReference>())
             _ = XaiFileRequestData.Identity(file.File.FileId);
-        if (request.Resources is not null && !GetCapabilities(connection, request.ModelId).SupportsPromptDocuments)
+        if (request.Resources is not null && (GetCapabilities(connection, request.ModelId).SupportsPromptDocuments == InferenceSupport.Unsupported))
             throw new NotSupportedException("This resource destination requires document input support.");
         foreach (LlmAttachment attachment in request.Messages.SelectMany(message => message.Attachments).OfType<LlmAttachment>())
             if (attachment.Kind == LlmBinaryKind.Image && attachment.Data.Length > MaxImageBytes)
@@ -507,7 +507,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
         XaiSchemaLimits.ResolveEnforcement(request.StructuredOutput, capabilities);
 
     protected override void ApplyRequestHeaders(HttpRequestMessage message, LlmConnection connection, LlmChatRequest request) =>
-        XaiRequestHeaders.Apply(message, connection, message.Method == HttpMethod.Post && GetCapabilities(connection, request.ModelId).SupportsStreaming);
+        XaiRequestHeaders.Apply(message, connection, message.Method == HttpMethod.Post && (GetCapabilities(connection, request.ModelId).SupportsStreaming != InferenceSupport.Unsupported));
 
     [SuppressMessage("Design", "CA1031", Justification = "The HTTP send boundary redacts diagnostics and keeps original failures as private evidence.")]
     public async Task<LlmTokenization> TokenizeAsync(LlmConnection connection, string modelId, string text,
@@ -586,7 +586,7 @@ internal sealed class XaiResponsesLlmClient(HttpClient http, XaiMediaDownloadCli
 
     public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
-        if (!GetCapabilities(connection).SupportsModelListing) return [];
+        if ((GetCapabilities(connection).SupportsModelListing == InferenceSupport.Unsupported)) return [];
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken);
         void Fence() { consumption.Token.ThrowIfCancellationRequested(); consumption.Fence(); }
         IReadOnlyList<JsonElement> generic = await XaiCatalog.ReadAsync(Http, connection, ModelCatalogPart.Generic, Fence, consumption.Token);

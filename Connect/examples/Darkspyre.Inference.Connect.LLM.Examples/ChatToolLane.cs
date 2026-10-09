@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Examples;
@@ -22,7 +23,7 @@ public static class ChatToolLane
             connectionId,
             modelId,
             cancellationToken);
-        if (!capabilities.SupportsToolUse)
+        if ((capabilities.SupportsToolUse == InferenceSupport.Unsupported))
         {
             throw new NotSupportedException(
                 "This connection does not support the chat tool lane. Use an agent session when SupportsAgentToolUse is true.");

@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -23,10 +24,10 @@ internal sealed class ManagedAnthropicAgentClient(AnthropicMessagesLlmClient cli
         var openingCapabilities = client.GetCapabilities(connection, options.ModelId);
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, openingCapabilities.HostedTools);
         ClientTools.ValidateManagedOpening(options, openingCapabilities,
-            supportsResources: client.CanPrepareResources && openingCapabilities.SupportsPromptDocuments);
+            supportsResources: client.CanPrepareResources && (openingCapabilities.SupportsPromptDocuments != InferenceSupport.Unsupported));
         connection = await providers.AttachCatalogAsync(connectionId, connection, client, cancellationToken).ConfigureAwait(false);
         var capabilities = client.GetCapabilities(connection, options.ModelId);
-        if (!capabilities.SupportsAgentSessions || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && !capabilities.SupportsAgentToolUse))
+        if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported) || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported)))
         {
             throw new NotSupportedException("The selected model/connection disables the requested agent operation.");
         }

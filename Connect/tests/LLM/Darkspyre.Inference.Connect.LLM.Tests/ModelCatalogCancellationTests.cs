@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Concurrent;
 using System.Net;
 using Darkspyre.Inference.Common.LLM;
@@ -147,7 +148,7 @@ public sealed class ModelCatalogCancellationTests
         public LlmTransport Transport => LlmTransport.OpenAiCompatibleChat;
         public LlmProviderDefinition ProviderDefinition => throw new NotSupportedException();
         public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) =>
-            new() { SupportsModelListing = true };
+            new() { SupportsModelListing = InferenceSupport.Supported };
         public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
             CancellationToken cancellationToken = default) => throw new NotSupportedException();
 

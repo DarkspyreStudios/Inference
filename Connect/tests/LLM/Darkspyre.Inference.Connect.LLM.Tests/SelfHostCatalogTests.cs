@@ -23,7 +23,10 @@ public sealed class SelfHostCatalogTests
         {
             Capabilities = new()
             {
-                SupportsToolUse = feature == "strict",
+                SupportsToolUse = (feature == "strict" ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+                SupportsPromptImages = InferenceSupport.Unsupported,
+                SupportsJsonSchema = InferenceSupport.Unsupported,
+                SupportsJsonObject = InferenceSupport.Unsupported,
                 Tools = new() { StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported }
             }
         };
@@ -84,7 +87,7 @@ public sealed class SelfHostCatalogTests
     [InlineData(true)]
     public async Task TemperatureAdmissionUsesTheEngineSupportFlag(bool supported)
     {
-        var engine = new Engine { Capabilities = new() { SupportsTemperature = supported } };
+        var engine = new Engine { Capabilities = new() { SupportsTemperature = (supported ? InferenceSupport.Supported : InferenceSupport.Unsupported) } };
         await using var service = new LlmProviderService(new Source(), [new SelfHostLlmClient(new Host(engine))]);
         ILlmInference inference = service.Bind("connection");
         LlmRequestAccounting measurement = await service.MeasureRequestAsync("connection", new()
@@ -203,7 +206,7 @@ public sealed class SelfHostCatalogTests
         {
             Models = [new("model", "Model") { MaxContextTokens = 4096 }],
             Capabilities = new()
-            { SupportsModelListing = true, SupportsPromptImages = true, SupportsToolUse = true, SupportsShellTools = true }
+            { SupportsModelListing = InferenceSupport.Supported, SupportsPromptImages = InferenceSupport.Supported, SupportsToolUse = InferenceSupport.Supported, SupportsShellTools = InferenceSupport.Supported }
         };
         await using var service = new LlmProviderService(new Source(), [new SelfHostLlmClient(new Host(engine))]);
         var message = new LlmChatMessage("user", "Read this content");
@@ -277,7 +280,7 @@ public sealed class SelfHostCatalogTests
     {
         private IReadOnlyList<LlmModelInfo>? _kept;
         public IReadOnlyList<LlmModelInfo> Models { get; set; } = [];
-        public LlmCapabilities Capabilities { get; init; } = new() { SupportsModelListing = true, SupportsPromptImages = true };
+        public LlmCapabilities Capabilities { get; init; } = new() { SupportsModelListing = InferenceSupport.Supported, SupportsPromptImages = InferenceSupport.Supported };
         public LlmInferenceRequest? LastRequest { get; private set; }
         public InferenceImplementationDescriptor Descriptor { get; } = new("engine", "Engine",
             InferenceImplementationKind.Tensor, InferenceTask.TextGeneration);

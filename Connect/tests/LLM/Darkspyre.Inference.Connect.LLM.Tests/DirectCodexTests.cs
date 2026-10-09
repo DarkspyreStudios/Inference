@@ -65,8 +65,8 @@ public sealed class DirectCodexTests
         Assert.Equal(65536, model.MaxContextTokens);
         LlmProviderCapabilities capabilities = await providers.GetModelCapabilitiesAsync("codex", model.Id);
         Assert.Equal(LlmReasoningLevel.Low, Assert.Single(capabilities.ReasoningLevels));
-        Assert.False(capabilities.SupportsReasoningText);
-        Assert.False(capabilities.SupportsPromptImages);
+        Assert.Equal(InferenceSupport.Unsupported, capabilities.SupportsReasoningText);
+        Assert.Equal(InferenceSupport.Unsupported, capabilities.SupportsPromptImages);
 
         LlmChatRequest prompt = Request() with { ReasoningLevel = LlmReasoningLevel.Low, ConversationKey = "conversation" };
         LlmChatResult result = await providers.CompleteAsync("codex", prompt);

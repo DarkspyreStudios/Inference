@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -7,7 +8,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// model without a profile row; it keeps the adapter's former default levels and accepts temperature at any level.
 /// </summary>
 internal sealed record OpenAiModelProfile(IReadOnlySet<LlmReasoningLevel> ReasoningLevels, bool Verified = true,
-    bool SupportsPromptCacheOptions = false)
+    InferenceSupport SupportsPromptCacheOptions = InferenceSupport.Unsupported)
 {
     public bool IsReasoning => ReasoningLevels.Count > 0;
 
@@ -41,17 +42,17 @@ internal static class OpenAiModelProfiles
         // https://developers.openai.com/api/docs/guides/latest-model: rejects none and minimal.
         ("gpt-6.1-sol", new(LlmReasoningEffort.Levels(
             LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High,
-            LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum), SupportsPromptCacheOptions: true)),
+            LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum), SupportsPromptCacheOptions: InferenceSupport.Supported)),
         // https://developers.openai.com/api/docs/guides/reasoning: rejects none.
         ("gpt-6-astra", new(LlmReasoningEffort.Levels(
             LlmReasoningLevel.Minimal, LlmReasoningLevel.Low, LlmReasoningLevel.Medium,
-            LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum), SupportsPromptCacheOptions: true)),
+            LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum), SupportsPromptCacheOptions: InferenceSupport.Supported)),
         // https://developers.openai.com/api/docs/guides/reasoning: accepts none and low to max.
         ("gpt-6-luna", new(LlmReasoningEffort.Levels(
             LlmReasoningLevel.None, LlmReasoningLevel.Low, LlmReasoningLevel.Medium,
-            LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum), SupportsPromptCacheOptions: true)),
+            LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum), SupportsPromptCacheOptions: InferenceSupport.Supported)),
         // https://developers.openai.com/api/docs/guides/reasoning: accepts every value.
-        ("gpt-5.6", new(Every, SupportsPromptCacheOptions: true)),
+        ("gpt-5.6", new(Every, SupportsPromptCacheOptions: InferenceSupport.Supported)),
         // https://developers.openai.com/api/docs/guides/reasoning: accepts every value.
         ("gpt-5.5", new(Every)),
         // https://developers.openai.com/api/docs/models/gpt-4.1: a non-reasoning model.

@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Runtime.CompilerServices;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
@@ -205,7 +206,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             sandbox,
             networkAllowed,
             allowRuntimeBackgroundWork,
-            capabilities.SupportsReasoningText);
+            (capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
         InferenceResourceSelectionVersion? resourceScope = await ReadResourceScopeAsync(resourceAccess, opening.Context, cancellationToken);
         IClaudeCliSessionProcess process;
         try
@@ -239,7 +240,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         try
         {
             session.Start();
-            await session.InitializeAsync(instructions, capabilities.SupportsReasoningText, cancellationToken);
+            await session.InitializeAsync(instructions, (capabilities.SupportsReasoningText != InferenceSupport.Unsupported), cancellationToken);
             return session;
         }
         catch (Exception original)
@@ -653,13 +654,13 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     _connection, request.ModelId ?? selectedModelId);
                 LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
                 (JsonArray input, string? openingNotice) = await PrepareInputAsync(request, selectedModelId, cancellationToken);
-                var settings = new JsonObject { ["showThinkingSummaries"] = capabilities.SupportsReasoningText };
+                var settings = new JsonObject { ["showThinkingSummaries"] = (capabilities.SupportsReasoningText != InferenceSupport.Unsupported) };
                 if (request.ReasoningLevel is { } level)
                 {
                     settings["effortLevel"] = LlmReasoningEffort.Word(level);
                 }
                 string turnId = Guid.NewGuid().ToString();
-                turn = new HostTurn(turnId, new ClaudeStreamUsage(capabilities.SupportsUsageDeltas, _accountedCalls), capabilities.SupportsReasoningText);
+                turn = new HostTurn(turnId, new ClaudeStreamUsage((capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported), _accountedCalls), (capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
                 if (!string.IsNullOrWhiteSpace(request.ModelId)
                     && !string.Equals(request.ModelId, selectedModelId, StringComparison.Ordinal))
                 {
@@ -671,7 +672,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 await SendControlRequestAsync(
                     new JsonObject { ["subtype"] = "apply_flag_settings", ["settings"] = settings },
                     cancellationToken);
-                await SetThinkingDisplayAsync(capabilities.SupportsReasoningText, cancellationToken);
+                await SetThinkingDisplayAsync((capabilities.SupportsReasoningText != InferenceSupport.Unsupported), cancellationToken);
 
                 cancellationToken.ThrowIfCancellationRequested();
                 yield return new LlmAgentTurnStartedEvent(ThreadId, turnId);
@@ -1634,7 +1635,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 }
                 LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(_connection, _selectedModelId);
                 _provider = new ProviderTurn(Guid.NewGuid().ToString(), new ClaudeStreamUsage(
-                    capabilities.SupportsUsageDeltas, _accountedCalls), capabilities.SupportsReasoningText);
+                    (capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported), _accountedCalls), (capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
                 _activeTurnId = _provider.Id;
                 _pendingToolCalls.Clear();
                 _sessionEvents.Writer.TryWrite(new LlmAgentProviderTurnStartedEvent(ThreadId, _provider.Id, _tasks.TakeLastReported()));

@@ -19,7 +19,7 @@ internal sealed class ImageTestTransport : IImageTransport
 
     public static ImageGenerationRequest Request() => new() { ModelId = "workflow", Prompt = "draw" };
 
-    public ImageTransportDescriptor Descriptor => new(ImageTransport.ComfyUi, "Controlled Image transport", "Managed fixture; no target qualification", new(false, true, true));
+    public ImageTransportDescriptor Descriptor => new(ImageTransport.ComfyUi, "Controlled Image transport", "Managed fixture; no target qualification", new(InferenceSupport.Unsupported, InferenceSupport.Supported, InferenceSupport.Supported));
 
     public Task<IReadOnlyList<ImageWorkflow>> GetWorkflowsAsync(ImageConnection connection, XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();

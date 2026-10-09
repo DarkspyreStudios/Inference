@@ -24,7 +24,7 @@ public sealed class XaiImagineImageTransport : IImageTransport, IDisposable, IAs
     private readonly List<(Exception Original, Exception Safe)> _cleanupFailures = [];
 
     public ImageTransportDescriptor Descriptor { get; } = new(ImageTransport.XaiImagine, "Grok Imagine",
-        "xAI image generation and editing", new(false, true, false) { SupportsBuiltInWorkflows = true });
+        "xAI image generation and editing", new(InferenceSupport.Unsupported, InferenceSupport.Supported, InferenceSupport.Unsupported) { SupportsBuiltInWorkflows = InferenceSupport.Supported });
 
     public Task<IReadOnlyList<ImageWorkflow>> GetWorkflowsAsync(ImageConnection connection,
         XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default) =>

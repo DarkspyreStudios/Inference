@@ -3,17 +3,17 @@ using Darkspyre.Inference.Tensor.Common;
 
 namespace Darkspyre.Inference.Tensor.STT.Whisper;
 
-internal sealed record WhisperModelMetadata(bool EnglishOnly, bool SupportsTranslation, int LanguageCount)
+internal sealed record WhisperModelMetadata(bool EnglishOnly, InferenceSupport SupportsTranslation, int LanguageCount)
 {
     // Token IDs are ordered by the Whisper vocabulary, not by culture/display-language sorting.
     private static readonly string[] LanguageCodes = ("en zh de es ru ko fr ja pt tr pl ca nl ar sv it id hi fi vi he uk el ms cs ro da hu ta no th ur hr bg lt la mi ml cy sk te fa lv bn sr az sl kn et mk br eu is hy ne mn bs kk sq sw gl mr pa si km sn yo so af oc ka be tg sd gu am yi lo uz fo ht ps tk nn mt sa lb my bo tl mg as tt haw ln ha ba jw su yue").Split(' ');
     public IReadOnlyList<string> Languages => Array.AsReadOnly(EnglishOnly ? ["en"] : LanguageCodes.Take(LanguageCount).ToArray());
-    public SpeechToTextCapabilities Capabilities => new(EnglishOnly, SupportsTranslation, !EnglishOnly, Languages,
+    public SpeechToTextCapabilities Capabilities => new(EnglishOnly, SupportsTranslation, EnglishOnly ? InferenceSupport.Unsupported : InferenceSupport.Supported, Languages,
         WhisperPcm.MinimumRate, WhisperPcm.MaximumRate, WhisperPcm.MaximumChannels);
 
     public string Language(SpeechToTextOptions options)
     {
-        if (options.TranslateToEnglish && !SupportsTranslation)
+        if (options.TranslateToEnglish && (SupportsTranslation == InferenceSupport.Unsupported))
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "This Whisper model does not support translation to English.");
         if (options.Language is null) return EnglishOnly ? "en" : "auto";
         string language = options.Language.ToLowerInvariant();
@@ -52,6 +52,6 @@ internal static class WhisperCompatibility
             || (vocabulary == 51866 && audioLayers != 32) || (turbo && vocabulary != 51866)
             || encoding is not (0 or 1))
             throw new InvalidDataException("Unsupported Whisper architecture, vocabulary or weight encoding.");
-        return new(vocabulary == 51864, vocabulary != 51864 && !turbo, vocabulary == 51866 ? 100 : 99);
+        return new(vocabulary == 51864, vocabulary != 51864 && !turbo ? InferenceSupport.Supported : InferenceSupport.Unsupported, vocabulary == 51866 ? 100 : 99);
     }
 }

@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text.Json;
@@ -33,7 +34,7 @@ public readonly record struct TensorModelInstallProgress(
     long? TotalBytes = null,
     long? OverallBytesTransferred = null,
     long? OverallTotalBytes = null,
-    bool SupportsResume = false);
+    InferenceSupport SupportsResume = InferenceSupport.Unsupported);
 
 public interface ITensorModelPackManager
 {
@@ -222,12 +223,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                     }
 
                     Report(progress, new TensorModelInstallProgress(
-                        TensorModelInstallStage.Saving,
-                        artifact.Role,
-                        artifact.Length,
-                        artifact.Length,
-                        completed + artifact.Length,
-                        total));
+                        TensorModelInstallStage.Saving,                        artifact.Role,                        artifact.Length,                        artifact.Length,                        completed + artifact.Length,                        total));
                     _directory.Publish(temporaryPath, ArtifactName(definition.Key, artifact.RelativePath));
                     completed += artifact.Length;
                 }

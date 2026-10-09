@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -132,11 +133,11 @@ public sealed record VideoCapabilities
     public int? MaximumKeyframes { get; init; }
     public int? MaximumReferenceImages { get; init; }
     public int? MaximumReferenceAudio { get; init; }
-    public bool SupportsProgress { get; init; }
-    public bool SupportsLastFrame { get; init; }
-    public bool SupportsAudioControl { get; init; }
-    public bool SupportsPresetVoiceReferences { get; init; }
-    public bool SupportsSuppliedAudioReferences { get; init; }
+    public InferenceSupport SupportsProgress { get; init; }
+    public InferenceSupport SupportsLastFrame { get; init; }
+    public InferenceSupport SupportsAudioControl { get; init; }
+    public InferenceSupport SupportsPresetVoiceReferences { get; init; }
+    public InferenceSupport SupportsSuppliedAudioReferences { get; init; }
 }
 
 /// <summary>Explicit native video operations and caller-resource materialization.</summary>

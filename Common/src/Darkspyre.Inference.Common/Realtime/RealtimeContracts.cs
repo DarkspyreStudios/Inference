@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Collections.ObjectModel;
 using System.Text.Json.Serialization;
@@ -155,14 +156,14 @@ public sealed record RealtimeCapabilities
     public IReadOnlySet<LlmHostedToolKind> SupportedHostedToolKinds { get; init => field = RealtimeData.Set(value); } = FrozenSet<LlmHostedToolKind>.Empty;
     public IReadOnlyList<int>? InputSampleRates { get; init => field = value is null ? null : RealtimeData.Copy(value); }
     public IReadOnlyList<int>? OutputSampleRates { get; init => field = value is null ? null : RealtimeData.Copy(value); }
-    public bool SupportsManualTurns { get; init; }
-    public bool SupportsServerVad { get; init; }
-    public bool SupportsClientTools { get; init; }
-    public bool SupportsStructuredToolOutput { get; init; }
-    public bool SupportsResumption { get; init; }
-    public bool SupportsBinaryTransport { get; init; }
-    public bool SupportsPronunciationReplacement { get; init; }
-    public bool SupportsForcedMessages { get; init; }
+    public InferenceSupport SupportsManualTurns { get; init; }
+    public InferenceSupport SupportsServerVad { get; init; }
+    public InferenceSupport SupportsClientTools { get; init; }
+    public InferenceSupport SupportsStructuredToolOutput { get; init; }
+    public InferenceSupport SupportsResumption { get; init; }
+    public InferenceSupport SupportsBinaryTransport { get; init; }
+    public InferenceSupport SupportsPronunciationReplacement { get; init; }
+    public InferenceSupport SupportsForcedMessages { get; init; }
 }
 
 /// <summary>One explicit session owner. Command completion means ordered send, not event consumption.</summary>

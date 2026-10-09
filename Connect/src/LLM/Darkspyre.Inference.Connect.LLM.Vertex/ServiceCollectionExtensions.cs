@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -39,9 +40,9 @@ internal sealed class ManagedVertexAgentClient(VertexLlmClient client, LlmProvid
         var openingCapabilities = client.GetCapabilities(connection, options.ModelId);
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, openingCapabilities.HostedTools);
         ClientTools.ValidateManagedOpening(options, openingCapabilities,
-            supportsResources: client.CanPrepareResources && openingCapabilities.SupportsPromptDocuments);
+            supportsResources: client.CanPrepareResources && (openingCapabilities.SupportsPromptDocuments != InferenceSupport.Unsupported));
         var capabilities = client.GetCapabilities(connection, options.ModelId);
-        if (!capabilities.SupportsAgentSessions || options.Tools.Any(tool => tool is LlmAgentToolDefinition) && !capabilities.SupportsAgentToolUse)
+        if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported) || options.Tools.Any(tool => tool is LlmAgentToolDefinition) && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported))
         { throw new NotSupportedException("The selected Vertex model disables the requested agent operation."); }
         connection = await client.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         var models = await providers.ListModelsAsync(connectionId, cancellationToken).ConfigureAwait(false);

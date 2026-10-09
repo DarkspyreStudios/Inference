@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Text.Json;
 using System.Globalization;
 using System.Net;
@@ -44,9 +45,9 @@ public sealed class BedrockSafetyTests
                         new MessageStopEvent { StopReason = new("end_turn") }]
                 };
                 var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
-                Assert.True(client.GetCapabilities(ResourceConnection(streaming), modelId).SupportsTopK);
+                Assert.Equal(InferenceSupport.Supported, client.GetCapabilities(ResourceConnection(streaming), modelId).SupportsTopK);
                 LlmConnection connection = ResourceConnection(streaming) with
-                { CapabilityOverrides = new() { SupportsStreaming = streaming, SupportsTopK = true } };
+                { CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported), SupportsTopK = InferenceSupport.Supported } };
                 if (modelId != "amazon.nova-2-lite-v1:0")
                     Assert.Empty(client.GetCapabilities(connection, modelId).ReasoningLevels);
                 LlmChatRequest request = Request() with { ModelId = modelId, TopK = topK };
@@ -449,7 +450,7 @@ public sealed class BedrockSafetyTests
         var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
         LlmConnection connection = ResourceConnection(streaming) with
         {
-            CapabilityOverrides = new() { SupportsStreaming = streaming, SupportsJsonSchema = nativeSchema }
+            CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported), SupportsJsonSchema = (nativeSchema ? InferenceSupport.Supported : InferenceSupport.Unsupported) }
         };
         LlmChatRequest request = Request() with
         {
@@ -520,16 +521,16 @@ public sealed class BedrockSafetyTests
         foreach (string model in new[] { "openai.gpt-oss-20b-1:0", "openai.gpt-oss-120b-1:0",
                      "anthropic.claude-sonnet-4-6", "us.anthropic.claude-sonnet-4-6" })
         {
-            Assert.True(client.GetCapabilities(Connection(), model).SupportsJsonSchema);
-            Assert.False(client.GetCapabilities(Connection() with
-            { CapabilityOverrides = new() { SupportsJsonSchema = false } }, model).SupportsJsonSchema);
+            Assert.Equal(InferenceSupport.Supported, client.GetCapabilities(Connection(), model).SupportsJsonSchema);
+            Assert.Equal(InferenceSupport.Unsupported, client.GetCapabilities(Connection() with
+            { CapabilityOverrides = new() { SupportsJsonSchema = InferenceSupport.Unsupported } }, model).SupportsJsonSchema);
         }
         foreach (string model in new[] { "openai.gpt-oss-20b-2:0", "anthropic.claude-haiku",
                      "arn:aws:bedrock:us-east-1:123456789012:inference-profile/unknown" })
         {
-            Assert.False(client.GetCapabilities(Connection(), model).SupportsJsonSchema);
-            Assert.True(client.GetCapabilities(Connection() with
-            { CapabilityOverrides = new() { SupportsJsonSchema = true } }, model).SupportsJsonSchema);
+            Assert.Equal(InferenceSupport.Unsupported, client.GetCapabilities(Connection(), model).SupportsJsonSchema);
+            Assert.Equal(InferenceSupport.Supported, client.GetCapabilities(Connection() with
+            { CapabilityOverrides = new() { SupportsJsonSchema = InferenceSupport.Supported } }, model).SupportsJsonSchema);
         }
     }
 
@@ -549,8 +550,8 @@ public sealed class BedrockSafetyTests
         Assert.Contains(LlmReasoningLevel.Low, capabilities.ReasoningLevels);
         Assert.True(BedrockModelResolver.LooksLikeInferenceProfile(modelId));
         Assert.Equal(BedrockModelLimits.Get(baseModel), BedrockModelLimits.Get(modelId));
-        Assert.Equal(nativeSchema, capabilities.SupportsJsonSchema);
-        Assert.True(capabilities.PromptCache.AcceptsHints);
+        Assert.Equal(nativeSchema ? InferenceSupport.Supported : InferenceSupport.Unsupported, capabilities.SupportsJsonSchema);
+        Assert.Equal(InferenceSupport.Supported, capabilities.PromptCache.AcceptsHints);
         LlmChatRequest request = Request() with
         {
             ModelId = modelId,
@@ -599,9 +600,9 @@ public sealed class BedrockSafetyTests
         LlmConnection connection = Connection();
         LlmProviderCapabilities capabilities = client.GetCapabilities(connection, modelId);
         Assert.Contains(LlmReasoningLevel.Low, capabilities.ReasoningLevels);
-        Assert.True(capabilities.SupportsJsonSchema);
-        Assert.False(capabilities.SupportsPromptImages);
-        Assert.False(capabilities.SupportsPromptDocuments);
+        Assert.Equal(InferenceSupport.Supported, capabilities.SupportsJsonSchema);
+        Assert.Equal(InferenceSupport.Unsupported, capabilities.SupportsPromptImages);
+        Assert.Equal(InferenceSupport.Unsupported, capabilities.SupportsPromptDocuments);
         Assert.True(BedrockModelResolver.LooksLikeInferenceProfile(modelId));
         Assert.Equal(BedrockModelFamily.OpenAiGptOss, BedrockModelFamilies.Classify(modelId).Family);
         Assert.Equal(baseModel, BedrockModelFamilies.Classify(modelId).BaseModelId);
@@ -640,7 +641,7 @@ public sealed class BedrockSafetyTests
         var invoker = new StubConverseInvoker();
         var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
         LlmConnection connection = ResourceConnection(streaming: true) with
-        { CapabilityOverrides = new() { SupportsJsonSchema = true } };
+        { CapabilityOverrides = new() { SupportsJsonSchema = InferenceSupport.Supported } };
         LlmChatRequest request = Request() with
         {
             ModelId = "in.anthropic.claude-haiku-4-5-20251001-v1:0",
@@ -766,7 +767,7 @@ public sealed class BedrockSafetyTests
             StructuredOutput = new() { Name = "answer", Schema = JsonElement.Parse("""{"type":"object"}""") }
         };
         LlmConnection connection = ResourceConnection(streaming: true) with
-        { CapabilityOverrides = new() { SupportsJsonSchema = true } };
+        { CapabilityOverrides = new() { SupportsJsonSchema = InferenceSupport.Supported } };
         NotSupportedException failure = await Assert.ThrowsAsync<NotSupportedException>(async () =>
         {
             await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
@@ -831,7 +832,7 @@ public sealed class BedrockSafetyTests
         };
 
         LlmProviderCapabilities capabilities = client.ValidateRequest(connection, request);
-        Assert.True(capabilities.SupportsJsonSchema);
+        Assert.Equal(InferenceSupport.Supported, capabilities.SupportsJsonSchema);
         LlmStructuredOutputEnforcement enforcement = StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
         Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, enforcement);
         ConverseRequest built = BedrockLlmClient.BuildRequest(connection, request, modelId, enforcement);
@@ -866,7 +867,7 @@ public sealed class BedrockSafetyTests
         var invoker = new StubConverseInvoker();
         var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
         LlmConnection connection = ResourceConnection(streaming: true) with
-        { CapabilityOverrides = new() { SupportsJsonSchema = true, SupportsJsonObject = jsonObject } };
+        { CapabilityOverrides = new() { SupportsJsonSchema = InferenceSupport.Supported, SupportsJsonObject = (jsonObject ? InferenceSupport.Supported : InferenceSupport.Unsupported) } };
         LlmChatRequest request = Request() with
         { StructuredOutput = new() { Name = name, Schema = JsonElement.Parse(schema) } };
         Exception error = await Assert.ThrowsAnyAsync<Exception>(async () =>
@@ -1063,10 +1064,10 @@ public sealed class BedrockSafetyTests
         });
         Assert.Equal("The selected connection does not support host-executed tools.", failure.Message);
         LlmProviderCapabilities capabilities = client.GetCapabilities(Connection(), modelId);
-        Assert.False(capabilities.SupportsToolUse);
-        Assert.False(capabilities.SupportsAgentToolUse);
+        Assert.Equal(InferenceSupport.Unsupported, capabilities.SupportsToolUse);
+        Assert.Equal(InferenceSupport.Unsupported, capabilities.SupportsAgentToolUse);
         Assert.Empty(capabilities.Tools.ChoiceModes);
-        Assert.True(capabilities.SupportsAgentSessions);
+        Assert.Equal(InferenceSupport.Supported, capabilities.SupportsAgentSessions);
         _ = client.ValidateRequest(Connection(), Request() with { ModelId = modelId });
         Assert.Equal(0, acquired);
         Assert.Empty(invoker.ConverseRequests);
@@ -1086,7 +1087,7 @@ public sealed class BedrockSafetyTests
         var invoker = new StubConverseInvoker();
         var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
         const string modelId = "us.deepseek.r1-v1:0";
-        var overrides = new LlmCapabilityOverrides { SupportsToolUse = true };
+        var overrides = new LlmCapabilityOverrides { SupportsToolUse = InferenceSupport.Supported };
         LlmConnection connection = perModel
             ? ResourceConnection(streaming: true) with { ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides> { [modelId] = overrides } }
             : ResourceConnection(streaming: true) with { CapabilityOverrides = overrides };
@@ -1116,8 +1117,8 @@ public sealed class BedrockSafetyTests
         var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
         LlmConnection connection = Connection();
         LlmProviderCapabilities capabilities = client.GetCapabilities(connection, modelId);
-        Assert.False(capabilities.SupportsPromptImages);
-        Assert.False(capabilities.SupportsPromptDocuments);
+        Assert.Equal(InferenceSupport.Unsupported, capabilities.SupportsPromptImages);
+        Assert.Equal(InferenceSupport.Unsupported, capabilities.SupportsPromptDocuments);
         Assert.Equal(LlmRichContentCarriage.Unsupported, capabilities.RichContentSupported.Images);
         Assert.Equal(LlmRichContentCarriage.Unsupported, capabilities.RichContentSupported.PdfDocuments);
         Assert.Equal(LlmRichContentCarriage.Text, capabilities.RichContentSupported.TextDocuments);
@@ -1137,7 +1138,7 @@ public sealed class BedrockSafetyTests
         Assert.Empty(invoker.ConverseRequests);
         Assert.Empty(invoker.StreamRequests);
         Assert.Throws<NotSupportedException>(() => client.GetCapabilities(connection with
-        { CapabilityOverrides = new() { SupportsPromptDocuments = true } }, modelId));
+        { CapabilityOverrides = new() { SupportsPromptDocuments = InferenceSupport.Supported } }, modelId));
 
         ConverseRequest request = BedrockLlmClient.BuildRequest(connection, Request(messages:
         [
@@ -1343,7 +1344,7 @@ public sealed class BedrockSafetyTests
         LlmConnection connection = Connection() with
         {
             ResolvedContinuationScope = "fixture-scope",
-            CapabilityOverrides = new() { SupportsStreaming = false },
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported },
             Credential = new LlmCredential
             {
                 Aws = new() { Region = "us-east-1", AccessKeyId = "fixture-key", SecretAccessKey = "fixture-secret" }
@@ -1554,7 +1555,7 @@ public sealed class BedrockSafetyTests
         var client = new BedrockLlmClient(factory, guard, invoker, NullLogger<BedrockLlmClient>.Instance);
         LlmConnection connection = Connection() with
         {
-            CapabilityOverrides = new() { SupportsStreaming = streaming },
+            CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) },
             Credential = new LlmCredential
             {
                 Aws = new() { Region = "us-east-1", AccessKeyId = "fixture-key", SecretAccessKey = "fixture-secret" }
@@ -1614,7 +1615,7 @@ public sealed class BedrockSafetyTests
         LlmConnection connection = Connection() with
         {
             ResolvedContinuationScope = "fixture-scope",
-            CapabilityOverrides = new() { SupportsStreaming = streaming },
+            CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) },
             Credential = new LlmCredential
             {
                 Aws = new() { Region = "us-east-1", AccessKeyId = "fixture-key", SecretAccessKey = "fixture-secret" }
@@ -1973,7 +1974,7 @@ public sealed class BedrockSafetyTests
 
     private static LlmConnection ResourceConnection(bool streaming) => Connection() with
     {
-        CapabilityOverrides = new() { SupportsStreaming = streaming },
+        CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) },
         Credential = new LlmCredential
         { Aws = new() { Region = "us-east-1", AccessKeyId = "fixture-key", SecretAccessKey = "fixture-secret" } }.Serialize()
     };

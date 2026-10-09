@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Net.Http.Headers;
 using System.Runtime.CompilerServices;
@@ -35,31 +36,31 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.ProviderEnforced,
-        SupportsStreaming = true,
-        SupportsReasoningText = true,
-        SupportsStreamingUsage = true,
-        SupportsUsageDeltas = true,
-        SupportsModelListing = true,
-        SupportsAccountUsage = false,
+        SupportsStreaming = InferenceSupport.Supported,
+        SupportsReasoningText = InferenceSupport.Supported,
+        SupportsStreamingUsage = InferenceSupport.Supported,
+        SupportsUsageDeltas = InferenceSupport.Supported,
+        SupportsModelListing = InferenceSupport.Supported,
+        SupportsAccountUsage = InferenceSupport.Unsupported,
         PromptCache = PromptCaching.Claude,
-        SupportsJsonSchema = false,
-        SupportsJsonObject = false,
-        SupportsTemperature = false,
-        SupportsToolUse = true,
-        SupportsAgentSessions = true,
-        SupportsAgentToolUse = true,
-        SupportsAgentTurnInstructions = true,
+        SupportsJsonSchema = InferenceSupport.Unsupported,
+        SupportsJsonObject = InferenceSupport.Unsupported,
+        SupportsTemperature = InferenceSupport.Unsupported,
+        SupportsToolUse = InferenceSupport.Supported,
+        SupportsAgentSessions = InferenceSupport.Supported,
+        SupportsAgentToolUse = InferenceSupport.Supported,
+        SupportsAgentTurnInstructions = InferenceSupport.Supported,
         Agent = ManagedAgentPolicy.Capabilities with { RichContentSupported = RichContentRoutes.Anthropic },
         Tools = new()
         {
             ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
             StrictInputSchema = LlmStrictInputSchemaSupport.Unknown,
-            SupportsParallelCalls = true,
-            SupportsParallelCallControl = true,
-            SupportsArgumentStreaming = true
+            SupportsParallelCalls = InferenceSupport.Supported,
+            SupportsParallelCallControl = InferenceSupport.Supported,
+            SupportsArgumentStreaming = InferenceSupport.Supported
         },
-        SupportsPromptImages = true,
-        SupportsPromptDocuments = true,
+        SupportsPromptImages = InferenceSupport.Supported,
+        SupportsPromptDocuments = InferenceSupport.Supported,
         RichContentSupported = RichContentRoutes.Anthropic
     };
 
@@ -77,29 +78,29 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         }
         return capabilities with
         {
-            SupportsJsonSchema = profile.SupportsStructuredOutputs != false
-                && (LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsJsonSchema)
-                    ? capabilities.SupportsJsonSchema : profile.SupportsStructuredOutputs == true),
-            SupportsJsonObject = false,
+            SupportsJsonSchema = LlmProviderCapabilities.Intersect(profile.SupportsStructuredOutputs ?? InferenceSupport.Unknown,
+                LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsJsonSchema)
+                    ? capabilities.SupportsJsonSchema : profile.SupportsStructuredOutputs ?? InferenceSupport.Unknown),
+            SupportsJsonObject = InferenceSupport.Unsupported,
             Tools = capabilities.Tools with
             {
                 StrictInputSchema = profile.SupportsStructuredOutputs switch
                 {
-                    true => LlmStrictInputSchemaSupport.Supported,
-                    false => LlmStrictInputSchemaSupport.Unsupported,
-                    null => LlmStrictInputSchemaSupport.Unknown
+                    InferenceSupport.Supported => LlmStrictInputSchemaSupport.Supported,
+                    InferenceSupport.Unsupported => LlmStrictInputSchemaSupport.Unsupported,
+                    _ => LlmStrictInputSchemaSupport.Unknown
                 }
             },
-            SupportsAccountUsage = false,
-            SupportsTemperature = profile.AllowsSampling
-                && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTemperature) || capabilities.SupportsTemperature),
-            SupportsTopP = profile.AllowsSampling
-                && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTopP) || capabilities.SupportsTopP),
-            SupportsTopK = profile.AllowsSampling
-                && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTopK) || capabilities.SupportsTopK),
-            SupportsSeed = false,
-            SupportsPresencePenalty = false,
-            SupportsFrequencyPenalty = false,
+            SupportsAccountUsage = InferenceSupport.Unsupported,
+            SupportsTemperature = (profile.AllowsSampling
+                && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTemperature) || (capabilities.SupportsTemperature != InferenceSupport.Unsupported)) ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTopP = (profile.AllowsSampling
+                && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTopP) || (capabilities.SupportsTopP != InferenceSupport.Unsupported)) ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTopK = (profile.AllowsSampling
+                && (!LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTopK) || (capabilities.SupportsTopK != InferenceSupport.Unsupported)) ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsSeed = InferenceSupport.Unsupported,
+            SupportsPresencePenalty = InferenceSupport.Unsupported,
+            SupportsFrequencyPenalty = InferenceSupport.Unsupported,
             MaxStopSequences = LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.MaxStopSequences)
                 ? capabilities.MaxStopSequences : int.MaxValue,
             ReasoningLevels = LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.ReasoningLevels)
@@ -200,7 +201,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     {
         var (capabilities, enforcement) = ValidateMessagesRequest(connection, request);
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
-        bool stream = capabilities.SupportsStreaming;
+        bool stream = (capabilities.SupportsStreaming != InferenceSupport.Unsupported);
         JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), stream);
         using HttpRequestMessage httpRequest = CreateHttpRequest(connection, request, payload, stream);
 
@@ -223,7 +224,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         {
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(
-                         body, response, connection, request, enforcement, credential, secrets, capabilities.SupportsReasoningText))
+                         body, response, connection, request, enforcement, credential, secrets, (capabilities.SupportsReasoningText != InferenceSupport.Unsupported)))
             {
                 yield return consumption.Publish<LlmStreamEvent>(completeEvent);
             }
@@ -246,7 +247,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         string? lastEvent = null;
         var toolCalls = new Dictionary<int, AnthropicToolCallBuilder>();
         var streamedContent = new AnthropicContentStream();
-        var usageDeltas = new UsageDeltas(capabilities.SupportsUsageDeltas);
+        var usageDeltas = new UsageDeltas((capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported));
 
         await foreach (string data in Sse.ReadDataPayloadsAsync(events, cancellationToken))
         {
@@ -306,7 +307,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             && LlmJson.GetString(thinkingDelta, "type") == "thinking_delta"
                             && LlmJson.GetString(thinkingDelta, "thinking") is { Length: > 0 } thinking)
                         {
-                            if (capabilities.SupportsReasoningText) { yield return consumption.Publish<LlmStreamEvent>(new LlmReasoningDeltaEvent(thinking, true)); }
+                            if ((capabilities.SupportsReasoningText != InferenceSupport.Unsupported)) { yield return consumption.Publish<LlmStreamEvent>(new LlmReasoningDeltaEvent(thinking, true)); }
                         }
                         else if (LlmJson.GetObject(root, "delta") is { } toolDelta
                             && LlmJson.GetString(toolDelta, "type") == "input_json_delta")
@@ -827,7 +828,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 ILlmCatalogCapabilities.EntryFor(connection, request.ModelId)),
             request.ReasoningLevel,
             request.MaxOutputTokens ?? DefaultMaxOutputTokens,
-            GetCapabilities(connection, request.ModelId).SupportsReasoningText);
+            (GetCapabilities(connection, request.ModelId).SupportsReasoningText != InferenceSupport.Unsupported));
         if (fields.Thinking is { } thinking)
         {
             payload["thinking"] = thinking;

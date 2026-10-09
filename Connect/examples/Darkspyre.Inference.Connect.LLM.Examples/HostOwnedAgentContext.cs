@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Runtime.CompilerServices;
 
 namespace Darkspyre.Inference.Connect.LLM.Examples;
@@ -43,10 +44,10 @@ public static class HostOwnedAgentContext
         ArgumentNullException.ThrowIfNull(agents);
         ArgumentNullException.ThrowIfNull(options);
         var capabilities = await providers.GetModelCapabilitiesAsync(connectionId, options.ModelId, cancellationToken);
-        if (!capabilities.SupportsAgentSessions
+        if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported)
             || capabilities.Agent.ContextOwnership != LlmAgentOwnership.Host
-            || !capabilities.Agent.SupportsContextCapture
-            || !capabilities.Agent.SupportsContextReplacement)
+            || (capabilities.Agent.SupportsContextCapture == InferenceSupport.Unsupported)
+            || (capabilities.Agent.SupportsContextReplacement == InferenceSupport.Unsupported))
         {
             throw new NotSupportedException("This runtime cannot open a host-owned conversation snapshot.");
         }
@@ -63,7 +64,7 @@ public static class HostOwnedAgentContext
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(pause);
         var capabilities = await session.GetCapabilitiesAsync(cancellationToken);
-        if (!capabilities.SupportsCompactionHandoff || !capabilities.SupportsContextCapture)
+        if ((capabilities.SupportsCompactionHandoff == InferenceSupport.Unsupported) || (capabilities.SupportsContextCapture == InferenceSupport.Unsupported))
         {
             throw new NotSupportedException("This runtime does not support host compaction handoff.");
         }

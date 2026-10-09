@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -27,13 +28,13 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
     protected override LlmProviderCapabilities DefaultCapabilities => base.DefaultCapabilities with
     {
         OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
-        SupportsStreaming = false,
-        SupportsStreamingUsage = false,
-        SupportsJsonSchema = true,
-        SupportsJsonObject = true,
-        SupportsPromptImages = true,
-        SupportsPromptDocuments = true,
-        SupportsFileReferences = true,
+        SupportsStreaming = InferenceSupport.Unsupported,
+        SupportsStreamingUsage = InferenceSupport.Unsupported,
+        SupportsJsonSchema = InferenceSupport.Supported,
+        SupportsJsonObject = InferenceSupport.Supported,
+        SupportsPromptImages = InferenceSupport.Supported,
+        SupportsPromptDocuments = InferenceSupport.Supported,
+        SupportsFileReferences = InferenceSupport.Supported,
         Tools = base.DefaultCapabilities.Tools with { StrictInputSchema = LlmStrictInputSchemaSupport.Supported }
     };
 
@@ -45,22 +46,22 @@ internal sealed class XaiDeferredChatCodec(HttpClient http) : ChatCompletionsLlm
         LlmProviderCapabilities defaults = DefaultCapabilities with
         {
             ReasoningLevels = profile.ReasoningLevels,
-            SupportsTemperature = profile.AllowsSampling,
-            SupportsTopP = profile.AllowsSampling,
-            SupportsPromptImages = profile.AcceptsImages,
-            SupportsPresencePenalty = !reasoning,
-            SupportsFrequencyPenalty = !reasoning,
+            SupportsTemperature = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTopP = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsPromptImages = (profile.AcceptsImages ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsPresencePenalty = (!reasoning ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsFrequencyPenalty = (!reasoning ? InferenceSupport.Supported : InferenceSupport.Unsupported),
             MaxStopSequences = reasoning ? 0 : 4
         };
         LlmProviderCapabilities capabilities = LlmCapabilityOverrideLookup.Apply(defaults, connection, modelId, false);
         return capabilities with
         {
-            SupportsStreaming = false,
-            SupportsStreamingUsage = false,
-            SupportsTopK = false,
-            SupportsExplicitCache = false,
-            SupportsPromptImages = capabilities.SupportsPromptImages && profile.AcceptsImages,
-            SupportsShellTools = false,
+            SupportsStreaming = InferenceSupport.Unsupported,
+            SupportsStreamingUsage = InferenceSupport.Unsupported,
+            SupportsTopK = InferenceSupport.Unsupported,
+            SupportsExplicitCache = InferenceSupport.Unsupported,
+            SupportsPromptImages = ((capabilities.SupportsPromptImages != InferenceSupport.Unsupported) && profile.AcceptsImages ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsShellTools = InferenceSupport.Unsupported,
             HostedTools = FrozenSet<LlmHostedToolKind>.Empty
         };
     }

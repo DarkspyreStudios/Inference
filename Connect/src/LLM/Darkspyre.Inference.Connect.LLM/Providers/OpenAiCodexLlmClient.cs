@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -29,32 +30,32 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unsupported,
-        SupportsStreaming = true,
-        SupportsReasoningText = true,
-        SupportsStreamingUsage = true,
-        SupportsModelListing = true,
-        SupportsAccountUsage = true,
+        SupportsStreaming = InferenceSupport.Supported,
+        SupportsReasoningText = InferenceSupport.Supported,
+        SupportsStreamingUsage = InferenceSupport.Supported,
+        SupportsModelListing = InferenceSupport.Supported,
+        SupportsAccountUsage = InferenceSupport.Supported,
         PromptCache = PromptCaching.Automatic,
-        SupportsJsonSchema = true,
+        SupportsJsonSchema = InferenceSupport.Supported,
         // A model whose catalog entry lists its reasoning levels offers exactly those; see GetCapabilities.
         ReasoningLevels = LlmReasoningEffort.Levels(
             LlmReasoningLevel.Minimal, LlmReasoningLevel.Low, LlmReasoningLevel.Medium,
             LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh),
-        SupportsToolUse = true,
+        SupportsToolUse = InferenceSupport.Supported,
         Tools = new()
         {
             ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
             StrictInputSchema = LlmStrictInputSchemaSupport.Supported,
-            SupportsParallelCalls = true,
-            SupportsParallelCallControl = true,
-            SupportsArgumentStreaming = true
+            SupportsParallelCalls = InferenceSupport.Supported,
+            SupportsParallelCallControl = InferenceSupport.Supported,
+            SupportsArgumentStreaming = InferenceSupport.Supported
         },
-        SupportsAgentSessions = true,
-        SupportsAgentToolUse = true,
-        SupportsAgentTurnInstructions = true,
-        Agent = ManagedAgentPolicy.Capabilities with { SupportsProviderCompaction = true },
-        SupportsPromptImages = true,
-        SupportsPromptDocuments = true,
+        SupportsAgentSessions = InferenceSupport.Supported,
+        SupportsAgentToolUse = InferenceSupport.Supported,
+        SupportsAgentTurnInstructions = InferenceSupport.Supported,
+        Agent = ManagedAgentPolicy.Capabilities with { SupportsProviderCompaction = InferenceSupport.Supported },
+        SupportsPromptImages = InferenceSupport.Supported,
+        SupportsPromptDocuments = InferenceSupport.Supported,
         RichContentSupported = RichContentRoutes.Responses
     };
 
@@ -64,25 +65,40 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         LlmProviderCapabilities capabilities = base.GetCapabilities(connection, modelId);
         JsonElement? entry = ILlmCatalogCapabilities.EntryFor(connection, modelId);
         bool? supportsImages = CatalogSupportsImages(entry);
-        bool? toolImages = LlmCapabilityOverrideLookup.Overrides(connection, modelId,
-            overrides => overrides.SupportsToolResultImages) ? null : supportsImages;
+        InferenceSupport? toolImages = LlmCapabilityOverrideLookup.Overrides(connection, modelId,
+            overrides => overrides.SupportsToolResultImages) ? null : supportsImages switch
+            {
+                true => InferenceSupport.Supported,
+                false => InferenceSupport.Unsupported,
+                _ => InferenceSupport.Unknown
+            };
         return capabilities with
         {
-            SupportsTemperature = false,
-            SupportsTopP = false,
-            SupportsTopK = false,
-            SupportsSeed = false,
-            SupportsPresencePenalty = false,
-            SupportsFrequencyPenalty = false,
+            SupportsTemperature = InferenceSupport.Unsupported,
+            SupportsTopP = InferenceSupport.Unsupported,
+            SupportsTopK = InferenceSupport.Unsupported,
+            SupportsSeed = InferenceSupport.Unsupported,
+            SupportsPresencePenalty = InferenceSupport.Unsupported,
+            SupportsFrequencyPenalty = InferenceSupport.Unsupported,
             MaxStopSequences = 0,
-            SupportsJsonObject = false,
+            SupportsJsonObject = InferenceSupport.Unsupported,
             SupportsReasoningText = !LlmCapabilityOverrideLookup.Overrides(connection, modelId,
                 overrides => overrides.SupportsReasoningText)
-                    ? CatalogSupportsReasoningText(entry) ?? capabilities.SupportsReasoningText
+                    ? CatalogSupportsReasoningText(entry) switch
+                    {
+                        true => InferenceSupport.Supported,
+                        false => InferenceSupport.Unsupported,
+                        _ => capabilities.SupportsReasoningText
+                    }
                     : capabilities.SupportsReasoningText,
             SupportsPromptImages = !LlmCapabilityOverrideLookup.Overrides(connection, modelId,
                 overrides => overrides.SupportsPromptImages)
-                    ? supportsImages ?? capabilities.SupportsPromptImages
+                    ? supportsImages switch
+                    {
+                        true => InferenceSupport.Supported,
+                        false => InferenceSupport.Unsupported,
+                        _ => capabilities.SupportsPromptImages
+                    }
                     : capabilities.SupportsPromptImages,
             RichContentSupported = capabilities.RichContentSupported.Restrict(toolImages, null),
             Agent = capabilities.Agent with
@@ -179,7 +195,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
     protected override bool ReasonsByDefault(LlmConnection connection, string modelId) =>
         CatalogLevels(ILlmCatalogCapabilities.EntryFor(connection, modelId)) is { } levels
             ? levels.Any(level => level > LlmReasoningLevel.None)
-            : GetCapabilities(connection, modelId).SupportsReasoning;
+            : (GetCapabilities(connection, modelId).SupportsReasoning != InferenceSupport.Unsupported);
 
     protected override void ApplyRequestHeaders(
         HttpRequestMessage message, LlmConnection connection, LlmChatRequest request)
@@ -197,7 +213,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
     public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(
         LlmConnection connection, CancellationToken cancellationToken = default)
     {
-        if (!GetCapabilities(connection).SupportsModelListing) { return []; }
+        if ((GetCapabilities(connection).SupportsModelListing == InferenceSupport.Unsupported)) { return []; }
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         var result = new List<LlmModel>();
         {
@@ -250,7 +266,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
     public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(
         LlmConnection connection, CancellationToken cancellationToken = default)
     {
-        if (!GetCapabilities(connection).SupportsAccountUsage)
+        if ((GetCapabilities(connection).SupportsAccountUsage == InferenceSupport.Unsupported))
         {
             throw new NotSupportedException("The connection disables account usage.");
         }

@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -33,7 +34,7 @@ internal sealed record AnthropicModelProfile(
     IReadOnlySet<LlmReasoningLevel> ReasoningLevels,
     bool AllowsSampling,
     bool AllowsForcedToolChoice,
-    bool? SupportsStructuredOutputs,
+    InferenceSupport? SupportsStructuredOutputs,
     long? MaxInputTokens,
     long? MaxOutputTokens)
 {
@@ -182,14 +183,13 @@ internal static class AnthropicModelProfiles
                 levels.Add(LlmReasoningLevel.None);
             }
             return new AnthropicModelProfile(
-                thinking,
-                none,
-                levels.ToFrozenSet(),
-                row?.AllowsSampling ?? false,
-                row?.AllowsForcedToolChoice ?? true,
-                Supported(entry, "capabilities", "structured_outputs"),
-                Long(entry, "max_input_tokens"),
-                Long(entry, "max_tokens"))
+                thinking, none, levels.ToFrozenSet(), row?.AllowsSampling ?? false, row?.AllowsForcedToolChoice ?? true,
+                Supported(entry, "capabilities", "structured_outputs") switch
+                {
+                    true => InferenceSupport.Supported,
+                    false => InferenceSupport.Unsupported,
+                    _ => InferenceSupport.Unknown
+                }, Long(entry, "max_input_tokens"), Long(entry, "max_tokens"))
             {
                 ThinksByDefault = thinking == AnthropicThinkingMode.Adaptive && row?.ThinksByDefault == true,
                 DisplayDefaultsToOmitted = row?.DisplayDefaultsToOmitted == true
@@ -198,8 +198,7 @@ internal static class AnthropicModelProfiles
 
         return row is null
             ? Unknown
-            : new AnthropicModelProfile(row.Thinking, row.NoneMapping, row.Levels, row.AllowsSampling,
-                row.AllowsForcedToolChoice, SupportsStructuredOutputs: null, MaxInputTokens: null, MaxOutputTokens: null)
+            : new AnthropicModelProfile(row.Thinking,row.NoneMapping,row.Levels,row.AllowsSampling,                row.AllowsForcedToolChoice,SupportsStructuredOutputs: null,MaxInputTokens: null,MaxOutputTokens: null)
             { ThinksByDefault = row.ThinksByDefault, DisplayDefaultsToOmitted = row.DisplayDefaultsToOmitted };
     }
 

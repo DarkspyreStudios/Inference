@@ -60,10 +60,10 @@ public sealed class SupraImageInference : ITensorImageInference
         return new ImageCapabilities
         {
             SupportedSizes = [new(SupraDiT.ImageSize, SupraDiT.ImageSize)],
-            SupportsNegativePrompt = false,
-            SupportsSeed = true,
-            SupportsSteps = true,
-            SupportsGuidanceScale = true,
+            SupportsNegativePrompt = InferenceSupport.Unsupported,
+            SupportsSeed = InferenceSupport.Supported,
+            SupportsSteps = InferenceSupport.Supported,
+            SupportsGuidanceScale = InferenceSupport.Supported,
             MaximumImageCount = MaximumCount
         };
     }

@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using Darkspyre.Inference.Common.LLM;
 
@@ -12,37 +13,37 @@ internal static class GeminiCapabilities
             : RichContentRoutes.TextOnly with { ErrorFlag = LlmRichContentCarriage.Native };
         return new()
         {
-            SupportsStreaming = true,
-            SupportsReasoningText = true,
-            SupportsStreamingUsage = true,
-            SupportsUsageDeltas = true,
-            SupportsModelListing = true,
+            SupportsStreaming = InferenceSupport.Supported,
+            SupportsReasoningText = InferenceSupport.Supported,
+            SupportsStreamingUsage = InferenceSupport.Supported,
+            SupportsUsageDeltas = InferenceSupport.Supported,
+            SupportsModelListing = InferenceSupport.Supported,
             PromptCache = PromptCaching.Automatic,
             OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
-            SupportsJsonSchema = true,
-            SupportsTemperature = profile.AllowsSampling,
-            SupportsTopP = profile.AllowsSampling,
-            SupportsTopK = profile.AllowsSampling && supportsTopK,
-            SupportsSeed = true,
-            SupportsPresencePenalty = profile.AllowsSampling,
-            SupportsFrequencyPenalty = profile.AllowsSampling,
+            SupportsJsonSchema = InferenceSupport.Supported,
+            SupportsTemperature = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTopP = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTopK = (profile.AllowsSampling && supportsTopK ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsSeed = InferenceSupport.Supported,
+            SupportsPresencePenalty = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsFrequencyPenalty = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
             MaxStopSequences = 5,
-            SupportsToolUse = true,
+            SupportsToolUse = InferenceSupport.Supported,
             Tools = new()
             {
                 ChoiceModes = Enum.GetValues<LlmToolChoiceMode>().ToFrozenSet(),
                 StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported,
-                SupportsParallelCalls = true,
-                SupportsParallelCallControl = false,
-                SupportsArgumentStreaming = false
+                SupportsParallelCalls = InferenceSupport.Supported,
+                SupportsParallelCallControl = InferenceSupport.Unsupported,
+                SupportsArgumentStreaming = InferenceSupport.Unsupported
             },
             ReasoningLevels = profile.Levels,
-            SupportsPromptImages = true,
-            SupportsPromptDocuments = true,
+            SupportsPromptImages = InferenceSupport.Supported,
+            SupportsPromptDocuments = InferenceSupport.Supported,
             RichContentSupported = rich,
-            SupportsAgentSessions = true,
-            SupportsAgentToolUse = true,
-            SupportsAgentTurnInstructions = true,
+            SupportsAgentSessions = InferenceSupport.Supported,
+            SupportsAgentToolUse = InferenceSupport.Supported,
+            SupportsAgentTurnInstructions = InferenceSupport.Supported,
             Agent = ManagedAgentPolicy.Capabilities with { RichContentSupported = rich }
         };
     }

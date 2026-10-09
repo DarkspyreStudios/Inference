@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Net;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
@@ -25,7 +26,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
 
     public override LlmTransport Transport => LlmTransport.GoogleGeminiApi;
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.GeminiApi;
-    protected override LlmProviderCapabilities DefaultCapabilities => new() { SupportsModelListing = true };
+    protected override LlmProviderCapabilities DefaultCapabilities => new() { SupportsModelListing = InferenceSupport.Supported };
     protected override bool OffersNonStreamingRequests => true;
     protected override bool SupportsResourcePreparation => true;
 
@@ -39,17 +40,17 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             && entry.TryGetProperty("topK", out JsonElement topK) && topK.ValueKind == JsonValueKind.Number
             && topK.TryGetInt32(out int defaultTopK) && defaultTopK > 0;
         LlmProviderCapabilities implemented = GeminiCapabilities.Create(profile, supportsTopK) with
-        { SupportsExplicitCache = connection.CacheBindings is not null };
+        { SupportsExplicitCache = (connection.CacheBindings is not null ? InferenceSupport.Supported : InferenceSupport.Unsupported) };
         LlmProviderCapabilities capabilities = implemented;
-        if (modelId is not null && !IsReviewed(modelId)) { capabilities = capabilities with { SupportsJsonSchema = false }; }
+        if (modelId is not null && !IsReviewed(modelId)) { capabilities = capabilities with { SupportsJsonSchema = InferenceSupport.Unsupported }; }
         capabilities = LlmCapabilityOverrideLookup.Apply(capabilities, connection, modelId);
-        if (capabilities.SupportsJsonObject || capabilities.SupportsAccountUsage
-            || capabilities.SupportsExplicitCache && !implemented.SupportsExplicitCache
-            || capabilities.SupportsTemperature && !implemented.SupportsTemperature
-            || capabilities.SupportsTopP && !implemented.SupportsTopP
-            || capabilities.SupportsTopK && !implemented.SupportsTopK
-            || capabilities.SupportsPresencePenalty && !implemented.SupportsPresencePenalty
-            || capabilities.SupportsFrequencyPenalty && !implemented.SupportsFrequencyPenalty
+        if ((capabilities.SupportsJsonObject != InferenceSupport.Unsupported) || (capabilities.SupportsAccountUsage != InferenceSupport.Unsupported)
+            || (capabilities.SupportsExplicitCache != InferenceSupport.Unsupported) && (implemented.SupportsExplicitCache == InferenceSupport.Unsupported)
+            || (capabilities.SupportsTemperature != InferenceSupport.Unsupported) && (implemented.SupportsTemperature == InferenceSupport.Unsupported)
+            || (capabilities.SupportsTopP != InferenceSupport.Unsupported) && (implemented.SupportsTopP == InferenceSupport.Unsupported)
+            || (capabilities.SupportsTopK != InferenceSupport.Unsupported) && (implemented.SupportsTopK == InferenceSupport.Unsupported)
+            || (capabilities.SupportsPresencePenalty != InferenceSupport.Unsupported) && (implemented.SupportsPresencePenalty == InferenceSupport.Unsupported)
+            || (capabilities.SupportsFrequencyPenalty != InferenceSupport.Unsupported) && (implemented.SupportsFrequencyPenalty == InferenceSupport.Unsupported)
             || capabilities.MaxStopSequences > implemented.MaxStopSequences
             || capabilities.ReasoningLevels.Any(level => !profile.Levels.Contains(level)))
         { throw new NotSupportedException("Gemini API capability overrides cannot enable unimplemented controls."); }
@@ -97,11 +98,11 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         { throw new InvalidOperationException("The Gemini API key changed before dispatch."); }
         connection = connection with { ContinuationCodec = Codec, ResolvedContinuationScope = scope };
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
-        LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is { } structured && !capabilities.SupportsJsonSchema
+        LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is { } structured && (capabilities.SupportsJsonSchema == InferenceSupport.Unsupported)
             ? StructuredOutput.ResolveEnforcement(structured, capabilities)
             : GeminiSchemas.Enforcement(request.StructuredOutput, RouteName, GeminiSchemaDialect.GeminiApi);
         JsonObject payload = GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
-            Reasoning(connection, request.ModelId), capabilities.SupportsReasoningText);
+            Reasoning(connection, request.ModelId), (capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
         return (connection, request, capabilities, enforcement, payload, omitted);
     }
 
@@ -147,12 +148,12 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         var enforcement = built.Enforcement;
         int omitted = built.Omitted;
         string model = request.ModelId;
-        string operation = capabilities.SupportsStreaming ? "streamGenerateContent?alt=sse" : "generateContent";
+        string operation = (capabilities.SupportsStreaming != InferenceSupport.Unsupported) ? "streamGenerateContent?alt=sse" : "generateContent";
         var message = new HttpRequestMessage(HttpMethod.Post, $"{DefaultEndpoint}/v1beta/models/{model}:{operation}")
         { Content = RequestJson.Content(built.Payload) };
         message.Headers.TryAddWithoutValidation(KeyHeader, Key(connection));
         IAsyncEnumerable<LlmStreamEvent> source = GeminiStream.ReadAsync(Http, message, Route, connection, request, enforcement,
-            capabilities.SupportsStreaming, capabilities.SupportsUsageDeltas, capabilities.SupportsReasoningText, cancellationToken);
+            (capabilities.SupportsStreaming != InferenceSupport.Unsupported), (capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported), (capabilities.SupportsReasoningText != InferenceSupport.Unsupported), cancellationToken);
         await using IAsyncEnumerator<LlmStreamEvent> iterator = source.GetAsyncEnumerator(cancellationToken);
         while (true)
         {
@@ -305,7 +306,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         if (request.Temperature is < 0 or > 2) { throw new ArgumentException("The temperature exceeds the Gemini range of 0 to 2."); }
         if (ClientTools.Functions(request.Tools).Any(tool => tool.Strict) && capabilities.Tools.StrictInputSchema == LlmStrictInputSchemaSupport.Unsupported)
         { throw new NotSupportedException("This model does not offer strict tool-schema enforcement. Ordinary non-strict tools are supported."); }
-        if (request.AllowParallelToolCalls is not null && !capabilities.Tools.SupportsParallelCallControl)
+        if (request.AllowParallelToolCalls is not null && (capabilities.Tools.SupportsParallelCallControl == InferenceSupport.Unsupported))
         { throw new NotSupportedException("This route cannot enforce parallel tool-call control."); }
         if (request.Messages.SelectMany(message => message.Attachments).Where(attachment => attachment is not LlmResourceAttachment)
             .Select(LlmAttachments.RequireBinary).Any(attachment => !GeminiCapabilities.AcceptsAttachment(attachment)))

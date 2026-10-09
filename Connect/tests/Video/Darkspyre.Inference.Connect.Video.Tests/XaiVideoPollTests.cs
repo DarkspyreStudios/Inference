@@ -151,7 +151,7 @@ public sealed class XaiVideoPollTests
         Assert.Equal(VideoOperation.Generation, Assert.Single(capabilities.Operations));
         Assert.Equal(0, capabilities.MaximumReferenceImages);
         Assert.Equal(0, capabilities.MaximumKeyframes);
-        Assert.False(capabilities.SupportsLastFrame);
+        Assert.Equal(InferenceSupport.Unsupported, capabilities.SupportsLastFrame);
     }
 
     [Theory]
@@ -245,8 +245,8 @@ public sealed class XaiVideoPollTests
         Assert.Throws<NotSupportedException>(() => XaiVideoProtocol.Validate(request));
         VideoCapabilities capabilities = XaiVideoProtocol.Capabilities(modelId);
         Assert.Equal(0, capabilities.MaximumReferenceAudio);
-        Assert.False(capabilities.SupportsPresetVoiceReferences);
-        Assert.False(capabilities.SupportsSuppliedAudioReferences);
+        Assert.Equal(InferenceSupport.Unsupported, capabilities.SupportsPresetVoiceReferences);
+        Assert.Equal(InferenceSupport.Unsupported, capabilities.SupportsSuppliedAudioReferences);
     }
 
     [Theory]

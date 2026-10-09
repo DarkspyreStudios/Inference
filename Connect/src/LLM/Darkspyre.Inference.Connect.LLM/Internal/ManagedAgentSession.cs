@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
@@ -56,7 +57,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             && (openingContext.ResourceSelectionVersion is not null || openingContext.SelectedResources.Count > 0))
             throw new NotSupportedException("Resource-bearing context requires explicit caller-owned access.");
         bool supportsResources = estimator is ILlmResourcePreparationClient { CanPrepareResources: true }
-            && capabilities(options.ModelId).SupportsPromptDocuments;
+            && (capabilities(options.ModelId).SupportsPromptDocuments != InferenceSupport.Unsupported);
         cancellationToken.ThrowIfCancellationRequested();
         openingFence?.Invoke();
         var session = new ManagedAgentSession(connection, options, models, estimator, stream, capabilities,
@@ -248,7 +249,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         lock (_sync)
         {
             ThrowIfDisposed();
-            RequireCapability(Capabilities.SupportsProviderCompaction && !_automaticProviderCompaction);
+            RequireCapability(_automaticProviderCompaction ? InferenceSupport.Unsupported : Capabilities.SupportsProviderCompaction);
             compactor = _compactor ?? throw new NotSupportedException("This session has no provider compactor.");
             run = RequireCompactionPosition(request);
             source = ManagedAgentContext.Copy(_context, includeAttachmentData: true);
@@ -481,7 +482,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             ThrowIfDisposed();
             LiveRun run = RequireRun(turnId);
-            RequireCapability(Capabilities.Steering == LlmAgentSteering.SafeBoundary);
+            if (Capabilities.Steering != LlmAgentSteering.SafeBoundary)
+                throw new NotSupportedException("The selected connection disables this agent operation.");
             run.Steering.Enqueue(text);
             return Task.CompletedTask;
         }
@@ -1254,8 +1256,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             && _connection.Transport == LlmTransport.XaiResponses
             && XaiModelProfiles.Get(_connection, effective.ModelId).MultiAgent is not null)
             effective = effective with { ProviderControls = new XaiMultiAgentControls() };
-        if (!capabilities.SupportsAgentSessions || (_options.Tools.Count > 0 && !capabilities.SupportsAgentToolUse)
-            || (turn.Instructions is not null && !capabilities.SupportsAgentTurnInstructions))
+        if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported) || (_options.Tools.Count > 0 && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported))
+            || (turn.Instructions is not null && (capabilities.SupportsAgentTurnInstructions == InferenceSupport.Unsupported)))
         {
             throw new NotSupportedException("The selected model disables the requested agent operation.");
         }
@@ -1276,9 +1278,9 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             return ClientTools.ManagedCapabilities(capabilities) with { HostedTools = capabilities.HostedTools };
         }
     }
-    private static void RequireCapability(bool supported)
+    private static void RequireCapability(InferenceSupport supported)
     {
-        if (!supported) { throw new NotSupportedException("The selected connection disables this agent operation."); }
+        if (supported == InferenceSupport.Unsupported) { throw new NotSupportedException("The selected connection disables this agent operation."); }
     }
     private LlmModel? Model(string id) => _models.FirstOrDefault(model => model.Id == id);
     private static LlmChatMessage UserMessage(LlmAgentTurnRequest turn) => new("user", TextContent(turn.Input)) { Attachments = turn.Attachments };
@@ -1350,7 +1352,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             }
             if (call is LlmShellCall)
             {
-                if (!_options.Tools.Any(tool => tool is LlmAgentShellTool) || !Capabilities.SupportsShellTools)
+                if (!_options.Tools.Any(tool => tool is LlmAgentShellTool) || (Capabilities.SupportsShellTools == InferenceSupport.Unsupported))
                     throw new NotSupportedException("The session does not declare shell tools.");
             }
             else if (call is LlmToolCall function)

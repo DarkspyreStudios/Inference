@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -17,7 +18,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
     /// <summary>True when the provider has a non-streaming request that this adapter sends while streaming is off.</summary>
     protected virtual bool OffersNonStreamingRequests => false;
 
-    protected virtual bool OffersUsageDeltas => DefaultCapabilities.SupportsUsageDeltas;
+    protected virtual bool OffersUsageDeltas => DefaultCapabilities.SupportsUsageDeltas == InferenceSupport.Supported;
 
     public virtual LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
@@ -35,7 +36,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
         CancellationToken cancellationToken = default)
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection);
-        if (!capabilities.SupportsModelListing)
+        if ((capabilities.SupportsModelListing == InferenceSupport.Unsupported))
         {
             return [];
         }
@@ -125,16 +126,16 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
     {
         EnsureTransport(connection);
         ProviderControlPolicy.Validate(connection, request);
-        ExplicitCaches.Validate(request, capabilities.SupportsExplicitCache);
+        ExplicitCaches.Validate(request, (capabilities.SupportsExplicitCache != InferenceSupport.Unsupported));
         RequestJson.ValidateSamplingOptions(connection, request);
         HostedTools.Validate(request, capabilities);
-        ClientTools.Validate(request, capabilities.SupportsShellTools);
+        ClientTools.Validate(request, (capabilities.SupportsShellTools != InferenceSupport.Unsupported));
         if (string.IsNullOrWhiteSpace(request.ModelId))
         {
             throw new ArgumentException("A model id is required.", nameof(request));
         }
 
-        if (!capabilities.SupportsStreaming && !OffersNonStreamingRequests)
+        if ((capabilities.SupportsStreaming == InferenceSupport.Unsupported) && !OffersNonStreamingRequests)
         {
             throw new NotSupportedException(
                 $"{ProviderDefinition.DisplayName} has no non-streaming request, so streaming cannot be turned off for this connection.");
@@ -159,27 +160,27 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
 
     internal static void ValidateSampling(LlmChatRequest request, LlmProviderCapabilities capabilities, bool allowZeroTopK = false)
     {
-        if (request.Temperature is not null && !capabilities.SupportsTemperature)
+        if (request.Temperature is not null && (capabilities.SupportsTemperature == InferenceSupport.Unsupported))
         { throw new NotSupportedException("The selected connection does not support temperature."); }
         if (request.Temperature is double temperature && !double.IsFinite(temperature))
         { throw new ArgumentOutOfRangeException(nameof(request), "Temperature must be finite."); }
         if (capabilities.MaxStopSequences < 0)
         { throw new ArgumentOutOfRangeException(nameof(capabilities), "The stop-sequence limit cannot be negative."); }
-        if (request.TopP is not null && !capabilities.SupportsTopP)
+        if (request.TopP is not null && (capabilities.SupportsTopP == InferenceSupport.Unsupported))
         { throw new NotSupportedException("The selected model does not support top-p."); }
         if (request.TopP is { } topP && (!double.IsFinite(topP) || topP is <= 0 or > 1))
         { throw new ArgumentOutOfRangeException(nameof(request), "TopP must be finite and in (0, 1]."); }
-        if (request.TopK is not null && !capabilities.SupportsTopK)
+        if (request.TopK is not null && (capabilities.SupportsTopK == InferenceSupport.Unsupported))
         { throw new NotSupportedException("The selected model does not support top-k."); }
         if (request.TopK is < 0 || request.TopK == 0 && !allowZeroTopK)
         { throw new ArgumentOutOfRangeException(nameof(request), allowZeroTopK ? "TopK must be non-negative." : "TopK must be positive."); }
-        if (request.Seed is not null && !capabilities.SupportsSeed)
+        if (request.Seed is not null && (capabilities.SupportsSeed == InferenceSupport.Unsupported))
         { throw new NotSupportedException("The selected model does not support a sampling seed."); }
         if (request.Seed is < 0)
         { throw new ArgumentOutOfRangeException(nameof(request), "Seed must be non-negative."); }
-        if (request.PresencePenalty is not null && !capabilities.SupportsPresencePenalty)
+        if (request.PresencePenalty is not null && (capabilities.SupportsPresencePenalty == InferenceSupport.Unsupported))
         { throw new NotSupportedException("The selected model does not support a presence penalty."); }
-        if (request.FrequencyPenalty is not null && !capabilities.SupportsFrequencyPenalty)
+        if (request.FrequencyPenalty is not null && (capabilities.SupportsFrequencyPenalty == InferenceSupport.Unsupported))
         { throw new NotSupportedException("The selected model does not support a frequency penalty."); }
         if (request.PresencePenalty is { } presence && !double.IsFinite(presence)
             || request.FrequencyPenalty is { } frequency && !double.IsFinite(frequency))
@@ -205,7 +206,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
         LlmProviderCapabilities capabilities,
         bool supportsResources = false)
     {
-        LlmAttachments.ValidateReferences(request, () => capabilities.SupportsFileReferences, supportsResources);
+        LlmAttachments.ValidateReferences(request, () => (capabilities.SupportsFileReferences != InferenceSupport.Unsupported), supportsResources);
         foreach (LlmChatMessage message in request.Messages)
         {
             if (message.Attachments.Count > 0
@@ -218,10 +219,10 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
 
             LlmAttachments.Validate(
                 message.Attachments,
-                capabilities.SupportsPromptImages,
-                capabilities.SupportsPromptDocuments,
+                (capabilities.SupportsPromptImages != InferenceSupport.Unsupported),
+                (capabilities.SupportsPromptDocuments != InferenceSupport.Unsupported),
                 nameof(request),
-                capabilities.SupportsFileReferences || supportsResources);
+                (capabilities.SupportsFileReferences != InferenceSupport.Unsupported) || supportsResources);
         }
     }
 
@@ -238,7 +239,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
             || request.AllowParallelToolCalls is not null
             || (hasToolHistory && capabilities.ToolHistory == LlmToolHistory.Structured);
 
-        if (requestsToolUse && !capabilities.SupportsToolUse)
+        if (requestsToolUse && (capabilities.SupportsToolUse == InferenceSupport.Unsupported))
         {
             throw new NotSupportedException("The selected connection does not support host-executed tools.");
         }

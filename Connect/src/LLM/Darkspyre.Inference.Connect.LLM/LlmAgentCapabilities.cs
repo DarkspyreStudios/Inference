@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using Darkspyre.Inference.Common.LLM;
 
@@ -56,7 +57,7 @@ public sealed record LlmAgentCapabilities
     public IReadOnlySet<LlmHostedToolKind> HostedTools { get; init => field = value.ToFrozenSet(); } = FrozenSet<LlmHostedToolKind>.Empty;
 
     /// <summary>The agent lane routes shell calls to the borrowed caller executor.</summary>
-    public bool SupportsShellTools { get; init; }
+    public InferenceSupport SupportsShellTools { get; init; }
 
     /// <summary>Caller services actually mapped by this agent lane.</summary>
     public IReadOnlySet<LlmAgentCallerServiceKind> SupportedCallerServices
@@ -70,18 +71,18 @@ public sealed record LlmAgentCapabilities
     /// <summary>How a session start accepts <see cref="LlmAgentSessionOptions.Context"/>.</summary>
     public LlmAgentContextImport ContextImport { get; init; }
 
-    public bool SupportsContextCapture { get; init; }
+    public InferenceSupport SupportsContextCapture { get; init; }
 
-    public bool SupportsContextReplacement { get; init; }
+    public InferenceSupport SupportsContextReplacement { get; init; }
 
-    public bool SupportsContextStatus { get; init; }
+    public InferenceSupport SupportsContextStatus { get; init; }
 
-    public bool SupportsCompactionHandoff { get; init; }
+    public InferenceSupport SupportsCompactionHandoff { get; init; }
 
     /// <summary>Creates a provider compaction proposal; the host still commits the replacement.</summary>
-    public bool SupportsProviderCompaction { get; init; }
+    public InferenceSupport SupportsProviderCompaction { get; init; }
 
-    public bool SupportsNativeResume { get; init; }
+    public InferenceSupport SupportsNativeResume { get; init; }
 
     public LlmAgentNativeFork NativeFork { get; init; }
 
@@ -90,7 +91,7 @@ public sealed record LlmAgentCapabilities
     public LlmAgentSteering Steering { get; init; }
 
     /// <summary>Explicit InterruptAsync support; enumeration cancellation is separate.</summary>
-    public bool SupportsInterrupt { get; init; }
+    public InferenceSupport SupportsInterrupt { get; init; }
 
     /// <summary>Whether the session reports the runtime's own background work through its resource members.</summary>
     public LlmOperationSupport ResourceObservation { get; init; } = LlmOperationSupport.Unsupported;
@@ -128,16 +129,16 @@ public sealed record LlmAgentCapabilities
             || SupportedCallerServices.Any(kind => !Enum.IsDefined(kind))
             || (ContextOwnership == LlmAgentOwnership.None && !IsNone)
             || (ContextOwnership == LlmAgentOwnership.Host && SupportedRuntimePolicies.Count > 0)
-            || (SupportsCompactionHandoff && (ContextOwnership != LlmAgentOwnership.Host
+            || ((SupportsCompactionHandoff == InferenceSupport.Supported) && (ContextOwnership != LlmAgentOwnership.Host
                 || CompactionOwnership != LlmAgentOwnership.Host
-                || !SupportsContextCapture || !SupportsContextReplacement || !SupportsContextStatus))
-            || (SupportsProviderCompaction && (ContextOwnership != LlmAgentOwnership.Host
-                || !SupportsCompactionHandoff))
-            || (NativeFork != LlmAgentNativeFork.None && !SupportsNativeResume)
+                || (SupportsContextCapture == InferenceSupport.Unsupported) || (SupportsContextReplacement == InferenceSupport.Unsupported) || (SupportsContextStatus == InferenceSupport.Unsupported)))
+            || ((SupportsProviderCompaction == InferenceSupport.Supported) && (ContextOwnership != LlmAgentOwnership.Host
+                || (SupportsCompactionHandoff == InferenceSupport.Unsupported)))
+            || (NativeFork != LlmAgentNativeFork.None && (SupportsNativeResume == InferenceSupport.Unsupported))
             || (ContextImport == LlmAgentContextImport.Structured && ContextOwnership != LlmAgentOwnership.Host)
             || (ContextImport == LlmAgentContextImport.OpeningContext && ContextOwnership != LlmAgentOwnership.Provider)
             || (ContextOwnership == LlmAgentOwnership.Host
-                && (SupportsNativeResume || NativeFork != LlmAgentNativeFork.None)))
+                && ((SupportsNativeResume == InferenceSupport.Supported) || NativeFork != LlmAgentNativeFork.None)))
         {
             throw new ArgumentException("The agent capability combination cannot be implemented consistently.");
         }

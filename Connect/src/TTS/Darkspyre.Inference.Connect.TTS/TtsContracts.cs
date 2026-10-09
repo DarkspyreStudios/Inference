@@ -53,22 +53,22 @@ public sealed record TtsVoice(string Id, string DisplayName, string? Locale = nu
     [JsonRequired] public string DisplayName { get; init => field = TtsData.Required(value); } = TtsData.Required(DisplayName);
     public override string ToString() => "TtsVoice { <data> }";
 }
-public sealed record TtsCapabilities(bool SupportsVoiceListing, bool SupportsSpeed, IReadOnlyList<TtsAudioFormat> Formats)
+public sealed record TtsCapabilities(InferenceSupport SupportsVoiceListing, InferenceSupport SupportsSpeed, IReadOnlyList<TtsAudioFormat> Formats)
 {
-    [JsonRequired] public bool SupportsVoiceListing { get; init; } = SupportsVoiceListing;
-    [JsonRequired] public bool SupportsSpeed { get; init; } = SupportsSpeed;
+    [JsonRequired] public InferenceSupport SupportsVoiceListing { get; init; } = SupportsVoiceListing;
+    [JsonRequired] public InferenceSupport SupportsSpeed { get; init; } = SupportsSpeed;
     [JsonRequired] public IReadOnlyList<TtsAudioFormat> Formats { get; init => field = TtsData.Copy(value); } = TtsData.Copy(Formats);
-    public bool SupportsLanguage { get; init; }
-    public bool SupportsSampleRate { get; init; }
-    public bool SupportsBitRate { get; init; }
-    public bool SupportsTimestamps { get; init; }
-    public bool SupportsStreaming { get; init; }
-    public bool SupportsRepeatedUtterances { get; init; }
-    public bool SupportsReplacementUpdates { get; init; }
-    public bool SupportsUtteranceClearing { get; init; }
-    public bool SupportsTextNormalization { get; init; }
-    public bool SupportsTextReplacement { get; init; }
-    public bool SupportsOptimizeStreamingLatency { get; init; }
+    public InferenceSupport SupportsLanguage { get; init; }
+    public InferenceSupport SupportsSampleRate { get; init; }
+    public InferenceSupport SupportsBitRate { get; init; }
+    public InferenceSupport SupportsTimestamps { get; init; }
+    public InferenceSupport SupportsStreaming { get; init; }
+    public InferenceSupport SupportsRepeatedUtterances { get; init; }
+    public InferenceSupport SupportsReplacementUpdates { get; init; }
+    public InferenceSupport SupportsUtteranceClearing { get; init; }
+    public InferenceSupport SupportsTextNormalization { get; init; }
+    public InferenceSupport SupportsTextReplacement { get; init; }
+    public InferenceSupport SupportsOptimizeStreamingLatency { get; init; }
     public IReadOnlyList<int>? SampleRates { get; init => field = value is null ? null : TtsData.Copy(value); }
     public IReadOnlyList<int>? BitRates { get; init => field = value is null ? null : TtsData.Copy(value); }
 }

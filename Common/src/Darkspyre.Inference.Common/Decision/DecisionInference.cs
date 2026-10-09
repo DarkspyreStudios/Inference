@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -145,9 +146,9 @@ public sealed record DecisionCapabilities
 
     public int? MaximumInputTokens { get; init; }
 
-    public bool SupportsCalibratedConfidence { get; init; }
+    public InferenceSupport SupportsCalibratedConfidence { get; init; }
 
-    public bool SupportsActionProbability { get; init; }
+    public InferenceSupport SupportsActionProbability { get; init; }
 }
 
 public interface IDecisionInference

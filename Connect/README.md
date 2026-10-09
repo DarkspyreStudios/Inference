@@ -1,5 +1,18 @@
 # Darkspyre.Inference.Connect
 
+## Support Evidence
+
+Capability flags use Common's `InferenceSupport` enum. `Unknown` permits an explicit attempt through
+an implemented mapper. `Supported` reports affirmative evidence. `Unsupported` reports an actual
+inability or an explicit caller restriction. Default capability values are `Unknown`.
+Tool-output `PreservesOrder` and `AllowsEmpty` use the same contract.
+
+`LlmCapabilityOverrides` uses nullable support values. Null inherits adapter or connection metadata.
+An explicit `Unknown` remains unknown. The settings editor exposes Default, Unknown, Supported,
+and Unsupported for these fields. Per-level reasoning choices remain Default, Enabled, and Disabled.
+Common bindings and SelfHost preserve the enum values. JSON carries enum names without boolean
+compatibility conversion. The host consumes the same source contract.
+
 ## SDK HTTP composition
 
 SDK HTTP registrations use one generation-owned pool for the finite SDK named pipelines,
@@ -629,7 +642,7 @@ Chat messages and turns use the Common ordered binary/native-file/workspace-reso
 union. `LlmChatRequest.Resources` and its Common projection preserve the same borrowed authority.
 Owned request JSON refuses non-null authority and request diagnostics never traverse it.
 Current built-in routes reject unimplemented references and authority before refresh, catalog,
-provider, process or model execution. `SupportsFileReferences` defaults to false; capability overrides
+provider, process or model execution. `SupportsFileReferences` defaults to `Unknown`; capability overrides
 cannot enable a missing native-file route.
 
 Chat admission copies each ordered attachment list, binary payload and omission list before
@@ -827,7 +840,8 @@ terminal format and the current Apple, Antigravity and Bedrock protocols report 
 `High`, `ExtraHigh` or `Maximum`. On one model, each level asks for at least as much reasoning as the
 level below it; a level does not cost the same on two different models. Null leaves the provider's
 default in place. Each model reports the levels it accepts in `LlmCapabilities.ReasoningLevels`, and
-`SupportsReasoning` is true when that set contains a level above `None`. A request carrying a level
+`SupportsReasoning` is `Supported` when that set contains a level above `None`, `Unsupported` when
+it contains only `None`, and `Unknown` when the set is empty. A request carrying a level
 the model does not accept fails with `InferenceFailureCode.InvalidRequest` before any provider call;
 no adapter substitutes a nearby level. Each adapter owns the mapping to its provider's wire form.
 `LlmCapabilityOverrides.ReasoningLevels` replaces a transport's set for a connection or one model,
@@ -1608,7 +1622,7 @@ dispose open streaming responses and enumerators so their leases can leave.
 ### Streaming, reasoning text and usage
 
 `LlmProviderCapabilities.SupportsStreaming` says whether the adapter streams provider output as the model
-generates it. `LlmCapabilityOverrides.SupportsStreaming = false` selects the provider's non-streaming request:
+generates it. `LlmCapabilityOverrides.SupportsStreaming = InferenceSupport.Unsupported` selects the provider's non-streaming request:
 the adapter sends it and emits the complete response as events after it arrives. A transport whose provider
 has no non-streaming request rejects every request while streaming is off. Common's
 `LlmCapabilities.SupportsStreaming` carries the same flag to `ILlmInference` hosts.
@@ -1853,7 +1867,7 @@ longer than 10 minutes, and the API can end a long non-streaming request with `5
 does not pre-validate `max_tokens` against that limit, so a long non-streaming Anthropic request can fail
 where the same streamed request succeeds.
 
-| Transport | Streams | With `SupportsStreaming = false` |
+| Transport | Streams | With `SupportsStreaming = InferenceSupport.Unsupported` |
 | --- | --- | --- |
 | OpenAI Responses | `stream: true` | `stream: false` |
 | Codex | `stream: true` | Rejected |
@@ -2457,7 +2471,7 @@ operations. Its request, correlation, receipt, usage, page and delete-result rec
 type-name getters on `ConnectLlmJson`. `BindContextCacheAsync` validates a selected connection
 without remote effects and binds Gemini API or standard-project Vertex Gemini; other routes remain unavailable.
 `LlmChatRequest.ExplicitCache` and Common's request carry the same data-only selection.
-`SupportsExplicitCache` defaults to false on both capability shapes; overrides cannot enable it.
+`SupportsExplicitCache` defaults to `Unknown` on both capability shapes; overrides cannot enable it.
 The Google facade advertises its owner-admitted selection path; a raw direct adapter without this
 internal admission remains unavailable. Other built-in routes refuse a supplied selection before
 credential refresh, catalog discovery, counting, remote requests or engine/process entry. Registered implementations own their declared
@@ -2715,7 +2729,7 @@ A text document is UTF-8 text with a `text/*` or `application/json` media type.
 provider's own content item, `Text` sends a text part that renders it, and `Unsupported` omits it.
 `LlmProviderCapabilities.RichContentSupported` describes the chat lane, and
 `LlmProviderCapabilities.Agent.RichContentSupported` describes agent-session tool calls. An override
-with `SupportsToolResultImages` or `SupportsToolResultDocuments` set to `false` lowers those carriages.
+with `SupportsToolResultImages` or `SupportsToolResultDocuments` set to `Unsupported` lowers those carriages.
 An override never raises a carriage.
 
 | Route and lane | Images | PDF | Text docs | Audio | Links | Embedded text | Structured | Error flag |
@@ -3760,7 +3774,7 @@ do not qualify OAuth, remote resumption, model mutation or provider execution.
 
 ## Account usage
 
-Subscription adapters that can read account-level quotas report `SupportsAccountUsage = true` and
+Subscription adapters that can read account-level quotas report `SupportsAccountUsage = InferenceSupport.Supported` and
 implement `ILlmAccountUsageClient`. Hosts normally call the provider-neutral facade:
 
 ```csharp
@@ -3888,7 +3902,7 @@ effort or leaving effort to the provider when unspecified. Summary deltas flow t
 can display progress before the reply. Summaries are provider output and may be absent for a turn;
 the library does not manufacture reasoning text. See [OpenAI reasoning summaries](https://developers.openai.com/api/docs/guides/reasoning#reasoning-summaries).
 
-Both `SupportsToolUse` and `SupportsAgentToolUse` are true. With chat, the caller runs the tool
+Both `SupportsToolUse` and `SupportsAgentToolUse` is `Supported`. With chat, the caller runs the tool
 loop. With `LlmAgentProviderService`, Darkspyre.Inference.Connect.LLM runs it and invokes the host's handlers; do not
 run a second Agent DS loop on top. Start through that facade so every model iteration re-resolves
 and refreshes the host connection. Account/endpoint changes reject an existing session.
@@ -4111,7 +4125,7 @@ The configured AWS connection rejects both `amazon.nova-lite-1-5-v1:0` and
 `us.amazon.nova-lite-1-5-v1:0` with `ValidationException` and "The provided model identifier is invalid."
 Neither identity is live-qualified. This does not establish availability on another connection or region.
 
-Converse streams through ConverseStream. A connection with `SupportsStreaming = false` sends Converse
+Converse streams through ConverseStream. A connection with `SupportsStreaming = InferenceSupport.Unsupported` sends Converse
 instead. Its events then arrive after generation ends, in the order reasoning, text, tool calls, then the
 completion. Reasoning text arrives as `LlmReasoningDeltaEvent` with `IsSummary = false`. A Claude model
 under its default `omitted` reasoning display streams no reasoning text. Usage arrives in the stream's
@@ -4404,7 +4418,7 @@ Unreported plan, credits, absolute limits and observation provenance remain unkn
 check does not qualify passive response observations, refresh, other versions or target platforms.
 
 Native chat-style tools are enabled for API-key connections. Claude subscription chat requests remain
-isolated one-shot generations, report `SupportsToolUse = false`, and launch the CLI with tools disabled.
+isolated one-shot generations, report `SupportsToolUse = InferenceSupport.Unsupported`, and launch the CLI with tools disabled.
 Tool history in those requests is carried as text blocks (`ToolHistory = Text`).
 For host tools, use `LlmAgentProviderService`: it registers the supplied schemas as an SDK-hosted MCP
 server over Claude's streaming stdin/stdout control protocol. MCP `tools/call` requests are converted
@@ -4416,7 +4430,7 @@ being disposed, cancels calls in flight too. A result that arrives after its tur
 turn.
 The adapter launches in restricted mode, disables built-in tools and settings-based MCP servers, and
 allows only the explicitly registered Darkspyre.Inference.Connect.LLM tools. Claude subscription connections therefore
-report `SupportsAgentSessions = true` and `SupportsAgentToolUse = true`.
+report `SupportsAgentSessions = InferenceSupport.Supported` and `SupportsAgentToolUse = InferenceSupport.Supported`.
 
 ### Native background resources
 
@@ -4449,7 +4463,7 @@ sent during a provider turn is queued by the CLI and starts after it.
 The neutral request carries `TopP`, `TopK`, `Seed`, `PresencePenalty`, `FrequencyPenalty` and
 `StopSequences`. Null controls leave provider defaults intact. An explicit unsupported control fails
 before dispatch. `SupportsTopP`, `SupportsTopK`, `SupportsSeed`, `SupportsPresencePenalty` and
-`SupportsFrequencyPenalty` default to false; `MaxStopSequences` defaults to zero.
+`SupportsFrequencyPenalty` defaults to `Unknown`; `MaxStopSequences` defaults to zero.
 
 Raw provider options cannot carry `temperature`, `top_p`, `top_k`, `seed`, `presence_penalty`,
 `frequency_penalty`, `stop`, `stop_sequences`, or Gemini's `topP`, `topK`, `presencePenalty`,
@@ -4676,7 +4690,7 @@ event; that check does not establish the behavior of Connect's pipe-backed launc
 Native controls and resume for this model remain unqualified. The adapter does not disable the model,
 retry a turn or fabricate a conversation identity in response to that failure.
 
-Each request runs in an empty temporary workspace with terminal sandboxing and slash-command expansion disabled. A streamed request sends its prompt as BOM-free UTF-8 through standard input. A request with `SupportsStreaming = false` is the exception: the CLI's only non-streaming form, `agy -p "<prompt>" --output-format json`, takes the prompt as a process argument, because stream-json input requires stream-json output. That prompt is visible in the local process list. It must fit in one argument: at most 131,071 UTF-8 bytes on macOS and Linux, and at most 30,000 characters on Windows, where a `.cmd` or `.bat` launcher cannot carry it at all because the prompt contains line breaks. A prompt that does not fit fails with `NotSupportedException` before the CLI starts. Native JSON Schema and the `Low`, `Medium` and `High` reasoning levels are supported. Only `agent_response` step deltas stream as answer text. A schema-backed request streams no provisional text: it returns the terminal event's canonical `structured_output` value, validated locally. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
+Each request runs in an empty temporary workspace with terminal sandboxing and slash-command expansion disabled. A streamed request sends its prompt as BOM-free UTF-8 through standard input. A request with `SupportsStreaming = InferenceSupport.Unsupported` is the exception: the CLI's only non-streaming form, `agy -p "<prompt>" --output-format json`, takes the prompt as a process argument, because stream-json input requires stream-json output. That prompt is visible in the local process list. It must fit in one argument: at most 131,071 UTF-8 bytes on macOS and Linux, and at most 30,000 characters on Windows, where a `.cmd` or `.bat` launcher cannot carry it at all because the prompt contains line breaks. A prompt that does not fit fails with `NotSupportedException` before the CLI starts. Native JSON Schema and the `Low`, `Medium` and `High` reasoning levels are supported. Only `agent_response` step deltas stream as answer text. A schema-backed request streams no provisional text: it returns the terminal event's canonical `structured_output` value, validated locally. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
 
 Two public ConsoleTester nonstreaming calls at source `cec838c`, installed CLI 1.3.1 and selected
 `gemini-3.8-flash-low` with Low effort complete through the CLI's JSON-response path. The plain call
@@ -4698,9 +4712,9 @@ selected CLI route, not independently observed upstream identity, refresh or Win
 
 Antigravity may emit its own internal tool activity, but the CLI owns that execution. Because
 Darkspyre.Inference.Connect.LLM cannot surface the call for host authorization and result submission, this adapter reports
-`SupportsToolUse = false`. Its documented headless input protocol accepts only `text` blocks and
+`SupportsToolUse = InferenceSupport.Unsupported`. Its documented headless input protocol accepts only `text` blocks and
 terminates on any other content-block type, so `SupportsPromptImages` and
-`SupportsPromptDocuments` are also false. Darkspyre.Inference.Connect.LLM does not rely on undocumented `@path` behavior.
+`SupportsPromptDocuments` are also `Unsupported`. Darkspyre.Inference.Connect.LLM does not rely on undocumented `@path` behavior.
 
 Antigravity chat reports `Unknown` for an unrecognized or missing terminal status and retains the
 actual response text, usage, conversation ID and observed status. It does not validate that result
@@ -4768,7 +4782,7 @@ per open session, with an open standard input and one output reader.
   usage. All disposal callers share one completion and its cleanup failure. Cancelled turns retain
   cancellation; a failed local termination also faults the session with its PID and remains visible
   to disposal. Failed opening preserves both the opening and cleanup errors when both occur.
-- `SupportsAgentToolUse` is false, `ToolExecutionOwnership` is Provider, `ResourceObservation` is
+- `SupportsAgentToolUse` is `Unsupported`, `ToolExecutionOwnership` is Provider, `ResourceObservation` is
   Unsupported and resource operations throw. Interrupt, steering, fork and context capture, status,
   replacement and compaction handoff are unsupported.
 
@@ -4820,7 +4834,7 @@ been exercised on macOS 26.7; oldest-OS and signed clean-machine certification r
 See the [helper build/test instructions and process limits](tools/AppleFoundationModelsHost/README.md).
 
 Supported: text/instructions, user/assistant semantic history, streaming or one complete
-`respond(to:)` response when `SupportsStreaming` is false, temperature in [0,1],
+`respond(to:)` response when `SupportsStreaming` is `Unsupported`, temperature in [0,1],
 provider-enforced output caps, host-executed chat tools and existing managed agent sessions.
 Each model operation owns one helper process, which starts and ends as
 [Wrapped CLI processes](#wrapped-cli-processes) describes. Tools and persistence remain with the host.
@@ -4871,7 +4885,7 @@ or not loaded fails with `InferenceException` and `ModelUnavailable`. `GetCapabi
 loaded engine's capabilities for operations the adapter accepts, and does no I/O, because Connect reads
 a transport's capabilities synchronously. Streaming, final streamed usage and running usage flags come
 from the engine. Native file and caller-owned resource references remain unsupported; SelfHost reports
-`SupportsFileReferences = false` even when the engine declares support. Binary prompt attachments
+`SupportsFileReferences = InferenceSupport.Unsupported` even when the engine declares support. Binary prompt attachments
 retain the engine's image/document capability gates. An unloaded engine declares no usage or tool support.
 
 Connect keeps the connection's catalog in its shared model cache. A provider listing refreshes the
@@ -5159,7 +5173,7 @@ One public nonstreaming prompt at source `d26da43`, Global/Default and
 `grok-4.20-0309-non-reasoning` returns exactly `CONNECT_GROK_COMPLETE_OK` with
 `Completed/completed`. Actual usage reports 198 input, 6 output and 204 total tokens, with
 128 cached input tokens and provider-reported cost of 0.0001281000 USD. The connection selects
-`SupportsStreaming = false`; the adapter sends the native complete Responses request.
+`SupportsStreaming = InferenceSupport.Unsupported`; the adapter sends the native complete Responses request.
 This qualifies the selected plain complete route, not native response schemas, all models,
 credential refresh or actual account billing. The call does not retry or copy application credentials.
 

@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -21,19 +22,19 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
     {
         OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unsupported,
         ToolHistory = LlmToolHistory.Text,
-        SupportsStreaming = true,
-        SupportsStreamingUsage = true,
-        SupportsUsageDeltas = true,
-        SupportsModelListing = true,
-        SupportsAccountUsage = true,
-        SupportsJsonSchema = true,
-        SupportsJsonObject = false,
+        SupportsStreaming = InferenceSupport.Supported,
+        SupportsStreamingUsage = InferenceSupport.Supported,
+        SupportsUsageDeltas = InferenceSupport.Supported,
+        SupportsModelListing = InferenceSupport.Supported,
+        SupportsAccountUsage = InferenceSupport.Supported,
+        SupportsJsonSchema = InferenceSupport.Supported,
+        SupportsJsonObject = InferenceSupport.Unsupported,
         ReasoningLevels = LlmReasoningEffort.Levels(
             LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High),
-        SupportsTemperature = false,
-        SupportsToolUse = false,
-        SupportsAgentSessions = true,
-        SupportsAgentToolUse = false,
+        SupportsTemperature = InferenceSupport.Unsupported,
+        SupportsToolUse = InferenceSupport.Unsupported,
+        SupportsAgentSessions = InferenceSupport.Supported,
+        SupportsAgentToolUse = InferenceSupport.Unsupported,
         Agent = NativeAgentContract.Antigravity
     };
 
@@ -66,17 +67,17 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                 : pinnedEffort is { } pinned
                     ? LlmReasoningEffort.Levels(capabilities.ReasoningLevels.Where(level => level == pinned).ToArray())
                     : capabilities.ReasoningLevels,
-            SupportsJsonObject = false,
-            SupportsTemperature = false,
-            SupportsTopP = false,
-            SupportsTopK = false,
-            SupportsSeed = false,
-            SupportsPresencePenalty = false,
-            SupportsFrequencyPenalty = false,
+            SupportsJsonObject = InferenceSupport.Unsupported,
+            SupportsTemperature = InferenceSupport.Unsupported,
+            SupportsTopP = InferenceSupport.Unsupported,
+            SupportsTopK = InferenceSupport.Unsupported,
+            SupportsSeed = InferenceSupport.Unsupported,
+            SupportsPresencePenalty = InferenceSupport.Unsupported,
+            SupportsFrequencyPenalty = InferenceSupport.Unsupported,
             MaxStopSequences = 0,
-            SupportsToolUse = false,
-            SupportsPromptImages = false,
-            SupportsPromptDocuments = false,
+            SupportsToolUse = InferenceSupport.Unsupported,
+            SupportsPromptImages = InferenceSupport.Unsupported,
+            SupportsPromptDocuments = InferenceSupport.Unsupported,
             RichContentSupported = RichContentRoutes.TextOnly
         };
     }
@@ -106,7 +107,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             ? request.StructuredOutput?.Schema
             : null;
         string executable = ResolveExecutable(connection.Endpoint);
-        if (!capabilities.SupportsStreaming)
+        if ((capabilities.SupportsStreaming == InferenceSupport.Unsupported))
         {
             LlmChatResult completeResult = await CompleteAsync(
                 executable, prompt, request, enforcement, providerSchema, cancellationToken);
@@ -133,7 +134,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         LlmProviderException? parseException = null;
         bool emittedText = false;
         var ledger = new AntigravityStepLedger();
-        var usageDeltas = new UsageDeltas(capabilities.SupportsUsageDeltas);
+        var usageDeltas = new UsageDeltas((capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported));
         await foreach (AntigravityCliProcessEvent processEvent in InvokeStreamingAsync(
                            executable,
                            arguments,
@@ -333,7 +334,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         CancellationToken cancellationToken = default)
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection);
-        if (!capabilities.SupportsModelListing)
+        if ((capabilities.SupportsModelListing == InferenceSupport.Unsupported))
         {
             return [];
         }
@@ -588,7 +589,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         LlmProviderCapabilities capabilities)
     {
         HostedTools.Validate(request, capabilities);
-        ExplicitCaches.Validate(request, capabilities.SupportsExplicitCache);
+        ExplicitCaches.Validate(request, (capabilities.SupportsExplicitCache != InferenceSupport.Unsupported));
         ProviderControlPolicy.Validate(connection, request);
         if (string.IsNullOrWhiteSpace(request.ModelId))
         {

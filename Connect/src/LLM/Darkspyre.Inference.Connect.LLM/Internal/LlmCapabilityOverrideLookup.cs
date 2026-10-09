@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 /// <summary>Resolves explicit overrides and identifies values supplied by the host.</summary>
@@ -11,11 +12,11 @@ internal static class LlmCapabilityOverrideLookup
         {
             capabilities = capabilities.Apply(modelOverrides);
         }
-        if (capabilities.SupportsUsageDeltas && !defaults.SupportsUsageDeltas && !usageDeltasImplemented)
+        if ((capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported) && (defaults.SupportsUsageDeltas == InferenceSupport.Unsupported) && !usageDeltasImplemented)
         {
             throw new NotSupportedException("This adapter does not implement running usage observations.");
         }
-        if (capabilities.SupportsReasoningText && !defaults.SupportsReasoningText)
+        if ((capabilities.SupportsReasoningText != InferenceSupport.Unsupported) && (defaults.SupportsReasoningText == InferenceSupport.Unsupported))
         {
             throw new NotSupportedException("This adapter does not implement public reasoning text.");
         }

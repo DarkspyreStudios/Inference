@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Net.Http.Json;
 using System.Runtime.ExceptionServices;
 using System.Runtime.InteropServices;
@@ -144,7 +145,7 @@ internal sealed partial class VertexLlmClient
                     {
                         if (descriptor.ContentType is not null) VertexCacheFiles.ValidateDescriptor(descriptor);
                         if (promptReferences.Contains(reference) && descriptor.ContentType is not null
-                            && (descriptor.ContentType!.StartsWith("image/", StringComparison.Ordinal) ? !capabilities.SupportsPromptImages : !capabilities.SupportsPromptDocuments))
+                            && (descriptor.ContentType!.StartsWith("image/", StringComparison.Ordinal) ? (capabilities.SupportsPromptImages == InferenceSupport.Unsupported) : (capabilities.SupportsPromptDocuments == InferenceSupport.Unsupported)))
                             throw new NotSupportedException("The selected connection disables this named prompt media.");
                         if (Connection.Vertex!.CacheStaging is null && descriptor.Bytes > available)
                             throw new NotSupportedException("The named cache media requires explicitly configured Cloud Storage staging.");
@@ -153,7 +154,7 @@ internal sealed partial class VertexLlmClient
                     phase = InferenceResourceOperationPhase.Materialize;
                     VertexCacheFiles.ValidateDescriptor(opened.Descriptor);
                     if (promptReferences.Contains(reference)
-                        && (opened.Descriptor.ContentType!.StartsWith("image/", StringComparison.Ordinal) ? !capabilities.SupportsPromptImages : !capabilities.SupportsPromptDocuments))
+                        && (opened.Descriptor.ContentType!.StartsWith("image/", StringComparison.Ordinal) ? (capabilities.SupportsPromptImages == InferenceSupport.Unsupported) : (capabilities.SupportsPromptDocuments == InferenceSupport.Unsupported)))
                         throw new NotSupportedException("The selected connection disables this named prompt media.");
                     PreparedMedia prepared;
                     if (Connection.Vertex!.CacheStaging is { } staging)

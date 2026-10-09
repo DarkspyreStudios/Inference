@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Net;
 using System.Text.Json;
@@ -32,11 +33,11 @@ internal static class XaiVideoProtocol
             MaximumKeyframes = modern ? 4 : classic || lite ? 0 : null,
             MaximumReferenceImages = modern ? 14 : classic ? 7 : lite ? 0 : null,
             MaximumReferenceAudio = classic || lite ? 0 : 3,
-            SupportsLastFrame = modern,
-            SupportsAudioControl = true,
-            SupportsPresetVoiceReferences = !classic && !lite,
-            SupportsSuppliedAudioReferences = !classic && !lite,
-            SupportsProgress = true
+            SupportsLastFrame = (modern ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsAudioControl = InferenceSupport.Supported,
+            SupportsPresetVoiceReferences = (!classic && !lite ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsSuppliedAudioReferences = (!classic && !lite ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsProgress = InferenceSupport.Supported
         };
     }
 

@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -32,7 +33,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         RuntimeInputAdmission.Validate(connection);
         CommonLlm.LlmCapabilities? engine = host.GetCapabilities(connection.Endpoint, modelId);
         return engine is null
-            ? new LlmProviderCapabilities { SupportsStreaming = true, SupportsModelListing = true, SupportsAgentSessions = true, Agent = Agent }
+            ? new LlmProviderCapabilities { SupportsStreaming = InferenceSupport.Supported, SupportsModelListing = InferenceSupport.Supported, SupportsAgentSessions = InferenceSupport.Supported, Agent = Agent }
             : ToConnect(engine);
     }
 
@@ -61,7 +62,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         request = ClientTools.Snapshot(request);
         ValidateOptions(connection, request);
         HostedTools.Validate(request, GetCapabilities(connection, request.ModelId));
-        ClientTools.Validate(request, GetCapabilities(connection, request.ModelId).SupportsShellTools);
+        ClientTools.Validate(request, (GetCapabilities(connection, request.ModelId).SupportsShellTools != InferenceSupport.Unsupported));
         CommonLlm.ILlmInference engine = await host.GetInferenceAsync(connection.Endpoint, cancellationToken).ConfigureAwait(false);
         var capabilities = ToConnect(await engine.GetCapabilitiesAsync(request.ModelId, cancellationToken).ConfigureAwait(false));
         ValidateEngineRequest(request, capabilities);
@@ -110,7 +111,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
         LlmClientBase.ValidateOutputLimit(request, capabilities);
         HostedTools.Validate(request, capabilities);
-        ClientTools.Validate(request, capabilities.SupportsShellTools);
+        ClientTools.Validate(request, (capabilities.SupportsShellTools != InferenceSupport.Unsupported));
         LlmClientBase.ValidatePromptAttachments(request, capabilities);
         LlmClientBase.ValidateToolUse(request, capabilities);
         StructuredOutput.ValidateRequest(request);
@@ -225,11 +226,11 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         Tools = capabilities.Tools,
         HostedTools = capabilities.HostedTools,
         ToolHistory = LlmToolHistory.Structured,
-        SupportsAgentSessions = true,
+        SupportsAgentSessions = InferenceSupport.Supported,
         SupportsAgentToolUse = capabilities.SupportsToolUse,
         Agent = Agent,
         SupportsPromptImages = capabilities.SupportsPromptImages,
         SupportsPromptDocuments = capabilities.SupportsPromptDocuments,
-        SupportsFileReferences = false
+        SupportsFileReferences = InferenceSupport.Unsupported
     };
 }
