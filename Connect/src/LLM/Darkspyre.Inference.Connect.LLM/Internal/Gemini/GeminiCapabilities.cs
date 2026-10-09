@@ -7,7 +7,7 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// <summary>Capabilities the shared Gemini protocol implements on every route.</summary>
 internal static class GeminiCapabilities
 {
-    public static LlmProviderCapabilities Create(GeminiModelProfile profile, bool supportsTopK)
+    public static LlmProviderCapabilities Create(GeminiModelProfile profile, InferenceSupport supportsTopK)
     {
         LlmRichContentSupported rich = profile.MultimodalFunctionResponses ? RichContentRoutes.GeminiFunctionResponse
             : RichContentRoutes.TextOnly with { ErrorFlag = LlmRichContentCarriage.Native };
@@ -21,9 +21,11 @@ internal static class GeminiCapabilities
             PromptCache = PromptCaching.Automatic,
             OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
             SupportsJsonSchema = InferenceSupport.Supported,
+            SupportsJsonObject = InferenceSupport.Unsupported,
+            SupportsAccountUsage = InferenceSupport.Unsupported,
             SupportsTemperature = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
             SupportsTopP = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
-            SupportsTopK = (profile.AllowsSampling && supportsTopK ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsTopK = profile.AllowsSampling ? supportsTopK : InferenceSupport.Unsupported,
             SupportsSeed = InferenceSupport.Supported,
             SupportsPresencePenalty = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),
             SupportsFrequencyPenalty = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),

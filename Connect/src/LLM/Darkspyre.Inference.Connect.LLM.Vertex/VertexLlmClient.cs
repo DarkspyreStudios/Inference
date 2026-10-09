@@ -31,23 +31,25 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         if (express) capabilities = capabilities with { SupportsModelListing = InferenceSupport.Unsupported };
         capabilities = capabilities with
         {
+            SupportsJsonObject = InferenceSupport.Unsupported,
+            SupportsAccountUsage = InferenceSupport.Unsupported,
             SupportsExplicitCache = (!express && connection.CacheBindings is not null
             && (modelId is null || !VertexModelProfiles.Get(modelId).IsClaude) ? InferenceSupport.Supported : InferenceSupport.Unsupported)
         };
         LlmProviderCapabilities implemented = capabilities;
         capabilities = LlmCapabilityOverrideLookup.Apply(capabilities, connection, modelId);
-        if ((capabilities.SupportsJsonObject != InferenceSupport.Unsupported) || (capabilities.SupportsAccountUsage != InferenceSupport.Unsupported)
-            || (capabilities.SupportsExplicitCache != InferenceSupport.Unsupported) && (implemented.SupportsExplicitCache == InferenceSupport.Unsupported)
-            || (capabilities.SupportsTemperature != InferenceSupport.Unsupported) && (implemented.SupportsTemperature == InferenceSupport.Unsupported)
-            || (capabilities.SupportsTopP != InferenceSupport.Unsupported) && (implemented.SupportsTopP == InferenceSupport.Unsupported)
-            || (capabilities.SupportsTopK != InferenceSupport.Unsupported) && (implemented.SupportsTopK == InferenceSupport.Unsupported)
-            || (capabilities.SupportsSeed != InferenceSupport.Unsupported) && (implemented.SupportsSeed == InferenceSupport.Unsupported)
-            || (capabilities.SupportsPresencePenalty != InferenceSupport.Unsupported) && (implemented.SupportsPresencePenalty == InferenceSupport.Unsupported)
-            || (capabilities.SupportsFrequencyPenalty != InferenceSupport.Unsupported) && (implemented.SupportsFrequencyPenalty == InferenceSupport.Unsupported)
+        if (capabilities.SupportsJsonObject == InferenceSupport.Supported || capabilities.SupportsAccountUsage == InferenceSupport.Supported
+            || capabilities.SupportsExplicitCache == InferenceSupport.Supported && implemented.SupportsExplicitCache == InferenceSupport.Unsupported
+            || capabilities.SupportsTemperature == InferenceSupport.Supported && implemented.SupportsTemperature == InferenceSupport.Unsupported
+            || capabilities.SupportsTopP == InferenceSupport.Supported && implemented.SupportsTopP == InferenceSupport.Unsupported
+            || capabilities.SupportsTopK == InferenceSupport.Supported && implemented.SupportsTopK == InferenceSupport.Unsupported
+            || capabilities.SupportsSeed == InferenceSupport.Supported && implemented.SupportsSeed == InferenceSupport.Unsupported
+            || capabilities.SupportsPresencePenalty == InferenceSupport.Supported && implemented.SupportsPresencePenalty == InferenceSupport.Unsupported
+            || capabilities.SupportsFrequencyPenalty == InferenceSupport.Supported && implemented.SupportsFrequencyPenalty == InferenceSupport.Unsupported
             || capabilities.MaxStopSequences > implemented.MaxStopSequences
             || modelId is not null && capabilities.ReasoningLevels.Any(level =>
                 !VertexModelProfiles.Get(modelId).ReasoningLevels.Contains(level))
-            || express && (capabilities.SupportsModelListing != InferenceSupport.Unsupported))
+            || express && capabilities.SupportsModelListing == InferenceSupport.Supported)
         { throw new NotSupportedException("Vertex capability overrides cannot enable unimplemented controls."); }
         return capabilities;
     }

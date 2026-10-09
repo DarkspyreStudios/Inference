@@ -131,26 +131,26 @@ internal sealed class BedrockLlmClient(
             SupportsPresencePenalty = InferenceSupport.Unsupported,
             SupportsFrequencyPenalty = InferenceSupport.Unsupported
         };
-        if ((capabilities.SupportsJsonObject != InferenceSupport.Unsupported))
+        if (capabilities.SupportsJsonObject == InferenceSupport.Supported)
         {
             throw new NotSupportedException("Bedrock Converse does not expose JSON-object-only output enforcement.");
         }
-        if (!nativeTools && (capabilities.SupportsToolUse != InferenceSupport.Unsupported))
+        if (!nativeTools && capabilities.SupportsToolUse == InferenceSupport.Supported)
         {
             throw new NotSupportedException("Bedrock capability overrides cannot enable native tool use for DeepSeek-R1.");
         }
-        if (indiaHaiku && (capabilities.SupportsJsonSchema != InferenceSupport.Unsupported))
+        if (indiaHaiku && capabilities.SupportsJsonSchema == InferenceSupport.Supported)
         {
             throw new NotSupportedException(
                 "Bedrock capability overrides cannot enable JSON Schema output for the India Haiku 4.5 inference profile.");
         }
-        if (novaWithoutStructuredOutput && (capabilities.SupportsJsonSchema != InferenceSupport.Unsupported))
+        if (novaWithoutStructuredOutput && capabilities.SupportsJsonSchema == InferenceSupport.Supported)
         {
             throw new NotSupportedException(
                 "Bedrock capability overrides cannot enable JSON Schema output for this Nova model.");
         }
-        if ((richContent.Images == LlmRichContentCarriage.Unsupported && (capabilities.SupportsPromptImages != InferenceSupport.Unsupported))
-            || (richContent.PdfDocuments == LlmRichContentCarriage.Unsupported && (capabilities.SupportsPromptDocuments != InferenceSupport.Unsupported)))
+        if ((richContent.Images == LlmRichContentCarriage.Unsupported && capabilities.SupportsPromptImages == InferenceSupport.Supported)
+            || (richContent.PdfDocuments == LlmRichContentCarriage.Unsupported && capabilities.SupportsPromptDocuments == InferenceSupport.Supported))
         {
             throw new NotSupportedException("Bedrock capability overrides cannot enable image or document input for this text-only model.");
         }

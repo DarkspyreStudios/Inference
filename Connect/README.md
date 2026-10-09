@@ -13,6 +13,11 @@ and Unsupported for these fields. Per-level reasoning choices remain Default, En
 Common bindings and SelfHost preserve the enum values. JSON carries enum names without boolean
 compatibility conversion. The host consumes the same source contract.
 
+Capability queries do not treat an explicit Unknown override as an affirmative implementation claim.
+Gemini and Vertex retain known missing JSON-object/account-usage operations as Unsupported by default.
+An unfamiliar Gemini API model reports Unknown schema support and can use the existing unchanged
+`responseFormat.text.schema` request. Provider acceptance remains unqualified.
+
 ## SDK HTTP composition
 
 SDK HTTP registrations use one generation-owned pool for the finite SDK named pipelines,
@@ -980,7 +985,7 @@ empty values; setup does not automatically register an xAI provider.
 The explicit xAI client acquires one OAuth snapshot per REST operation or stream opening. Voice
 listing requires the binding's optional borrowed LLM facade and uses its selected HTTP/admission
 owner without a second resolve or refresh. Voice observations remain ordered actual provider data,
-not a separate cached model catalog. Without that facade, voice-listing capability is false and the
+not a separate cached model catalog. Without that facade, voice-listing capability is `Unsupported` and the
 operation refuses before resolution or HTTP. REST timestamps preserve graph text and timeline
 pairs; raw responses preserve their observed media type. Speech with no reported model has required
 `Provenance.ModelId = null`, rather than a fabricated model identity.
@@ -4056,7 +4061,7 @@ content; use `Attachments`. Claude materializes MCP document resources through i
 Converse sends a tool's `strict` flag only when `LlmToolDefinition.Strict` is true. Models without
 strict schemas reject the field even when it is false. The exact base IDs
 `amazon.nova-micro-v1:0`, `amazon.nova-lite-v1:0`, `amazon.nova-pro-v1:0` and `amazon.nova-2-lite-v1:0`
-report Unsupported strict tool-input schemas and false native JSON Schema support after geographic-prefix
+report Unsupported strict tool-input schemas and Unsupported native JSON Schema support after geographic-prefix
 normalization. Explicit strict tools fail before SDK acquisition through the shared tool validator.
 Overrides cannot enable native JSON Schema output for these models. Ordinary tools retain the original
 input schema and omit the strict flag in both Converse request modes. This follows the model-card
@@ -4226,7 +4231,7 @@ and [120B](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-opena
 model cards document the `us-gov.` profile IDs. They retain their base model's request facts without
 qualifying live GovCloud access or native structured-output success.
 The [India Haiku 4.5 profile](https://docs.aws.amazon.com/bedrock/latest/userguide/model-card-anthropic-claude-haiku-4-5.html)
-does not support native structured output. Its schema capability is false, and an override cannot
+does not support native structured output. Its schema capability is `Unsupported`, and an override cannot
 enable it. Explicit original-schema local validation remains available without changing the profile ID.
 Its strict tool-input schema capability is Unsupported. An explicit strict tool fails with "The selected
 route cannot enforce strict tool input schemas." before SDK acquisition or resource preparation.
@@ -4343,7 +4348,7 @@ because AgentCore cannot route approval requests for its remote built-in tools t
 writable sandbox and `Never`, the deployed Harness tool policy is allowed to operate remotely.
 
 The current Harness wire contract has no image or document message block and no binary tool-result
-block. This transport therefore reports all four attachment capabilities as `false`; callers must not
+block. This transport therefore reports all four attachment capabilities as `Unsupported`; callers must not
 splice files into text or base64 themselves. It also has no portable model-list endpoint, so hosts
 normally expose `default` plus a manually entered Bedrock override.
 
@@ -4481,7 +4486,7 @@ Nonstandard extension options retain request-over-connection precedence.
 | Anthropic and Vertex Claude | Profile-owned temperature/top-p/top-k, `stop_sequences` without an invented Connect limit; thinking permits top-p from 0.95 to 1 and no top-k |
 | Bedrock Converse | `inferenceConfig.topP` and `stopSequences`; Claude `top_k`, Nova 1 and Nova 2 `inferenceConfig.topK` from 0 to 128, merged with reasoning fields; stop limit 2500, or 10 for DeepSeek R1 |
 | AgentCore | `BedrockModelConfig.TopP` on an explicit Bedrock model ID; the harness-default route cannot carry it |
-| Gemini API and Vertex Gemini | `generationConfig` sampling fields and penalties, up to five stops; Gemini API top-k requires a catalog default, Vertex uses its shared model profile |
+| Gemini API and Vertex Gemini | `generationConfig` sampling fields and penalties, up to five stops; Gemini API reports top-k as Unknown without a catalog response, Unsupported for an observed model without a positive default, and Supported for a positive default; Vertex uses its shared model profile |
 | Apple Foundation Models | Top-p or top-k random mode with optional seed; seed alone selects top-p 1; no stops or penalties |
 | Claude CLI, Antigravity CLI and Codex | All six controls rejected; capability overrides cannot enable an unmapped control |
 | SelfHost | All six controls and support flags pass to the selected Common engine; unsupported engine controls fail before its stream starts |

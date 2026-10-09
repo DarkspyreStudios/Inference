@@ -20,6 +20,14 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
         SupportsStreaming = InferenceSupport.Supported,
         SupportsModelListing = InferenceSupport.Supported,
         SupportsJsonSchema = InferenceSupport.Supported,
+        SupportsJsonObject = InferenceSupport.Unsupported,
+        SupportsPromptImages = InferenceSupport.Unsupported,
+        SupportsPromptDocuments = InferenceSupport.Unsupported,
+        SupportsStreamingUsage = InferenceSupport.Unsupported,
+        SupportsUsageDeltas = InferenceSupport.Unsupported,
+        SupportsAccountUsage = InferenceSupport.Unsupported,
+        SupportsPresencePenalty = InferenceSupport.Unsupported,
+        SupportsFrequencyPenalty = InferenceSupport.Unsupported,
         SupportsTemperature = InferenceSupport.Supported,
         SupportsTopP = InferenceSupport.Supported,
         SupportsTopK = InferenceSupport.Supported,
@@ -51,9 +59,9 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
         if (ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } hello
             && !AppleProtocol.SupportsSampling(hello))
             result = result with { SupportsTopP = InferenceSupport.Unsupported, SupportsTopK = InferenceSupport.Unsupported, SupportsSeed = InferenceSupport.Unsupported };
-        if ((result.SupportsJsonObject != InferenceSupport.Unsupported) || (result.SupportsPromptImages != InferenceSupport.Unsupported) || (result.SupportsPromptDocuments != InferenceSupport.Unsupported)
-            || (result.SupportsStreamingUsage != InferenceSupport.Unsupported) || (result.SupportsUsageDeltas != InferenceSupport.Unsupported) || (result.SupportsAccountUsage != InferenceSupport.Unsupported) || result.ReasoningLevels.Count > 0
-            || (result.SupportsPresencePenalty != InferenceSupport.Unsupported) || (result.SupportsFrequencyPenalty != InferenceSupport.Unsupported) || result.MaxStopSequences > 0)
+        if (result.SupportsJsonObject == InferenceSupport.Supported || result.SupportsPromptImages == InferenceSupport.Supported || result.SupportsPromptDocuments == InferenceSupport.Supported
+            || result.SupportsStreamingUsage == InferenceSupport.Supported || result.SupportsUsageDeltas == InferenceSupport.Supported || result.SupportsAccountUsage == InferenceSupport.Supported || result.ReasoningLevels.Count > 0
+            || result.SupportsPresencePenalty == InferenceSupport.Supported || result.SupportsFrequencyPenalty == InferenceSupport.Supported || result.MaxStopSequences > 0)
             throw new NotSupportedException("Capability overrides cannot enable unsupported Apple model features.");
         return result;
     }

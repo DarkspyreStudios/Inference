@@ -4,6 +4,7 @@ using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Darkspyre.Inference.Connect.LLM.Vertex;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -78,6 +79,81 @@ public sealed class SupportStateTests
     }
 
     [Theory]
+    [InlineData(null, InferenceSupport.Unknown)]
+    [InlineData("{}", InferenceSupport.Unsupported)]
+    [InlineData("{\"topK\":40}", InferenceSupport.Supported)]
+    public async Task GeminiMissingCatalogPermitsTopKAndUnreviewedSchemaWithoutChangingEither(
+        string? entry, InferenceSupport expected)
+    {
+        var handler = new SchemaHandler();
+        using var http = new HttpClient(handler);
+        var client = new GeminiApiLlmClient(http);
+        const string model = "gemini-unlisted";
+        var connection = Connection() with
+        {
+            Transport = LlmTransport.GoogleGeminiApi,
+            Endpoint = GeminiApiLlmClient.DefaultEndpoint,
+            Catalog = entry is null ? null : [new(model, model) { CatalogEntry = JsonElement.Parse(entry) }],
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported }
+        };
+        Assert.Equal(expected, client.GetCapabilities(connection, model).SupportsTopK);
+        Assert.Equal(InferenceSupport.Unknown, client.GetCapabilities(connection, model).SupportsJsonSchema);
+        var request = new LlmChatRequest
+        {
+            ModelId = model, Messages = [new("user", "Return an object.")], TopK = 7,
+            StructuredOutput = new() { Name = "answer", Schema = JsonElement.Parse("{\"type\":\"object\"}") }
+        };
+        if (expected == InferenceSupport.Unsupported)
+        {
+            await Assert.ThrowsAsync<NotSupportedException>(async () =>
+            {
+                await foreach (var _ in client.StreamAsync(connection, request)) { }
+            });
+            Assert.Null(handler.Payload);
+            return;
+        }
+        await foreach (var _ in client.StreamAsync(connection, request)) { }
+        using var sent = JsonDocument.Parse(handler.Payload!);
+        JsonElement config = sent.RootElement.GetProperty("generationConfig");
+        Assert.Equal(7, config.GetProperty("topK").GetInt32());
+        Assert.Equal(request.StructuredOutput.Schema.GetRawText(),
+            config.GetProperty("responseFormat").GetProperty("text").GetProperty("schema").GetRawText());
+    }
+
+    [Theory]
+    [InlineData(LlmTransport.GoogleGeminiApi, null)]
+    [InlineData(LlmTransport.GoogleGeminiApi, InferenceSupport.Unknown)]
+    [InlineData(LlmTransport.GoogleVertexAi, null)]
+    [InlineData(LlmTransport.GoogleVertexAi, InferenceSupport.Unknown)]
+    [InlineData(LlmTransport.AppleFoundationModels, null)]
+    [InlineData(LlmTransport.AppleFoundationModels, InferenceSupport.Unknown)]
+    public void CapabilityLookupDoesNotMistakeUnknownForEnablingAMissingOperation(
+        LlmTransport transport, InferenceSupport? jsonObjectOverride)
+    {
+        using var http = new HttpClient(new SchemaHandler());
+        var connection = Connection() with
+        {
+            Transport = transport,
+            Endpoint = transport switch
+            {
+                LlmTransport.GoogleGeminiApi => GeminiApiLlmClient.DefaultEndpoint,
+                LlmTransport.GoogleVertexAi => VertexEndpoints.BaseEndpoint,
+                _ => "apple-fixture"
+            },
+            Credential = transport == LlmTransport.AppleFoundationModels ? null : Connection().Credential,
+            Vertex = transport == LlmTransport.GoogleVertexAi ? new() { AuthenticationMode = LlmGoogleAuthenticationMode.ApiKey } : null,
+            CapabilityOverrides = new() { SupportsJsonObject = jsonObjectOverride }
+        };
+        LlmProviderCapabilities capabilities = transport switch
+        {
+            LlmTransport.GoogleGeminiApi => new GeminiApiLlmClient(http).GetCapabilities(connection),
+            LlmTransport.GoogleVertexAi => VertexLlmClient.Capabilities(connection, "google/gemini-3-flash-preview"),
+            _ => new AppleFoundationModelsClient(http, new AppleProcessRunner()).GetCapabilities(connection)
+        };
+        Assert.Equal(jsonObjectOverride ?? InferenceSupport.Unsupported, capabilities.SupportsJsonObject);
+    }
+
+    [Theory]
     [InlineData(InferenceSupport.Unknown)]
     [InlineData(InferenceSupport.Unsupported)]
     public async Task SchemaAdmissionDistinguishesAnAttemptFromAnExplicitRestriction(InferenceSupport support)
@@ -145,7 +221,9 @@ public sealed class SupportStateTests
             Payload = await request.Content!.ReadAsStringAsync(token);
             return new(HttpStatusCode.OK)
             {
-                Content = new StringContent("{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"{}\"},\"finish_reason\":\"stop\"}]}", Encoding.UTF8, "application/json")
+                Content = new StringContent(request.RequestUri!.Host == "generativelanguage.googleapis.com"
+                    ? "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"{}\"}]},\"finishReason\":\"STOP\"}]}"
+                    : "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"{}\"},\"finish_reason\":\"stop\"}]}", Encoding.UTF8, "application/json")
             };
         }
     }

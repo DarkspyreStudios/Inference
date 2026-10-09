@@ -36,21 +36,23 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         GeminiModelProfile profile = modelId is null
             ? GeminiModelProfiles.Get(string.Empty, null) with { MultimodalFunctionResponses = true }
             : Reasoning(connection, modelId);
-        bool supportsTopK = modelId is not null && ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } entry
-            && entry.TryGetProperty("topK", out JsonElement topK) && topK.ValueKind == JsonValueKind.Number
-            && topK.TryGetInt32(out int defaultTopK) && defaultTopK > 0;
+        InferenceSupport supportsTopK = modelId is not null && ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } entry
+            ? entry.TryGetProperty("topK", out JsonElement topK) && topK.ValueKind == JsonValueKind.Number
+                && topK.TryGetInt32(out int defaultTopK) && defaultTopK > 0
+                ? InferenceSupport.Supported : InferenceSupport.Unsupported
+            : InferenceSupport.Unknown;
         LlmProviderCapabilities implemented = GeminiCapabilities.Create(profile, supportsTopK) with
         { SupportsExplicitCache = (connection.CacheBindings is not null ? InferenceSupport.Supported : InferenceSupport.Unsupported) };
         LlmProviderCapabilities capabilities = implemented;
-        if (modelId is not null && !IsReviewed(modelId)) { capabilities = capabilities with { SupportsJsonSchema = InferenceSupport.Unsupported }; }
+        if (modelId is not null && !IsReviewed(modelId)) { capabilities = capabilities with { SupportsJsonSchema = InferenceSupport.Unknown }; }
         capabilities = LlmCapabilityOverrideLookup.Apply(capabilities, connection, modelId);
-        if ((capabilities.SupportsJsonObject != InferenceSupport.Unsupported) || (capabilities.SupportsAccountUsage != InferenceSupport.Unsupported)
-            || (capabilities.SupportsExplicitCache != InferenceSupport.Unsupported) && (implemented.SupportsExplicitCache == InferenceSupport.Unsupported)
-            || (capabilities.SupportsTemperature != InferenceSupport.Unsupported) && (implemented.SupportsTemperature == InferenceSupport.Unsupported)
-            || (capabilities.SupportsTopP != InferenceSupport.Unsupported) && (implemented.SupportsTopP == InferenceSupport.Unsupported)
-            || (capabilities.SupportsTopK != InferenceSupport.Unsupported) && (implemented.SupportsTopK == InferenceSupport.Unsupported)
-            || (capabilities.SupportsPresencePenalty != InferenceSupport.Unsupported) && (implemented.SupportsPresencePenalty == InferenceSupport.Unsupported)
-            || (capabilities.SupportsFrequencyPenalty != InferenceSupport.Unsupported) && (implemented.SupportsFrequencyPenalty == InferenceSupport.Unsupported)
+        if (capabilities.SupportsJsonObject == InferenceSupport.Supported || capabilities.SupportsAccountUsage == InferenceSupport.Supported
+            || capabilities.SupportsExplicitCache == InferenceSupport.Supported && implemented.SupportsExplicitCache == InferenceSupport.Unsupported
+            || capabilities.SupportsTemperature == InferenceSupport.Supported && implemented.SupportsTemperature == InferenceSupport.Unsupported
+            || capabilities.SupportsTopP == InferenceSupport.Supported && implemented.SupportsTopP == InferenceSupport.Unsupported
+            || capabilities.SupportsTopK == InferenceSupport.Supported && implemented.SupportsTopK == InferenceSupport.Unsupported
+            || capabilities.SupportsPresencePenalty == InferenceSupport.Supported && implemented.SupportsPresencePenalty == InferenceSupport.Unsupported
+            || capabilities.SupportsFrequencyPenalty == InferenceSupport.Supported && implemented.SupportsFrequencyPenalty == InferenceSupport.Unsupported
             || capabilities.MaxStopSequences > implemented.MaxStopSequences
             || capabilities.ReasoningLevels.Any(level => !profile.Levels.Contains(level)))
         { throw new NotSupportedException("Gemini API capability overrides cannot enable unimplemented controls."); }

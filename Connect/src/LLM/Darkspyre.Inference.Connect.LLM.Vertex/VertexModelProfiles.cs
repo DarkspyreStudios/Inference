@@ -21,7 +21,7 @@ internal static class VertexModelProfiles
         {
             var (context, output) = GeminiModels.VertexLimits(model);
             return new(modelId, context, output,
-                GeminiCapabilities.Create(GeminiModelProfiles.Get(model, catalogThinking: null), supportsTopK: true));
+                GeminiCapabilities.Create(GeminiModelProfiles.Get(model, catalogThinking: null), supportsTopK: InferenceSupport.Supported));
         }
         if (publisher != "anthropic" || !model.StartsWith("claude-", StringComparison.Ordinal))
             throw new NotSupportedException("Vertex serves google/gemini-* and anthropic/claude-* text models.");

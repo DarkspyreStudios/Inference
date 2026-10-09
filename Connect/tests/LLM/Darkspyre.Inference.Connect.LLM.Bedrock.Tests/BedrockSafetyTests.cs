@@ -532,6 +532,17 @@ public sealed class BedrockSafetyTests
             Assert.Equal(InferenceSupport.Supported, client.GetCapabilities(Connection() with
             { CapabilityOverrides = new() { SupportsJsonSchema = InferenceSupport.Supported } }, model).SupportsJsonSchema);
         }
+        Assert.Equal(InferenceSupport.Unknown, client.GetCapabilities(Connection() with
+        {
+            CapabilityOverrides = new()
+            {
+                SupportsJsonSchema = InferenceSupport.Unknown,
+                SupportsJsonObject = InferenceSupport.Unknown,
+                SupportsToolUse = InferenceSupport.Unknown,
+                SupportsPromptImages = InferenceSupport.Unknown,
+                SupportsPromptDocuments = InferenceSupport.Unknown
+            }
+        }, "deepseek.r1-v1:0").SupportsJsonSchema);
     }
 
     [Theory]
