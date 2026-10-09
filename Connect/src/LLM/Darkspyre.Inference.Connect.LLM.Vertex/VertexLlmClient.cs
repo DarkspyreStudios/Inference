@@ -47,8 +47,6 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
             || capabilities.SupportsPresencePenalty == InferenceSupport.Supported && implemented.SupportsPresencePenalty == InferenceSupport.Unsupported
             || capabilities.SupportsFrequencyPenalty == InferenceSupport.Supported && implemented.SupportsFrequencyPenalty == InferenceSupport.Unsupported
             || capabilities.MaxStopSequences > implemented.MaxStopSequences
-            || modelId is not null && !VertexModelProfiles.Get(modelId).IsClaude && capabilities.ReasoningLevels.Any(level =>
-                !VertexModelProfiles.Get(modelId).ReasoningLevels.Contains(level))
             || express && capabilities.SupportsModelListing == InferenceSupport.Supported)
         { throw new NotSupportedException("Vertex capability overrides cannot enable unimplemented controls."); }
         return capabilities;
@@ -62,7 +60,9 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
                 AnthropicModelProfiles.Resolve(VertexEndpoints.ParseModel(request.ModelId).Model, null)
                     with { ReasoningLevels = capabilities.ReasoningLevels }, request.ReasoningLevel);
         else
-            base.ValidateReasoningRequest(connection, request, capabilities);
+            _ = GeminiModelProfiles.MapReasoning(
+                GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null)
+                    with { Levels = capabilities.ReasoningLevels }, request.ReasoningLevel);
     }
 
     public async Task<LlmConnection> PrepareAsync(LlmConnection connection, CancellationToken cancellationToken)
@@ -135,7 +135,8 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         {
             JsonObject payload = GeminiRequest.Build(built.Connection, built.Request, built.Enforcement,
                 output => ProjectToolOutput(built.Connection, request.ModelId, output),
-                GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), (built.Capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
+                GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null)
+                    with { Levels = built.Capabilities.ReasoningLevels }, (built.Capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
             payload.Remove("toolConfig");
             using var message = new HttpRequestMessage(HttpMethod.Post, endpoint) { Content = RequestJson.Content(payload) };
             built.Access.Authorize(message);
@@ -162,7 +163,8 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
             ? new VertexClaudeProtocol(Http, access).StreamAsync(connection, request, cancellationToken)
             : GeminiStream.ReadAsync(Http, GeminiMessage(connection, request,
                 GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
-                    GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null), (capabilities.SupportsReasoningText != InferenceSupport.Unsupported),
+                    GeminiModelProfiles.Get(VertexEndpoints.ParseModel(request.ModelId).Model, catalogThinking: null)
+                        with { Levels = capabilities.ReasoningLevels }, (capabilities.SupportsReasoningText != InferenceSupport.Unsupported),
                     streamArguments: (capabilities.SupportsStreaming != InferenceSupport.Unsupported)),
                 access, capabilities.SupportsStreaming != InferenceSupport.Unsupported), GeminiRoute, connection, request, enforcement,
                 capabilities.SupportsStreaming != InferenceSupport.Unsupported, capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported,

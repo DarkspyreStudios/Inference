@@ -855,7 +855,7 @@ terminal format and the current Apple, Antigravity and Bedrock protocols report 
 level below it; a level does not cost the same on two different models. Null leaves the provider's
 default in place. Each model reports the levels it accepts in `LlmCapabilities.ReasoningLevels`, and
 `SupportsReasoning` is `Supported` when that set contains a level above `None`, `Unsupported` when
-it contains only `None`, and `Unknown` when the set is empty. Direct Codex and the Claude transports
+it contains only `None`, and `Unknown` when the set is empty. Direct Codex, Gemini API, Vertex Gemini and the Claude transports
 map desired effort inside their adapters. Other adapters currently reject a level outside their declared set with
 `InferenceFailureCode.InvalidRequest` before any provider call. Each adapter owns its provider's wire form.
 `LlmCapabilityOverrides.ReasoningLevels` replaces a transport's set for a connection or one model,
@@ -884,6 +884,18 @@ Null leaves the provider default unchanged. Missing or empty native-level observ
 Unknown support and send an explicit requested effort with its existing native spelling.
 No shared distance/rank calculation or host-side native selection runs. The caller request and
 reported native-level catalog remain unchanged. Summary requests follow the mapped native effort.
+
+Gemini API and Vertex Gemini use `GeminiModelProfiles.MapReasoning` before admission and native
+projection, including token counting. Its explicit rows map `ExtraHigh` and `Maximum` to `High`,
+and map `Medium` to `Low` for Gemini 3 Pro's low/high choices. Named-level models map `None` to their
+lowest native level; this does not disable thinking. Gemini 2.5 retains its token budgets: Low 1024,
+Medium 8192, High 24576 for Flash or 32768 for Pro. Flash maps `Minimal` to its zero budget;
+Pro maps `None` and `Minimal` to Low because it cannot disable thinking. Null leaves effort unset.
+Effective native-level overrides reach both admission and payload construction. Missing profile
+facts remain Unknown and attempt the existing `thinkingLevel` vocabulary with minimal/low/medium/high
+choices. An explicit catalog `thinking: false` offers only `None` and sends no thinking configuration.
+Thought-summary requests follow the mapped native effort. These native forms follow Google's
+[GenerateContent thinking guide](https://ai.google.dev/gemini-api/docs/generate-content/thinking).
 
 OpenAI Responses levels are per model, from a table of verified model pages, because the OpenAI Models
 API reports no capabilities. `None` sends `reasoning.effort: "none"` and `Maximum` sends `"max"`. A

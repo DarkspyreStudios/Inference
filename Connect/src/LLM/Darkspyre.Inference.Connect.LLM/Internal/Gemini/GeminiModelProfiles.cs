@@ -4,9 +4,10 @@ using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
-/// <summary>How a Gemini model takes a reasoning level: a named thinking level, a thinking-token budget, or neither.</summary>
+/// <summary>How a Gemini model takes reasoning controls, or whether that information is unknown.</summary>
 internal enum GeminiThinkingControl
 {
+    Unknown,
     None,
     Level,
     Budget
@@ -27,7 +28,7 @@ internal sealed record GeminiModelProfile(
 /// <summary>Per-model Gemini reasoning controls, shared by the Gemini API and Vertex Gemini routes.</summary>
 internal static class GeminiModelProfiles
 {
-    private static readonly IReadOnlySet<LlmReasoningLevel> MinimalToHigh = new[]
+    private static readonly FrozenSet<LlmReasoningLevel> MinimalToHigh = new[]
     { LlmReasoningLevel.Minimal, LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High }.ToFrozenSet();
 
     private static readonly IReadOnlySet<LlmReasoningLevel> LowToHigh = new[]
@@ -36,7 +37,10 @@ internal static class GeminiModelProfiles
     private static readonly FrozenDictionary<LlmReasoningLevel, int> NoBudgets = FrozenDictionary<LlmReasoningLevel, int>.Empty;
 
     private static readonly GeminiModelProfile NoControl = new(
-        GeminiThinkingControl.None, FrozenSet<LlmReasoningLevel>.Empty, NoBudgets);
+        GeminiThinkingControl.None, new[] { LlmReasoningLevel.None }.ToFrozenSet(), NoBudgets);
+
+    private static readonly GeminiModelProfile UnknownControl = new(
+        GeminiThinkingControl.Unknown, FrozenSet<LlmReasoningLevel>.Empty, NoBudgets);
 
     // Gemini 3 thinkingLevel sets. Longest prefix first, so a longer, more specific prefix is tested before a shorter
     // one it contains.
@@ -63,7 +67,7 @@ internal static class GeminiModelProfiles
     /// </summary>
     public static GeminiModelProfile Get(string bareModelId, bool? catalogThinking)
     {
-        GeminiModelProfile resolved = NoControl;
+        GeminiModelProfile resolved = UnknownControl;
         foreach ((string prefix, GeminiModelProfile profile) in Rows)
         {
             if (bareModelId.StartsWith(prefix, StringComparison.Ordinal))
@@ -88,18 +92,47 @@ internal static class GeminiModelProfiles
         };
     }
 
+    /// <summary>Maps desired effort through Gemini-owned native-choice rows without changing caller intent.</summary>
+    public static LlmReasoningLevel? MapReasoning(GeminiModelProfile profile, LlmReasoningLevel? requested)
+    {
+        if (requested is null) return null;
+        if (profile.Control == GeminiThinkingControl.None) return LlmReasoningLevel.None;
+        LlmReasoningLevel[] row = requested switch
+        {
+            LlmReasoningLevel.None => [LlmReasoningLevel.None, LlmReasoningLevel.Minimal, LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High],
+            LlmReasoningLevel.Minimal => [LlmReasoningLevel.Minimal, LlmReasoningLevel.None, LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High],
+            LlmReasoningLevel.Low => [LlmReasoningLevel.Low, LlmReasoningLevel.Minimal, LlmReasoningLevel.None, LlmReasoningLevel.Medium, LlmReasoningLevel.High],
+            LlmReasoningLevel.Medium => [LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.Minimal, LlmReasoningLevel.None, LlmReasoningLevel.High],
+            LlmReasoningLevel.High or LlmReasoningLevel.ExtraHigh or LlmReasoningLevel.Maximum =>
+                [LlmReasoningLevel.High, LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.Minimal, LlmReasoningLevel.None],
+            _ => throw new ArgumentOutOfRangeException(nameof(requested))
+        };
+        IReadOnlySet<LlmReasoningLevel> choices = profile.Levels.Count == 0
+            ? profile.Control == GeminiThinkingControl.Budget ? profile.Budgets.Keys.ToFrozenSet() : MinimalToHigh
+            : profile.Levels;
+        foreach (LlmReasoningLevel choice in row)
+        {
+            bool native = profile.Control == GeminiThinkingControl.Budget
+                ? profile.Budgets.ContainsKey(choice) : MinimalToHigh.Contains(choice);
+            if (native && choices.Contains(choice)) return choice;
+        }
+        throw new NotSupportedException("The selected Gemini native choices contain no mapped thinking level or budget.");
+    }
+
     /// <summary>
-    /// The <c>thinkingConfig</c> for a level the profile offers. It never writes both <c>thinkingLevel</c> and
+    /// The <c>thinkingConfig</c> for mapped desired effort. It never writes both <c>thinkingLevel</c> and
     /// <c>thinkingBudget</c>, which Gemini rejects.
     /// </summary>
     public static JsonObject? ThinkingConfig(GeminiModelProfile profile, LlmReasoningLevel? level, bool requestReasoningText)
     {
+        level = MapReasoning(profile, level);
         JsonObject? config = level is null ? null : profile.Control switch
         {
-            GeminiThinkingControl.Level => new JsonObject { ["thinkingLevel"] = level.Value.ToString().ToUpperInvariant() },
+            GeminiThinkingControl.Level or GeminiThinkingControl.Unknown => new JsonObject { ["thinkingLevel"] = level.Value.ToString().ToUpperInvariant() },
             GeminiThinkingControl.Budget when level == LlmReasoningLevel.None => new JsonObject { ["thinkingBudget"] = 0 },
             GeminiThinkingControl.Budget => new JsonObject { ["thinkingBudget"] = profile.Budgets[level.Value] },
-            _ => throw new ArgumentOutOfRangeException(nameof(profile), "The model takes no reasoning level.")
+            GeminiThinkingControl.None => null,
+            _ => throw new ArgumentOutOfRangeException(nameof(profile))
         };
         if (requestReasoningText && level != LlmReasoningLevel.None && profile.Control != GeminiThinkingControl.None)
         {

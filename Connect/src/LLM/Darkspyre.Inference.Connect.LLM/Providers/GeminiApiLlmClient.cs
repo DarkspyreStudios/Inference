@@ -53,11 +53,14 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             || capabilities.SupportsTopK == InferenceSupport.Supported && implemented.SupportsTopK == InferenceSupport.Unsupported
             || capabilities.SupportsPresencePenalty == InferenceSupport.Supported && implemented.SupportsPresencePenalty == InferenceSupport.Unsupported
             || capabilities.SupportsFrequencyPenalty == InferenceSupport.Supported && implemented.SupportsFrequencyPenalty == InferenceSupport.Unsupported
-            || capabilities.MaxStopSequences > implemented.MaxStopSequences
-            || capabilities.ReasoningLevels.Any(level => !profile.Levels.Contains(level)))
+            || capabilities.MaxStopSequences > implemented.MaxStopSequences)
         { throw new NotSupportedException("Gemini API capability overrides cannot enable unimplemented controls."); }
-        return capabilities;
+        return profile.Control == GeminiThinkingControl.None ? capabilities with { ReasoningLevels = profile.Levels } : capabilities;
     }
+
+    protected override void ValidateReasoningRequest(LlmConnection connection, LlmChatRequest request,
+        LlmProviderCapabilities capabilities) =>
+        _ = GeminiModelProfiles.MapReasoning(Reasoning(connection, request.ModelId) with { Levels = capabilities.ReasoningLevels }, request.ReasoningLevel);
 
     public Task<LlmConnection> PrepareAsync(LlmConnection connection, CancellationToken cancellationToken)
     {
@@ -104,7 +107,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             ? StructuredOutput.ResolveEnforcement(structured, capabilities)
             : GeminiSchemas.Enforcement(request.StructuredOutput, RouteName, GeminiSchemaDialect.GeminiApi);
         JsonObject payload = GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
-            Reasoning(connection, request.ModelId), (capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
+            Reasoning(connection, request.ModelId) with { Levels = capabilities.ReasoningLevels }, (capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
         return (connection, request, capabilities, enforcement, payload, omitted);
     }
 
