@@ -17,6 +17,34 @@ public sealed class ClaudeCliLlmClientTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public async Task OutputLimitReachesTheChildEnvironmentForBothChatPaths(bool streaming)
+    {
+        var runner = new RecordingRunner(new(0,
+            """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
+            string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        LlmConnection connection = CliConnection() with
+        { CapabilityOverrides = new() { SupportsStreaming = streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported } };
+        Assert.Equal(LlmOutputLimitEnforcement.Unknown, client.GetCapabilities(connection, "claude-test").OutputLimitEnforcement);
+        string? inherited = Environment.GetEnvironmentVariable("CLAUDE_CODE_MAX_OUTPUT_TOKENS");
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection,
+            new() { ModelId = "claude-test", Messages = [new("user", "test")], MaxOutputTokens = 123 }));
+
+        Assert.Equal("OK", Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Text);
+        ClaudeCliInvocation invocation = Assert.Single(runner.Invocations);
+        Assert.Equal(123, invocation.MaxOutputTokens);
+        Assert.Equal("123", ClaudeCliProcessRunner.CreateStartInfo(invocation).Environment["CLAUDE_CODE_MAX_OUTPUT_TOKENS"]);
+        Assert.Equal(inherited, Environment.GetEnvironmentVariable("CLAUDE_CODE_MAX_OUTPUT_TOKENS"));
+        ClaudeCliProcessRunner.CreateStartInfo(invocation with { MaxOutputTokens = null })
+            .Environment.TryGetValue("CLAUDE_CODE_MAX_OUTPUT_TOKENS", out string? unchanged);
+        Assert.Equal(inherited, unchanged);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task CatalogEffortFactsControlAliasAdmissionThroughTheFacade(bool supportsEffort)
     {
         var process = new CatalogProcess

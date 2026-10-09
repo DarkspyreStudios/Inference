@@ -29,7 +29,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
-        OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unsupported,
+        OutputLimitEnforcement = Common.LLM.LlmOutputLimitEnforcement.Unknown,
         SupportsStreaming = InferenceSupport.Supported,
         SupportsReasoningText = InferenceSupport.Supported,
         SupportsStreamingUsage = InferenceSupport.Supported,
@@ -74,8 +74,6 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
             };
         return capabilities with
         {
-            SupportsTemperature = InferenceSupport.Unsupported,
-            SupportsTopP = InferenceSupport.Unsupported,
             SupportsTopK = InferenceSupport.Unsupported,
             SupportsSeed = InferenceSupport.Unsupported,
             SupportsPresencePenalty = InferenceSupport.Unsupported,
@@ -166,10 +164,6 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         LlmConnection connection, LlmChatRequest request, LlmStructuredOutputEnforcement? enforcement, bool stream,
         LlmResourcePreparation? resources = null)
     {
-        if (request.MaxOutputTokens is not null)
-        {
-            throw new NotSupportedException("Codex subscription does not accept MaxOutputTokens. Use the managed context output reserve for budgeting.");
-        }
         var instructions = new List<string>();
         if (request.Instructions is not null)
         {

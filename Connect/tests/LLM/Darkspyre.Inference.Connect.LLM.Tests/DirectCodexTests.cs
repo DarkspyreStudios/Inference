@@ -13,6 +13,47 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class DirectCodexTests
 {
     [Fact]
+    public async Task UnknownMappedControlsReachTheDirectEndpointUnchanged()
+    {
+        using var handler = new Handler(_ => Sse(Completed));
+        using var http = new HttpClient(handler);
+        var client = new OpenAiCodexLlmClient(http);
+        LlmConnection connection = Connection();
+        LlmProviderCapabilities capabilities = client.GetCapabilities(connection, "model");
+        Assert.Equal(InferenceSupport.Unknown, capabilities.SupportsTemperature);
+        Assert.Equal(InferenceSupport.Unknown, capabilities.SupportsTopP);
+        Assert.Equal(LlmOutputLimitEnforcement.Unknown, capabilities.OutputLimitEnforcement);
+
+        LlmChatResult result = await Complete(client, connection, Request() with
+        { Temperature = 0.7, TopP = 0.5, MaxOutputTokens = 123 });
+
+        Assert.Equal("Hello", result.Text);
+        using var sent = JsonDocument.Parse(handler.Body!);
+        Assert.Equal(0.7, sent.RootElement.GetProperty("temperature").GetDouble());
+        Assert.Equal(0.5, sent.RootElement.GetProperty("top_p").GetDouble());
+        Assert.Equal(123, sent.RootElement.GetProperty("max_output_tokens").GetInt32());
+        Assert.Equal("/backend-api/codex/responses", handler.Uri!.AbsolutePath);
+        Assert.Equal("0.159.3", handler.Headers["version"]);
+        Assert.Equal("Darkspyre.Inference.Connect.LLM/0.159.3", handler.Headers["User-Agent"]);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task ExplicitUnsupportedSamplingStillRejectsBeforeSending()
+    {
+        using var handler = new Handler(_ => Sse(Completed));
+        using var http = new HttpClient(handler);
+        var client = new OpenAiCodexLlmClient(http);
+        LlmConnection connection = Connection() with
+        { CapabilityOverrides = new() { SupportsTemperature = InferenceSupport.Unsupported } };
+        NotSupportedException error = await Assert.ThrowsAsync<NotSupportedException>(() =>
+            Complete(client, connection, Request() with { Temperature = 0.7 }));
+
+        Assert.Contains("temperature", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Fact]
     public async Task CatalogAndGenerationUseTheSameCompatibilityPinAndSelectedModelFacts()
     {
         var paths = new HashSet<string>(StringComparer.Ordinal);

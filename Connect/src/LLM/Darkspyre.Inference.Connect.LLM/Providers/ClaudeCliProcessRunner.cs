@@ -239,11 +239,23 @@ internal sealed class ClaudeCliProcessRunner(ClaudeCliExits exits) : IClaudeCliR
         }
     }
 
+    internal static ProcessStartInfo CreateStartInfo(ClaudeCliInvocation invocation)
+    {
+        ProcessStartInfo startInfo = CliProcessLauncher.CreateStartInfo(
+            invocation.Executable, invocation.Arguments, invocation.WorkingDirectory);
+        if (invocation.MaxOutputTokens is { } limit)
+        {
+            startInfo.Environment["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] =
+                limit.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        }
+        return startInfo;
+    }
+
     private static Process StartProcess(ClaudeCliInvocation invocation)
     {
         var process = new Process
         {
-            StartInfo = CliProcessLauncher.CreateStartInfo(invocation.Executable, invocation.Arguments, invocation.WorkingDirectory)
+            StartInfo = CreateStartInfo(invocation)
         };
         try
         {

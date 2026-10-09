@@ -3906,9 +3906,11 @@ matches the selected release metadata, not main's placeholder or the Inference p
 Chat and managed agents share SSE request mapping, attachments, tool definitions, reasoning level,
 JSON Schema, and ordered opaque response-state replay. Requests use `store: false`; the library
 does not retrieve server history or send `previous_response_id`. `ConversationKey` provides cache
-affinity only; managed sessions use `ThreadId`. Temperature, JSON-object mode, and
-`MaxOutputTokens` are unsupported; the managed output reserve budgets context without sending
-that unsupported parameter.
+affinity only; managed sessions use `ThreadId`. Temperature, top-p and output-limit enforcement
+are `Unknown` for this direct endpoint. Explicit values reach the existing Responses fields
+unchanged. Unknown admission does not promise endpoint acceptance or output-limit enforcement.
+JSON-object mode remains unsupported because the adapter has no mapping for it.
+The managed output reserve budgets context independently of `MaxOutputTokens`.
 
 Subscription requests explicitly opt into `reasoning.summary: "auto"`, retaining the selected
 effort or leaving effort to the provider when unspecified. Summary deltas flow through
@@ -4534,7 +4536,12 @@ no level unless a capability override supplies the set.
 
 ### Maximum output tokens
 
-For direct API-key requests, omitting `MaxOutputTokens` sends `max_tokens` of 8192. Adaptive thinking is on by default on current Claude models, and thinking tokens count against `max_tokens`, so a lower ceiling can truncate the response before visible text and return `LlmCompletionStatus.Incomplete`. The official CLI does not expose a maximum-output-token option, so subscription requests reject `MaxOutputTokens` rather than silently ignoring it.
+For direct API-key requests, omitting `MaxOutputTokens` sends `max_tokens` of 8192. Adaptive thinking is on by default on current Claude models, and thinking tokens count against `max_tokens`, so a lower ceiling can truncate the response before visible text and return `LlmCompletionStatus.Incomplete`.
+Subscription chat requests map an explicit `MaxOutputTokens` to the child process's
+[`CLAUDE_CODE_MAX_OUTPUT_TOKENS`](https://code.claude.com/docs/en/env-vars) environment variable.
+Both streaming and non-streaming calls use that mapping without changing the parent environment.
+Output-limit enforcement remains `Unknown`: the CLI documents the setting for most requests and
+applies model-specific caps. An omitted limit leaves the CLI environment unchanged.
 
 ### Refusals
 

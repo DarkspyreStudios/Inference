@@ -6,7 +6,10 @@ internal sealed record ClaudeCliInvocation(
     string Executable,
     IReadOnlyList<string> Arguments,
     string? StandardInput,
-    string WorkingDirectory);
+    string WorkingDirectory)
+{
+    internal int? MaxOutputTokens { get; init; }
+}
 
 internal sealed record ClaudeCliSessionInvocation(
     string Executable,

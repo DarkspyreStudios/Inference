@@ -527,7 +527,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 
     private string ResponseName => Transport == LlmTransport.XaiResponses ? "Grok Responses" : "OpenAI Responses";
 
-    /// <summary>OpenAI Responses applies its per-model sampling rule. Codex accepts no temperature at all.</summary>
+    /// <summary>Applies OpenAI Responses model sampling rules only to the OpenAI API transport.</summary>
     protected virtual void ValidateModelSampling(LlmConnection connection, LlmChatRequest request)
     {
         if (Transport == LlmTransport.OpenAiResponses)
