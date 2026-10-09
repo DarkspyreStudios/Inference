@@ -13,7 +13,7 @@
     </ItemGroup>
   </Target>
   <Import Project="$(MSBuildThisFileDirectory)../SecureStore/eng/SourceReferences.targets" Condition="'$(TensorSharpSourceRoot)' != ''" />
-  <Import Project="$(MSBuildThisFileDirectory)../PersistenceStore/eng/SourceReferences.targets" Condition="'$(TensorSharpSourceRoot)' != ''" />
+  <Import Project="$(MSBuildThisFileDirectory)../Persist/eng/SourceReferences.targets" Condition="'$(TensorSharpSourceRoot)' != ''" />
   <Target Name="ValidateDependencyMode" BeforeTargets="CollectPackageReferences;PrepareForBuild">
     <Error Condition="'$(DarkspyreDependencyMode)' == 'Source' and '$(TensorSharpSourceRoot)' == ''"
            Text="Source mode requires the sibling TensorSharp worktree. Do not clear TensorSharpSourceRoot." />
