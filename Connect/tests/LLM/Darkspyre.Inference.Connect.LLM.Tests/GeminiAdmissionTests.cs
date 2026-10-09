@@ -13,6 +13,95 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class GeminiAdmissionTests
 {
     [Theory]
+    [InlineData(false, "gemini-3-flash-preview", false, false)]
+    [InlineData(true, "google/gemini-3-flash-preview", false, false)]
+    [InlineData(false, "gemini-3-flash-preview", true, false)]
+    [InlineData(false, "gemini-3-flash-preview", true, true)]
+    [InlineData(true, "google/gemini-2.5-flash", true, false)]
+    [InlineData(true, "google/gemini-2.5-flash", true, true)]
+    public async Task AutoToolsUseTheProviderModeWithoutConsumerFormatChoices(bool vertex, string model,
+        bool mixed, bool reverse)
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        ILlmClient client = Client(http, vertex);
+        LlmToolDefinition[] tools = Tools(mixed);
+        if (reverse) Array.Reverse(tools);
+        var request = new LlmChatRequest
+        {
+            ModelId = model, Messages = [new("user", "Use a tool only if needed.")], Tools = tools,
+            ToolChoice = reverse ? new() { Mode = LlmToolChoiceMode.Auto } : null
+        };
+        LlmChatResult? result = null;
+
+        await foreach (LlmStreamEvent item in client.StreamAsync(Connection(vertex), request))
+            if (item is LlmChatCompletionEvent completion) result = completion.Result;
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement config = sent.RootElement.GetProperty("toolConfig").GetProperty("functionCallingConfig");
+        Assert.Equal("VALIDATED", config.GetProperty("mode").GetString());
+        Assert.False(config.TryGetProperty("allowedFunctionNames", out _));
+        Assert.Equal("OK", result!.Text);
+        AssertToolsUnchanged(sent.RootElement, tools);
+        Assert.Equal(mixed, tools.Any(tool => tool.Strict));
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false, LlmToolChoiceMode.Required, "ANY")]
+    [InlineData(true, LlmToolChoiceMode.Required, "ANY")]
+    [InlineData(false, LlmToolChoiceMode.Specific, "ANY")]
+    [InlineData(true, LlmToolChoiceMode.Specific, "ANY")]
+    [InlineData(false, LlmToolChoiceMode.None, "NONE")]
+    [InlineData(true, LlmToolChoiceMode.None, "NONE")]
+    public async Task NativeToolModeRetainsExplicitCallIntentWithMixedTools(bool vertex, LlmToolChoiceMode mode, string expected)
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        LlmToolDefinition[] tools = Tools(mixed: true);
+        var request = new LlmChatRequest
+        {
+            ModelId = vertex ? "google/gemini-2.5-flash" : "gemini-3-flash-preview",
+            Messages = [new("user", "Hello")], Tools = tools,
+            ToolChoice = new() { Mode = mode, Name = mode == LlmToolChoiceMode.Specific ? "lookup" : null }
+        };
+
+        await foreach (LlmStreamEvent _ in Client(http, vertex).StreamAsync(Connection(vertex), request)) { }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement config = sent.RootElement.GetProperty("toolConfig").GetProperty("functionCallingConfig");
+        Assert.Equal(expected, config.GetProperty("mode").GetString());
+        Assert.Equal(mode == LlmToolChoiceMode.Specific, config.TryGetProperty("allowedFunctionNames", out JsonElement names));
+        if (mode == LlmToolChoiceMode.Specific) Assert.Equal("lookup", Assert.Single(names.EnumerateArray()).GetString());
+        AssertToolsUnchanged(sent.RootElement, tools);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    private static LlmToolDefinition[] Tools(bool mixed) =>
+    [
+        new()
+        {
+            Name = "lookup", Strict = mixed,
+            InputSchema = JsonElement.Parse("""
+                {"type":"object","properties":{"key":{"type":"string"},"note":{"type":"string"}},"required":["key"],"additionalProperties":false}
+                """)
+        },
+        new() { Name = "list", InputSchema = JsonElement.Parse("""{"type":"object","properties":{"limit":{"type":"integer"}}}""") }
+    ];
+
+    private static void AssertToolsUnchanged(JsonElement payload, LlmToolDefinition[] tools)
+    {
+        JsonElement declarations = payload.GetProperty("tools")[0].GetProperty("functionDeclarations");
+        Assert.Equal(tools.Length, declarations.GetArrayLength());
+        for (int index = 0; index < tools.Length; index++)
+        {
+            Assert.Equal(tools[index].Name, declarations[index].GetProperty("name").GetString());
+            Assert.True(JsonElement.DeepEquals(tools[index].InputSchema, declarations[index].GetProperty("parametersJsonSchema")));
+            Assert.False(declarations[index].TryGetProperty("strict", out _));
+        }
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]

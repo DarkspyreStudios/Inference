@@ -220,13 +220,14 @@ internal static class GeminiRequest
             }
             payload["tools"] = new JsonArray(new JsonObject { ["functionDeclarations"] = declarations });
         }
-        if (request.ToolChoice is { } choice)
+        if (request.ToolChoice is not null || request.Tools.Count > 0)
         {
+            LlmToolChoice choice = request.ToolChoice ?? new();
             var config = new JsonObject
             {
                 ["mode"] = choice.Mode switch
                 {
-                    LlmToolChoiceMode.Auto => "AUTO",
+                    LlmToolChoiceMode.Auto => request.Tools.Count > 0 ? "VALIDATED" : "AUTO",
                     LlmToolChoiceMode.None => "NONE",
                     LlmToolChoiceMode.Required or LlmToolChoiceMode.Specific => "ANY",
                     _ => throw new ArgumentException("Unsupported tool choice.")

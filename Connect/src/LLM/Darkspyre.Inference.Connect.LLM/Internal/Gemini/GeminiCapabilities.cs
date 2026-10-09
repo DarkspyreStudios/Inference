@@ -34,7 +34,8 @@ internal static class GeminiCapabilities
             Tools = new()
             {
                 ChoiceModes = Enum.GetValues<LlmToolChoiceMode>().ToFrozenSet(),
-                StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported,
+                // Enforcement depends on the model, schema and request-wide mode, not a per-tool strict field.
+                StrictInputSchema = LlmStrictInputSchemaSupport.Unknown,
                 SupportsParallelCalls = InferenceSupport.Supported,
                 SupportsParallelCallControl = InferenceSupport.Unsupported,
                 SupportsArgumentStreaming = InferenceSupport.Unsupported

@@ -783,6 +783,18 @@ does not change host-tool cancellation, response routing or session retirement.
 `LlmToolCapabilities.StrictInputSchema` reports Supported, Unsupported or Unknown. Unknown allows an
 explicit `Strict=true` request unchanged so the host can try it and handle the provider result.
 Known Unsupported rejects that request. Ordinary tools default to `Strict=false` independently.
+Gemini API and Vertex Gemini resolve native tool formatting inside the shared Google writer.
+With functions present, implicit or explicit Auto selects `VALIDATED` for the entire tool set,
+including ordinary tools. Consumers do not select a provider format or arrange strictness flags.
+Both mixed-tool orders produce the same mode; no declaration cancels another.
+Required and Specific use `ANY`, Specific retains its allowed function name, and None uses `NONE`.
+Schemas retain the inputs each tool actually accepts, including optional properties.
+Google's writer does not send per-tool `strict` fields. Native enforcement can therefore strengthen
+an ordinary tool or provide less than a requested strict guarantee without denying Auto.
+Strict-input capability remains Unknown because enforcement varies by model, schema and mode.
+Older Vertex VALIDATED does not guarantee required-parameter presence; the adapter still attempts
+Auto and does not force a call. The managed loop validates returned arguments against the original
+tool schema before invoking the caller. Native mode selection does not replace that validation.
 Cache-read/write and reasoning usage details are optional subsets of normalized input/output totals.
 
 ### Vertex ConsoleTester
