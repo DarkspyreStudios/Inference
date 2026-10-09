@@ -1689,7 +1689,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 + ClaudeCliConfiguration.ErrorDetail(root, LlmCredential.Parse(_connection.Credential))
                 : reason == LlmAgentCompletionReason.Unknown
                     ? $"Claude CLI returned result subtype '{subtype}' with stop reason '{stopReason}'." : null;
-            Emit(new LlmAgentTurnCompletedEvent(ThreadId, target.Id, reason, error));
+            Emit(new LlmAgentTurnCompletedEvent(ThreadId, target.Id, reason, error)
+            {
+                IsContextOverflow = isError && LlmContextOverflow.ClaudeCli(error)
+            });
             lock (_route)
             {
                 if (target is HostTurn host)

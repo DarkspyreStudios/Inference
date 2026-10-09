@@ -122,6 +122,35 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         Assert.DoesNotContain("result-secret", terminal.Error!, StringComparison.Ordinal);
         Assert.Empty(events.OfType<LlmAgentMessageCompletedEvent>());
         Assert.Empty(events.OfType<LlmAgentTextDeltaEvent>());
+        Assert.False(terminal.IsContextOverflow);
+    }
+
+    [Fact]
+    public async Task APromptTooLongForTheWindowEndsTheTurnAsAContextOverflow()
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        {
+            ModelId = "claude-test",
+            Runtime = new() { WorkingDirectory = _directory }
+        });
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(
+            new() { Input = [new LlmAgentTextContent("test")] }, limit.Token).GetAsyncEnumerator(limit.Token);
+        Assert.True(await feed.MoveNextAsync());
+        string turnId = await process.WaitForUserMessage(limit.Token);
+        process.Push(new { type = "user", uuid = turnId, isReplay = true });
+        process.Push(new
+        {
+            type = "result",
+            subtype = "success",
+            is_error = true,
+            result = "Prompt is too long · the request is ~1053843 tokens (limit 1000000)",
+        });
+
+        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+
+        Assert.True(Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).IsContextOverflow);
     }
 
     [Fact]

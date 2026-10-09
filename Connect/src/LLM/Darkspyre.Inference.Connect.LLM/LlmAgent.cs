@@ -379,6 +379,12 @@ public sealed record LlmAgentTurnCompletedEvent(
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 
     /// <summary>
+    /// Whether the provider refused the turn because its input exceeded the model's context window. The provider's
+    /// conversation then holds input it cannot read again; a host can start a new conversation from its own history.
+    /// </summary>
+    public bool IsContextOverflow { get; init; }
+
+    /// <summary>
     /// Derived from <see cref="Reason"/>: <c>Completed</c> for a completed turn, <c>Interrupted</c> for an
     /// interruption, <c>Unknown</c> for unreported termination, and <c>Failed</c> for every other reason.
     /// </summary>

@@ -18,6 +18,8 @@ internal static class LlmContextOverflow
     internal static bool Anthropic(string? type, string? message) => type == "invalid_request_error"
         && Contains(message, "prompt is too long");
 
+    internal static bool ClaudeCli(string? detail) => Contains(detail, "prompt is too long");
+
     internal static bool Google(string? status, string? message) => status == "INVALID_ARGUMENT"
         && Contains(message, "exceeds the maximum number of tokens");
 
