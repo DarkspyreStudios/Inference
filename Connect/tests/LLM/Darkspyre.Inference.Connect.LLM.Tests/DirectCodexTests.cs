@@ -121,15 +121,53 @@ public sealed class DirectCodexTests
             Assert.False(sent.RootElement.GetProperty("reasoning").TryGetProperty("summary", out _));
         }
         Assert.Equal(1, generations);
-        InferenceException unsupported = await Assert.ThrowsAsync<InferenceException>(() =>
-            providers.CompleteAsync("codex", prompt with { ReasoningLevel = LlmReasoningLevel.High }));
-        Assert.Equal(InferenceFailureCode.InvalidRequest, unsupported.Code);
-        Assert.Equal(1, generations);
+        await providers.CompleteAsync("codex", prompt with { ReasoningLevel = LlmReasoningLevel.High });
+        using (JsonDocument sent = JsonDocument.Parse(handler.Body!))
+        {
+            Assert.Equal("low", sent.RootElement.GetProperty("reasoning").GetProperty("effort").GetString());
+        }
+        Assert.Equal(2, generations);
 
         LlmAccountUsageSnapshot usage = await providers.GetAccountUsageAsync("codex");
         Assert.Equal("plus", usage.Plan);
         Assert.Equal(0.25, Assert.Single(usage.Quotas).UsedFraction);
         Assert.Equal(3, paths.Count);
+    }
+
+    [Theory]
+    [InlineData(LlmReasoningLevel.Maximum, "high", "high")]
+    [InlineData(LlmReasoningLevel.Medium, "none,high", "none")]
+    [InlineData(LlmReasoningLevel.None, "low,high", "low")]
+    [InlineData(LlmReasoningLevel.Maximum, "none", "none")]
+    [InlineData(LlmReasoningLevel.Maximum, "", "max")]
+    [InlineData(null, "", null)]
+    public async Task AdapterMapsDesiredEffortWithoutChangingTheCallerRequest(
+        LlmReasoningLevel? requested, string nativeLevels, string? expected)
+    {
+        using var handler = new Handler(_ => Sse(Completed));
+        using var http = new HttpClient(handler);
+        var client = new OpenAiCodexLlmClient(http);
+        var presets = new JsonArray(nativeLevels.Split(',', StringSplitOptions.RemoveEmptyEntries)
+            .Select(value => (JsonNode)new JsonObject { ["effort"] = value }).ToArray());
+        LlmConnection connection = Connection() with
+        {
+            Catalog = nativeLevels.Length == 0 ? null : [new("model", "Model")
+            { CatalogEntry = JsonElement.Parse(new JsonObject { ["supported_reasoning_levels"] = presets }.ToJsonString()) }]
+        };
+        LlmChatRequest request = Request() with { ReasoningLevel = requested };
+        if (nativeLevels.Length == 0)
+            Assert.Equal(InferenceSupport.Unknown, client.GetCapabilities(connection, "model").SupportsReasoning);
+
+        LlmChatResult result = await Complete(client, connection, request);
+
+        Assert.Equal("Hello", result.Text);
+        Assert.Equal(requested, request.ReasoningLevel);
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement reasoning = sent.RootElement.GetProperty("reasoning");
+        Assert.Equal(expected is not null, reasoning.TryGetProperty("effort", out JsonElement effort));
+        if (expected is not null) Assert.Equal(expected, effort.GetString());
+        Assert.Equal(expected != "none", reasoning.TryGetProperty("summary", out _));
+        Assert.Equal(1, handler.Calls);
     }
 
     private const string Completed = """

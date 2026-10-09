@@ -855,9 +855,9 @@ terminal format and the current Apple, Antigravity and Bedrock protocols report 
 level below it; a level does not cost the same on two different models. Null leaves the provider's
 default in place. Each model reports the levels it accepts in `LlmCapabilities.ReasoningLevels`, and
 `SupportsReasoning` is `Supported` when that set contains a level above `None`, `Unsupported` when
-it contains only `None`, and `Unknown` when the set is empty. A request carrying a level
-the model does not accept fails with `InferenceFailureCode.InvalidRequest` before any provider call;
-no adapter substitutes a nearby level. Each adapter owns the mapping to its provider's wire form.
+it contains only `None`, and `Unknown` when the set is empty. Direct Codex maps desired effort inside
+its adapter. Other adapters currently reject a level outside their declared set with
+`InferenceFailureCode.InvalidRequest` before any provider call. Each adapter owns its provider's wire form.
 `LlmCapabilityOverrides.ReasoningLevels` replaces a transport's set for a connection or one model,
 and the setup editor exposes it as one Default/Enabled/Disabled choice per level. The design is
 `docs/llm-reasoning-level.tech-design.md` in the repository root.
@@ -873,6 +873,17 @@ changing effort or retained state. An explicit modality array without `image` di
 and image tool results in chat and managed-agent sessions. Missing fields retain the adapter defaults.
 Connection and model overrides keep their existing precedence over these catalog facts. Other tool
 content and prompt documents keep their existing support.
+
+Direct Codex carries the caller's desired effort unchanged until its native payload projection.
+`OpenAiCodexLlmClient.MapReasoning` owns explicit mapping rows for all seven caller levels. Each row
+lists the same native level first, then lower native levels, then the below-minimum choices from
+lowest to highest. The first catalog/override-listed native choice in that explicit row is sent.
+For a model listing `none` and `high`, `Maximum` sends `high` and `Medium` sends `none`.
+When a model lists only `low` and `high`, `None` sends `low`; this does not disable reasoning.
+Null leaves the provider default unchanged. Missing or empty native-level observations retain
+Unknown support and send an explicit requested effort with its existing native spelling.
+No shared distance/rank calculation or host-side native selection runs. The caller request and
+reported native-level catalog remain unchanged. Summary requests follow the mapped native effort.
 
 OpenAI Responses levels are per model, from a table of verified model pages, because the OpenAI Models
 API reports no capabilities. `None` sends `reasoning.effort: "none"` and `Maximum` sends `"max"`. A

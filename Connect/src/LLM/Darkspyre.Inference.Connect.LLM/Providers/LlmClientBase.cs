@@ -142,7 +142,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
         }
 
         ValidateSampling(request, capabilities);
-        LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
+        ValidateReasoningRequest(connection, request, capabilities);
         ValidateOutputLimit(request, capabilities);
 
         StructuredOutput.ValidateRequest(request);
@@ -157,6 +157,10 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
     public bool CanPrepareResources => SupportsResourcePreparation;
 
     protected virtual void ValidateAdditionalRequest(LlmConnection connection, LlmChatRequest request) { }
+
+    /// <summary>Validates reasoning through the selected adapter's native mapping.</summary>
+    protected virtual void ValidateReasoningRequest(LlmConnection connection, LlmChatRequest request,
+        LlmProviderCapabilities capabilities) => LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
 
     internal static void ValidateSampling(LlmChatRequest request, LlmProviderCapabilities capabilities, bool allowZeroTopK = false)
     {
