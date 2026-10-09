@@ -475,7 +475,15 @@ The Gemini API (Google AI Studio) adapter is registered by `AddLlmConnect` under
 `gemini-api` and transport `GoogleGeminiApi`. It needs only an API key, sent in the `x-goog-api-key`
 header, and a fixed endpoint. It shares the Gemini request, stream, schema and continuation code with the
 Vertex Gemini route. Both routes use native `responseFormat` with their documented object/array
-shapes; Vertex retains its narrower schema keyword allowlist. Provider options go into
+shapes. Both carry the original JSON Schema unchanged, including unfamiliar annotations, boolean/null
+enum members and reference siblings. Older responseSchema/responseJsonSchema subset lists do not
+establish an inability on this field. Missing model support remains Unknown and permits a native
+attempt. Explicit Unsupported overrides still select only a caller-permitted fallback or refuse.
+`ProviderJsonSchema` names the selected request mechanism, not proof of every native constraint;
+the result separately reports local evaluation and validity. No automatic retry after a provider
+rejection runs. The native field is documented in the
+[GenerateContent reference](https://ai.google.dev/api/generate-content#v1beta.TextResponseFormat).
+Provider options go into
 `generationConfig` and cannot replace fields written by the canonical builder. See the
 [Gemini API design](docs/gemini-api-tech-design.md) for model discovery, capabilities and limits. Live
 qualification remains.

@@ -103,9 +103,8 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         { throw new InvalidOperationException("The Gemini API key changed before dispatch."); }
         connection = connection with { ContinuationCodec = Codec, ResolvedContinuationScope = scope };
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
-        LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is { } structured && (capabilities.SupportsJsonSchema == InferenceSupport.Unsupported)
-            ? StructuredOutput.ResolveEnforcement(structured, capabilities)
-            : GeminiSchemas.Enforcement(request.StructuredOutput, RouteName, GeminiSchemaDialect.GeminiApi);
+        LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is { } structured
+            ? StructuredOutput.ResolveEnforcement(structured, capabilities) : null;
         JsonObject payload = GeminiRequest.Build(connection, request, enforcement, output => ProjectToolOutput(connection, request.ModelId, output),
             Reasoning(connection, request.ModelId) with { Levels = capabilities.ReasoningLevels }, (capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
         return (connection, request, capabilities, enforcement, payload, omitted);

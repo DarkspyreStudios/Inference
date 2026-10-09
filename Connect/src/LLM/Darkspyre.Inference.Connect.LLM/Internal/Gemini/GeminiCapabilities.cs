@@ -20,7 +20,7 @@ internal static class GeminiCapabilities
             SupportsModelListing = InferenceSupport.Supported,
             PromptCache = PromptCaching.Automatic,
             OutputLimitEnforcement = LlmOutputLimitEnforcement.ProviderEnforced,
-            SupportsJsonSchema = InferenceSupport.Supported,
+            SupportsJsonSchema = profile.Control == GeminiThinkingControl.Unknown ? InferenceSupport.Unknown : InferenceSupport.Supported,
             SupportsJsonObject = InferenceSupport.Unsupported,
             SupportsAccountUsage = InferenceSupport.Unsupported,
             SupportsTemperature = (profile.AllowsSampling ? InferenceSupport.Supported : InferenceSupport.Unsupported),

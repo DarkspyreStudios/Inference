@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -11,6 +12,73 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class GeminiAdmissionTests
 {
+    [Theory]
+    [InlineData(false, """{"type":"object","$comment":"retained","examples":[{"enabled":true}],"x-provider-note":"retained","properties":{"enabled":{"type":"boolean"}}}""", LlmStructuredOutputFallback.None)]
+    [InlineData(true, """{"type":"object","$comment":"retained","examples":[{"enabled":true}],"x-provider-note":"retained","properties":{"enabled":{"type":"boolean"}}}""", LlmStructuredOutputFallback.LocalValidation)]
+    [InlineData(false, """{"type":"object","properties":{"enabled":{"enum":[true,null]}}}""", LlmStructuredOutputFallback.None)]
+    [InlineData(true, """{"type":"object","properties":{"enabled":{"enum":[true,null]}}}""", LlmStructuredOutputFallback.None)]
+    [InlineData(false, """{"$defs":{"answer":{"type":"object"}},"$ref":"#/$defs/answer","description":"retained sibling"}""", LlmStructuredOutputFallback.None)]
+    [InlineData(true, """{"$defs":{"answer":{"type":"object"}},"$ref":"#/$defs/answer","description":"retained sibling"}""", LlmStructuredOutputFallback.None)]
+    public async Task UnqualifiedSchemaConstructsReachTheCurrentNativeFieldUnchanged(
+        bool vertex, string schema, LlmStructuredOutputFallback fallback)
+    {
+        const string answer = """{"enabled":true}""";
+        using var handler = new Handler(answer);
+        using var http = new HttpClient(handler);
+        ILlmClient client = Client(http, vertex);
+        LlmConnection connection = Connection(vertex);
+        var request = new LlmChatRequest
+        {
+            ModelId = vertex ? "google/gemini-unfamiliar" : "gemini-unfamiliar", Messages = [new("user", "answer")],
+            StructuredOutput = new() { Name = "answer", Schema = JsonElement.Parse(schema), Fallback = fallback }
+        };
+        Assert.Equal(InferenceSupport.Unknown, client.GetCapabilities(connection, request.ModelId).SupportsJsonSchema);
+
+        LlmChatResult? result = null;
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request))
+            if (item is LlmChatCompletionEvent completion) result = completion.Result;
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement format = sent.RootElement.GetProperty("generationConfig").GetProperty("responseFormat");
+        if (vertex) format = format[0];
+        Assert.Equal("APPLICATION_JSON", format.GetProperty("text").GetProperty("mimeType").GetString());
+        Assert.True(JsonElement.DeepEquals(request.StructuredOutput.Schema, format.GetProperty("text").GetProperty("schema")));
+        Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, result!.StructuredOutput!.Enforcement);
+        Assert.Equal(answer, result.Text);
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExplicitUnsupportedSchemaUsesOnlyTheCallerPermittedLocalMechanism(bool vertex)
+    {
+        using var handler = new Handler("{}");
+        using var http = new HttpClient(handler);
+        ILlmClient client = Client(http, vertex);
+        LlmConnection connection = Connection(vertex) with
+        { CapabilityOverrides = Connection(vertex).CapabilityOverrides! with { SupportsJsonSchema = InferenceSupport.Unsupported } };
+        var request = new LlmChatRequest
+        {
+            ModelId = vertex ? "google/gemini-3-flash-preview" : "gemini-3-flash-preview", Messages = [new("user", "answer")],
+            StructuredOutput = new() { Name = "answer", Schema = JsonElement.Parse("""{"type":"object"}""") }
+        };
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        { await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { } });
+        Assert.Equal(0, handler.Calls);
+
+        request = request with { StructuredOutput = request.StructuredOutput with { Fallback = LlmStructuredOutputFallback.LocalValidation } };
+        LlmChatResult? result = null;
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request))
+            if (item is LlmChatCompletionEvent completion) result = completion.Result;
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        Assert.False(sent.RootElement.GetProperty("generationConfig").TryGetProperty("responseFormat", out _));
+        Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, result!.StructuredOutput!.Enforcement);
+        Assert.True(result.StructuredOutput.IsValid);
+        Assert.Equal(1, handler.Calls);
+    }
+
     [Theory]
     [InlineData(false, "gemini-3-pro-preview", LlmReasoningLevel.Medium, "LOW", null)]
     [InlineData(false, "gemini-3-flash-preview", LlmReasoningLevel.None, "MINIMAL", null)]
@@ -144,7 +212,7 @@ public sealed class GeminiAdmissionTests
             Task.FromResult(new VertexAccess("test-token", "test-scope"));
     }
 
-    private sealed class Handler : HttpMessageHandler
+    private sealed class Handler(string text = "OK") : HttpMessageHandler
     {
         public string? Body { get; private set; }
         public int Calls { get; private set; }
@@ -155,7 +223,7 @@ public sealed class GeminiAdmissionTests
             Body = await request.Content!.ReadAsStringAsync(cancellationToken);
             string response = request.RequestUri!.AbsolutePath.EndsWith(":countTokens", StringComparison.Ordinal)
                 ? """{"totalTokens":12}"""
-                : """{"candidates":[{"finishReason":"STOP","content":{"role":"model","parts":[{"text":"OK"}]}}]}""";
+                : $$$"""{"candidates":[{"finishReason":"STOP","content":{"role":"model","parts":[{"text":{{{JsonValue.Create(text)!.ToJsonString()}}}}]}}]}""";
             return new(HttpStatusCode.OK) { Content = new StringContent(response, Encoding.UTF8, "application/json") };
         }
     }
