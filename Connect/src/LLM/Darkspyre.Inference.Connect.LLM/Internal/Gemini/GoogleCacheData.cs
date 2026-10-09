@@ -17,8 +17,8 @@ internal static partial class GoogleCacheData
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
         ArgumentNullException.ThrowIfNull(request.Correlation);
-        if ((request.TimeToLive is null) == (request.ExpiresAt is null))
-            throw new ArgumentException("Cache creation requires exactly one explicit TTL or expiry.");
+        if (request.TimeToLive is not null && request.ExpiresAt is not null)
+            throw new ArgumentException("Cache creation cannot specify both TTL and expiry.");
         if (request.TimeToLive is { } ttl) _ = Duration(ttl);
         if (request.ExpiresAt is { } expiry && expiry <= now)
             throw new ArgumentOutOfRangeException(nameof(request), "Cache expiry must be in the future.");
@@ -40,7 +40,7 @@ internal static partial class GoogleCacheData
     internal static void AddExpiration(JsonObject payload, LlmContextCacheCreate request)
     {
         if (request.TimeToLive is { } ttl) payload["ttl"] = Duration(ttl);
-        else payload["expireTime"] = Timestamp(request.ExpiresAt!.Value);
+        else if (request.ExpiresAt is { } expiry) payload["expireTime"] = Timestamp(expiry);
     }
 
     internal static string Duration(TimeSpan value)

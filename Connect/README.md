@@ -2641,12 +2641,14 @@ properties copy their lists, without claiming an admitted operation's deep prefi
 Create's optional `Resources` is borrowed runtime authority: non-null serialization fails and
 diagnostics do not inspect it. The request does not validate a provider's lifetime or scope.
 
-The private Google cache data boundary freezes prefix lists, binary bytes and tool schemas, requires
+The private Google cache data boundary freezes prefix lists, binary bytes and tool schemas, accepts
 one positive, Protobuf-representable TTL or future expiry, and preserves the exact reconciliation
 display name. It converts CLR ticks without floating-point rounding and refuses observed timestamps
 finer than representable CLR precision. Its receipt parser preserves independent unknown usage facts, validates required
 observed expiry and returns one ordered page with its actual continuation token. These effect-free
 helpers do not establish native resource/principal authority or enable cache dispatch.
+Omitting both expiration fields sends neither field and lets the provider choose its default.
+The receipt uses only the provider's observed expiry. Supplying both fields is invalid.
 
 The shared Gemini request codec can construct immutable cache-prefix contents, system instructions,
 function declarations and tool configuration without generation-only settings; this internal

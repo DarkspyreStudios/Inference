@@ -12,6 +12,51 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ContextCacheLifetimeTests
 {
+    [Fact]
+    public async Task CacheCreationWithoutExpirationUsesProviderDefaultAndObservedReceipt()
+    {
+        var handler = new Boundary(async (request, token) =>
+        {
+            Assert.Equal(HttpMethod.Post, request.Method);
+            Assert.Equal("https://generativelanguage.googleapis.com/v1beta/cachedContents", request.RequestUri!.AbsoluteUri);
+            JsonElement submitted = JsonElement.Parse(await request.Content!.ReadAsStringAsync(token));
+            Assert.False(submitted.TryGetProperty("ttl", out _));
+            Assert.False(submitted.TryGetProperty("expireTime", out _));
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                    {"name":"cachedContents/created","model":"models/gemini-2.5-flash",
+                     "displayName":"explicit-correlation","expireTime":"2030-01-01T00:00:00Z"}
+                    """)
+            };
+        });
+        using var http = new HttpClient(handler);
+        await using var service = new LlmProviderService(new Source(), [new GeminiApiLlmClient(http)]);
+        ILlmContextCacheClient cache = await service.BindContextCacheAsync("connection");
+
+        LlmContextCache receipt = await cache.CreateAsync(new()
+        {
+            ModelId = "gemini-2.5-flash",
+            Messages = [new("user", "Retain this prefix.")],
+            Correlation = new("operation", "explicit-correlation")
+        });
+
+        Assert.Equal(new DateTimeOffset(2030, 1, 1, 0, 0, 0, TimeSpan.Zero), receipt.ExpiresAt);
+        Assert.Equal(receipt.ExpiresAt, receipt.Reference.ExpiresAt);
+        Assert.Equal(1, handler.Sends);
+    }
+
+    [Fact]
+    public void CacheCreationStillRejectsBothExpirationFields()
+    {
+        var request = new LlmContextCacheCreate
+        {
+            ModelId = "gemini-2.5-flash", Correlation = new("operation", "explicit-correlation"),
+            TimeToLive = TimeSpan.FromMinutes(1), ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(1)
+        };
+        Assert.Throws<ArgumentException>(() => GoogleCacheData.Snapshot(request, DateTimeOffset.UtcNow));
+    }
+
     [Theory]
     [InlineData("image/heic")]
     [InlineData("image/x-unreviewed")]
