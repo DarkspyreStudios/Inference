@@ -21,7 +21,7 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http) : ResponsesLlmCl
     protected override LlmStructuredOutputEnforcement? ResolveStructuredOutputEnforcement(
         LlmConnection connection, LlmChatRequest request, LlmProviderCapabilities capabilities) =>
         base.ResolveStructuredOutputEnforcement(connection, request,
-            request.StructuredOutput?.Schema.ValueKind == JsonValueKind.True
+            request.StructuredOutput is { Strict: true } output && output.Schema.ValueKind == JsonValueKind.True
                 ? capabilities with { SupportsJsonSchema = InferenceSupport.Unsupported }
                 : capabilities);
 

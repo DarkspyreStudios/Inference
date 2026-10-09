@@ -11,6 +11,36 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class SupportStateTests
 {
+    [Fact]
+    public async Task OpenAiNonStrictTrueSchemaRetainsItsUnchangedNativeAttempt()
+    {
+        var handler = new SchemaHandler();
+        using var http = new HttpClient(handler);
+        var client = new OpenAiResponsesLlmClient(http);
+        LlmConnection connection = Connection() with
+        {
+            Transport = LlmTransport.OpenAiResponses, Endpoint = "https://api.openai.com/v1",
+            CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported, SupportsJsonSchema = InferenceSupport.Unknown }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = "unlisted-model", Messages = [new("user", "Return JSON.")],
+            StructuredOutput = new() { Name = "answer", Schema = JsonElement.Parse("true"), Strict = false }
+        };
+
+        LlmChatResult? result = null;
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request))
+            if (item is LlmChatCompletionEvent completion) result = completion.Result;
+
+        using var sent = JsonDocument.Parse(handler.Payload!);
+        JsonElement format = sent.RootElement.GetProperty("text").GetProperty("format");
+        Assert.Equal("json_schema", format.GetProperty("type").GetString());
+        Assert.Equal(JsonValueKind.True, format.GetProperty("schema").ValueKind);
+        Assert.False(format.GetProperty("strict").GetBoolean());
+        Assert.True(result!.StructuredOutput!.IsValid);
+        Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, result.StructuredOutput.Enforcement);
+    }
+
     [Theory]
     [InlineData(LlmStructuredOutputFallback.None)]
     [InlineData(LlmStructuredOutputFallback.JsonObject)]
