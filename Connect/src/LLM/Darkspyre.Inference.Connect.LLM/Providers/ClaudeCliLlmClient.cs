@@ -671,11 +671,26 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
         _ = ValidateChatRequest(connection, request);
-        return request.Resources is not null || request.Messages.Any(message => message.Attachments.Count > 0
-            || ClientTools.Functions(message.ToolResults).Any(result =>
-                ProjectToolOutput(connection, request.ModelId, result.Output).Parts.Any(part => part is SentImage or SentFile)))
-            ? null
-            : new ContextEstimate(LocalTokenCount.Count(BuildClaudePrompt(connection, request)));
+        // Selected caller-owned content is unknown to local accounting.
+        if (request.Resources is not null) return null;
+        long attachments = 0;
+        foreach (var message in request.Messages)
+        {
+            foreach (LlmMessageAttachment attachment in message.Attachments)
+            {
+                if (attachment is not LlmAttachment inline) return null;
+                attachments += ClaudeAttachmentTokens.Estimate(inline.Kind, inline.MediaType, inline.Data.Span);
+            }
+            foreach (var result in ClientTools.Functions(message.ToolResults))
+                foreach (SentToolPart part in ProjectToolOutput(connection, request.ModelId, result.Output).Parts)
+                    attachments += part switch
+                    {
+                        SentImage image => ClaudeAttachmentTokens.Estimate(LlmBinaryKind.Image, image.MediaType, image.Data.Span),
+                        SentFile file => ClaudeAttachmentTokens.Estimate(LlmBinaryKind.Document, file.MediaType, file.Data.Span),
+                        _ => 0,
+                    };
+        }
+        return new ContextEstimate(LocalTokenCount.Count(BuildClaudePrompt(connection, request)) + attachments);
     }
 
     private string BuildClaudePrompt(LlmConnection connection, LlmChatRequest request)

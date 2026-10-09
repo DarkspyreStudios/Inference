@@ -366,7 +366,7 @@ public sealed class ClaudeCliLlmClientTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ToolBinaryPromptBlocksMatchTheSelectedCarriageAndDoNotProduceATextOnlyEstimate(bool restricted)
+    public async Task ToolBinaryPromptBlocksMatchTheSelectedCarriageAndCountInTheEstimate(bool restricted)
     {
         var runner = new RecordingRunner(new(0,
             """
@@ -393,7 +393,8 @@ public sealed class ClaudeCliLlmClientTests
         ProjectedToolOutput projected = client.ProjectToolOutput(connection, request.ModelId, output);
         Assert.Equal(restricted ? LlmToolPartDelivery.Omitted : LlmToolPartDelivery.Delivered, projected.Report.Parts[1].Delivery);
         Assert.Equal(restricted ? LlmToolPartDelivery.Omitted : LlmToolPartDelivery.Delivered, projected.Report.Parts[2].Delivery);
-        if (!restricted) Assert.Null(client.EstimateInputTokens(connection, request));
+        // A delivered image costs about 1,600 tokens and each PDF page its text plus its page image.
+        if (!restricted) Assert.True(client.EstimateInputTokens(connection, request)!.Value.Tokens >= 1_600 + 4_600);
         IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection, request));
         Assert.Equal("answer", Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Text);
         using JsonDocument input = JsonDocument.Parse(Assert.Single(runner.Invocations).StandardInput!);
