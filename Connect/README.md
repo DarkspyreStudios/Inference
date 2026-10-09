@@ -1737,6 +1737,8 @@ Claude profiles reject temperature and forced tool choice while adaptive or budg
 active, including a profile's default thinking. Profiles that prohibit forced tool choice reject it
 at every level. Explicitly disabled thinking and effort-only reasoning keep the model's supported
 sampling/tool controls. Anthropic Messages, Vertex Claude and Bedrock Claude use this validation.
+First-party post-Opus-4.6 Messages models additionally accept the documented temperature and top-p
+defaults described under Sampling Defaults. Those values do not represent controllable sampling.
 
 Anthropic Messages and Vertex Claude report `pause_turn` as `Incomplete` with its native reason and
 opaque continuation state. Ordered server-tool calls, their result blocks, caller metadata and
@@ -4502,10 +4504,12 @@ Nonstandard extension options retain request-over-connection precedence.
 | AgentCore | `BedrockModelConfig.TopP` on an explicit Bedrock model ID; the harness-default route cannot carry it |
 | Gemini API and Vertex Gemini | `generationConfig` sampling fields and penalties, up to five stops; Gemini API reports top-k as Unknown without a catalog response, Unsupported for an observed model without a positive default, and Supported for a positive default; Vertex uses its shared model profile |
 | Apple Foundation Models | Top-p or top-k random mode with optional seed; seed alone selects top-p 1; no stops or penalties |
-| Claude CLI, Antigravity CLI and Codex | All six controls rejected; capability overrides cannot enable an unmapped control |
+| Codex | Temperature and top-p use the existing Responses fields with Unknown support; top-k, seed and penalties have no adapter mapping |
+| Claude CLI and Antigravity CLI | All six controls rejected; capability overrides cannot enable an unmapped control |
 | SelfHost | All six controls and support flags pass to the selected Common engine; unsupported engine controls fail before its stream starts |
 
-Claude Opus 4.7 and newer non-sampling profiles reject temperature/top-p/top-k even with an override.
+Claude Opus 4.7 and newer non-sampling profiles reject custom temperature/top-p and all top-k.
+First-party Messages accepts the documented defaults described under Sampling Defaults.
 Earlier sampling-capable Claude profiles enable these controls by default; overrides can disable them.
 Gemini Flash 3.6 and later ignore temperature/top-p/top-k, so Connect rejects those explicit values.
 Their penalty support remains Unknown and permits unchanged attempts. Vertex Gemini penalties use
@@ -4578,8 +4582,8 @@ evidence, not an ordinary completed answer. Successful result text remains uncha
 ### Structured output
 
 Direct API-key connections use the Models API's `structured_outputs` evidence for native schema and
-strict tool support. A missing entry does not advertise native output enforcement; a host can
-explicitly enable schema support when the catalog is unknown. A catalog rejection cannot be
+strict tool support. A missing entry retains Unknown and permits an unchanged native schema attempt
+without advertising qualified support. A catalog rejection cannot be
 overridden. JSON-object-only enforcement is not advertised. Supported output schemas use
 `output_config.format` with `type: json_schema`; reasoning effort remains in the same output config.
 

@@ -12,6 +12,21 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class AnthropicAdmissionTests
 {
     [Fact]
+    public void UnknownAnnotationsDoNotDisableKnownConstraintValidation()
+    {
+        var output = new LlmStructuredOutputRequest
+        {
+            Name = "answer",
+            Schema = JsonElement.Parse("""{"type":"object","properties":{"value":{"type":"integer","x-note":"opaque"}},"required":["value"],"additionalProperties":false}""")
+        };
+
+        LlmStructuredOutputValidation result = StructuredOutput.Validate("""{"value":"wrong-type"}""",
+            output, LlmStructuredOutputEnforcement.ProviderJsonSchema);
+
+        Assert.False(result.IsValid);
+    }
+
+    [Fact]
     public async Task FirstPartyDeprecatedSamplingDefaultsReachTheProviderWithDefaultThinking()
     {
         using var handler = new Handler();
