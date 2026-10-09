@@ -1,0 +1,162 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.LLM.Internal;
+using Darkspyre.Inference.Connect.LLM.Providers;
+
+namespace Darkspyre.Inference.Connect.LLM.Tests;
+
+public sealed class AnthropicAdmissionTests
+{
+    [Fact]
+    public void UnqualifiedCodeExecutionDefinitionCanReplayItsProgrammaticCall()
+    {
+        var payload = JsonNode.Parse("""
+            {"tools":[{"type":"code_execution_unqualified","name":"code_execution"}],"container":"retained-container",
+             "messages":[{"role":"assistant","content":[
+               {"type":"server_tool_use","id":"run","name":"code_execution"},
+               {"type":"tool_use","id":"call","name":"echo","caller":{"type":"code_execution_20260120","tool_id":"run"}}]},
+               {"role":"user","content":[{"type":"tool_result","tool_use_id":"call","content":"answer"}]}]}
+            """)!.AsObject();
+
+        AnthropicToolContinuation.Validate(payload);
+
+        Assert.Equal("code_execution_unqualified", (string?)payload["tools"]![0]!["type"]);
+        Assert.Equal("retained-container", (string?)payload["container"]);
+    }
+
+    [Theory]
+    [InlineData("code_execution_unqualified", "code_execution", "allowed_callers", "[\"code_execution_20260120\"]")]
+    [InlineData("tool_search_unqualified", "tool_search_tool_bm25", "defer_loading", "true")]
+    [InlineData("unfamiliar_server_revision", "unfamiliar_server", null, null)]
+    public async Task UnqualifiedServerDescriptorsAndExistingClientMetadataReachTheProvider(
+        string type, string name, string? metadataName, string? metadataValue)
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        var native = new System.Text.Json.Nodes.JsonObject { ["type"] = type, ["name"] = name, ["opaque"] = "retained" };
+        var options = new System.Text.Json.Nodes.JsonObject
+        {
+            ["server_tools"] = new System.Text.Json.Nodes.JsonArray(native),
+            ["client_tools"] = metadataName is null ? new System.Text.Json.Nodes.JsonObject()
+                : new System.Text.Json.Nodes.JsonObject
+                { ["echo"] = new System.Text.Json.Nodes.JsonObject { [metadataName] = System.Text.Json.Nodes.JsonNode.Parse(metadataValue!) } }
+        };
+        var request = new LlmChatRequest
+        {
+            ModelId = "unfamiliar-claude-model", Messages = [new("user", "answer")],
+            Tools = [new LlmToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("""{"type":"object"}""") }],
+            ProviderOptions = new Dictionary<string, JsonElement> { ["anthropic_tools"] = JsonElement.Parse(options.ToJsonString()) }
+        };
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(Connection(), request)) { }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement tools = sent.RootElement.GetProperty("tools");
+        Assert.True(JsonElement.DeepEquals(JsonElement.Parse(native.ToJsonString()), tools[1]));
+        if (metadataName is not null)
+            Assert.True(JsonElement.DeepEquals(JsonElement.Parse(metadataValue!), tools[0].GetProperty(metadataName)));
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task KnownClientExecutedNativeToolCannotUseTheServerLane()
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        var request = new LlmChatRequest
+        {
+            ModelId = "unfamiliar-claude-model", Messages = [new("user", "answer")],
+            ProviderOptions = new Dictionary<string, JsonElement>
+            { ["anthropic_tools"] = JsonElement.Parse("""{"server_tools":[{"type":"bash_20250124","name":"bash"}]}""") }
+        };
+
+        NotSupportedException error = await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        { await foreach (LlmStreamEvent _ in client.StreamAsync(Connection(), request)) { } });
+
+        Assert.Contains("caller mapping", error.Message, StringComparison.Ordinal);
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task UnknownSchemaAnnotationsReachNativeOutputAndStrictToolsUnchanged(bool strictTool)
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        JsonElement schema = JsonElement.Parse("""
+            {"type":"object","properties":{"value":{"type":"string","$comment":"retained","examples":["answer"],"x-provider-note":{"opaque":true}}},"required":["value"],"additionalProperties":false}
+            """);
+        var request = new LlmChatRequest
+        {
+            ModelId = "unfamiliar-claude-model",
+            Messages = [new("user", "answer")],
+            Tools = strictTool ? [new LlmToolDefinition { Name = "echo", Strict = true, InputSchema = schema }] : [],
+            StructuredOutput = strictTool ? null : new() { Name = "answer", Schema = schema }
+        };
+        LlmConnection connection = Connection();
+        Assert.Equal(InferenceSupport.Unknown, client.GetCapabilities(connection, request.ModelId).SupportsJsonSchema);
+
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement emitted = strictTool ? sent.RootElement.GetProperty("tools")[0].GetProperty("input_schema")
+            : sent.RootElement.GetProperty("output_config").GetProperty("format").GetProperty("schema");
+        Assert.True(JsonElement.DeepEquals(schema, emitted));
+        if (strictTool) Assert.True(sent.RootElement.GetProperty("tools")[0].GetProperty("strict").GetBoolean());
+        Assert.Equal(1, handler.Calls);
+    }
+
+    [Fact]
+    public async Task DocumentedUnsupportedStrictConstraintStillRejectsBeforeSending()
+    {
+        using var handler = new Handler();
+        using var http = new HttpClient(handler);
+        var client = new AnthropicMessagesLlmClient(http);
+        var request = new LlmChatRequest
+        {
+            ModelId = "unfamiliar-claude-model", Messages = [new("user", "answer")],
+            Tools = [new LlmToolDefinition
+            {
+                Name = "echo", Strict = true,
+                InputSchema = JsonElement.Parse("""{"type":"object","properties":{"value":{"type":"number","minimum":1}},"additionalProperties":false}""")
+            }]
+        };
+
+        await Assert.ThrowsAsync<NotSupportedException>(async () =>
+        { await foreach (LlmStreamEvent _ in client.StreamAsync(Connection(), request)) { } });
+
+        Assert.Equal(0, handler.Calls);
+    }
+
+    private static LlmConnection Connection() => new()
+    {
+        Version = "1", Transport = LlmTransport.AnthropicMessages, Endpoint = "https://anthropic.example.test/v1",
+        Credential = new LlmCredential { ApiKey = "test-key" }.Serialize(),
+        CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported }
+    };
+
+    private sealed class Handler : HttpMessageHandler
+    {
+        internal string? Body { get; private set; }
+        internal int Calls { get; private set; }
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Calls++;
+            Body = await request.Content!.ReadAsStringAsync(cancellationToken);
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""
+                    {"id":"response","type":"message","role":"assistant","model":"unfamiliar-claude-model","content":[{"type":"text","text":"{\"value\":\"answer\"}"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}
+                    """, Encoding.UTF8, "application/json")
+            };
+        }
+    }
+}

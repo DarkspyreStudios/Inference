@@ -32,7 +32,11 @@ internal sealed class AnthropicTools
             {
                 RequireObject(tool);
                 string? type = String(tool, "type"), name = String(tool, "name");
-                if (type is null || name != ServerName(type)) throw Invalid();
+                if (string.IsNullOrWhiteSpace(type) || string.IsNullOrWhiteSpace(name)) throw Invalid();
+                if (type is "memory_20250818" or "bash_20250124" or "text_editor_20250728" or "text_editor_20250124"
+                    or "computer_toolset_20260801" or "computer_20251124" or "computer_20250124" or "browser_toolset_20260801")
+                    throw new NotSupportedException("Claude client-executed native tools require a caller mapping and cannot use server_tools.");
+                if (ServerName(type) is { } knownName && name != knownName) throw Invalid();
                 if (tool.TryGetProperty("input_schema", out _) || tool.TryGetProperty("strict", out _))
                     throw new NotSupportedException("Claude client schemas and strictness belong to typed Tools.");
                 if (!allNames.Add(name)) throw new ArgumentException("Claude tool names must be unique.");
@@ -59,7 +63,8 @@ internal sealed class AnthropicTools
                     ValidateCallers(callers);
                     bool programmatic = callers.EnumerateArray().Any(caller => caller.GetString() != "direct");
                     hasProgrammatic |= programmatic;
-                    if (programmatic && !result.serverTools.Any(tool => (string?)tool!["type"] is "code_execution_20260120" or "code_execution_20260521"))
+                    if (programmatic && !result.serverTools.Any(tool => CanAttemptProgrammaticCalls(
+                        (string?)tool!["type"], (string?)tool["name"])))
                         throw new ArgumentException("Programmatic Claude clients require a compatible code-execution tool.");
                     if (programmatic && definition.Strict)
                         throw new NotSupportedException("Programmatic Claude client tools do not support strict input schemas.");
@@ -71,8 +76,8 @@ internal sealed class AnthropicTools
                 if (field.Value.TryGetProperty("defer_loading", out JsonElement deferred))
                 {
                     if (deferred.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw Invalid();
-                    if (deferred.GetBoolean() && !result.serverTools.Any(tool => (string?)tool!["type"] is
-                        "tool_search_tool_bm25_20251119" or "tool_search_tool_regex_20251119" or "tool_search_tool_bm25" or "tool_search_tool_regex"))
+                    if (deferred.GetBoolean() && !result.serverTools.Any(tool => (string?)tool!["name"] is
+                        "tool_search_tool_bm25" or "tool_search_tool_regex"))
                         throw new ArgumentException("Deferred Claude clients require a tool-search tool.");
                 }
                 if (field.Value.TryGetProperty("input_examples", out JsonElement examples)
@@ -107,7 +112,7 @@ internal sealed class AnthropicTools
         return tools;
     }
 
-    private static string ServerName(string type) => type switch
+    private static string? ServerName(string type) => type switch
     {
         "web_search_20250305" or "web_search_20260209" or "web_search_20260318" => "web_search",
         "web_fetch_20250910" or "web_fetch_20260209" or "web_fetch_20260309" or "web_fetch_20260318" => "web_fetch",
@@ -115,8 +120,11 @@ internal sealed class AnthropicTools
         "tool_search_tool_bm25_20251119" or "tool_search_tool_bm25" => "tool_search_tool_bm25",
         "tool_search_tool_regex_20251119" or "tool_search_tool_regex" => "tool_search_tool_regex",
         "advisor_20260301" => "advisor",
-        _ => throw new NotSupportedException("Unknown or client-executed Claude native tool type.")
+        _ => null
     };
+
+    internal static bool CanAttemptProgrammaticCalls(string? type, string? name) =>
+        name == "code_execution" && type is not null and not ("code_execution_20250522" or "code_execution_20250825");
 
     private static void ValidateCallers(JsonElement callers)
     {

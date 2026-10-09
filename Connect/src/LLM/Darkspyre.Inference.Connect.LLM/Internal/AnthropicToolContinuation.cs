@@ -12,7 +12,8 @@ internal static class AnthropicToolContinuation
         JsonNode[] native = payload["tools"] is JsonArray tools
             ? tools.Where(tool => Text(tool!, "type") is not null).Select(tool => tool!).ToArray() : [];
         var declared = native.Select(tool => Text(tool, "name")).ToHashSet(StringComparer.Ordinal);
-        bool hasProgrammaticRuntime = native.Any(tool => Text(tool, "type") is "code_execution_20260120" or "code_execution_20260521");
+        bool hasProgrammaticRuntime = native.Any(tool => AnthropicTools.CanAttemptProgrammaticCalls(
+            Text(tool, "type"), Text(tool, "name")));
         bool hasImplicitExecution = native.Any(tool => Text(tool, "type") is
             "web_search_20260209" or "web_search_20260318" or "web_fetch_20260209" or "web_fetch_20260309" or "web_fetch_20260318");
         bool hasExecutionSubtools = hasProgrammaticRuntime || hasImplicitExecution

@@ -8,11 +8,11 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 internal static class AnthropicSchemas
 {
-    private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
+    private static readonly HashSet<string> UnsupportedConstraints = new(StringComparer.Ordinal)
     {
-        "type", "title", "description", "default", "properties", "additionalProperties", "required",
-        "items", "minItems", "enum", "const", "anyOf", "allOf", "$ref", "$defs", "definitions", "$schema",
-        "format", "pattern"
+        "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf",
+        "minLength", "maxLength", "maxItems", "uniqueItems", "contains", "minContains", "maxContains",
+        "prefixItems", "additionalItems", "unevaluatedItems"
     };
     private static readonly HashSet<string> Types = new(StringComparer.Ordinal)
     { "object", "array", "string", "integer", "number", "boolean", "null" };
@@ -26,8 +26,8 @@ internal static class AnthropicSchemas
         if (request.StructuredOutput is not { } output) return null;
         return StructuredOutput.ResolveEnforcement(output, capabilities with
         {
-            SupportsJsonSchema = ((capabilities.SupportsJsonSchema != InferenceSupport.Unsupported) && Analyze(output.Schema, out SchemaCost cost)
-                && tools.Add(cost).Fits ? InferenceSupport.Supported : InferenceSupport.Unsupported),
+            SupportsJsonSchema = Analyze(output.Schema, out SchemaCost cost) && tools.Add(cost).Fits
+                ? capabilities.SupportsJsonSchema : InferenceSupport.Unsupported,
             SupportsJsonObject = InferenceSupport.Unsupported
         });
     }
@@ -110,7 +110,7 @@ internal static class AnthropicSchemas
         bool isObject = schema.TryGetProperty("properties", out _);
         foreach (JsonProperty property in schema.EnumerateObject())
         {
-            if (!Keywords.Contains(property.Name)) return false;
+            if (UnsupportedConstraints.Contains(property.Name)) return false;
             JsonElement value = property.Value;
             switch (property.Name)
             {

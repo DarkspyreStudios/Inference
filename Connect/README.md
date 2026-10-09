@@ -1775,9 +1775,12 @@ provider counting. Typed tool choice and parallel controls apply to the combined
 guard applies to generation and counting before Vertex authentication. Vertex Gemini rejects
 `anthropic_tools`.
 
-Native definitions accept the documented web search/fetch, code execution, tool search and advisor
-versions. Unknown types, client-executed native built-ins, duplicate names and native schema/strict
-overrides fail locally. Other native configuration stays opaque and unchanged; provider errors
+Native definitions check name/type pairs for the known web search/fetch, code execution, tool search
+and advisor versions. Unfamiliar descriptors with a nonempty name and type remain opaque and unchanged.
+The documented client-executed native types, duplicate names and native schema/strict overrides fail
+locally. Programmatic tools require a named code-execution definition outside the known pre-programmatic
+versions; deferred tools require a named tool-search definition. Neither check requires a locally
+recognized server revision. Provider errors
 determine route/model availability and tool-specific parameter support. The adapter never rewrites
 definitions, retries an invalid configuration or switches tools. Advisor results, including encrypted
 advice, remain opaque ordered continuation content, not public reasoning or host tool events.
@@ -2933,9 +2936,9 @@ input budget, and preserves `LlmContextMeasurementSource`. Neither `IsSupported`
 [accounting design](docs/enhancements.md#public-nonmutating-accounting) for failure and concurrency semantics.
 
 `OutputLimitEnforcement` is exposed by both `LlmProviderCapabilities` and Common's `LlmCapabilities`.
-OpenAI Responses, Anthropic Messages and Bedrock Converse advertise `ProviderEnforced`; direct Codex,
-Claude CLI and Antigravity advertise `Unsupported`. Generic compatible endpoints and the custom
-AgentCore harness remain `Unknown`: forwarding a field is not evidence of enforcement. A reserve
+OpenAI Responses, Anthropic Messages and Bedrock Converse advertise `ProviderEnforced`.
+Direct Codex, Claude CLI, generic compatible endpoints and the custom AgentCore harness report
+`Unknown`: forwarding a field is not evidence of enforcement. Antigravity reports `Unsupported`. A reserve
 does not enforce `MaxOutputTokens`. Grok Responses also reports `Unknown` for total-output enforcement.
 Its native `max_output_tokens` limits visible output only, excluding reasoning and function tokens,
 as the [xAI Responses reference](https://docs.x.ai/developers/rest-api-reference/inference/responses.md)
@@ -4573,9 +4576,14 @@ overridden. JSON-object-only enforcement is not advertised. Supported output sch
 Anthropic Messages and Vertex Claude preflight the same schema subset. Objects must close
 `additionalProperties`; unsupported constraints, recursive/external references, complex enums,
 unsupported formats and unsupported pattern constructs do not reach native output enforcement.
-Schemas are not rewritten. A request must explicitly permit `LocalValidation` to use a schema
+Unknown keywords and annotations remain unchanged and do not establish native support or inability.
+Schema analysis retains an unknown model's support state; passing local checks does not promote it
+to supported. Schemas are not rewritten. A request must explicitly permit `LocalValidation` to use a schema
 outside that subset or a model without native support. That path omits the native format and
 validates the response against the original schema, including its omitted constraints.
+Response validation permits unfamiliar keywords in its default dialect without mutating the
+library's global defaults. It evaluates recognized constraints and does not establish semantics
+for a provider-specific keyword. An explicit schema dialect retains its own rules.
 
 Strict tools use the same subset check and a maximum of 20 strict tools per request. Ordinary tools
 do not count toward that limit and retain their original schemas. Unsupported strict schemas are
