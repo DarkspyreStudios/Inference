@@ -89,7 +89,14 @@ internal static class ClaudeCliModelCatalog
                 || value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString())
                 || !model.TryGetProperty("displayName", out JsonElement name) || name.ValueKind != JsonValueKind.String)
                 throw ProtocolFailure();
-            result.Add(new(value.GetString()!, name.GetString()!) { CatalogEntry = model.Clone() });
+            // The CLI reports no window; the published limits of the model an alias resolves to supply it.
+            string resolved = model.TryGetProperty("resolvedModel", out JsonElement target) && target.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(target.GetString()) ? target.GetString()! : value.GetString()!;
+            ClaudeModelLimit limit = ClaudeModelLimits.Get(resolved);
+            result.Add(new(value.GetString()!, name.GetString()!)
+            {
+                CatalogEntry = model.Clone(), MaxContextTokens = limit.ContextTokens, MaxOutputTokens = limit.OutputTokens,
+            });
         }
         return Array.AsReadOnly(result.ToArray());
     }
