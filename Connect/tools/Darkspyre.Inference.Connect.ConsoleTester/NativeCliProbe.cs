@@ -269,7 +269,8 @@ internal sealed class NativeCliProbe(LlmAgentProviderService agents, string conn
         TurnSummary turn = await RunAsync(session, Turn("Call probe_lookup with text set to alpha. Do nothing else."), token);
         Require(turn.Completion?.Reason == LlmAgentCompletionReason.ToolRequests,
             $"The turn ended with {turn.Completion?.Reason.ToString() ?? "no completion"}, not ToolRequests.");
-        LlmAgentToolEvent call = turn.Tools.SingleOrDefault(tool => tool.Tool == "probe_lookup")
+        // The call is reported when the model makes it and again when the turn returns it.
+        LlmAgentToolEvent call = turn.Tools.LastOrDefault(tool => tool.Tool == "probe_lookup")
             ?? throw new ProbeFailure("No probe_lookup call was returned.");
         Require(call.Status == "returned" && call.Output is null, $"The call has status '{call.Status}' or an output.");
         Require(call.Arguments.TryGetProperty("text", out JsonElement text) && text.GetString() == "alpha",
@@ -468,23 +469,19 @@ internal sealed class ClaudeCliRecorder(IClaudeCliSessionProcessFactory inner) :
 
         public ValueTask DisposeAsync() => process.DisposeAsync();
 
-        /// <summary>Whether no process with this launch's session id remains within the time given.</summary>
+        /// <summary>Whether the CLI process exits within the time given.</summary>
         public async Task<bool> ExitedAsync(TimeSpan within, CancellationToken token)
         {
-            int index = arguments.ToList().IndexOf("--session-id");
-            if (index < 0 || index + 1 >= arguments.Count) throw new ProbeFailure("The launch has no --session-id.");
-            var clock = Stopwatch.StartNew();
-            while (true)
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(token);
+            limit.CancelAfter(within);
+            try
             {
-                using var check = Process.Start(new ProcessStartInfo("pgrep", ["-f", arguments[index + 1]])
-                {
-                    RedirectStandardOutput = true,
-                    UseShellExecute = false
-                }) ?? throw new ProbeFailure("pgrep did not start.");
-                await check.WaitForExitAsync(token);
-                if (check.ExitCode == 1) return true;
-                if (clock.Elapsed >= within) return false;
-                await Task.Delay(TimeSpan.FromMilliseconds(500), token);
+                await process.WaitForExitAsync(limit.Token);
+                return true;
+            }
+            catch (OperationCanceledException) when (!token.IsCancellationRequested)
+            {
+                return false;
             }
         }
 
