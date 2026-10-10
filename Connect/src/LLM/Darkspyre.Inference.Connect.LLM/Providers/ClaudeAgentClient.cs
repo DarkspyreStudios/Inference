@@ -31,7 +31,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude, supportsAgentToolUse: true,
             options.ModelId, options.Tools, options.ToolHandler);
         ClaudeCliConfiguration.ValidateConnection(connection);
-        ValidateOptions(options.ModelId, runtime.WorkingDirectory, ClientTools.Functions(options.Tools), options.ToolHandler);
+        ValidateOptions(options.ModelId, runtime.WorkingDirectory);
+        // The first definition of a duplicated name is the one used.
+        LlmAgentToolDefinition[] tools = [.. ClientTools.Functions(options.Tools).DistinctBy(tool => tool.Name, StringComparer.Ordinal)];
         (LlmAgentContext? Context, int Omitted) opening = AgentOpeningContext.Validate(options, supportsResources: true);
         if (options.CallerServices?.Resources is null && opening.Context is { } context)
             _ = AgentOpeningContext.From(context, opening.Omitted, carriesAttachments: true);
@@ -46,7 +48,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             policy.WritableRoots,
             policy.Sandbox,
             policy.NetworkAllowed,
-            ClientTools.Functions(options.Tools),
+            tools,
             options.ToolHandler,
             runtime.Ephemeral,
             connection,
@@ -104,10 +106,12 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
     {
         string normalizedDirectory = CliInfrastructure.NormalizeWorkingDirectory(workingDirectory);
         LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(connection, modelId);
+        LlmToolNames names = LlmToolNames.Create(tools.Select(tool => tool.Name), IsValidMcpToolName);
         IReadOnlyList<string> arguments = BuildArguments(
             threadId,
             modelId,
             tools,
+            names,
             ephemeral,
             normalizedDirectory,
             writableRoots,
@@ -137,6 +141,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             sessionId,
             modelId,
             tools,
+            names,
             toolHandler,
             NativeAgentContract.Claude.RichContentSupported.For(connection, null),
             richContent,
@@ -163,6 +168,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         string threadId,
         string? modelId,
         IReadOnlyList<LlmAgentToolDefinition> tools,
+        LlmToolNames names,
         bool ephemeral,
         string workingDirectory,
         IReadOnlyList<string> writableRoots,
@@ -222,7 +228,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
         string[] allowed =
         [
-            .. tools.Select(tool => McpToolName(tool.Name)),
+            .. tools.Select(tool => McpToolName(names.Native(tool.Name))),
             .. tools.Count > 0 ? ["Read"] : Array.Empty<string>(),
             .. background
         ];
@@ -270,49 +276,17 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         _ => throw new ArgumentOutOfRangeException(nameof(sandbox))
     };
 
-    private static void ValidateOptions(
-        string? modelId,
-        string workingDirectory,
-        IReadOnlyList<LlmAgentToolDefinition> tools,
-        LlmAgentToolHandler? toolHandler)
+    private static void ValidateOptions(string? modelId, string workingDirectory)
     {
-        ArgumentNullException.ThrowIfNull(tools);
-        NativeAgentContract.ValidateTools(tools);
         if (string.IsNullOrWhiteSpace(modelId))
         {
             throw new ArgumentException("A model id is required.", nameof(modelId));
         }
 
         _ = CliInfrastructure.NormalizeWorkingDirectory(workingDirectory);
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        foreach (LlmAgentToolDefinition tool in tools)
-        {
-            if (string.IsNullOrWhiteSpace(tool.Name)
-                || !IsValidMcpToolName(tool.Name)
-                || tool.InputSchema.ValueKind != JsonValueKind.Object)
-            {
-                throw new ArgumentException(
-                    "Every Claude agent tool requires a valid MCP name containing only letters, "
-                    + "numbers, underscores, hyphens, or periods, and a JSON object input schema.",
-                    nameof(tools));
-            }
-
-            if (!names.Add(tool.Name))
-            {
-                throw new ArgumentException(
-                    $"Agent tool names must be unique: '{tool.Name}'.",
-                    nameof(tools));
-            }
-        }
-
-        if (tools.Count > 0 && toolHandler is null)
-        {
-            throw new ArgumentException(
-                "Claude agent sessions with tools require a tool handler.",
-                nameof(toolHandler));
-        }
     }
 
+    /// <summary>The MCP tool-name rule. A name outside it is sent as its <see cref="LlmToolNames.Alias"/>.</summary>
     private static bool IsValidMcpToolName(string name) =>
         name.Length is > 0 and <= 128
         && name.All(character =>
@@ -324,6 +298,23 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             or '.');
 
     private static string McpToolName(string toolName) => $"mcp__{McpServerName}__{toolName}";
+
+    /// <summary>
+    /// The schema the bridge lists for a tool. A schema whose root is not an object is wrapped in an object with one
+    /// required member, <c>value</c>, because MCP tool arguments are an object.
+    /// </summary>
+    private static JsonElement WireSchema(JsonElement schema) => IsObjectSchema(schema) ? schema
+        : JsonElement.Parse(new JsonObject
+        {
+            ["type"] = "object",
+            ["properties"] = new JsonObject { ["value"] = JsonNode.Parse(schema.GetRawText()) },
+            ["required"] = new JsonArray("value")
+        }.ToJsonString());
+
+    private static bool IsObjectSchema(JsonElement schema) =>
+        schema.ValueKind == JsonValueKind.Object
+        && (!schema.TryGetProperty("type", out JsonElement type)
+            || (type.ValueKind == JsonValueKind.String && type.GetString() == "object"));
 
     private sealed record PendingToolCall(string Id, string Name, JsonElement Arguments);
 
@@ -339,7 +330,10 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private readonly HashSet<string> _completedResults = new(StringComparer.Ordinal);
         private readonly IReadOnlyList<LlmAgentToolDefinition> _tools;
         private readonly Dictionary<string, LlmAgentToolDefinition> _toolsByName;
+        private readonly LlmToolNames _names;
         private readonly LlmAgentToolHandler? _toolHandler;
+        // Held around each call to a tool that requires sequential execution, so two such calls never overlap.
+        private readonly SemaphoreSlim _sequential = new(1, 1);
         // The agent lane's tool-output support after the connection's overrides, and after the model's too.
         private readonly LlmRichContentSupported _richRoute;
         private readonly LlmRichContentSupported _richContent;
@@ -377,6 +371,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             string sessionId,
             string? initialModelId,
             IReadOnlyList<LlmAgentToolDefinition> tools,
+            LlmToolNames names,
             LlmAgentToolHandler? toolHandler,
             LlmRichContentSupported richRoute,
             LlmRichContentSupported richContent,
@@ -400,6 +395,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             _connection = connection;
             _tools = tools;
             _toolsByName = tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
+            _names = names;
             _toolHandler = toolHandler;
         }
 
@@ -500,7 +496,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     [McpServerName] = new JsonObject
                     {
                         ["initializeResult"] = McpInitializeResult("2025-06-18"),
-                        ["toolsListResult"] = McpToolsListResult(_tools)
+                        ["toolsListResult"] = McpToolsListResult(_tools, _names)
                     }
                 };
             }
@@ -522,24 +518,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         {
             ArgumentNullException.ThrowIfNull(request);
             request = ClientTools.Snapshot(request);
-            NativeAgentContract.ValidateTurn(request);
-            if (request.Input.Count == 0 && request.Attachments.Count == 0)
-            {
-                throw new ArgumentException(
-                    "An agent turn requires at least one input item or attachment.",
-                    nameof(request));
-            }
-            if (request.OutputSchema is not null)
-            {
-                throw new NotSupportedException(
-                    "Claude CLI agent sessions do not support changing output schemas per turn.");
-            }
-            LlmAttachments.Validate(
-                request.Attachments,
-                supportsImages: true,
-                supportsDocuments: true,
-                parameterName: nameof(request),
-                supportsReferences: _resourceAccess is not null);
             _ = SerializeInput(request.Input, []);
             if (!_turnGate.Wait(0, cancellationToken))
             {
@@ -549,20 +527,32 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             bool completed = false;
             try
             {
+                if (request.Input.Count == 0 && request.Attachments.Count == 0 && _openingContext is null)
+                {
+                    // Nothing to send: the turn completes at once.
+                    string emptyTurnId = Guid.NewGuid().ToString();
+                    yield return new LlmAgentTurnStartedEvent(ThreadId, emptyTurnId);
+                    completed = true;
+                    yield return new LlmAgentTurnCompletedEvent(ThreadId, emptyTurnId, LlmAgentCompletionReason.Completed, null);
+                    yield break;
+                }
                 string? selectedModelId;
                 lock (_route) { selectedModelId = _selectedModelId; }
                 LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(
                     _connection, request.ModelId ?? selectedModelId);
                 LlmReasoningLevel? nativeEffort = ClaudeCliLlmClient.MapReasoning(
                     _connection, request.ModelId ?? selectedModelId, request.ReasoningLevel);
-                (JsonArray input, string? openingNotice) = await PrepareInputAsync(request, selectedModelId, cancellationToken);
+                (JsonArray input, string? openingNotice) = await PrepareInputAsync(request, selectedModelId, capabilities, cancellationToken);
                 var settings = new JsonObject { ["showThinkingSummaries"] = (capabilities.SupportsReasoningText != InferenceSupport.Unsupported) };
                 if (nativeEffort is { } level)
                 {
                     settings["effortLevel"] = LlmReasoningEffort.Word(level);
                 }
                 string turnId = Guid.NewGuid().ToString();
-                turn = new HostTurn(turnId, new ClaudeStreamUsage((capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported), _accountedCalls), (capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
+                turn = new HostTurn(turnId, new ClaudeStreamUsage((capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported), _accountedCalls), (capabilities.SupportsReasoningText != InferenceSupport.Unsupported))
+                {
+                    OutputSchema = request.OutputSchema
+                };
                 if (!string.IsNullOrWhiteSpace(request.ModelId)
                     && !string.Equals(request.ModelId, selectedModelId, StringComparison.Ordinal))
                 {
@@ -629,15 +619,38 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
         }
 
-        private async Task<(JsonArray Content, string? Notice)> PrepareInputAsync(LlmAgentTurnRequest turn, string? selectedModelId, CancellationToken token)
+        /// <summary>
+        /// The turn's content: the opening context, then the turn instructions, the input, a notice for each attachment
+        /// left out, and the answer schema's guidance, followed by the attachments that are sent.
+        /// </summary>
+        private async Task<(JsonArray Content, string? Notice)> PrepareInputAsync(LlmAgentTurnRequest turn, string? selectedModelId,
+            LlmProviderCapabilities capabilities, CancellationToken token)
         {
             LlmAgentContext? openingContext = _openingContext;
+            string modelId = turn.ModelId ?? selectedModelId ?? string.Empty;
+            // An attachment the model or route cannot take is left out of this request, with a notice in its place.
+            LlmChatMessage turnMessage = LlmRequestNormalizer.Normalize(_connection, new LlmChatRequest
+            {
+                ModelId = modelId,
+                Resources = _resourceAccess,
+                Messages = [new("user", string.Empty) { Attachments = turn.Attachments }]
+            }, capabilities).Messages[0];
+            LlmAgentContent[] input =
+            [
+                .. string.IsNullOrEmpty(turn.Instructions) ? [] : new LlmAgentContent[]
+                {
+                    new LlmAgentTextContent($"Instructions for this turn:\n{turn.Instructions}\n\n")
+                },
+                .. turn.Input,
+                .. turnMessage.Content.Length == 0 ? [] : new LlmAgentContent[] { new LlmAgentTextContent(turnMessage.Content) },
+                .. turn.OutputSchema is { } schema ? new LlmAgentContent[] { new LlmAgentTextContent(StructuredOutput.Guidance(schema)) } : []
+            ];
             var request = new LlmChatRequest
             {
-                ModelId = turn.ModelId ?? selectedModelId ?? string.Empty,
+                ModelId = modelId,
                 Resources = _resourceAccess,
                 Messages = [.. openingContext?.Entries.Select(entry => entry.Message) ?? [],
-                    new("user", string.Empty) { Attachments = turn.Attachments }]
+                    new("user", string.Empty) { Attachments = turnMessage.Attachments }]
             };
             LlmAttachments.ValidateReferences(request, supportsResources: _resourceAccess is not null);
             (JsonArray Content, string? Notice) Project(LlmChatRequest prepared)
@@ -646,8 +659,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 {
                     Entries = openingContext.Entries.Select((entry, index) => entry with { Message = prepared.Messages[index] }).ToArray()
                 }, _openingOmitted, carriesAttachments: true);
-                return (opening is null ? SerializeInput(turn.Input, prepared.Messages[^1].Attachments)
-                    : SerializeInput([new LlmAgentTextContent(opening.Text), .. turn.Input],
+                return (opening is null ? SerializeInput(input, prepared.Messages[^1].Attachments)
+                    : SerializeInput([new LlmAgentTextContent(opening.Text), .. input],
                         [.. opening.Attachments, .. prepared.Messages[^1].Attachments]), opening?.Notice);
             }
             if (_resourceAccess is not { } access) return Project(request);
@@ -809,6 +822,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             _openingContext = null;
             _readerStop.Dispose();
             _turnGate.Dispose();
+            _sequential.Dispose();
             _writeLock.Dispose();
             if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
             if (failures.Count > 1) throw new AggregateException("The Claude CLI session did not retire cleanly.", failures);
@@ -887,7 +901,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 if (PrepareToolCall(message, callId, requestId, out LlmAgentToolCall? call) is { } refusal)
                 {
                     await WriteMcpResponseAsync(requestId, refusal.Message, cancellationToken);
-                    return null;
+                    return refusal.ToolEvent;
                 }
                 // A host tool can run for minutes. The reader keeps routing meanwhile, including the CLI's
                 // cancellation of this call when its turn is interrupted.
@@ -944,7 +958,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 case "ping":
                     return new McpResponse(McpResult(id, new JsonObject()), null);
                 case "tools/list":
-                    return new McpResponse(McpResult(id, McpToolsListResult(_tools)), null);
+                    return new McpResponse(McpResult(id, McpToolsListResult(_tools, _names)), null);
                 default:
                     return new McpResponse(McpError(id, -32601, "Method not found."), null);
             }
@@ -967,19 +981,37 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 return new McpResponse(McpError(id, -32602, "Invalid tool parameters."), null);
             }
 
-            string? name = OptionalString(parameters, "name");
-            if (name is null || !_toolsByName.ContainsKey(name))
+            string? name = OptionalString(parameters, "name") is { } native ? _names.Logical(native) : null;
+            if (name is null || !_toolsByName.TryGetValue(name, out LlmAgentToolDefinition? definition))
             {
                 return new McpResponse(McpError(id, -32602, "Unknown tool."), null);
             }
 
             JsonElement arguments = parameters.TryGetProperty("arguments", out JsonElement suppliedArguments)
-                && suppliedArguments.ValueKind == JsonValueKind.Object
-                    ? suppliedArguments.Clone()
-                    : JsonElement.Parse("{}");
+                ? suppliedArguments.Clone()
+                : JsonElement.Parse("{}");
             PendingToolCall? pending = TakePendingToolCall(name, arguments);
             string callId = pending?.Id ?? ReadJsonRpcId(id) ?? controlRequestId;
-            call = new LlmAgentToolCall(ThreadId, _activeTurnId ?? string.Empty, callId, McpServerName, name, arguments);
+            // A wrapped schema's value is checked against the tool's own schema and is what the handler receives.
+            bool wrapped = !IsObjectSchema(definition.InputSchema);
+            StructuredOutput.Evaluation evaluation = wrapped && arguments.ValueKind == JsonValueKind.Object
+                && arguments.TryGetProperty("value", out JsonElement value)
+                    ? StructuredOutput.Evaluate(definition.InputSchema, value.GetRawText())
+                    : StructuredOutput.Evaluate(WireSchema(definition.InputSchema), arguments.GetRawText());
+            if (evaluation is { Checked: true, Errors.Count: > 0 })
+            {
+                // The handler does not run; the model receives the errors and the turn continues.
+                string rejection = $"Tool '{name}' arguments were rejected:\n{string.Join('\n', evaluation.Errors)}";
+                return new McpResponse(
+                    McpResult(id, new JsonObject
+                    {
+                        ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = rejection }),
+                        ["isError"] = true
+                    }),
+                    new LlmAgentToolEvent(ThreadId, _activeTurnId ?? string.Empty, callId, McpServerName, name, arguments,
+                        false, "failed", LlmToolOutput.FromText(rejection, isError: true)));
+            }
+            call = new LlmAgentToolCall(ThreadId, _activeTurnId ?? string.Empty, callId, McpServerName, name, evaluation.Instance);
             return null;
         }
 
@@ -1064,17 +1096,35 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private async Task<McpResponse> RunToolCallAsync(LlmAgentToolCall call, JsonElement id, CancellationToken cancellationToken)
         {
             LlmToolOutput output;
+            bool sequential = _toolsByName[call.Name].RequiresSequentialExecution;
+            bool entered = false;
             try
             {
-                output = await _toolHandler!(call, cancellationToken);
+                if (_toolHandler is not { } handler)
+                {
+                    output = LlmToolOutput.FromText($"No handler is available for tool '{call.Name}'.", isError: true);
+                }
+                else
+                {
+                    if (sequential)
+                    {
+                        await _sequential.WaitAsync(cancellationToken);
+                        entered = true;
+                    }
+                    output = await handler(call, cancellationToken);
+                }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
-            catch
+            catch (Exception error)
             {
-                output = LlmToolOutput.FromText("The host tool failed.", isError: true);
+                output = LlmToolOutput.FromText(HandlerFailure(error), isError: true);
+            }
+            finally
+            {
+                if (entered) _sequential.Release();
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -1089,21 +1139,19 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     Resources = access,
                     Messages = [new("user", string.Empty) { ToolResults = [new LlmToolResult(call.CallId, output)] }]
                 };
-                return await LlmResourcePreparation.ProjectInlineAsync(request, prepared =>
-                {
-                    LlmToolOutput binary = ClientTools.Functions(prepared.Messages[0].ToolResults)[0].Output;
-                    ProjectedToolOutput resourceProjection = ToolOutputProjector.Project(binary, _richRoute, _richContent);
-                    for (int index = 0; index < output.Parts.Count; index++)
-                        if (output.Parts[index] is LlmToolOutputSessionResource
-                            && resourceProjection.Report.Parts[index].Delivery == LlmToolPartDelivery.Omitted)
-                            throw new NotSupportedException("The Claude MCP route cannot carry this logical resource content.");
-                    return ToolResponse(call, id, output, resourceProjection);
-                }, static () => { }, cancellationToken, includeSelection: false);
+                // A resource part the MCP route cannot carry is left out with the projection's notice.
+                return await LlmResourcePreparation.ProjectInlineAsync(request, prepared => ToolResponse(call, id, output,
+                    ToolOutputProjector.Project(ClientTools.Functions(prepared.Messages[0].ToolResults)[0].Output, _richRoute, _richContent)),
+                    static () => { }, cancellationToken, includeSelection: false);
             }
             // Unsupported parts are omitted by the projection; they never fail the tool or the turn.
             ProjectedToolOutput projected = ToolOutputProjector.Project(output, _richRoute, _richContent);
             return ToolResponse(call, id, output, projected);
         }
+
+        /// <summary>A handler failure as the model sees it, with the connection's credential and header values removed.</summary>
+        private string HandlerFailure(Exception error) =>
+            $"{error.GetType().Name}: {SecretRedactor.Sanitize(error.Message, LlmCredential.Parse(_connection.Credential), _connection.AdditionalHeaders.Values)} External outcome is unknown. Do not automatically replay.";
 
         private McpResponse ToolResponse(LlmAgentToolCall call, JsonElement id, LlmToolOutput output, ProjectedToolOutput projected)
         {
@@ -1213,6 +1261,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 yield break;
             }
 
+            if (OptionalString(message, "model") is { } model) ObserveModel(model);
             string messageId = OptionalString(message, "id") ?? $"message-{turnId}";
             var text = new List<string>();
             foreach (JsonElement block in content.EnumerateArray())
@@ -1232,8 +1281,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     continue;
                 }
 
-                string rawName = OptionalString(block, "name") ?? string.Empty;
-                string name = NormalizeToolName(rawName);
+                string name = LogicalToolName(OptionalString(block, "name") ?? string.Empty);
                 string callId = OptionalString(block, "id") ?? Guid.NewGuid().ToString("N");
                 JsonElement arguments = block.TryGetProperty("input", out JsonElement input)
                     ? input.Clone()
@@ -1435,10 +1483,17 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     case "stream_event" when parent is null:
                         {
                             TurnTarget target = EnsureTarget();
+                            if (root.TryGetProperty("event", out JsonElement started)
+                                && OptionalString(started, "type") == "message_start"
+                                && started.TryGetProperty("message", out JsonElement startedMessage)
+                                && OptionalString(startedMessage, "model") is { } startedModel)
+                            {
+                                target.ModelId = startedModel;
+                            }
                             if (target.Usage.Observe(root) is { } observation)
                             {
                                 Emit(new LlmAgentUsageEvent(ThreadId, target.Id, $"usage-{target.Id}",
-                                    observation.Cumulative, observation.Cumulative));
+                                    observation.Cumulative, observation.Cumulative) { ModelId = target.ModelId });
                             }
                             foreach (LlmAgentEvent item in MapStreamEvent(root, target.Id, target.ReasoningText))
                             {
@@ -1573,7 +1628,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
             target.Usage.Finish();
             LlmUsage? usage = ClaudeStreamUsage.ReadFinal(root);
-            Emit(new LlmAgentUsageEvent(ThreadId, target.Id, $"usage-{target.Id}", usage, usage));
+            Emit(new LlmAgentUsageEvent(ThreadId, target.Id, $"usage-{target.Id}", usage, usage) { ModelId = target.ModelId });
             bool isError = OptionalBoolean(root, "is_error") == true;
             string text = OptionalString(root, "result") ?? string.Empty;
             if (!isError && text.Length > 0 && target.Completed.Count == 0)
@@ -1595,7 +1650,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     ? $"Claude CLI returned result subtype '{subtype}' with stop reason '{stopReason}'." : null;
             Emit(new LlmAgentTurnCompletedEvent(ThreadId, target.Id, reason, error)
             {
-                IsContextOverflow = isError && LlmContextOverflow.ClaudeCli(error)
+                IsContextOverflow = isError && LlmContextOverflow.ClaudeCli(error),
+                StructuredOutput = (target as HostTurn)?.OutputSchema is { } schema ? AnswerCheck(schema, text, reason) : null
             });
             lock (_route)
             {
@@ -1610,6 +1666,21 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 }
                 _activeTurnId = null;
             }
+        }
+
+        /// <summary>
+        /// The final answer's check against the turn's schema. An answer that ended for another reason than completion
+        /// is reported as not evaluated.
+        /// </summary>
+        private static LlmStructuredOutputValidation AnswerCheck(JsonElement schema, string answer, LlmAgentCompletionReason reason) =>
+            reason is LlmAgentCompletionReason.Completed or LlmAgentCompletionReason.Unknown
+                ? StructuredOutput.Validate(answer, new() { Name = "agent_output", Schema = schema }, LlmStructuredOutputEnforcement.LocalValidationOnly)
+                : new(LlmStructuredOutputEnforcement.LocalValidationOnly, false, false, [$"The answer was not evaluated: {reason}."]);
+
+        /// <summary>Records the model the CLI reports for the running turn's step.</summary>
+        private void ObserveModel(string model)
+        {
+            if (CurrentTarget() is { } target) target.ModelId = model;
         }
 
         /// <summary>The CLI's output ended: every waiting caller fails, and unreported work ends as Unknown.</summary>
@@ -1674,6 +1745,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             public ClaudeStreamUsage Usage { get; } = usage;
             public bool ReasoningText { get; } = reasoningText;
 
+            /// <summary>The model the CLI last reported for this turn; null until it reports one.</summary>
+            public string? ModelId { get; set; }
+
             public HashSet<string> Completed { get; } = new(StringComparer.Ordinal);
         }
 
@@ -1683,6 +1757,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 new UnboundedChannelOptions { SingleReader = true });
 
             public bool InterruptOnStart { get; set; }
+
+            /// <summary>The turn's answer schema; the final answer is checked against it.</summary>
+            public JsonElement? OutputSchema { get; init; }
 
             public bool Abandoned { get; set; }
         }
@@ -1809,13 +1886,13 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
         };
 
-        private static JsonObject McpToolsListResult(IReadOnlyList<LlmAgentToolDefinition> tools) => new()
+        private static JsonObject McpToolsListResult(IReadOnlyList<LlmAgentToolDefinition> tools, LlmToolNames names) => new()
         {
             ["tools"] = new JsonArray([.. tools.Select(tool => new JsonObject
             {
-                ["name"] = tool.Name,
+                ["name"] = names.Native(tool.Name),
                 ["description"] = tool.Description ?? string.Empty,
-                ["inputSchema"] = JsonNode.Parse(tool.InputSchema.GetRawText()),
+                ["inputSchema"] = JsonNode.Parse(WireSchema(tool.InputSchema).GetRawText()),
                 ["_meta"] = new JsonObject
                 {
                     ["anthropic/alwaysLoad"] = !tool.DeferLoading
@@ -1838,12 +1915,13 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 ["error"] = new JsonObject { ["code"] = code, ["message"] = message }
             }.ToJsonString());
 
-        private static string NormalizeToolName(string name)
+        /// <summary>A bridge tool's logical name; any other tool keeps the name the CLI reported.</summary>
+        private string LogicalToolName(string name)
         {
             string prefix = $"mcp__{McpServerName}__";
-            return name.StartsWith(prefix, StringComparison.Ordinal)
-                ? name[prefix.Length..]
-                : name;
+            if (!name.StartsWith(prefix, StringComparison.Ordinal)) return name;
+            string native = name[prefix.Length..];
+            return _names.Logical(native) ?? native;
         }
 
         private static string? ReadJsonRpcId(JsonElement id) => id.ValueKind switch

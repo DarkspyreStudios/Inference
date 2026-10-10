@@ -144,7 +144,7 @@ public sealed class ResourcePreparationTests
     }
 
     [Fact]
-    public async Task ClaudeCliPlainTextLaneRefusesResourcesBeforeOpeningThemOrInvokingTheCli()
+    public async Task ClaudeCliPlainTextLaneLeavesOutResourcesWithANotice()
     {
         var reference = new InferenceResourceReference("workspace", "reference");
         var access = new Resources(new("workspace", "session", 1, [reference]),
@@ -154,14 +154,11 @@ public sealed class ResourcePreparationTests
         using var http = new HttpClient(handler);
         var runner = new CliDocuments();
         var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
-        await Assert.ThrowsAsync<NotSupportedException>(async () =>
-        {
-            await foreach (LlmStreamEvent _ in client.StreamAsync(connection,
-                new() { ModelId = InlineModel("claude-cli"), Resources = access, Messages = [new("user", "Read the file")] })) { }
-        });
-        Assert.Empty(access.Reads);
-        Assert.Empty(runner.Invocations);
-        Assert.Equal(0, access.ReleaseAttempts);
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection,
+            new() { ModelId = InlineModel("claude-cli"), Resources = access, Messages = [new("user", "Read the file")] })) { }
+        ClaudeCliInvocation invocation = Assert.Single(runner.Invocations);
+        Assert.Contains("This content was not supplied to the model.", string.Join("\n", [.. invocation.Arguments, invocation.StandardInput ?? ""]), StringComparison.Ordinal);
+        Assert.DoesNotContain("reference text", string.Join("\n", [.. invocation.Arguments, invocation.StandardInput ?? ""]), StringComparison.Ordinal);
         Assert.Equal(0, handler.Requests);
     }
 

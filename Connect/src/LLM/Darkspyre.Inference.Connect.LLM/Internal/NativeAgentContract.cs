@@ -47,7 +47,6 @@ internal static class NativeAgentContract
                 + "Use native resume/fork for provider-owned conversations.");
         }
 
-        ValidateTools(options.Tools);
         LlmAgentNativeRuntimeOptions runtime = options.Runtime ?? throw new ArgumentException(
             "This native runtime requires Runtime options with a working directory.", nameof(options));
         ValidateRuntime(agent, runtime, options.ResourceOutputRetentionBytes);
@@ -99,30 +98,11 @@ internal static class NativeAgentContract
             throw new NotSupportedException(AgentToolUseUnsupported);
     }
 
-    public static void ValidateTools(IReadOnlyList<LlmAgentClientToolDefinition> tools)
-    {
-        ArgumentNullException.ThrowIfNull(tools);
-        if (ClientTools.Functions(tools).Any(tool => tool.RequiresSequentialExecution))
-        {
-            throw new NotSupportedException("This native runtime does not implement managed tool scheduling.");
-        }
-    }
-
     /// <summary>The refusal of an opening on a model that marks agent sessions Unsupported.</summary>
     public const string AgentSessionsUnsupported = "The selected model does not support agent sessions.";
 
     /// <summary>The refusal of an opening with tools on a model that marks agent tool use Unsupported.</summary>
     public const string AgentToolUseUnsupported = "The selected model does not support agent tool use.";
-
-    public static void ValidateTurn(LlmAgentTurnRequest request)
-    {
-        if (request.Instructions is not null)
-        {
-            throw new NotSupportedException(
-                "This native runtime does not support per-turn instruction overrides. "
-                + "Check SupportsAgentTurnInstructions before supplying Instructions.");
-        }
-    }
 
     public static NotSupportedException UnsupportedContext(CancellationToken cancellationToken)
     {

@@ -128,14 +128,16 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             value.ValueKind == JsonValueKind.String && value.GetString() == LlmReasoningEffort.Word(level))).ToFrozenSet();
     }
 
-    /// <summary>Maps caller effort to the CLI's native effort vocabulary for both chat and agent turns.</summary>
+    /// <summary>
+    /// Maps caller effort to the CLI's native effort vocabulary for both chat and agent turns. Null when nothing was
+    /// requested, the model reports no effort control, or no offered effort maps: the effort is then not sent.
+    /// </summary>
     internal static LlmReasoningLevel? MapReasoning(LlmConnection connection, string? modelId, LlmReasoningLevel? requested)
     {
         if (requested is null) return null;
         if (ILlmCatalogCapabilities.EntryFor(connection, modelId) is { ValueKind: JsonValueKind.Object } entry
             && entry.TryGetProperty("supportsEffort", out JsonElement support) && support.ValueKind == JsonValueKind.False)
-            throw new InferenceException(InferenceFailureCode.InvalidRequest,
-                "The selected Claude CLI model reports no effort control.");
+            return null;
         LlmReasoningLevel[] row = requested.Value switch
         {
             LlmReasoningLevel.None or LlmReasoningLevel.Minimal or LlmReasoningLevel.Low =>
@@ -153,7 +155,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         IReadOnlySet<LlmReasoningLevel> offered = ResolveCapabilities(connection, modelId).ReasoningLevels;
         foreach (LlmReasoningLevel native in row)
             if (offered.Count == 0 || offered.Contains(native)) return native;
-        throw new NotSupportedException("The selected Claude CLI effort choices contain no mapped native effort.");
+        return null;
     }
 
     public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(
@@ -162,6 +164,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        // Another provider's continuation state is never sent to the CLI.
+        request = request with { Messages = [.. request.Messages.Select(message => message with { ContinuationState = null })] };
         return request.Resources is null
             ? StreamPreparedAsync(connection, request, cancellationToken)
             : LlmResourcePreparation.StreamInlineAsync(request, input => _ = ValidateChatRequest(connection, input),
@@ -174,10 +178,6 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
-        if (request.Resources is not null && (capabilities.SupportsPromptDocuments == InferenceSupport.Unsupported))
-            throw new NotSupportedException("Claude CLI requires stream-json input to materialize caller-owned resources.");
-        if (request.Messages.Any(message => message.ContinuationState is not null))
-            throw new NotSupportedException("Claude CLI chat cannot import adapter continuation state.");
         ValidateClaudeCliRequest(connection, request);
         LlmStructuredOutputEnforcement? enforcement = request.StructuredOutput is null
             ? null : StructuredOutput.ResolveEnforcement(request.StructuredOutput, capabilities);
@@ -190,6 +190,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         (LlmProviderCapabilities capabilities, LlmStructuredOutputEnforcement? enforcement) = ValidateChatRequest(connection, request);
+        // Prepared resources arrive as attachments; one this lane cannot carry is left out with a notice.
+        request = LlmRequestNormalizer.Normalize(connection, request, capabilities);
         request = request with { ReasoningLevel = MapReasoning(connection, request.ModelId, request.ReasoningLevel) };
         string prompt = BuildClaudePrompt(connection, request);
         string executable = ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint);
@@ -679,8 +681,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
     {
-        // Another provider's continuation state is never sent to the CLI: an agent opening drops it, and chat refuses it
-        // when sending. The estimate counts what the CLI receives.
+        // Another provider's continuation state is never sent to the CLI: an agent opening and chat both drop it.
+        // The estimate counts what the CLI receives.
         request = request with { Messages = [.. request.Messages.Select(message => message with { ContinuationState = null })] };
         _ = ValidateChatRequest(connection, request);
         // Selected caller-owned content is unknown to local accounting.

@@ -66,7 +66,10 @@ These public surfaces are deleted: `LlmProviderService.MeasureRequestAsync`, `Co
 **Turn settings.** `LlmAgentTurnRequest` carries `Instructions`, `Input` (may be empty), `Attachments`, `ModelId`,
 `ReasoningLevel`, `OutputSchema`, `Temperature`, `MaxOutputTokens` and `ToolChoice`. A managed session applies
 `ToolChoice` to the turn's first model step and `Auto` after it. Empty `Input` appends no user message: the turn
-sends the context as it is, and with an empty context the turn completes at once as `Completed`.
+sends the context as it is, and with an empty context the turn completes at once as `Completed`. A Claude turn
+with empty `Input` and no attachments sends the opening context alone, or completes at once when there is none.
+Claude puts nonempty turn `Instructions` before the turn input as `Instructions for this turn:\n{text}\n\n`, and
+sends no tool choice. Claude drops an effort when the model reports no effort control or no offered effort maps.
 
 **Values the model cannot use.** Every request passes one normalizer before its client runs, and a managed
 session normalizes each request it builds, so its measure sees what is sent. A dropped setting is not reported.
@@ -90,6 +93,8 @@ session normalizes each request it builds, so its measure sees what is sent. A d
   calls left unsettled get the error result `The tool was not run; no result is available.`
 - An image URL in managed `Input` becomes the text `[Image: {url}]`. A deferred tool is presented with the others.
 - Structured output is checked locally when the schema root is not an object or the route has no JSON format.
+- Claude chat drops continuation state and prepares caller-owned resources inline; a prepared file its lane cannot
+  carry gets the attachment notice. A Claude turn attachment the model cannot take gets the same notice.
 
 A refusal remains only for an operation the conversation marks Unsupported, and it names the feature: steering on
 Claude; resume (`{transport} agent sessions cannot resume a provider thread.`); a hosted tool kind the route does
@@ -123,12 +128,22 @@ them in its context.
 Codex prepares caller-owned resources inline, so a context with resources opens when the caller supplies resource
 access.
 
+On Claude the MCP bridge applies the same rules. A name outside the MCP rule `[A-Za-z0-9_.-]{1,128}` is sent as
+its alias in `--allowedTools`, the MCP tool list and calls, and every event carries the logical name. The first
+definition of a duplicated name is used. A schema whose root is not an object is listed as
+`{"type":"object","properties":{"value":<schema>},"required":["value"]}`, and `value` is checked and handed to the
+handler. The bridge holds one lock per session around each call to a tool with `RequiresSequentialExecution`, so two
+such calls never overlap. With tools and no handler, each call gets the error result
+`No handler is available for tool '{name}'.` A tool-result resource part the MCP route cannot carry is left out
+with the tool-output notice.
+
 **Structured answers.** On Codex a schema with an object root goes out as the `json_schema` format named
 `agent_output` with `"strict": false`. Any other root, or a route without a JSON-schema format, gets this line in the
 instructions, followed on the next line by the schema: `Return the final answer as exactly one JSON value that
 satisfies this JSON Schema, with no Markdown fence or other text.` The final answer is checked locally and the result
 is `LlmAgentTurnCompletedEvent.StructuredOutput`; the completion reason does not change. A refusal or truncation keeps
 its reason and reports `IsValid = false` with `The answer was not evaluated: {reason}.` No second request is sent.
+Claude appends the guidance to the turn input for every root and checks the turn's final result text the same way.
 
 **Continuing, forking and rewinding.** Codex and the Claude CLI continue a conversation by starting a new session
 with its history through `StartSessionAsync`. Neither keeps provider-side state the host must resume. Continuation
@@ -165,7 +180,8 @@ Claude sessions `Provider`) and `CompactNowAsync` (refused while `SupportsCompac
 `LlmAgentImageOutputEvent`;
 `LlmAgentResponseRecoveryEvent.Delay` and `Error`; and `LlmAgentCompactedEvent.ShortenedToolOutputCount` and
 `RemovedImageCount`. `LlmAgentUsageEvent.ModelId` names the model a Codex step used: the step request's model on
-streamed usage, and the reported model on the step's final usage.
+streamed usage, and the reported model on the step's final usage. On Claude it is the `model` the CLI reports on
+the turn's latest assistant message or message start.
 
 An unclassified managed failure ends the turn with `{exception type}: {message}`, the message with credentials
 removed. Provider errors keep `LlmProviderException.Message`.
@@ -1679,7 +1695,7 @@ continuation from foreign history. Native context capture and replacement remain
 the caller retains its resource authority and selection.
 Claude MCP tool results materialize only their explicitly named, already-selected resources. They
 do not append unrelated selected files. The existing MCP projection carries text/JSON and images;
-logical content it cannot carry, including PDF on this route, raises an explicit error. Public tool
+logical content it cannot carry, including PDF on this route, is left out with the tool-output notice. Public tool
 results retain logical references. Background failures reach the session observer. Retirement drains
 ignoring resource callbacks before releasing the process, detaches borrowed access, and preserves
 operation and independent cleanup failures once for every retirement caller.
@@ -1964,7 +1980,7 @@ the operation before the prompt is written. The session keeps the last model ack
 `set_model`; later omitted model choices and provider-originated turns use that model's capability
 overrides. An explicit return to the startup model sends a model switch when the CLI has selected
 another model.
-Native effort validation reads the same resolved model profile before any CLI control is sent.
+Native effort mapping reads the same resolved model profile before any CLI control is sent.
 Chat and native-session thinking deltas carry `IsSummary = true`; neither path exposes signature
 or encrypted state as reasoning text.
 
@@ -4223,7 +4239,7 @@ history; `ResumeSessionAsync` refuses on both. Claude supports interrupt; its st
 text plus provider-neutral image/document attachments. Managed tools reject URL-based image/audio
 content; use `Attachments`. Claude materializes MCP document resources through its read-only
 `Read` tool. A tool-capable session receives a host tool handler unless Codex returns its calls
-(`ToolHandling = ReturnRequests`).
+(`ToolHandling = ReturnRequests`); a Claude call with no handler gets an error result.
 
 ## AWS Bedrock AgentCore Harness transport
 

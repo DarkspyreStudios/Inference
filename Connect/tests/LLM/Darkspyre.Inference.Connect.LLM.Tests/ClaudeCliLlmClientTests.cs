@@ -71,19 +71,11 @@ public sealed class ClaudeCliLlmClientTests
             Messages = [new("user", "Reply with OK.")],
             ReasoningLevel = LlmReasoningLevel.ExtraHigh
         };
-        if (supportsEffort)
-        {
-            await ReadAllAsync(service.StreamAsync("connection", request));
-            IReadOnlyList<string> mapped = Assert.Single(runner.Invocations).Arguments;
-            Assert.Equal("low", mapped[mapped.ToList().IndexOf("--effort") + 1]);
-        }
-        else
-        {
-            InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() =>
-                ReadAllAsync(service.StreamAsync("connection", request)));
-            Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
-            Assert.Empty(runner.Invocations);
-        }
+        await ReadAllAsync(service.StreamAsync("connection", request));
+        IReadOnlyList<string> mapped = Assert.Single(runner.Invocations).Arguments;
+        // Without an effort control the effort is not sent.
+        if (supportsEffort) Assert.Equal("low", mapped[mapped.ToList().IndexOf("--effort") + 1]);
+        else Assert.DoesNotContain("--effort", mapped);
 
         IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(service.StreamAsync("connection",
             request with { ReasoningLevel = supportsEffort ? LlmReasoningLevel.Low : null }));
