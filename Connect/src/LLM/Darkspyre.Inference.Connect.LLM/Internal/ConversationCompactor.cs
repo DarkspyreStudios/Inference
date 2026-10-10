@@ -120,21 +120,55 @@ internal sealed class ConversationCompactor(
         // target too small for that summary, the summary keeps half the room.
         long room = Math.Max(0, limits.TargetTokens - currentMeasure);
         long olderRoom = room - Math.Min((long)(MaximumSummaryWords / WordsPerToken), room / 2);
+        string? partialTurn = null;
         foreach (string turnId in entries.Select(entry => entry.TurnId)
             .Where(turnId => turnId != currentTurnId && turnId != SummaryTurnId).Distinct(StringComparer.Ordinal).Reverse())
         {
             var candidate = new HashSet<string>(keptTurns, StringComparer.Ordinal) { turnId };
             long candidateMeasure = await Measure(shortened, Kept(entries, candidate), cancellationToken).ConfigureAwait(false);
-            if (candidateMeasure - currentMeasure > olderRoom) break;
+            if (candidateMeasure - currentMeasure > olderRoom)
+            {
+                partialTurn = turnId;
+                break;
+            }
             keptTurns = candidate;
             keptMeasure = candidateMeasure;
         }
-        LlmAgentContextEntry[] kept = Kept(entries, keptTurns);
+        LlmAgentContextEntry[] whole = Kept(entries, keptTurns);
+        var keptIds = new HashSet<string>(whole.Select(entry => entry.Id), StringComparer.Ordinal);
+        // The turn that does not fit whole keeps its newest part, from the earliest tool call that still fits, so a
+        // turn of many tool calls fills the room instead of being summarized whole (Brandon, 2026-10-10).
+        if (partialTurn is not null)
+        {
+            LlmAgentContextEntry[] turn = [.. entries.Where(entry => entry.TurnId == partialTurn)];
+            int[] starts = [.. Enumerable.Range(1, Math.Max(0, turn.Length - 1)).Where(index => turn[index].Message.ToolCalls.Count > 0)];
+            // A later start keeps less, so the earliest start that fits is found by bisection.
+            int low = 0, high = starts.Length;
+            long found = keptMeasure;
+            while (low < high)
+            {
+                int middle = (low + high) / 2;
+                long candidateMeasure = await Measure(shortened, [.. whole, .. turn[starts[middle]..]], cancellationToken)
+                    .ConfigureAwait(false);
+                if (candidateMeasure - currentMeasure <= olderRoom)
+                {
+                    high = middle;
+                    found = candidateMeasure;
+                }
+                else low = middle + 1;
+            }
+            if (low < starts.Length)
+            {
+                keptIds.UnionWith(turn[starts[low]..].Select(entry => entry.Id));
+                keptMeasure = found;
+            }
+        }
+        LlmAgentContextEntry[] kept = [.. entries.Where(entry => keptIds.Contains(entry.Id))];
         LlmAgentContextEntry[] carried = transcript is null ? [.. entries.Where(entry => entry.TurnId == SummaryTurnId)] : [];
-        bool nothingNew = !entries.Any(entry => !keptTurns.Contains(entry.TurnId) && entry.TurnId != SummaryTurnId);
+        bool nothingNew = !entries.Any(entry => !keptIds.Contains(entry.Id) && entry.TurnId != SummaryTurnId);
 
         IReadOnlyList<LlmAgentContextEntry> source = nothingNew ? []
-            : await SourceAsync(entries, keptTurns, cancellationToken).ConfigureAwait(false);
+            : await SourceAsync(entries, keptTurns, keptIds, cancellationToken).ConfigureAwait(false);
         if (source.Count == 0)
             return await FinishAsync(shortened, current, null, null, shortenedCount, removedImages, limits, cancellationToken)
                 .ConfigureAwait(false);
@@ -165,7 +199,7 @@ internal sealed class ConversationCompactor(
         if (transcript is null) return new(remaining, null, null, 0, 0);
         var keptTurns = remaining.Entries.Select(entry => entry.TurnId).Where(turnId => turnId != SummaryTurnId)
             .ToHashSet(StringComparer.Ordinal);
-        IReadOnlyList<LlmAgentContextEntry> source = await SourceAsync(remaining.Entries, keptTurns, cancellationToken)
+        IReadOnlyList<LlmAgentContextEntry> source = await SourceAsync(remaining.Entries, keptTurns, new HashSet<string>(), cancellationToken)
             .ConfigureAwait(false);
         if (source.Count == 0) return new(remaining, null, null, 0, 0);
         LlmAgentContextEntry[] kept = Kept(remaining.Entries, keptTurns);
@@ -218,16 +252,18 @@ internal sealed class ConversationCompactor(
 
     /// <summary>The entries to summarize: the transcript's turns that are not kept, or the live context's real entries.</summary>
     private async Task<IReadOnlyList<LlmAgentContextEntry>> SourceAsync(IReadOnlyList<LlmAgentContextEntry> entries,
-        HashSet<string> keptTurns, CancellationToken cancellationToken)
+        HashSet<string> keptTurns, HashSet<string> keptIds, CancellationToken cancellationToken)
     {
+        bool Summarized(LlmAgentContextEntry entry) =>
+            !keptTurns.Contains(entry.TurnId) && !keptIds.Contains(entry.Id) && entry.TurnId != SummaryTurnId;
         if (transcript is null)
-            return [.. entries.Where(entry => !keptTurns.Contains(entry.TurnId) && entry.TurnId != SummaryTurnId)];
+            return [.. entries.Where(Summarized)];
         var source = new List<LlmAgentContextEntry>();
         string? cursor = null;
         do
         {
             LlmTranscriptPage page = await transcript.ReadAsync(cursor, TranscriptPageSize, cancellationToken).ConfigureAwait(false);
-            source.AddRange(page.Entries.Where(entry => !keptTurns.Contains(entry.TurnId) && entry.TurnId != SummaryTurnId));
+            source.AddRange(page.Entries.Where(Summarized));
             cursor = page.NextCursor;
         }
         while (cursor is not null);

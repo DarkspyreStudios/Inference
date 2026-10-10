@@ -64,6 +64,32 @@ public sealed class ConversationCompactorTests
     }
 
     [Fact]
+    public async Task TurnTooBigToKeepWholeKeepsItsNewestToolCalls()
+    {
+        // Target 30,000 tokens; a 3,000-word summary takes 4,000, so 26,000 tokens of the 35,000-token turn fit.
+        var limits = new CompactionLimits(Window: 100_000, Reserve: 10_000, UsableWindow: 90_000, TriggerTokens: 76_500,
+            TargetTokens: 30_000);
+        LlmAgentContextEntry[] big =
+        [
+            new("big-user", "big", new("user", "do the work")),
+            .. Enumerable.Range(1, 70).SelectMany(index => ToolTurn("big", new string('v', 2_000))
+                .Select(entry => entry with { Id = entry.Id + index }))
+        ];
+        var context = new LlmAgentContext { Entries = [.. Turn("old", "earlier"), .. big, .. Turn("now", "go")] };
+        var harness = new Harness(null);
+
+        CompactionResult result = await harness.Compactor.CompactAsync(context, "model", "now", new HashSet<string>(), limits,
+            NoStage, CancellationToken.None);
+
+        LlmAgentContextEntry[] kept = [.. result.Context.Entries.Where(entry => entry.TurnId == "big")];
+        Assert.Equal(104, kept.Length); // 52 calls whose results hold 500 tokens each.
+        Assert.NotEmpty(kept[0].Message.ToolCalls);
+        Assert.Equal("big-result70", kept[^1].Id);
+        string material = string.Join("\n", harness.Requests.Select(request => request.Messages.Single().Content));
+        Assert.Contains("do the work", material, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task LongTranscriptIsSummarizedInParts()
     {
         LlmAgentContextEntry[] older = [.. Enumerable.Range(1, 10).SelectMany(index => Turn("t" + index, $"turn {index} " + new string('y', 8_000)))];
