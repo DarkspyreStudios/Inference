@@ -170,9 +170,6 @@ signature and refuses on both transports.
 | SupportsSpendCap | Unsupported | Unknown |
 | SupportsCompactNow | Supported | Supported |
 
-**Declared for later behaviour.** These public members exist; the behaviour behind each arrives with its own
-change: `LlmAgentSessionOptions.SkillFolders` and `LlmAgentImageOutputEvent`.
-
 **Fallback models, caps and retries.** Codex refuses a non-empty `FallbackModelIds` and a `MaxSpendUsd` greater
 than 0 at opening. Claude passes `FallbackModelIds`, without the session model and without repeats, as
 `--fallback-model a,b`; the CLI stops at launch when a fallback equals the main model. When `ExecutionOptions` is
@@ -4273,8 +4270,8 @@ cache affinity is not file storage.
 Managed sessions expose `ThreadId` and `SessionId`, explicit interrupt, safe-boundary steering,
 and host context operations. Codex and Claude continue, fork and rewind by starting a new session with the cut
 history; `ResumeSessionAsync` refuses on both. Claude supports interrupt; its steering method is unsupported. Tools return
-text plus provider-neutral image/document attachments. Managed tools reject URL-based image/audio
-content; use `Attachments`. Claude receives tool-result resources inline in the bridge's MCP results;
+text plus provider-neutral image/document attachments. On Codex, an image URL in a turn's input
+becomes the text `[Image: {url}]`. Claude receives tool-result resources inline in the bridge's MCP results;
 its built-in tools, `Read` included, are off (`--tools ""`). A tool-capable session receives a host tool handler unless it returns its calls
 (`ToolHandling = ReturnRequests`); a Claude call with no handler gets an error result. On Claude, returned calls run
 without session persistence: the first host tool call of a step interrupts the CLI unanswered, every call of that step

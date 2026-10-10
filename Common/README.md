@@ -49,10 +49,10 @@ contracts do not replace Tensor's model-instance speech-transcription lifecycle 
 Applications choose an implementation explicitly and work with typed contracts:
 
 Connect binds `ILlmInference` internally; a Connect host opens agent sessions through
-`LlmAgentProviderService`. A Tensor engine implements the contract directly:
+`LlmAgentProviderService`. Any other implementation is called through the contract:
 
 ```csharp
-ILlmInference inference = qwenEngine;
+ILlmInference inference = implementation;
 LlmInferenceResult result = await inference.CompleteAsync(new LlmInferenceRequest
 {
     ModelId = modelId,
