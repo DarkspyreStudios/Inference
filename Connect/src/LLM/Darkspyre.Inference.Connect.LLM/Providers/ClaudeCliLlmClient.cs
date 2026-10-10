@@ -633,12 +633,18 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                     break;
                 }
 
+                // The listing's own limits come first; a model it lists without them takes the published Claude limits.
                 models.AddRange(data.EnumerateArray()
-                    .Select(model => new LlmModel(
-                        LlmJson.GetString(model, "id") ?? string.Empty,
-                        LlmJson.GetString(model, "display_name")
-                            ?? LlmJson.GetString(model, "id")
-                            ?? string.Empty))
+                    .Select(model =>
+                    {
+                        string id = LlmJson.GetString(model, "id") ?? string.Empty;
+                        ClaudeModelLimit published = ClaudeModelLimits.Get(id);
+                        return new LlmModel(id, LlmJson.GetString(model, "display_name") ?? id)
+                        {
+                            MaxContextTokens = PositiveLong(model, "max_input_tokens") ?? published.ContextTokens,
+                            MaxOutputTokens = PositiveLong(model, "max_tokens") ?? published.OutputTokens,
+                        };
+                    })
                     .Where(model => model.Id.Length > 0));
 
                 bool hasMore = root.TryGetProperty("has_more", out JsonElement more)
@@ -653,6 +659,10 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
         return consumption.Publish<IReadOnlyList<LlmModel>>([.. models.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)]);
     }
+
+    private static long? PositiveLong(JsonElement model, string property) =>
+        model.TryGetProperty(property, out JsonElement value) && value.ValueKind == JsonValueKind.Number
+            && value.TryGetInt64(out long number) && number > 0 ? number : null;
 
     private static void ValidateClaudeCliRequest(
         LlmConnection connection,
