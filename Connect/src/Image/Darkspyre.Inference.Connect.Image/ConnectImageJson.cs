@@ -61,8 +61,7 @@ public static class ConnectImageJson
     public static JsonTypeInfo<ImageProviderHealth> ImageProviderHealth => Metadata<ImageProviderHealth>();
 }
 
-[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata,
-    Converters = [typeof(ImageBindingJsonConverter), typeof(ImageBindingFactoryJsonConverter)])]
+[JsonSourceGenerationOptions(GenerationMode = JsonSourceGenerationMode.Metadata)]
 [JsonSerializable(typeof(ImageConnection))]
 [JsonSerializable(typeof(ImageGenerationRequest))]
 [JsonSerializable(typeof(ImageTransport))]
@@ -109,16 +108,3 @@ internal sealed class ImageWorkflowOriginJsonConverter : JsonConverter<ImageWork
     }
 }
 
-internal abstract class ImageRuntimeJsonConverter<T> : JsonConverter<T> where T : class
-{
-    public override bool HandleNull => true;
-    public override T? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
-        => reader.TokenType == JsonTokenType.Null ? null : throw new NotSupportedException("Live image collaborators are not portable data.");
-    public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options)
-    {
-        if (value is null) writer.WriteNullValue();
-        else throw new NotSupportedException("Live image collaborators are not portable data.");
-    }
-}
-internal sealed class ImageBindingJsonConverter : ImageRuntimeJsonConverter<XaiFamilyBinding>;
-internal sealed class ImageBindingFactoryJsonConverter : ImageRuntimeJsonConverter<Func<XaiConnectionSelection, XaiFamilyBinding>>;

@@ -30,57 +30,6 @@ public sealed class LlmSettingsTests
     }
 
     [Fact]
-    public async Task GrokSettingsReopenKeepsSavedRoutingAndSignInWithoutClaimingFreshAuthentication()
-    {
-        var options = new XaiConnectionOptions { Region = XaiRegion.UnitedStates, ServiceTier = XaiServiceTier.Default };
-        var saved = new LlmConnection
-        {
-            Version = "v1",
-            Transport = LlmTransport.XaiResponses,
-            Endpoint = options.GetEndpoint(),
-            Xai = options,
-            Credential = new LlmCredential { OAuth = new() { AccessToken = "saved-grok-token" } }.Serialize()
-        };
-        var client = new Client(ProviderDefinitions.GrokSubscription);
-        using var provider = new LlmProviderService(new UnusedSource(), [client]);
-        var target = new Target();
-        var identity = new SetupConfigurationIdentity(SetupChangeIntent.Edit, "id", "v1");
-        var (manager, settings) = await OpenAsync(provider, LlmTransport.XaiResponses,
-            identity, target, saved, "grok-4.20");
-        using (manager)
-        {
-            Dictionary<string, SetupField> fields = Fields(settings).ToDictionary(field => field.Description.Id);
-            Assert.Equal(nameof(XaiRegion.UnitedStates), Assert.IsType<SetupChoiceField>(fields["xai-region"]).Value);
-            Assert.Equal(nameof(XaiServiceTier.Default), Assert.IsType<SetupChoiceField>(fields["xai-service-tier"]).Value);
-            SetupTextField savedSignIn = Assert.IsType<SetupTextField>(fields["saved-sign-in"]);
-            SetupTextField draftSignIn = Assert.IsType<SetupTextField>(fields["draft-sign-in"]);
-            Assert.True(savedSignIn.Description.IsReadOnly);
-            Assert.True(draftSignIn.Description.IsReadOnly);
-            Assert.Equal("Present", savedSignIn.Value);
-            Assert.Equal("Using saved sign-in", draftSignIn.Value);
-            Assert.DoesNotContain("saved-grok-token", savedSignIn.Value + draftSignIn.Value, StringComparison.Ordinal);
-            Assert.Null(settings.Status.Authenticated.Value);
-            Assert.False(settings.HasUnsavedChanges);
-            Assert.Equal(saved.Endpoint, settings.CurrentConnection().Endpoint);
-            Assert.Equal(saved.Xai, settings.CurrentConnection().Xai);
-            Assert.Equal(saved.Credential, settings.CurrentConnection().Credential);
-
-            Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
-            Assert.Equal(1, target.Calls);
-            Assert.Equal(identity, target.Changes!.Identity);
-            Assert.Equal(saved.Endpoint, target.Changes.Configuration.Connection.Endpoint);
-            Assert.Equal(saved.Xai, target.Changes.Configuration.Connection.Xai);
-            Assert.Null(target.Changes.Configuration.Connection.Credential);
-            Assert.Equal(SetupSecretEditKind.Keep, target.Changes.Credential.Kind);
-            Assert.False(target.Changes.RequiresReauthentication);
-            Assert.Equal("Saved", Assert.IsType<SetupTextField>(Fields(settings)
-                .Single(field => field.Description.Id == "draft-sign-in")).Value);
-            Assert.Null(settings.Status.Authenticated.Value);
-            Assert.Equal(0, client.Calls);
-        }
-    }
-
-    [Fact]
     public void AuthorizationGrantDiagnosticsDoNotExposeCodesOrVerifiers()
     {
         var session = new LlmAuthorizationSession

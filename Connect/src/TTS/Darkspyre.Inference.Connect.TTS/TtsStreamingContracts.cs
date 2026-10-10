@@ -13,17 +13,9 @@ public sealed record TtsTimestamp(string Text, TimeSpan Start, TimeSpan End)
     public override string ToString() => "TtsTimestamp { <data> }";
 }
 
-public sealed record XaiTtsOptions(int? OptimizeStreamingLatency = null,
-    bool? TextNormalization = null, IReadOnlyDictionary<string, string>? Replace = null)
-{
-    public IReadOnlyDictionary<string, string>? Replace { get; init => field = TtsData.Copy(value); } = TtsData.Copy(Replace);
-    public override string ToString() => "XaiTtsOptions { <data> }";
-}
-
 public sealed record TtsStreamOptions(string? VoiceId = null, double? Speed = null,
     TtsAudioFormat Format = TtsAudioFormat.Wav, string? Language = null,
-    int? SampleRate = null, int? BitRate = null, bool? IncludeTimestamps = null,
-    XaiTtsOptions? Xai = null)
+    int? SampleRate = null, int? BitRate = null, bool? IncludeTimestamps = null)
 {
     public override string ToString() => "TtsStreamOptions { <data> }";
 }
@@ -92,11 +84,6 @@ public interface ITtsStreamingClient
 
 internal static class TtsData
 {
-    internal static XaiTtsOptions? EffectiveOptions(XaiTtsOptions? defaults, XaiTtsOptions? options) =>
-        defaults is null && options is null ? null : new(
-            options?.OptimizeStreamingLatency ?? defaults?.OptimizeStreamingLatency,
-            options?.TextNormalization ?? defaults?.TextNormalization,
-            options?.Replace ?? defaults?.Replace);
     internal static T Required<T>(T value) where T : class => value ?? throw new ArgumentNullException(nameof(value));
 
     internal static ReadOnlyCollection<T> Copy<T>(IReadOnlyList<T> value)

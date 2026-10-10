@@ -6,15 +6,9 @@ using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
-using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.Audio;
-using Darkspyre.Inference.Connect.Image;
 using Darkspyre.Inference.Connect.LLM.Providers;
-using Darkspyre.Inference.Connect.Realtime;
-using Darkspyre.Inference.Connect.Resources;
-using Darkspyre.Inference.Connect.STT;
 using Darkspyre.Inference.Connect.TTS;
-using Darkspyre.Inference.Connect.Video;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -23,26 +17,55 @@ public sealed class CollectibleSerializationTests
 {
     private static readonly Type[] CommonConnectMetadataOwners =
     [
-        typeof(InferenceJson), typeof(ConnectLlmJson), typeof(ConnectImageJson), typeof(ConnectVideoJson),
-        typeof(ConnectTtsJson), typeof(ConnectSttJson), typeof(ConnectRealtimeJson), typeof(ConnectResourcesJson), typeof(ConnectAudioJson)
+        typeof(InferenceJson), typeof(ConnectLlmJson), typeof(ConnectTtsJson), typeof(ConnectAudioJson)
     ];
     private static readonly string[] GenerationAssemblies = CommonConnectMetadataOwners
         .Select(owner => owner.Assembly.GetName().Name!).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
-    private static readonly string[] ResourcesAssemblies =
-    [
-        "Darkspyre.Inference.Common", "Darkspyre.Inference.Connect.Image", "Darkspyre.Inference.Connect.LLM",
-        "Darkspyre.Inference.Connect.Resources", "Darkspyre.Inference.Connect.Video"
-    ];
+
+    // Serialized by the dev code before the phase-1 build changed any contract (B18).
+    private const string DevAgentContext = """
+        {"FormatVersion":3,"Revision":4,"Entries":[{"Id":"e1","TurnId":"t1","Message":{"Role":"user","Content":"Show the chart.","ContinuationState":null,"OmittedAttachments":[{"Kind":0,"FileName":"chart.png","Index":0,"ToolCallId":null}],"Attachments":[],"ToolCalls":[],"ToolResults":[]}},{"Id":"e2","TurnId":"t1","Message":{"Role":"assistant","Content":"","ContinuationState":null,"OmittedAttachments":[],"Attachments":[],"ToolCalls":[{"type":"function","Id":"call-1","Name":"read_file","ArgumentsJson":"{\u0022path\u0022:\u0022a.txt\u0022}"}],"ToolResults":[]}},{"Id":"e3","TurnId":"t1","Message":{"Role":"user","Content":"","ContinuationState":null,"OmittedAttachments":[],"Attachments":[],"ToolCalls":[],"ToolResults":[{"type":"function","ToolCallId":"call-1","Output":{"Parts":[{"type":"text","Text":"contents"}],"StructuredContent":null,"IsError":false}}]}},{"Id":"e4","TurnId":"t1","Message":{"Role":"assistant","Content":"Done.","ContinuationState":null,"OmittedAttachments":[],"Attachments":[],"ToolCalls":[],"ToolResults":[]}}],"SelectedResources":[],"ResourceSelectionVersion":null}
+        """;
+    private const string DevChatMessage = """
+        {"Role":"user","Content":"Look at these.","ContinuationState":null,"OmittedAttachments":[],"Attachments":[{"type":"binary","Kind":0,"FileName":"chart.png","MediaType":"image/png","Data":"AQID"}],"ToolCalls":[],"ToolResults":[]}
+        """;
+    private const string DevToolDefinition = """
+        {"Name":"read_file","Description":"Reads a file.","InputSchema":{"type":"object","properties":{"path":{"type":"string"}},"required":["path"],"additionalProperties":false},"Strict":true,"DeferLoading":false,"RequiresSequentialExecution":false}
+        """;
+    private const string DevContextPolicy = """
+        {"CompactionThresholdRatio":0.8,"SafetyMarginTokens":2048,"ReservedOutputTokens":8000,"MaxContextTokens":200000}
+        """;
+    private const string DevConnection = """
+        {"Version":"v1","Transport":13,"Endpoint":"https://api.x.ai/v1","Credential":null,"Vertex":null,"Azure":null,"Acp":null,"Copilot":null,"RuntimeLaunchInputs":null,"ChatCompletions":null,"Xai":{"Region":1,"ServiceTier":1,"MultiAgent":{"AgentCount":4}},"AdditionalHeaders":{},"ProviderOptions":{},"CapabilityOverrides":{"SupportsStreaming":null,"SupportsStreamingUsage":null,"SupportsUsageDeltas":null,"SupportsReasoningText":null,"SupportsModelListing":null,"SupportsAccountUsage":null,"SupportsJsonSchema":"Supported","SupportsJsonObject":null,"ReasoningLevels":null,"SupportsTemperature":"Unsupported","SupportsTopP":null,"SupportsTopK":null,"SupportsSeed":null,"SupportsPresencePenalty":null,"SupportsFrequencyPenalty":null,"MaxStopSequences":null,"SupportsToolUse":null,"SupportsAgentSessions":null,"SupportsAgentToolUse":null,"SupportsAgentTurnInstructions":null,"SupportsPromptImages":null,"SupportsPromptDocuments":null,"SupportsToolResultImages":null,"SupportsToolResultDocuments":null},"ModelCapabilityOverrides":{"grok-4":{"SupportsStreaming":null,"SupportsStreamingUsage":null,"SupportsUsageDeltas":null,"SupportsReasoningText":null,"SupportsModelListing":null,"SupportsAccountUsage":null,"SupportsJsonSchema":null,"SupportsJsonObject":null,"ReasoningLevels":null,"SupportsTemperature":null,"SupportsTopP":null,"SupportsTopK":null,"SupportsSeed":"Unsupported","SupportsPresencePenalty":null,"SupportsFrequencyPenalty":null,"MaxStopSequences":null,"SupportsToolUse":null,"SupportsAgentSessions":null,"SupportsAgentToolUse":null,"SupportsAgentTurnInstructions":null,"SupportsPromptImages":null,"SupportsPromptDocuments":null,"SupportsToolResultImages":null,"SupportsToolResultDocuments":null}}}
+        """;
 
     [Fact]
-    public void SchemaGuidanceQuotesNestedPropertyNamesWithoutReflection()
+    public void StoredDevPayloadsStillRead()
     {
-        var node = new AppleSchemaNode("object")
-        {
-            Properties = [new("part\"\\\n\u00e9", true, new("string") { Description = "leaf" })]
-        };
+        LlmAgentContext context = JsonSerializer.Deserialize(DevAgentContext, ConnectLlmJson.AgentContext)!;
+        Assert.Equal(4, context.Entries.Count);
+        Assert.Equal("chart.png", Assert.Single(context.Entries[0].Message.OmittedAttachments).FileName);
+        Assert.Equal("read_file", Assert.IsType<LlmToolCall>(Assert.Single(context.Entries[1].Message.ToolCalls)).Name);
+        Assert.Equal("call-1", Assert.Single(context.Entries[2].Message.ToolResults).ToolCallId);
 
-        Assert.Equal("$[\"part\\u0022\\\\\\n\\u00E9\"]: leaf", AppleSchema.Guidance(node));
+        LlmChatMessage message = JsonSerializer.Deserialize(DevChatMessage, ConnectLlmJson.ChatMessage)!;
+        LlmAttachment attachment = Assert.IsType<LlmAttachment>(Assert.Single(message.Attachments));
+        Assert.Equal(new byte[] { 1, 2, 3 }, attachment.Data.ToArray());
+
+        LlmAgentToolDefinition tool = JsonSerializer.Deserialize(DevToolDefinition, ConnectLlmJson.LlmAgentToolDefinition)!;
+        Assert.Equal("read_file", tool.Name);
+        Assert.Equal("string", tool.InputSchema.GetProperty("properties").GetProperty("path").GetProperty("type").GetString());
+
+        LlmAgentContextPolicy policy = JsonSerializer.Deserialize<LlmAgentContextPolicy>(DevContextPolicy)!;
+        Assert.Equal(8000, policy.ReservedOutputTokens);
+        Assert.Equal(200000, policy.MaxContextTokens);
+
+        LlmConnection connection = JsonSerializer.Deserialize(DevConnection, ConnectLlmJson.Connection)!;
+        Assert.Equal(LlmTransport.XaiResponses, connection.Transport);
+        Assert.Equal(XaiRegion.UnitedStates, connection.Xai!.Region);
+        Assert.Equal(4, connection.Xai.MultiAgent!.AgentCount);
+        Assert.Equal(InferenceSupport.Unsupported, connection.CapabilityOverrides!.SupportsTemperature);
+        Assert.Equal(InferenceSupport.Unsupported, connection.ModelCapabilityOverrides["grok-4"].SupportsSeed);
     }
 
     [Fact]
@@ -58,22 +81,6 @@ public sealed class CollectibleSerializationTests
             Diagnostics = new(200, null, null)
         }, ConnectLlmJson.ChatResult);
         WeakReference[] generation = RoundTripInCollectibleGeneration(json);
-
-        AssertCollected(generation);
-    }
-
-    [Fact]
-    public void ResourcesMetadataAndNestedCommitReceiptsDoNotKeepTheirCollectibleGenerationAlive()
-    {
-        WeakReference[] generation = RoundTripInCollectibleGeneration(ResourcesResultJson(), resources: true);
-
-        AssertCollected(generation);
-    }
-
-    [Fact]
-    public void AllCommonConnectMetadataOwnersReleaseTheirCollectibleGeneration()
-    {
-        WeakReference[] generation = RoundTripInCollectibleGeneration(ResourcesResultJson(), resources: true, allOwners: true);
 
         AssertCollected(generation);
     }
@@ -113,14 +120,12 @@ public sealed class CollectibleSerializationTests
             Type clientType = assembly.GetType(typeof(ILlmClient).FullName!, throwOnError: true)!;
             var clients = (System.Collections.IEnumerable)container.GetRequiredService(typeof(IEnumerable<>).MakeGenericType(clientType));
             object[] resolved = clients.Cast<object>().ToArray();
-            Assert.Equal(9, resolved.Length);
-            Assert.Contains(resolved, client => client.GetType().Name == "XaiResponsesLlmClient");
+            Assert.Equal(2, resolved.Length);
             Assert.All(resolved, client => Assert.Same(assembly, client.GetType().Assembly));
             object pool = container.GetRequiredService(assembly.GetType(
                 "Darkspyre.Inference.Connect.LLM.Internal.SdkHttpGenerationPool", throwOnError: true)!);
             Assert.Same(assembly, pool.GetType().Assembly);
             object chat = container.GetRequiredService(assembly.GetType(typeof(LlmProviderService).FullName!, throwOnError: true)!);
-            Assert.Same(chat, container.GetRequiredService(assembly.GetType(typeof(ILlmFileClient).FullName!, throwOnError: true)!));
             object agents = container.GetRequiredService(assembly.GetType(typeof(LlmAgentProviderService).FullName!, throwOnError: true)!);
             object embeddings = container.GetRequiredService(assembly.GetType(typeof(LlmEmbeddingProviderService).FullName!, throwOnError: true)!);
             Assert.All(new[] { chat, agents, embeddings }, facade => Assert.Same(assembly, facade.GetType().Assembly));
@@ -132,23 +137,6 @@ public sealed class CollectibleSerializationTests
             try { container?.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
             finally { context.Unload(); }
         }
-    }
-
-    private static string ResourcesResultJson()
-    {
-        var resource = new InferenceResourceReference("workspace", "generated");
-        var result = new LlmChatResult
-        {
-            Text = "done",
-            Status = LlmCompletionStatus.Completed,
-            Diagnostics = new(200, null, null),
-            Usage = new(7, 3, 10),
-            ToolCalls = [new LlmShellCall("call-1", ["pwd"], null, null)],
-            GeneratedResources = [new(new(resource, "session", "output.txt", "text/plain", 4),
-                new("workspace", "session", 1, [resource]))]
-        };
-        return JsonSerializer.Serialize(new LlmBatchResultPage([new LlmBatchChatResult("row-1", result)], "cursor"),
-            ConnectResourcesJson.LlmBatchResultPage);
     }
 
     private static void AssertCollected(WeakReference[] generation)
@@ -179,29 +167,18 @@ public sealed class CollectibleSerializationTests
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference[] RoundTripInCollectibleGeneration(string json, bool resources = false, bool allOwners = false)
+    private static WeakReference[] RoundTripInCollectibleGeneration(string json)
     {
         var context = new SerializationGeneration(Path.GetDirectoryName(typeof(ConnectLlmJson).Assembly.Location)!);
         try
         {
-            Type owner = resources ? typeof(ConnectResourcesJson) : typeof(ConnectLlmJson);
+            Type owner = typeof(ConnectLlmJson);
             Assembly assembly = context.LoadFromAssemblyPath(owner.Assembly.Location);
             Assert.Same(context, AssemblyLoadContext.GetLoadContext(assembly));
             Type metadataOwner = assembly.GetType(owner.FullName!, throwOnError: true)!;
             var references = new List<WeakReference> { new(context), new(assembly) };
-            if (allOwners)
-            {
-                int roots = 0;
-                foreach (Type sharedOwner in CommonConnectMetadataOwners)
-                {
-                    Assembly privateAssembly = context.LoadFromAssemblyPath(sharedOwner.Assembly.Location);
-                    Assert.Same(context, AssemblyLoadContext.GetLoadContext(privateAssembly));
-                    roots += ExerciseMetadata(privateAssembly.GetType(sharedOwner.FullName!, throwOnError: true)!, context, references);
-                }
-                Assert.Equal(504, roots);
-            }
-            else ExerciseMetadata(metadataOwner, context, references);
-            string rootName = resources ? nameof(ConnectResourcesJson.LlmBatchResultPage) : nameof(ConnectLlmJson.ChatResult);
+            ExerciseMetadata(metadataOwner, context, references);
+            string rootName = nameof(ConnectLlmJson.ChatResult);
             var metadata = (JsonTypeInfo)metadataOwner.GetProperty(rootName)!.GetValue(null)!;
             Assert.Same(assembly, metadata.Type.Assembly);
 
@@ -209,25 +186,6 @@ public sealed class CollectibleSerializationTests
             Assert.Same(assembly, value.GetType().Assembly);
             Assert.Equal(json, JsonSerializer.Serialize(value, metadata));
             object result = value;
-            if (resources)
-            {
-                var items = (System.Collections.IEnumerable)value.GetType().GetProperty(nameof(LlmBatchResultPage.Items))!.GetValue(value)!;
-                object row = Assert.Single(items.Cast<object>());
-                Assert.Same(assembly, row.GetType().Assembly);
-                result = row.GetType().GetProperty(nameof(LlmBatchChatResult.Result))!.GetValue(row)!;
-                Assert.Same(context, AssemblyLoadContext.GetLoadContext(result.GetType().Assembly));
-                Assert.Equal("Darkspyre.Inference.Connect.LLM", result.GetType().Assembly.GetName().Name);
-                references.Add(new(row));
-                var receipts = (System.Collections.IEnumerable)result.GetType().GetProperty(nameof(LlmChatResult.GeneratedResources))!.GetValue(result)!;
-                object receipt = Assert.Single(receipts.Cast<object>());
-                object descriptor = receipt.GetType().GetProperty(nameof(InferenceResourceCommitResult.Resource))!.GetValue(receipt)!;
-                object selection = receipt.GetType().GetProperty(nameof(InferenceResourceCommitResult.Selection))!.GetValue(receipt)!;
-                foreach (object nested in new[] { receipt, descriptor, selection })
-                {
-                    Assert.Same(context, AssemblyLoadContext.GetLoadContext(nested.GetType().Assembly));
-                    references.Add(new(nested));
-                }
-            }
             object usage = result.GetType().GetProperty(nameof(LlmChatResult.Usage))!.GetValue(result)!;
             Assembly common = usage.GetType().Assembly;
             Assert.Same(context, AssemblyLoadContext.GetLoadContext(common));
@@ -242,9 +200,6 @@ public sealed class CollectibleSerializationTests
             references.Add(new(common));
             references.Add(new(usage));
             references.Add(new(tool));
-            if (resources)
-                Assert.Equal(allOwners ? GenerationAssemblies : ResourcesAssemblies,
-                    context.Assemblies.Select(loaded => loaded.GetName().Name).Order(StringComparer.Ordinal));
             foreach (Assembly loaded in context.Assemblies) references.Add(new(loaded));
             return references.ToArray();
         }

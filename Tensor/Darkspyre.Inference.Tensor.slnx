@@ -55,6 +55,5 @@
     <Project Path="tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/Darkspyre.Inference.Tensor.LLM.Qwen.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
-    <Project Path="tools/Darkspyre.Inference.Tensor.ConsoleTester/Darkspyre.Inference.Tensor.ConsoleTester.csproj" />
   </Folder>
 </Solution>

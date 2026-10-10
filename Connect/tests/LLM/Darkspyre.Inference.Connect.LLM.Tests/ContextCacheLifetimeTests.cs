@@ -197,17 +197,6 @@ public sealed class ContextCacheLifetimeTests
         Assert.Equal(1, handler.Sends);
     }
 
-    [Fact]
-    public void CacheCreationStillRejectsBothExpirationFields()
-    {
-        var request = new LlmContextCacheCreate
-        {
-            ModelId = "gemini-2.5-flash", Correlation = new("operation", "explicit-correlation"),
-            TimeToLive = TimeSpan.FromMinutes(1), ExpiresAt = DateTimeOffset.UtcNow.AddMinutes(1)
-        };
-        Assert.Throws<ArgumentException>(() => GoogleCacheData.Snapshot(request, DateTimeOffset.UtcNow));
-    }
-
     [Theory]
     [InlineData("image/heic")]
     [InlineData("image/x-unreviewed")]

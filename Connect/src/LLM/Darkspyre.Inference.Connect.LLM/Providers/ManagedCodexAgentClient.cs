@@ -20,7 +20,6 @@ internal sealed class ManagedCodexAgentClient(OpenAiCodexLlmClient client, LlmPr
         Fence();
         void Preflight(LlmConnection selected)
         {
-            ProviderControlPolicy.Validate(selected, new() { ModelId = options.ModelId });
             if (options.Context is not null) { ManagedAgentContext.ValidateRuntimeResources(options.Context); }
             var capabilities = client.GetCapabilities(selected, options.ModelId);
             HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities.HostedTools);

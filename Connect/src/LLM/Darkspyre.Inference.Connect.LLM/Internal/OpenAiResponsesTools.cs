@@ -15,8 +15,7 @@ internal static class OpenAiResponsesTools
         int? messageCount = null)
     {
         var input = new JsonArray();
-        IReadOnlyDictionary<string, LlmShellCall> shellCalls = ClientTools.Validate(request,
-            connection.Transport == LlmTransport.XaiResponses);
+        IReadOnlyDictionary<string, LlmShellCall> shellCalls = ClientTools.Validate(request, false);
 
         // Accounting may project a prefix, but admission always validates the complete history.
         foreach (LlmChatMessage message in request.Messages.Take(messageCount ?? request.Messages.Count))
@@ -173,7 +172,6 @@ internal static class OpenAiResponsesTools
                     ["filename"] = file.FileName,
                     ["file_data"] = DataUrl(file.MediaType, file.Data)
                 },
-                SentNativeFile file => new JsonObject { ["type"] = "input_file", ["file_id"] = file.FileId },
                 _ => throw new InvalidOperationException("Responses tool output does not carry this part natively.")
             });
         }
@@ -266,12 +264,7 @@ internal static class OpenAiResponsesTools
         var calls = new List<LlmClientToolCall>();
         foreach (JsonElement item in output.EnumerateArray())
         {
-            if (transport == LlmTransport.XaiResponses && LlmJson.GetString(item, "type") == "function_call"
-                && (string.IsNullOrWhiteSpace(LlmJson.GetString(item, "call_id"))
-                    || string.IsNullOrWhiteSpace(LlmJson.GetString(item, "name"))
-                    || LlmJson.GetString(item, "arguments") is null))
-                throw new ArgumentException("Terminal function calls require call_id, name and string arguments.");
-            if (TryReadToolCall(item, transport == LlmTransport.XaiResponses, out LlmClientToolCall? call) && call is not null)
+            if (TryReadToolCall(item, false, out LlmClientToolCall? call) && call is not null)
             {
                 calls.Add(call);
             }

@@ -21,11 +21,7 @@
     <ProjectReference Include="..\..\src\Darkspyre.Inference.Common\Darkspyre.Inference.Common.csproj" />
     <ProjectReference Include="../../../Connect/src/LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
     <ProjectReference Include="../../../Connect/src/Image/Darkspyre.Inference.Connect.Image/Darkspyre.Inference.Connect.Image.csproj" />
-    <ProjectReference Include="../../../Connect/src/Video/Darkspyre.Inference.Connect.Video/Darkspyre.Inference.Connect.Video.csproj" />
     <ProjectReference Include="../../../Connect/src/TTS/Darkspyre.Inference.Connect.TTS/Darkspyre.Inference.Connect.TTS.csproj" />
-    <ProjectReference Include="../../../Connect/src/STT/Darkspyre.Inference.Connect.STT/Darkspyre.Inference.Connect.STT.csproj" />
-    <ProjectReference Include="../../../Connect/src/Realtime/Darkspyre.Inference.Connect.Realtime/Darkspyre.Inference.Connect.Realtime.csproj" />
-    <ProjectReference Include="../../../Connect/src/Resources/Darkspyre.Inference.Connect.Resources/Darkspyre.Inference.Connect.Resources.csproj" />
     <ProjectReference Include="../../../Connect/src/Audio/Darkspyre.Inference.Connect.Audio/Darkspyre.Inference.Connect.Audio.csproj" />
     <ProjectReference Include="../../../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj" />
   </ItemGroup>

@@ -10,24 +10,11 @@
     <ProjectReference Include="..\..\..\Common\src\Darkspyre.Inference.Common\Darkspyre.Inference.Common.csproj" />
     <ProjectReference Include="..\Image\Darkspyre.Inference.Connect.Image\Darkspyre.Inference.Connect.Image.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\TTS\Darkspyre.Inference.Connect.TTS\Darkspyre.Inference.Connect.TTS.csproj" PrivateAssets="all" />
-    <ProjectReference Include="..\STT\Darkspyre.Inference.Connect.STT\Darkspyre.Inference.Connect.STT.csproj" PrivateAssets="all" />
-    <ProjectReference Include="..\Realtime\Darkspyre.Inference.Connect.Realtime\Darkspyre.Inference.Connect.Realtime.csproj" PrivateAssets="all" />
-    <ProjectReference Include="..\Video\Darkspyre.Inference.Connect.Video\Darkspyre.Inference.Connect.Video.csproj" PrivateAssets="all" />
-    <ProjectReference Include="..\Resources\Darkspyre.Inference.Connect.Resources\Darkspyre.Inference.Connect.Resources.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\Audio\Darkspyre.Inference.Connect.Audio\Darkspyre.Inference.Connect.Audio.csproj" PrivateAssets="all" />
     <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" PrivateAssets="all" />
-    <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM.Bedrock\Darkspyre.Inference.Connect.LLM.Bedrock.csproj" PrivateAssets="all" />
-    <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM.Vertex\Darkspyre.Inference.Connect.LLM.Vertex.csproj" PrivateAssets="all" />
-    <ProjectReference Include="..\LLM\Darkspyre.Inference.Connect.LLM.Azure\Darkspyre.Inference.Connect.LLM.Azure.csproj" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="AWSSDK.Bedrock" />
-    <PackageReference Include="AWSSDK.BedrockAgentCore" />
-    <PackageReference Include="AWSSDK.BedrockRuntime" />
-    <PackageReference Include="AWSSDK.Core" />
-    <PackageReference Include="Google.Apis.Auth" />
-    <PackageReference Include="AWSSDK.SecurityToken" />
     <PackageReference Include="Darkspyre.ML.Tokenizers" />
     <PackageReference Include="JsonSchema.Net" />
     <PackageReference Include="Microsoft.Extensions.Http" />
@@ -41,23 +28,9 @@
     <None Include="..\Audio\Darkspyre.Inference.Connect.Audio\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Audio.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\TTS\Darkspyre.Inference.Connect.TTS\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.TTS.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\TTS\Darkspyre.Inference.Connect.TTS\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.TTS.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\STT\Darkspyre.Inference.Connect.STT\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.STT.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\STT\Darkspyre.Inference.Connect.STT\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.STT.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\Realtime\Darkspyre.Inference.Connect.Realtime\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Realtime.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\Realtime\Darkspyre.Inference.Connect.Realtime\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Realtime.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\Video\Darkspyre.Inference.Connect.Video\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Video.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\Video\Darkspyre.Inference.Connect.Video\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Video.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\Resources\Darkspyre.Inference.Connect.Resources\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Resources.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\Resources\Darkspyre.Inference.Connect.Resources\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Resources.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\Image\Darkspyre.Inference.Connect.Image\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Image.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\Image\Darkspyre.Inference.Connect.Image\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Image.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\LLM\Darkspyre.Inference.Connect.LLM\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\LLM\Darkspyre.Inference.Connect.LLM\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Bedrock\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Bedrock.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Vertex\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Vertex.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Bedrock\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Bedrock.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Vertex\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Vertex.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Azure\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Azure.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
-    <None Include="..\LLM\Darkspyre.Inference.Connect.LLM.Azure\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.LLM.Azure.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
   </ItemGroup>
 </Project>

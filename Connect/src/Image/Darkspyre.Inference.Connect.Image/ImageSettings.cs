@@ -12,10 +12,7 @@ public interface IImageWorkflowChoiceSource
     Task<ImageWorkflow?> GetWorkflowAsync(string workflowId, CancellationToken cancellationToken = default);
 }
 
-public sealed record ImageSetupConfiguration(ImageTransport Transport, Uri Endpoint, TimeSpan RequestTimeout, ImageWorkflowSelection Workflow)
-{
-    public XaiConnectionSelection? Xai { get; init; }
-}
+public sealed record ImageSetupConfiguration(ImageTransport Transport, Uri Endpoint, TimeSpan RequestTimeout, ImageWorkflowSelection Workflow);
 
 /// <summary>Protected header mutations; omission is not deletion.</summary>
 public sealed record ImageSetupHeaderChanges(IReadOnlyDictionary<string, string> Set, IReadOnlyList<string> Remove);
@@ -33,9 +30,8 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
     private long? _timeoutSeconds;
     private string _workflowId;
     private ImageWorkflowOrigin _origin;
-    private string _xaiConnectionId;
     private long _generation;
-    private readonly (Uri? Endpoint, long? Timeout, string Workflow, ImageWorkflowOrigin Origin, string Xai) _baseline;
+    private readonly (Uri? Endpoint, long? Timeout, string Workflow, ImageWorkflowOrigin Origin) _baseline;
 
     internal ImageSettings(ImageTransportDescriptor transport, SetupConfigurationIdentity identity,
         bool hasWorkflowCatalog, ImageConnection? existing, ImageWorkflowSelection? workflow)
@@ -52,8 +48,7 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
         _timeoutSeconds = (long)(existing?.RequestTimeout ?? TimeSpan.FromMinutes(10)).TotalSeconds;
         _workflowId = workflow?.Id ?? string.Empty;
         _origin = workflow?.Origin ?? ImageWorkflowOrigin.Host;
-        _xaiConnectionId = existing?.Xai?.ConnectionId ?? string.Empty;
-        _baseline = (_endpoint, _timeoutSeconds, _workflowId, _origin, _xaiConnectionId);
+        _baseline = (_endpoint, _timeoutSeconds, _workflowId, _origin);
         foreach ((string name, string value) in existing?.AdditionalHeaders ?? new Dictionary<string, string>())
         {
             _headers.Add(new(name, value));
@@ -104,9 +99,7 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
         new SetupChoiceField(new("workflow", "Workflow") { IsRequired = true, IsEnabled = _origin == ImageWorkflowOrigin.BuiltIn || _hasWorkflowCatalog,
             HelpText = _origin == ImageWorkflowOrigin.Host && !_hasWorkflowCatalog ? "The host must supply a workflow catalog." : string.Empty },
             _workflowId, string.Empty, value => Edit(() => { _workflowId = value; Workflow = null; }), false,
-            capabilities: SetupChoiceCapabilities.Searchable),
-        new SetupTextField(new("xai-connection", "xAI connection") { IsEnabled = Transport == ImageTransport.XaiImagine },
-            _xaiConnectionId, string.Empty, value => Edit(() => { _xaiConnectionId = value; Workflow = null; }))])]),
+            capabilities: SetupChoiceCapabilities.Searchable)])]),
         new("verify", "Check and test", "Checking health does not generate an image. The separate generation test can consume provider resources.", [])
     ];
 
@@ -155,8 +148,6 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
     {
         var issues = new List<SetupIssue>();
         if (!Enum.IsDefined(_origin)) issues.Add(new("workflow-origin-invalid", "Select a defined workflow origin.", "workflow-origin"));
-        if (Transport == ImageTransport.XaiImagine && _xaiConnectionId.Length == 0)
-            issues.Add(new("xai-selection-required", "Select the xAI connection.", "xai-connection"));
         if (_endpoint is not { IsAbsoluteUri: true } || _endpoint.Scheme is not ("http" or "https")
             || _endpoint.UserInfo.Length > 0 || _endpoint.Fragment.Length > 0 || _endpoint.Query.Length > 0)
         {
@@ -185,11 +176,10 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
         Endpoint = _endpoint!.AbsoluteUri,
         RequestTimeout = TimeSpan.FromSeconds(_timeoutSeconds!.Value),
         AdditionalHeaders = _headers.Where(header => header.Value is not null)
-            .ToDictionary(header => header.Name, header => header.Value!, StringComparer.OrdinalIgnoreCase),
-        Xai = Transport == ImageTransport.XaiImagine && _xaiConnectionId.Length > 0 ? new(_xaiConnectionId) : null
+            .ToDictionary(header => header.Name, header => header.Value!, StringComparer.OrdinalIgnoreCase)
     };
 
-    protected override bool IsDraftDirty => (_endpoint, _timeoutSeconds, _workflowId, _origin, _xaiConnectionId) != _baseline
+    protected override bool IsDraftDirty => (_endpoint, _timeoutSeconds, _workflowId, _origin) != _baseline
         || _removedHeaders.Count != 0 || _headers.Any(header => header.OriginalName.Length == 0
             || header.Name != header.OriginalName || header.Change.Kind != SetupSecretEditKind.Keep);
 
@@ -205,7 +195,7 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
         }
         // A rename into a removed name is an explicit set, not an ambiguous delete-and-set pair.
         removed.ExceptWith(set.Keys);
-        return new(Identity, new(Transport, _endpoint!, TimeSpan.FromSeconds(_timeoutSeconds!.Value), new(_origin, _workflowId)) { Xai = Connection().Xai },
+        return new(Identity, new(Transport, _endpoint!, TimeSpan.FromSeconds(_timeoutSeconds!.Value), new(_origin, _workflowId)),
             new(set, removed.ToArray()));
     }
 
@@ -233,15 +223,13 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
     private readonly LlmOperationLifetime _lifetime = new();
     private ImageProviderService? _service;
     private IImageWorkflowChoiceSource? _workflows;
-    private Func<XaiConnectionSelection, XaiFamilyBinding>? _xaiBindings;
 
     internal ImageSettingsManager(ImageProviderService service, ISetupCommitTarget<ImageSetupChanges> target,
-        IImageWorkflowChoiceSource? workflows, Func<XaiConnectionSelection, XaiFamilyBinding>? xaiBindings)
+        IImageWorkflowChoiceSource? workflows)
         : base(target)
     {
         _service = service;
         _workflows = workflows;
-        _xaiBindings = xaiBindings;
     }
 
     /// <summary>Returns settings for <paramref name="transport"/>, blank or from the saved entry.</summary>
@@ -300,10 +288,9 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
             return page;
         }
         ImageConnection connection = settings.Connection();
-        XaiFamilyBinding? binding = Binding(connection);
         Fence(cancellationToken);
         if (settings.Generation != generation) return new([], State: SetupChoiceState.Cancelled);
-        IReadOnlyList<ImageWorkflow> available = await _service!.GetWorkflowsAsync(connection, binding, cancellationToken).ConfigureAwait(false);
+        IReadOnlyList<ImageWorkflow> available = await _service!.GetWorkflowsAsync(connection, cancellationToken).ConfigureAwait(false);
         Fence(cancellationToken);
         ValidateWorkflowIds(available);
         if (settings.Generation != generation) return new([], State: SetupChoiceState.Cancelled);
@@ -322,10 +309,9 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
         else
         {
             ImageConnection connection = settings.Connection();
-            XaiFamilyBinding? binding = Binding(connection);
             Fence(token);
             if (settings.Generation != generation) return new(SetupActionState.Cancelled);
-            IReadOnlyList<ImageWorkflow> available = await _service!.GetWorkflowsAsync(connection, binding, token).ConfigureAwait(false);
+            IReadOnlyList<ImageWorkflow> available = await _service!.GetWorkflowsAsync(connection, token).ConfigureAwait(false);
             Fence(token);
             ValidateWorkflowIds(available);
             workflow = available.SingleOrDefault(item => item.Id == workflowId);
@@ -347,11 +333,10 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
         long generation = settings.Generation;
         ImageConnection connection = settings.Connection();
         ImageWorkflow? workflow = settings.Workflow;
-        XaiFamilyBinding? binding = Binding(connection);
         Fence(token);
         if (settings.Generation != generation) return new(SetupActionState.Cancelled);
         ImageProviderHealth result = await _service!.GetRequiredTransport(settings.Transport)
-            .TestAsync(connection, workflow, binding, token).ConfigureAwait(false);
+            .TestAsync(connection, workflow, token).ConfigureAwait(false);
         Fence(token);
         if (settings.Generation != generation) return new(SetupActionState.Cancelled);
         settings.Status = settings.Status with { Verified = SetupObservation.Known(result.IsHealthy) };
@@ -374,10 +359,7 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
         progress?.Report(new("generating", "Generating one test image."));
         Fence(token);
         if (settings.Generation != generation) return new(SetupActionState.Cancelled);
-        XaiFamilyBinding? binding = Binding(connection);
-        Fence(token);
-        if (settings.Generation != generation) return new(SetupActionState.Cancelled);
-        IImageInference inference = _service!.Bind(connection, workflow, binding);
+        IImageInference inference = _service!.Bind(connection, workflow);
         ImageGenerationResult result;
         try
         {
@@ -399,16 +381,6 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
         return ready ? SetupActionResult.Completed : new(SetupActionState.Failed, [new("empty-image", "The provider returned no image.")]);
     }
 
-    private XaiFamilyBinding? Binding(ImageConnection connection)
-    {
-        if (connection.Transport != ImageTransport.XaiImagine) return null;
-        if (connection.Xai is null || _xaiBindings is null)
-            throw new InvalidOperationException("The selected image connection requires a borrowed xAI binding factory.");
-        XaiFamilyBinding binding = _xaiBindings(connection.Xai);
-        ConnectImageInference.ValidateBinding(connection, binding);
-        return binding;
-    }
-
     private static void ValidateWorkflowIds(IReadOnlyList<ImageWorkflow> workflows)
     {
         if (workflows.GroupBy(workflow => workflow.Id, StringComparer.Ordinal).Any(group => group.Count() > 1))
@@ -421,7 +393,7 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
     public ValueTask DisposeAsync() => new(RetireAsync());
     private Task RetireAsync() => _lifetime.RetireAsync(() =>
     {
-        _service = null; _workflows = null; _xaiBindings = null;
+        _service = null; _workflows = null;
         DetachCommitTarget();
         return Task.CompletedTask;
     });

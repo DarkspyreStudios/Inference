@@ -9,11 +9,7 @@ using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.Audio;
 using Darkspyre.Inference.Connect.Image;
 using Darkspyre.Inference.Connect.LLM;
-using Darkspyre.Inference.Connect.Realtime;
-using Darkspyre.Inference.Connect.Resources;
-using Darkspyre.Inference.Connect.STT;
 using Darkspyre.Inference.Connect.TTS;
-using Darkspyre.Inference.Connect.Video;
 using Darkspyre.Inference.Tensor.Common;
 
 namespace Darkspyre.Inference.Common.Tests;
@@ -23,13 +19,9 @@ public sealed class CollectibleSerializationTests
     private static readonly (Type Owner, int Roots)[] MetadataOwners =
     [
         (typeof(InferenceJson), 183),
-        (typeof(ConnectLlmJson), 167),
+        (typeof(ConnectLlmJson), 126),
         (typeof(ConnectImageJson), 21),
-        (typeof(ConnectVideoJson), 22),
-        (typeof(ConnectTtsJson), 21),
-        (typeof(ConnectSttJson), 5),
-        (typeof(ConnectRealtimeJson), 48),
-        (typeof(ConnectResourcesJson), 28),
+        (typeof(ConnectTtsJson), 20),
         (typeof(ConnectAudioJson), 9),
         (typeof(TensorJson), 15)
     ];

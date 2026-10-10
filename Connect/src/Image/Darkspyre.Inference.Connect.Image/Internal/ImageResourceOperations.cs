@@ -65,7 +65,7 @@ internal static class ImageResourceOperations
             InferenceResourceDescriptor? resource = committed?.Resource;
             if (resource is null || resource.Reference != reference || resource.SessionId is { } reportedSession && reportedSession != sessionId
                 || resource.Bytes is { } size && size != written
-                || XaiMediaData.ContentTypesConflict(resource.ContentType, contentType)
+                || ImageContentTypes.ContentTypesConflict(resource.ContentType, contentType)
                 || selectionOutcome != InferenceResourceCommitOutcome.Committed) throw Invalid();
             var selection = new InferenceResourceSelection(workspaceId!, sessionId!, committed!.Selection!.Revision, committed.Selection.SelectedResources);
             if (selection.SelectedResources.Any(item => string.IsNullOrEmpty(item.Id))) throw Invalid();
@@ -144,7 +144,6 @@ internal static class ImageResourceOperations
             Exception? original = error.InnerException switch
             {
                 FailureEvidence evidence => evidence.Original,
-                Providers.XaiImagineImageTransport.ImageEvidence evidence => evidence.Original,
                 _ => error.InnerException
             };
             if (original is InferenceResourceOperationException resource && resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup

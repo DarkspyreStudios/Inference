@@ -137,21 +137,21 @@ internal sealed class ComfyUiImageTransport(
             SupportsCancellation: InferenceSupport.Supported));
 
     public Task<IReadOnlyList<ImageWorkflow>> GetWorkflowsAsync(
-        ImageConnection connection, XaiFamilyBinding? xai = null,
+        ImageConnection connection,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ValidateConnection(connection, xai);
+        ValidateConnection(connection);
         throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
             "ComfyUI workflows are supplied by the host; built-in workflow discovery is unavailable.");
     }
 
     public Task<ImageCapabilities> GetCapabilitiesAsync(
         ImageConnection connection, ImageWorkflow workflow, string? modelId = null,
-        XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ValidateConnection(connection, xai);
+        ValidateConnection(connection);
         ArgumentNullException.ThrowIfNull(workflow);
         if (modelId is not null && !string.Equals(modelId, workflow.Id, StringComparison.Ordinal))
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The requested workflow is not bound.");
@@ -213,10 +213,9 @@ internal sealed class ComfyUiImageTransport(
     public async Task<ImageProviderHealth> TestAsync(
         ImageConnection connection,
         ImageWorkflow? workflow = null,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
-        connection = CaptureConnection(connection, xai);
+        connection = CaptureConnection(connection);
         using var consumption = SdkHttpConsumption.Enter(httpClientFactory, cancellationToken); cancellationToken = consumption.Token;
         return consumption.Publish(await ReadHealthAsync().ConfigureAwait(false));
 
@@ -290,10 +289,9 @@ internal sealed class ComfyUiImageTransport(
 
     public async Task<IImageTransportProgressConnection?> TryConnectProgressAsync(
         ImageConnection connection,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
-        connection = CaptureConnection(connection, xai);
+        connection = CaptureConnection(connection);
         var socket = new ClientWebSocket();
         ApplyHeaders(socket.Options, connection);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -324,11 +322,10 @@ internal sealed class ComfyUiImageTransport(
         ImageConnection connection,
         ImageReference reference,
         Stream content,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        (InferenceResourceScope scope, connection) = Admit(connection, xai);
+        (InferenceResourceScope scope, connection) = Admit(connection);
         using var consumption = SdkHttpConsumption.Enter(httpClientFactory, cancellationToken); cancellationToken = consumption.Token;
         return consumption.Publish<ImagePreparedReference>(await UploadAdmittedAsync(connection, reference, content, scope, cancellationToken).ConfigureAwait(false));
     }
@@ -378,17 +375,17 @@ internal sealed class ComfyUiImageTransport(
 
     public async Task<ImagePreparedReference> ResolveReferenceAsync(
         ImageConnection connection, InferenceMediaSource source,
-        XaiFamilyBinding? xai = null, IInferenceResourceAccess? resources = null,
+        IInferenceResourceAccess? resources = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        ValidateConnection(connection, xai);
+        ValidateConnection(connection);
         ArgumentNullException.ThrowIfNull(source);
         if (source is not (BinaryMediaSource or ResourceMediaSource))
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "ComfyUI accepts binary or logical resource reference images only.");
         if (source is ResourceMediaSource && resources is null)
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The resource source requires caller-owned access.");
-        (InferenceResourceScope scope, connection) = Admit(connection, xai);
+        (InferenceResourceScope scope, connection) = Admit(connection);
         using var consumption = SdkHttpConsumption.Enter(httpClientFactory, cancellationToken); cancellationToken = consumption.Token;
         if (source is BinaryMediaSource binary)
         {
@@ -511,11 +508,10 @@ internal sealed class ComfyUiImageTransport(
     public async Task<string> SubmitAsync(
         ImageConnection connection,
         PreparedImageTransportRequest request,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        (InferenceResourceScope scope, connection) = Admit(connection, xai);
+        (InferenceResourceScope scope, connection) = Admit(connection);
         ArgumentNullException.ThrowIfNull(request);
         ComfyPreparedEnvelope envelope = JsonSerializer.Deserialize(request.ProviderRequest, ComfyOutputJsonContext.Default.ComfyPreparedEnvelope)
             ?? throw new InvalidOperationException("The prepared ComfyUI request is empty.");
@@ -556,10 +552,9 @@ internal sealed class ComfyUiImageTransport(
         ImageConnection connection,
         string providerJobId,
         ImageWorkflow workflow,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
-        (InferenceResourceScope scope, connection) = Admit(connection, xai);
+        (InferenceResourceScope scope, connection) = Admit(connection);
         ArgumentException.ThrowIfNullOrWhiteSpace(providerJobId);
         ArgumentNullException.ThrowIfNull(workflow);
         ComfyWorkflowConfiguration configuration = ReadConfiguration(workflow);
@@ -624,10 +619,9 @@ internal sealed class ComfyUiImageTransport(
     public async Task<ImageTransportDownload> DownloadAsync(
         ImageConnection connection,
         ImageTransportOutput output,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
-        (InferenceResourceScope scope, connection) = Admit(connection, xai);
+        (InferenceResourceScope scope, connection) = Admit(connection);
         ArgumentNullException.ThrowIfNull(output);
         ValidateScope(output.Scope, scope);
         ComfyOutputImage comfyOutput = JsonSerializer.Deserialize(output.ProviderState, ComfyOutputJsonContext.Default.ComfyOutputImage)
@@ -651,10 +645,9 @@ internal sealed class ComfyUiImageTransport(
         ImageConnection connection,
         string providerJobId,
         bool interruptRunning,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default)
     {
-        connection = CaptureConnection(connection, xai);
+        connection = CaptureConnection(connection);
         ArgumentException.ThrowIfNullOrWhiteSpace(providerJobId);
         using var consumption = SdkHttpConsumption.Enter(httpClientFactory, cancellationToken); cancellationToken = consumption.Token;
         return consumption.Publish(await CancelAsync().ConfigureAwait(false));
@@ -814,12 +807,12 @@ internal sealed class ComfyUiImageTransport(
         }
     }
 
-    private static void ValidateConnection(ImageConnection connection, XaiFamilyBinding? xai = null)
+    private static void ValidateConnection(ImageConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);
-        if (connection.Authorization is not null || connection.Xai is not null || xai is not null)
+        if (connection.Authorization is not null)
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
-                "ComfyUI uses static protected request headers; dynamic authorization and xAI bindings are not qualified for this transport.");
+                "ComfyUI uses static protected request headers; dynamic authorization is not qualified for this transport.");
         if (connection.Transport != ImageTransport.ComfyUi)
         {
             throw new InvalidOperationException(
@@ -840,9 +833,9 @@ internal sealed class ComfyUiImageTransport(
         }
     }
 
-    private static ImageConnection CaptureConnection(ImageConnection connection, XaiFamilyBinding? xai)
+    private static ImageConnection CaptureConnection(ImageConnection connection)
     {
-        ValidateConnection(connection, xai);
+        ValidateConnection(connection);
         ArgumentNullException.ThrowIfNull(connection.AdditionalHeaders);
         return connection with
         {
@@ -852,9 +845,9 @@ internal sealed class ComfyUiImageTransport(
         };
     }
 
-    private (InferenceResourceScope Scope, ImageConnection Snapshot) Admit(ImageConnection connection, XaiFamilyBinding? xai)
+    private (InferenceResourceScope Scope, ImageConnection Snapshot) Admit(ImageConnection connection)
     {
-        ImageConnection snapshot = CaptureConnection(connection, xai);
+        ImageConnection snapshot = CaptureConnection(connection);
         lock (_scopeGate)
         {
             if (_scopes.TryGetValue(connection, out ScopeEntry? entry)

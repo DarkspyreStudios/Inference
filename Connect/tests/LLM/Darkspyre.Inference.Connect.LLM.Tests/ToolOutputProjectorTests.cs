@@ -40,47 +40,6 @@ public sealed class ToolOutputProjectorTests
 
     private static readonly byte[] Png = [0x89, 0x50, 0x4e, 0x47];
 
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public void GrokAgentImageCapabilitiesMatchCatalogAndRequestProjection(bool acceptsImages, bool restrictImages)
-    {
-        const string modelId = "selected-grok-model";
-        using var http = new HttpClient();
-        var client = new XaiResponsesLlmClient(http);
-        var connection = new LlmConnection
-        {
-            Version = "1",
-            Transport = LlmTransport.XaiResponses,
-            Endpoint = "https://api.x.ai/v1",
-            Xai = new(),
-            Catalog = [new(modelId, "Selected Grok model")
-            {
-                CatalogEntry = JsonElement.Parse(acceptsImages
-                    ? """{"input_modalities":["text","image"]}"""
-                    : """{"input_modalities":["text"]}""")
-            }],
-            CapabilityOverrides = restrictImages ? new() { SupportsToolResultImages = InferenceSupport.Unsupported } : null
-        };
-        var output = new LlmToolOutput
-        { Parts = [new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", Png, "chart.png")] };
-
-        LlmProviderCapabilities capabilities = client.GetCapabilities(connection, modelId);
-        LlmAgentCapabilities agent = ClientTools.ManagedCapabilities(capabilities);
-        ProjectedToolOutput projected = client.ProjectToolOutput(connection, modelId, output);
-
-        bool deliversImage = acceptsImages && !restrictImages;
-        Assert.Equal(deliversImage ? LlmRichContentCarriage.Native : LlmRichContentCarriage.Unsupported,
-            agent.RichContentSupported.Images);
-        Assert.Equal(capabilities.RichContentSupported, agent.RichContentSupported);
-        Assert.Equal(acceptsImages ? InferenceSupport.Supported : InferenceSupport.Unsupported, capabilities.SupportsPromptImages);
-        Assert.Equal(deliversImage ? LlmToolPartDelivery.Delivered : LlmToolPartDelivery.Omitted,
-            Assert.Single(projected.Report.Parts).Delivery);
-        if (deliversImage) Assert.IsType<SentImage>(Assert.Single(projected.Parts));
-        else Assert.DoesNotContain(projected.Parts, part => part is SentImage);
-    }
-
     private static readonly LlmRichContentSupported AllNative = new()
     {
         Images = LlmRichContentCarriage.Native,

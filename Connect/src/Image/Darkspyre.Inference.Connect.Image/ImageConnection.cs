@@ -14,8 +14,6 @@ public sealed record ImageConnection
     /// <summary>Maximum duration of one provider HTTP operation.</summary>
     public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromMinutes(10);
 
-    public XaiConnectionSelection? Xai { get; init; }
-
     public IProviderAuthorization? Authorization { get; init; }
 
     /// <summary>

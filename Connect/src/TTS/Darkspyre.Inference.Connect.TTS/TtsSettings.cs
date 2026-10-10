@@ -26,8 +26,7 @@ public sealed record TtsSetupConfiguration(TtsConnection Connection, string? Voi
         Language = Language,
         SampleRate = SampleRate,
         BitRate = BitRate,
-        IncludeTimestamps = IncludeTimestamps,
-        Xai = TtsData.EffectiveOptions(Connection.XaiDefaults, null)
+        IncludeTimestamps = IncludeTimestamps
     };
     public override string ToString() => "TtsSetupConfiguration { <data> }";
 }
@@ -78,11 +77,10 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
     internal TtsSetupConfiguration Draft => _draft;
     internal long Generation => Interlocked.Read(ref _generation);
     protected override void OnDraftEdited() { Interlocked.Increment(ref _generation); base.OnDraftEdited(); }
-    private static Uri DefaultEndpoint(TtsTransport transport) => new(transport == TtsTransport.PocketTtsHttp ? "http://127.0.0.1:8020" : "https://api.x.ai/v1");
+    private static Uri DefaultEndpoint(TtsTransport transport) => new("http://127.0.0.1:8020");
 
     protected override IReadOnlyList<SetupStep> CreateSteps()
     {
-        if (Transport == TtsTransport.XaiTts) return CreateXaiSteps();
         PocketTtsEndpointOptions options = _draft.Connection.PocketTts;
         SetupTextField Path(string id, string label, string value, string defaultValue,
             Func<PocketTtsEndpointOptions, string, PocketTtsEndpointOptions> set) => new(new(id, label) { IsRequired = true }, value, defaultValue,
@@ -122,83 +120,6 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
                         : new(SetupEditState.Invalid, [new("format-unsupported", "Only WAV is supported.", "format")]), false)
             ])])
         ];
-    }
-
-    private IReadOnlyList<SetupStep> CreateXaiSteps() =>
-    [
-        new("connection", "Connection", string.Empty, [new("connection", "Connection",
-        [
-            new SetupUriField(new("endpoint", "Endpoint") { IsRequired = true }, _endpoint, DefaultEndpoint(Transport), value => Edit(() => _endpoint = value)),
-            new SetupIntegerField(new("timeout", "Timeout (seconds)") { IsRequired = true }, _timeout, 300, value => Edit(() => _timeout = value), 1),
-            new SetupTextField(new("xai-connection", "Signed-in connection") { IsRequired = true }, _draft.Connection.Xai?.ConnectionId ?? string.Empty,
-                string.Empty, value => Edit(() => _draft = _draft with { Connection = _draft.Connection with { Xai = value.Length == 0 ? null : new(value) } })),
-            Headers()
-        ])]),
-        new("speech", "Speech defaults", string.Empty, [new("speech", "Defaults",
-        [
-            new SetupChoiceField(new("voice", "Voice"), _draft.VoiceId ?? string.Empty, string.Empty, value => Edit(() => _draft = _draft with { VoiceId = value }),
-                true, SetupSideEffect.Network, SetupChoiceCapabilities.Searchable),
-            new SetupDecimalField(new("speed", "Speed"), _draft.Speed is { } speed && double.IsFinite(speed) && speed <= (double)decimal.MaxValue && speed >= (double)decimal.MinValue ? (decimal)speed : null,
-                null, value => Edit(() => _draft = _draft with { Speed = value is null ? null : (double)value })),
-            new SetupChoiceField(new("format", "Audio format"), _draft.Format.ToString(), TtsAudioFormat.Wav.ToString(), value =>
-                Enum.TryParse(value, out TtsAudioFormat format) && Enum.IsDefined(format) ? Edit(() => _draft = _draft with { Format = format })
-                    : new(SetupEditState.Invalid, [new("format-invalid", "Select an audio format.", "format")]), false),
-            new SetupTextField(new("language", "Language") { IsRequired = true }, _draft.Language ?? string.Empty, string.Empty,
-                value => Edit(() => _draft = _draft with { Language = value.Length == 0 ? null : value })),
-            Number("sample-rate", "Sample rate (Hz)", _draft.SampleRate, value => _draft = _draft with { SampleRate = value }),
-            Number("bit-rate", "Bit rate", _draft.BitRate, value => _draft = _draft with { BitRate = value }),
-            Flag("timestamps", "Timestamps", _draft.IncludeTimestamps, value => _draft = _draft with { IncludeTimestamps = value }),
-            Number("latency", "Streaming latency", _draft.Connection.XaiDefaults?.OptimizeStreamingLatency,
-                value => SetXai((_draft.Connection.XaiDefaults ?? new()) with { OptimizeStreamingLatency = value })),
-            Flag("normalization", "Text normalization", _draft.Connection.XaiDefaults?.TextNormalization,
-                value => SetXai((_draft.Connection.XaiDefaults ?? new()) with { TextNormalization = value })),
-            ReplacementMode(), Replacements()
-        ])])
-    ];
-
-    private SetupIntegerField Number(string id, string label, int? value, Action<int?> set) => new(new(id, label), value, null, replacement =>
-        replacement is < int.MinValue or > int.MaxValue ? new(SetupEditState.Invalid, [new("integer-width", "Use a 32-bit integer.", id)])
-            : Edit(() => set((int?)replacement)), int.MinValue, int.MaxValue);
-    private SetupChoiceField Flag(string id, string label, bool? value, Action<bool?> set) => new(new(id, label), value?.ToString() ?? string.Empty, string.Empty, replacement =>
-        replacement.Length == 0 ? Edit(() => set(null)) : bool.TryParse(replacement, out bool flag) ? Edit(() => set(flag))
-            : new(SetupEditState.Invalid, [new("flag-invalid", "Select true, false or omitted.", id)]), false);
-    private void SetXai(XaiTtsOptions options) => _draft = _draft with { Connection = _draft.Connection with { XaiDefaults = options } };
-    private SetupChoiceField ReplacementMode() => new(new("replace-mode", "Text replacement"), _draft.Connection.XaiDefaults?.Replace is null ? "Omitted" : "Map", "Omitted", value => value switch
-    {
-        "Omitted" => Edit(() => SetXai((_draft.Connection.XaiDefaults ?? new()) with { Replace = null })),
-        "Map" => Edit(() => SetXai((_draft.Connection.XaiDefaults ?? new()) with { Replace = _draft.Connection.XaiDefaults?.Replace ?? new Dictionary<string, string>() })),
-        _ => new(SetupEditState.Invalid, [new("replace-mode-invalid", "Select omitted or map.", "replace-mode")])
-    }, false);
-    private SetupRepeatableGroupField Replacements()
-    {
-        Dictionary<string, string> Copy() => new(_draft.Connection.XaiDefaults?.Replace ?? new Dictionary<string, string>(), StringComparer.Ordinal);
-        void Set(Dictionary<string, string> map) => SetXai((_draft.Connection.XaiDefaults ?? new()) with { Replace = map });
-        SetupFieldRow Row(KeyValuePair<string, string> pair)
-        {
-            string key = pair.Key;
-            return new(pair.Key,
-            [
-                new SetupTextField(new("replacement." + pair.Key + ".text", "Text"), pair.Key, string.Empty, value =>
-                {
-                    var map = Copy();
-                    if (!map.TryGetValue(key, out string? replacement) || value != key && map.ContainsKey(value))
-                        return new(SetupEditState.Invalid, [new("replacement-key-conflict", "Use a distinct replacement key.", "replacements")]);
-                    return Edit(() => { map.Remove(key); map[value] = replacement; key = value; Set(map); });
-                }),
-                new SetupTextField(new("replacement." + pair.Key + ".value", "Replacement"), pair.Value, string.Empty, value =>
-                {
-                    var map = Copy();
-                    if (!map.ContainsKey(key)) return new(SetupEditState.Invalid, [new("replacement-stale", "Read the current replacement entries.", "replacements")]);
-                    return Edit(() => { map[key] = value; Set(map); });
-                })
-            ]);
-        }
-        return new(new("replacements", "Replacement entries"), Copy().Select(Row).ToArray(), () =>
-        {
-            var map = Copy();
-            if (map.ContainsKey(string.Empty)) return new(SetupEditState.Invalid, [new("replacement-pending", "Name the existing new entry first.", "replacements")]);
-            return Edit(() => { map[string.Empty] = string.Empty; Set(map); });
-        }, key => Edit(() => { var map = Copy(); map.Remove(key); Set(map); }));
     }
 
     private SetupRepeatableGroupField Headers() => new(new("headers", "Protected HTTP headers"),
@@ -242,8 +163,7 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
     private bool ConnectionValid()
     {
         if (_endpoint is null || _timeout is null or < 1 || _timeout > TimeSpan.MaxValue.TotalSeconds
-            || _headers.Select(header => header.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != _headers.Count
-            || Transport == TtsTransport.XaiTts && string.IsNullOrWhiteSpace(_draft.Connection.Xai?.ConnectionId)) { return false; }
+            || _headers.Select(header => header.Name).Distinct(StringComparer.OrdinalIgnoreCase).Count() != _headers.Count) { return false; }
         try { TtsProviderService.ValidateConnection(Connection()); return true; }
         catch (Exception error) when (error is InferenceException or ArgumentException or InvalidOperationException or FormatException) { return false; }
     }
@@ -257,10 +177,8 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
         { issues.Add(new("speed-invalid", "Use a positive speed supported by the selected protocol.", "speed")); }
         if (!Enum.IsDefined(_draft.Format) || Transport == TtsTransport.PocketTtsHttp && _draft.Format != TtsAudioFormat.Wav) { issues.Add(new("format-unsupported", "Select a supported audio format.", "format")); }
         if (Transport == TtsTransport.PocketTtsHttp && (_draft.Language is not null || _draft.SampleRate is not null || _draft.BitRate is not null
-            || _draft.IncludeTimestamps is not null || _draft.Connection.XaiDefaults is not null))
+            || _draft.IncludeTimestamps is not null))
         { issues.Add(new("controls-unsupported", "PocketTTS does not implement these explicit speech controls.", StepId: "speech")); }
-        if (Transport == TtsTransport.XaiTts && string.IsNullOrWhiteSpace(_draft.Language))
-            issues.Add(new("language-required", "Supply the speech language.", "language"));
         return new(issues.AsReadOnly());
     }
 
@@ -302,13 +220,12 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
 {
     private readonly LlmOperationLifetime _lifetime = new();
     private TtsProviderService? _service;
-    private Func<XaiConnectionSelection, XaiFamilyBinding>? _xaiBindings;
     private IInferenceResourceAccess? _resources;
     private readonly List<(Exception Failure, ITtsClient Owner)> _cleanupFailures = [];
 
     internal TtsSettingsManager(TtsProviderService service, ISetupCommitTarget<TtsSetupChanges> target,
-        Func<XaiConnectionSelection, XaiFamilyBinding>? xaiBindings, IInferenceResourceAccess? resources)
-        : base(target) { _service = service; _xaiBindings = xaiBindings; _resources = resources; }
+        IInferenceResourceAccess? resources)
+        : base(target) { _service = service; _resources = resources; }
 
     /// <summary>Returns settings for <paramref name="transport"/>, blank or from the saved entry.</summary>
     public Task<TtsSettings> OpenAsync(TtsTransport transport, SetupConfigurationIdentity identity,
@@ -419,15 +336,8 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
     {
         TtsProviderService.ValidateConnection(connection);
         Fence(token);
-        XaiFamilyBinding? binding = null;
-        if (connection.Transport == TtsTransport.XaiTts)
-        {
-            if (_xaiBindings is null || connection.Xai is null) return null;
-            binding = _xaiBindings(connection.Xai);
-            Fence(token);
-        }
         // Readiness checks and sample clips do not select persistent session artifacts.
-        ITtsClient result = _service!.Bind(connection, binding);
+        ITtsClient result = _service!.Bind(connection);
         try { Fence(token); return result; }
         catch (Exception original)
         {
@@ -458,7 +368,7 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
     public ValueTask DisposeAsync() => new(Retire());
     private Task Retire() => _lifetime.RetireAsync(() =>
     {
-        _service = null; _xaiBindings = null; _resources = null; DetachCommitTarget();
+        _service = null; _resources = null; DetachCommitTarget();
         if (_cleanupFailures.Count == 1) return Task.FromException(_cleanupFailures[0].Failure);
         if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException(_cleanupFailures.Select(item => item.Failure)));
         return Task.CompletedTask;

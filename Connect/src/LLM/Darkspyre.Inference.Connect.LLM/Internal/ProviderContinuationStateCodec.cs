@@ -30,7 +30,7 @@ internal static class ProviderContinuationStateCodec
     /// </summary>
     public static bool Retains(LlmTransport transport) =>
         transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses or LlmTransport.AnthropicMessages
-            or LlmTransport.AwsBedrockConverse or LlmTransport.XaiResponses;
+            or LlmTransport.AwsBedrockConverse;
 
     private const string NoOutput = "[]";
 
@@ -139,8 +139,7 @@ internal static class ProviderContinuationStateCodec
             if (call["type"]?.GetValue<string>() == "shell_call")
             {
                 using JsonDocument shellDocument = JsonDocument.Parse(call.ToJsonString());
-                _ = OpenAiResponsesTools.TryReadToolCall(shellDocument.RootElement,
-                    connection.Transport == LlmTransport.XaiResponses, out LlmClientToolCall? observed);
+                _ = OpenAiResponsesTools.TryReadToolCall(shellDocument.RootElement, false, out LlmClientToolCall? observed);
                 if (observed is not LlmShellCall native || message.ToolCalls[index] is not LlmShellCall visibleShell
                     || native.Id != visibleShell.Id || native.TimeoutMs != visibleShell.TimeoutMs
                     || native.MaxOutputLength != visibleShell.MaxOutputLength
@@ -198,31 +197,6 @@ internal static class ProviderContinuationStateCodec
             if (node is not JsonObject item || item["type"]?.GetValue<string>() is not { } type)
             {
                 throw new ArgumentException("Response state contains an invalid output item.");
-            }
-
-            if (transport == LlmTransport.XaiResponses)
-            {
-                if (type is not ("message" or "reasoning" or "function_call" or "shell_call" or "compaction" or "web_search_call"
-                    or "x_search_call" or "code_interpreter_call" or "code_execution_call" or "file_search_call"
-                    or "mcp_call" or "image_generation_call" or "view_image_call" or "view_x_video_call"
-                    or "custom_tool_call" or "tool_search_call" or "tool_search_output"))
-                {
-                    throw new NotSupportedException("The adapter cannot retain this assistant output type.");
-                }
-                if (type == "message" && item["role"]?.GetValue<string>() != "assistant")
-                {
-                    throw new ArgumentException("Response state cannot contain non-assistant messages.");
-                }
-                if (type == "message" && (item["content"] is not JsonArray content
-                    || content.Any(part => part is not JsonObject)))
-                {
-                    throw new ArgumentException("Response state content must contain ordered assistant blocks.");
-                }
-                ValidateItem(item, transport, type);
-                // xAI requires verbatim ordered output, including encrypted server-tool metadata.
-                // The cloned payload is opaque context. The library never executes or logs its fields.
-                projected.Add(item.DeepClone());
-                continue;
             }
 
             if (transport == LlmTransport.OpenAiCodex && type is "compaction" or "compaction_summary")
@@ -347,19 +321,7 @@ internal static class ProviderContinuationStateCodec
         if (type == "shell_call")
         {
             using JsonDocument document = JsonDocument.Parse(item.ToJsonString());
-            _ = OpenAiResponsesTools.TryReadToolCall(document.RootElement, transport == LlmTransport.XaiResponses, out _);
-        }
-        if (transport == LlmTransport.XaiResponses && type is "custom_tool_call" or "tool_search_call" or "tool_search_output")
-        {
-            if (item["id"] is not JsonValue identity || !identity.TryGetValue<string>(out _))
-                throw new ArgumentException("Hosted continuation requires its actual item identity.");
-            foreach (string field in new[] { "call_id", "status", "name", "input", "execution" })
-                if (item[field] is { } value && (value is not JsonValue text || !text.TryGetValue<string>(out _)))
-                    throw new ArgumentException("Hosted continuation contains an invalid string field.");
-            if (type == "custom_tool_call" && (item["call_id"] is null || item["name"] is null))
-                throw new ArgumentException("Custom continuation requires actual call identity and name.");
-            if (type == "tool_search_output" && item["tools"] is { } tools && tools is not JsonArray)
-                throw new ArgumentException("Tool-search output requires ordered definitions.");
+            _ = OpenAiResponsesTools.TryReadToolCall(document.RootElement, false, out _);
         }
         if (transport == LlmTransport.AwsBedrockConverse && type == "redacted_reasoning")
         {

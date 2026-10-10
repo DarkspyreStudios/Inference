@@ -78,13 +78,6 @@ internal static class RichContentRoutes
         PreservesOrder = InferenceSupport.Unsupported
     };
 
-    /// <summary>The AgentCore Harness tool result, which is text with a status.</summary>
-    public static LlmRichContentSupported AgentCore { get; } = TextOnly with
-    {
-        ErrorFlag = LlmRichContentCarriage.Native,
-        AllowsEmpty = InferenceSupport.Unsupported
-    };
-
     /// <summary>Gemini functionResponse media referenced by nested inlineData display names.</summary>
     public static LlmRichContentSupported GeminiFunctionResponse { get; } = TextOnly with
     {

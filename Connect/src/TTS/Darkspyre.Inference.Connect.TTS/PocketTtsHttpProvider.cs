@@ -24,20 +24,18 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
         new("darkspyre.connect.pockettts", "PocketTTS HTTP", InferenceImplementationKind.Connect, InferenceTask.SpeechSynthesis),
         "Synthesize speech through an externally managed PocketTTS endpoint.");
 
-    public ITtsClient Bind(TtsConnection connection, XaiFamilyBinding? xai = null,
+    public ITtsClient Bind(TtsConnection connection,
         IInferenceResourceAccess? resources = null)
     {
         ArgumentNullException.ThrowIfNull(connection);
-        if (xai is not null || connection.Xai is not null || connection.Authorization is not null)
-            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "PocketTTS does not implement borrowed provider authorization or xAI binding.");
+        if (connection.Authorization is not null)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "PocketTTS does not implement borrowed provider authorization.");
         ValidateConnection(connection);
         return new Client(this, connection with { Headers = new Dictionary<string, string>(connection.Headers, StringComparer.OrdinalIgnoreCase) }, resources);
     }
 
     internal static void ValidateConnection(TtsConnection connection)
     {
-        if (connection.XaiDefaults is not null)
-            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "PocketTTS does not implement xAI speech defaults.");
         if (connection.Transport != TtsTransport.PocketTtsHttp || !Enum.IsDefined(connection.PocketTts.Protocol)
             || connection.Endpoint is not { IsAbsoluteUri: true } || connection.Endpoint.Scheme is not ("http" or "https")
             || connection.Endpoint.UserInfo.Length != 0 || connection.Endpoint.Query.Length != 0 || connection.Endpoint.Fragment.Length != 0
@@ -72,7 +70,7 @@ public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
         if (request.Format != TtsAudioFormat.Wav || connection.PocketTts.Protocol == PocketTtsProtocol.Multipart && request.Speed is not (null or 1))
         { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "This protocol supports WAV; multipart does not support non-default speed."); }
         if (request.Language is not null || request.SampleRate is not null || request.BitRate is not null
-            || request.IncludeTimestamps is not null || request.Xai is not null)
+            || request.IncludeTimestamps is not null)
         { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "PocketTTS does not implement these explicit speech controls."); }
     }
 

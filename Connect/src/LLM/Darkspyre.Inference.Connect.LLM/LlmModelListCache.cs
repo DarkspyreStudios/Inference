@@ -1,14 +1,13 @@
 using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Diagnostics.CodeAnalysis;
-using System.Text.Json;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
 /// <summary>
-/// Owns immutable model facts and shared producers for a registration. Exact version/scope and admitted xAI
-/// configuration changes replace every family view. Caller cancellation stops only that caller's wait.
+/// Owns immutable model facts and shared producers for a registration. Exact version/scope changes replace every
+/// family view. Caller cancellation stops only that caller's wait.
 /// </summary>
 public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
 {
@@ -38,57 +37,26 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(snapshot);
         if (!Enum.IsDefined(family)) throw new ArgumentOutOfRangeException(nameof(family));
         if (snapshot.Version != scope.Version) throw new ArgumentException("The catalog scope must match the admitted connection.", nameof(scope));
-        var catalogClient = client as ILlmModelCatalogClient;
-        if (catalogClient is null && family != ModelCatalogFamily.Chat)
-            throw new NotSupportedException("This adapter does not implement a family catalog.");
-
-        // Caller dictionaries/getters and adapter validation execute outside the cache gate.
-        LlmConnection frozen = catalogClient is null ? snapshot : CatalogConnectionData.FreezeXai(snapshot);
-        CatalogConnectionData.Evidence? evidence = catalogClient is null ? null : new(frozen);
-        bool listingDisabled = catalogClient is not null && family == ModelCatalogFamily.Chat
-            && (client.GetCapabilities(frozen).SupportsModelListing == InferenceSupport.Unsupported);
         ThrowIfCanceled(admission.Token);
         Task<IReadOnlyList<LlmModel>> listing;
         lock (_gate)
         {
             ThrowIfCanceled(admission.Token);
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (refresh || !_entries.TryGetValue(connectionId, out Epoch? epoch) || epoch.Scope != scope
-                || !SameEvidence(epoch.Evidence, evidence))
+            if (refresh || !_entries.TryGetValue(connectionId, out Epoch? epoch) || epoch.Scope != scope)
             {
-                epoch = new(scope, evidence);
+                epoch = new(scope);
                 _entries[connectionId] = epoch;
             }
             if (!epoch.Families.TryGetValue(family, out Task<IReadOnlyList<LlmModel>>? current)
                 || current.IsCanceled || current.IsFaulted)
             {
-                if (listingDisabled)
-                {
-                    current = Task.FromResult<IReadOnlyList<LlmModel>>(Array.AsReadOnly(Array.Empty<LlmModel>()));
-                    epoch.Families[family] = current;
-                }
-                else
-                {
-                    Task<IReadOnlyList<JsonElement>>? generic = null;
-                    if (catalogClient is not null)
-                    {
-                        if (epoch.Generic is null || epoch.Generic.IsCanceled || epoch.Generic.IsFaulted)
-                        {
-                            var genericCompletion = new TaskCompletionSource<IReadOnlyList<JsonElement>>(TaskCreationOptions.RunContinuationsAsynchronously);
-                            epoch.Generic = genericCompletion.Task;
-                            var job = new Producer(client, frozen);
-                            LlmOperationLifetime.Lease lease = _lifetime.Enter(CancellationToken.None);
-                            _ = Task.Run(() => ProduceGenericAsync(connectionId, epoch, job, lease, genericCompletion), CancellationToken.None);
-                        }
-                        generic = epoch.Generic;
-                    }
-                    var completion = new TaskCompletionSource<IReadOnlyList<LlmModel>>(TaskCreationOptions.RunContinuationsAsynchronously);
-                    current = completion.Task;
-                    epoch.Families[family] = current;
-                    var producer = new Producer(client, frozen);
-                    LlmOperationLifetime.Lease operation = _lifetime.Enter(CancellationToken.None);
-                    _ = Task.Run(() => ProduceFamilyAsync(connectionId, epoch, family, producer, generic, operation, completion), CancellationToken.None);
-                }
+                var completion = new TaskCompletionSource<IReadOnlyList<LlmModel>>(TaskCreationOptions.RunContinuationsAsynchronously);
+                current = completion.Task;
+                epoch.Families[family] = current;
+                var producer = new Producer(client, snapshot);
+                LlmOperationLifetime.Lease operation = _lifetime.Enter(CancellationToken.None);
+                _ = Task.Run(() => ProduceFamilyAsync(connectionId, epoch, producer, operation, completion), CancellationToken.None);
             }
             listing = current;
         }
@@ -99,8 +67,8 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
     }
 
     [SuppressMessage("Design", "CA1031", Justification = "The shared completion preserves provider failures and observes abandoned faults.")]
-    private async Task ProduceGenericAsync(string connectionId, Epoch epoch, Producer producer,
-        LlmOperationLifetime.Lease operation, TaskCompletionSource<IReadOnlyList<JsonElement>> completion)
+    private async Task ProduceFamilyAsync(string connectionId, Epoch epoch, Producer producer,
+        LlmOperationLifetime.Lease operation, TaskCompletionSource<IReadOnlyList<LlmModel>> completion)
     {
         using (operation)
         {
@@ -108,54 +76,7 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
             {
                 void Fence() => CheckEpoch(connectionId, epoch, operation.Token);
                 Fence();
-                IReadOnlyList<JsonElement> rows = await ((ILlmModelCatalogClient)producer.Client!).ReadCatalogPartAsync(
-                    producer.Snapshot!, ModelCatalogPart.Generic, Fence, operation.Token).ConfigureAwait(false);
-                Fence();
-                rows = Array.AsReadOnly(rows.Select(row => row.Clone()).ToArray());
-                Fence();
-                producer.Clear();
-                lock (_gate)
-                {
-                    CheckEpochLocked(connectionId, epoch, operation.Token);
-                    completion.TrySetResult(rows);
-                }
-            }
-            catch (Exception error) { CompleteFailure(completion, error); }
-            finally { producer.Clear(); }
-        }
-    }
-
-    [SuppressMessage("Design", "CA1031", Justification = "The shared completion preserves provider failures and observes abandoned faults.")]
-    private async Task ProduceFamilyAsync(string connectionId, Epoch epoch, ModelCatalogFamily family, Producer producer,
-        Task<IReadOnlyList<JsonElement>>? generic, LlmOperationLifetime.Lease operation,
-        TaskCompletionSource<IReadOnlyList<LlmModel>> completion)
-    {
-        using (operation)
-        {
-            try
-            {
-                void Fence() => CheckEpoch(connectionId, epoch, operation.Token);
-                Fence();
-                IReadOnlyList<LlmModel> models;
-                if (generic is null)
-                    models = await producer.Client!.ListModelsAsync(producer.Snapshot!, operation.Token).ConfigureAwait(false);
-                else
-                {
-                    IReadOnlyList<JsonElement> shared = await generic.ConfigureAwait(false);
-                    Fence();
-                    var catalog = (ILlmModelCatalogClient)producer.Client!;
-                    ModelCatalogPart part = family switch
-                    {
-                        ModelCatalogFamily.Chat => ModelCatalogPart.Chat,
-                        ModelCatalogFamily.Image => ModelCatalogPart.Image,
-                        ModelCatalogFamily.Video => ModelCatalogPart.Video,
-                        ModelCatalogFamily.Embedding => ModelCatalogPart.Embedding,
-                        _ => throw new ArgumentOutOfRangeException(nameof(family))
-                    };
-                    IReadOnlyList<JsonElement> specific = await catalog.ReadCatalogPartAsync(producer.Snapshot!, part, Fence, operation.Token).ConfigureAwait(false);
-                    Fence();
-                    models = catalog.ProjectCatalog(producer.Snapshot!, family, shared, specific);
-                }
+                IReadOnlyList<LlmModel> models = await producer.Client!.ListModelsAsync(producer.Snapshot!, operation.Token).ConfigureAwait(false);
                 Fence();
                 models = Array.AsReadOnly(models.Select(model => model with
                 {
@@ -188,9 +109,6 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
         else { completion.TrySetException(error); _ = completion.Task.Exception; }
     }
 
-    private static bool SameEvidence(CatalogConnectionData.Evidence? left, CatalogConnectionData.Evidence? right) =>
-        left is null || right is null ? left is null && right is null : left.Same(right);
-
     private void ThrowIfCanceled(CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
@@ -221,11 +139,9 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
     /// <summary>Synchronously retires this cache. Use asynchronous disposal while listings are active.</summary>
     public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 
-    private sealed class Epoch(Scope scope, CatalogConnectionData.Evidence? evidence)
+    private sealed class Epoch(Scope scope)
     {
         internal Scope Scope { get; } = scope;
-        internal CatalogConnectionData.Evidence? Evidence { get; } = evidence;
-        internal Task<IReadOnlyList<JsonElement>>? Generic { get; set; }
         internal Dictionary<ModelCatalogFamily, Task<IReadOnlyList<LlmModel>>> Families { get; } = [];
     }
 
@@ -236,3 +152,5 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
         internal void Clear() { Client = null; Snapshot = null; }
     }
 }
+
+internal enum ModelCatalogFamily { Chat }

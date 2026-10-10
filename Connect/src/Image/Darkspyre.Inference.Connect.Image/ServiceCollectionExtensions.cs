@@ -16,7 +16,6 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<SdkHttpGenerationPool>(),
             provider.GetRequiredService<ILogger<ComfyUiImageTransport>>());
         services.TryAddEnumerable(new ServiceDescriptor(typeof(IImageTransport), factory, ServiceLifetime.Singleton));
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IImageTransport, XaiImagineImageTransport>());
         services.TryAddSingleton<ImageProviderService>();
         return services;
     }

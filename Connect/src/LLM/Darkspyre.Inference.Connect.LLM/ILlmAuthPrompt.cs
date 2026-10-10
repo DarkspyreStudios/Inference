@@ -6,7 +6,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// </summary>
 public interface ILlmAuthPrompt
 {
-    /// <summary>Displays a Codex or Grok device code and verification URL.</summary>
+    /// <summary>Displays a Codex device code and verification URL.</summary>
     Task ShowDeviceCodeAsync(
         LlmDeviceCode code,
         CancellationToken cancellationToken = default);

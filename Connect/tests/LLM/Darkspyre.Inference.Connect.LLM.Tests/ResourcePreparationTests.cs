@@ -6,207 +6,18 @@ using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
-using Darkspyre.Inference.Connect.LLM.Vertex;
-using Darkspyre.Inference.Connect.Resources;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ResourcePreparationTests
 {
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task HostedImageFailureRetainsTheEarlierCommittedResource(bool streaming, bool cancelAfterHosted)
+    [InlineData("000000206674797068656963000000006d69663168656963")]
+    [InlineData("00000010667479706d703432000000006d69663168656963")]
+    public void ImageMimeDetectionDoesNotReadCompatibleBrandsOutsideTheFileTypeBox(string hex)
     {
-        using var cancellation = new CancellationTokenSource();
-        using var handler = new HostedImages(streaming, cancelAfterHosted);
-        using var http = new HttpClient(handler);
-        var client = new XaiResponsesLlmClient(http);
-        LlmConnection connection = ResourceResults.Connection() with
-        { CapabilityOverrides = new() { SupportsStreaming = (streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported) } };
-        GeneratedWrite? write = null;
-        var workspace = new Resources(new("workspace", "session", 3, []), [])
-        {
-            WriteFactory = create => write = new GeneratedWrite("workspace", create, () => { })
-        };
-        await using var provider = new LlmProviderService(new Source(connection), [client]);
-        var events = new List<LlmStreamEvent>();
-        var request = new LlmChatRequest
-        {
-            ModelId = "grok-4.7",
-            Messages = [new("user", "Create images")],
-            HostedTools = [new LlmImageGenerationTool()],
-            Resources = workspace
-        };
-        IAsyncEnumerable<LlmStreamEvent> stream = cancelAfterHosted
-            ? client.StreamAsync(connection, request, cancellation.Token)
-            : provider.StreamAsync("connection", request, cancellation.Token);
-
-        Exception? failure = await Record.ExceptionAsync(async () =>
-        {
-            await foreach (LlmStreamEvent item in stream)
-            {
-                events.Add(item);
-                if (cancelAfterHosted && item is LlmHostedToolCallCompletedEvent) cancellation.Cancel();
-            }
-        });
-
-        Assert.Equal(HostedImages.Png, write!.CommittedBytes);
-        Assert.True(write.Disposed);
-        Assert.DoesNotContain(events, item => item is LlmChatCompletionEvent);
-        InferenceResourceOperationFailure facts;
-        if (cancelAfterHosted)
-        {
-            var canceled = Assert.IsType<InferenceResourceOperationCanceledException>(failure);
-            Assert.True(canceled.CancellationToken.IsCancellationRequested);
-            Assert.Single(events.OfType<LlmHostedToolCallCompletedEvent>());
-            facts = canceled.Failure;
-        }
-        else facts = Assert.IsType<InferenceResourceOperationException>(failure).Failure;
-        InferenceResourceOperationFailure restored = JsonSerializer.Deserialize(
-            JsonSerializer.SerializeToUtf8Bytes(facts, InferenceJson.InferenceResourceOperationFailure),
-            InferenceJson.InferenceResourceOperationFailure)!;
-        InferenceResourceCommitResult committed = Assert.Single(restored.GeneratedResources);
-        Assert.Equal(write.Reference, committed.Resource.Reference);
-        Assert.Equal("image/png", committed.Resource.ContentType);
-        Assert.Equal(4, committed.Selection!.Revision);
-        Assert.Equal([write.Reference], committed.Selection.SelectedResources);
-        Assert.Equal(1, handler.Requests);
-    }
-
-    [Fact]
-    public async Task DeferredChatUsesTheSharedStrictFunctionRootAdmissionBeforeDispatch()
-    {
-        var handler = new ResourceResults();
-        using var http = new HttpClient(handler);
-        var source = new Source(ResourceResults.Connection());
-        ILlmClient[] clients = [new XaiResponsesLlmClient(http)];
-        await using var access = new LlmConnectionAccess(source, [], clients);
-        await using var core = new LlmProviderService(source, clients, [], connectionAccess: access);
-        await using var resources = new LlmResourceProviderService(access, core);
-        var request = new LlmChatRequest
-        {
-            ModelId = "selected-model",
-            Messages = [new("user", "hello")],
-            Tools = [new LlmToolDefinition { Name = "echo", Strict = true, InputSchema = JsonElement.Parse("{\"type\":\"string\"}") }]
-        };
-
-        await Assert.ThrowsAsync<NotSupportedException>(() => resources.SubmitDeferredAsync("selected-connection", request));
-        Assert.Empty(handler.Requests);
-    }
-
-    [Fact]
-    public async Task ImportedDeferredReceiptConsumesOnceAndReturnsTheActualChatResult()
-    {
-        var handler = new ResourceResults(diagnosticEchoes: true);
-        using var http = new HttpClient(handler);
-        http.DefaultRequestHeaders.Add("X-Default", "default-value");
-        var source = new Source(ResourceResults.Connection() with
-        { AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" } });
-        ILlmClient[] clients = [new XaiResponsesLlmClient(http)];
-        await using var access = new LlmConnectionAccess(source, [], clients);
-        await using var core = new LlmProviderService(source, clients, [], connectionAccess: access);
-        await using var resources = new LlmResourceProviderService(access, core);
-        var receipt = new LlmDeferredCompletion("request-1",
-            new("https://api.x.ai/v1/chat/deferred-completion", "original-connection"));
-        LlmDeferredCompletion imported = JsonSerializer.Deserialize(
-            JsonSerializer.Serialize(receipt, ConnectResourcesJson.LlmDeferredCompletion), ConnectResourcesJson.LlmDeferredCompletion)!;
-
-        LlmDeferredResult result = await resources.GetDeferredAsync("selected-connection", imported);
-
-        LlmChatResult chat = Assert.IsType<LlmDeferredCompleted>(result).Result;
-        Assert.Equal("resource answer", chat.Text);
-        Assert.Equal("observed-model", chat.ModelId);
-        Assert.Equal(LlmCompletionStatus.Completed, chat.Status);
-        Assert.Equal("stop", chat.FinishReason);
-        Assert.Equal(5, chat.Usage!.TotalTokens);
-        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", chat.Diagnostics!.RequestId);
-        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
-            Assert.DoesNotContain(secret, chat.Diagnostics.RawFinalResponseJson!, StringComparison.Ordinal);
-        Assert.Empty(chat.GeneratedResources);
-        Assert.Equal("original-connection", imported.Scope.Identity);
-        Assert.Equal(new Uri("https://api.x.ai/v1/chat/deferred-completion/request-1"), Assert.Single(handler.Requests));
-    }
-
-    [Fact]
-    public async Task DeferredCancellationAfterCommitRetainsTheGeneratedFileInTheRecoveredChat()
-    {
-        using var cancellation = new CancellationTokenSource();
-        var handler = new ResourceResults(generatedFile: true);
-        using var http = new HttpClient(handler);
-        var source = new Source(ResourceResults.Connection());
-        ILlmClient[] clients = [new XaiResponsesLlmClient(http)];
-        await using var access = new LlmConnectionAccess(source, [], clients);
-        await using var core = new LlmProviderService(source, clients, [], connectionAccess: access);
-        await using var resources = new LlmResourceProviderService(access, core);
-        GeneratedWrite? write = null;
-        var workspace = new Resources(new("workspace", "session", 3, []), [])
-        {
-            WriteFactory = create => write = new GeneratedWrite("workspace", create, cancellation.Cancel)
-        };
-        var receipt = new LlmDeferredCompletion("request-1",
-            new("https://api.x.ai/v1/chat/deferred-completion", "original-connection"));
-
-        LlmResourceOperationCanceledException failure = await Assert.ThrowsAsync<LlmResourceOperationCanceledException>(
-            () => resources.GetDeferredAsync("selected-connection", receipt, workspace, cancellation.Token));
-
-        Assert.True(failure.Observation.DeferredRetrievalDispatched);
-        Assert.Equal("generated bytes", System.Text.Encoding.UTF8.GetString(write!.CommittedBytes));
-        Assert.True(write.Disposed);
-        InferenceResourceCommitResult committed = Assert.Single(failure.Observation.ObservedCommits);
-        LlmResourceOperationObservation restored = JsonSerializer.Deserialize(
-            JsonSerializer.SerializeToUtf8Bytes(failure.Observation, ConnectResourcesJson.LlmResourceOperationObservation),
-            ConnectResourcesJson.LlmResourceOperationObservation)!;
-        LlmChatResult recovered = Assert.IsType<LlmDeferredCompleted>(restored.ObservedDeferredResult).Result;
-        Assert.Equal("resource answer", recovered.Text);
-        InferenceResourceCommitResult generated = Assert.Single(recovered.GeneratedResources);
-        Assert.Equal(committed.Resource, generated.Resource);
-        Assert.Equal(4, generated.Selection!.Revision);
-        Assert.Equal([generated.Resource.Reference], generated.Selection.SelectedResources);
-        Assert.Equal(new[]
-        {
-            new Uri("https://api.x.ai/v1/chat/deferred-completion/request-1"),
-            new Uri("https://api.x.ai/v1/files/generated-file/content")
-        }, handler.Requests);
-    }
-
-    [Fact]
-    public async Task BatchChatResultsUseTheActualEnvelopeAndReturnOnlyTheRequestedPage()
-    {
-        var handler = new ResourceResults(batch: true, diagnosticEchoes: true);
-        using var http = new HttpClient(handler);
-        http.DefaultRequestHeaders.Add("X-Default", "default-value");
-        var source = new Source(ResourceResults.Connection() with
-        { AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" } });
-        ILlmClient[] clients = [new XaiResponsesLlmClient(http)];
-        await using var access = new LlmConnectionAccess(source, [], clients);
-        await using var core = new LlmProviderService(source, clients, [], connectionAccess: access);
-        await using var resources = new LlmResourceProviderService(access, core);
-        var batch = new LlmBatch("batch-1", "batch", new("https://api.x.ai/v1/batches", "original-connection"),
-            new(null, null, null, null, null));
-
-        LlmBatchResultPage page = await resources.GetResultsAsync("selected-connection", batch,
-            new(2, "input-cursor"), new(1024, 4096));
-
-        Assert.Equal("next-cursor", page.PaginationToken);
-        Assert.Equal(["row-1", "row-2"], page.Items.Select(item => item.CustomId));
-        LlmChatResult chat = Assert.IsType<LlmBatchChatResult>(page.Items[0]).Result;
-        Assert.Equal("resource answer", chat.Text);
-        Assert.Equal("observed-model", chat.ModelId);
-        Assert.Equal(LlmCompletionStatus.Completed, chat.Status);
-        Assert.Equal(5, chat.Usage!.TotalTokens);
-        Assert.Equal("request-[REDACTED]-[REDACTED]-[REDACTED]-1", chat.Diagnostics!.RequestId);
-        foreach (string secret in new[] { "test-token", "header-value", "default-value" })
-            Assert.DoesNotContain(secret, chat.Diagnostics.RawFinalResponseJson!, StringComparison.Ordinal);
-        Assert.Equal(InferenceFailureCode.ExecutionFailed, Assert.IsType<LlmBatchFailure>(page.Items[1]).Error.Code);
-        Assert.Equal("The row failed. [REDACTED] [REDACTED] [REDACTED]", Assert.IsType<LlmBatchFailure>(page.Items[1]).Error.Message);
-        Assert.Equal(new[]
-        {
-            new Uri("https://api.x.ai/v1/batches/batch-1"),
-            new Uri("https://api.x.ai/v1/batches/batch-1/results?limit=2&pagination_token=input-cursor")
-        }, handler.Requests);
+        var image = new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "photo.heic", Data = Convert.FromHexString(hex) };
+        Assert.Throws<NotSupportedException>(() => LlmAttachments.ResolveMediaType(image));
     }
 
     [Theory]
@@ -268,188 +79,6 @@ public sealed class ResourcePreparationTests
             LlmResourcePreparation.WithGeneratedResources(failure, receipts)).InnerExceptions.ToArray();
         Assert.Same(causes[0], repeated[0]);
         Assert.Same(cleanup, repeated[1]);
-    }
-
-    [Fact]
-    public async Task PortableSessionResourcesUploadAgainForTheSelectedDestination()
-    {
-        var reference = new InferenceResourceReference("workspace", "reference");
-        var generated = new InferenceResourceReference("workspace", "generated-json");
-        var access = new Resources(new("workspace", "session", 4, [generated, reference]),
-            [(reference, "reference.txt", "reference text"u8.ToArray()), (generated, "result.json", "{\"answer\":42}"u8.ToArray())]);
-        var context = new LlmAgentContext
-        {
-            Revision = 9,
-            ResourceSelectionVersion = new(access.WorkspaceId, access.SessionId, 4),
-            SelectedResources = [generated, reference],
-            Entries =
-            [
-                new("prompt", "turn-1", new("user", "Read the reference")
-                { Attachments = [new LlmResourceAttachment(reference), new LlmResourceAttachment(reference)] }),
-                new("reply", "turn-1", new("assistant", "Created result.json"))
-            ]
-        };
-        byte[] portable = JsonSerializer.SerializeToUtf8Bytes(context, ConnectLlmJson.AgentContext);
-
-        foreach (string destination in new[] { "a", "b" })
-        {
-            LlmAgentContext restored = JsonSerializer.Deserialize(portable, ConnectLlmJson.AgentContext)!;
-            var connection = new LlmConnection
-            {
-                Version = destination,
-                Transport = LlmTransport.XaiResponses,
-                Xai = new(),
-                Endpoint = "https://api.x.ai/v1",
-                Credential = new LlmCredential { OAuth = new() { AccessToken = "token-" + destination } }.Serialize()
-            };
-            LlmAgentContext imported = ManagedAgentContext.Import(restored, connection, "model-" + destination, supportsResources: true);
-            await LlmResourcePreparation.ValidateContextAsync(imported, access.Selection, access, () => { }, CancellationToken.None);
-            var request = new LlmChatRequest
-            {
-                ModelId = "model-" + destination,
-                Messages = [.. imported.Entries.Select(entry => entry.Message),
-                    new("user", "Compare the two files")]
-            };
-            request = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(request, ConnectLlmJson.ChatRequest),
-                ConnectLlmJson.ChatRequest)!;
-            request = request with { Resources = access };
-            var handler = new Uploads(destination);
-            using var http = new HttpClient(handler);
-            await using var files = new XaiFileClient(http);
-            await using (LlmResourcePreparation prepared = await LlmResourcePreparation.PrepareAsync(
-                connection, request, files, () => { }, CancellationToken.None))
-            {
-                Assert.Equal(9, imported.Revision);
-                Assert.Equal(context.ResourceSelectionVersion, prepared.SelectionVersion);
-                Assert.Equal([generated, reference], imported.SelectedResources);
-                Assert.Null(prepared.Request.Resources);
-                Assert.Equal(["file-" + destination + "-1", "file-" + destination + "-1"],
-                    prepared.Request.Messages[0].Attachments.Cast<LlmFileReference>().Select(part => part.File.FileId));
-                Assert.Equal("file-" + destination + "-2",
-                    Assert.IsType<LlmFileReference>(Assert.Single(prepared.Request.Messages[^1].Attachments)).File.FileId);
-                Assert.Equal("reference.txt", handler.Items[0].Name);
-                Assert.Equal("reference text"u8.ToArray(), handler.Items[0].Bytes);
-                Assert.Equal("result.json", handler.Items[1].Name);
-                Assert.Equal("{\"answer\":42}"u8.ToArray(), handler.Items[1].Bytes);
-                Assert.Equal(2, handler.Items.Count);
-            }
-            Assert.All(access.Reads, stream => Assert.False(stream.CanRead));
-        }
-
-        InferenceResourceSelection selection = JsonSerializer.Deserialize(
-            JsonSerializer.Serialize(access.Selection, InferenceJson.InferenceResourceSelection), InferenceJson.InferenceResourceSelection)!;
-        Assert.Equal(("workspace", "session", 4), (selection.WorkspaceId, selection.SessionId, selection.Revision));
-        Assert.Equal([generated, reference], selection.SelectedResources);
-        Assert.IsType<LlmResourceAttachment>(context.Entries[0].Message.Attachments[0]);
-    }
-
-    [Theory]
-    [InlineData("anthropic", false)]
-    [InlineData("anthropic", true)]
-    [InlineData("vertex-claude", false)]
-    [InlineData("vertex-claude", true)]
-    [InlineData("vertex-gemini", false)]
-    [InlineData("vertex-gemini", true)]
-    [InlineData("gemini-api", false)]
-    [InlineData("gemini-api", true)]
-    [InlineData("openai-responses", false)]
-    [InlineData("openai-responses", true)]
-    public async Task LogicalDocumentContextCanMoveFromGrokToAnInlineProviderWithoutChangingItsResources(string destination, bool generatedByTool)
-    {
-        var reference = new InferenceResourceReference("workspace", "reference");
-        var generated = new InferenceResourceReference("workspace", "generated-json");
-        var access = new Resources(new("workspace", "session", 4, [generated, reference]),
-            [(reference, "reference.txt", "reference text"u8.ToArray()), (generated, "result.json", "{\"answer\":42}"u8.ToArray())]);
-        var context = new LlmAgentContext
-        {
-            Revision = 9,
-            ResourceSelectionVersion = new(access.WorkspaceId, access.SessionId, 4),
-            SelectedResources = [generated, reference],
-            Entries = [new("prompt", "turn-1", new("user", "Read the reference")
-                { Attachments = [new LlmResourceAttachment(reference), new LlmResourceAttachment(reference)] }),
-                new("reply", "turn-1", new("assistant", "Created result.json"))]
-        };
-        if (generatedByTool)
-        {
-            context = context with
-            {
-                Entries = [context.Entries[0], context.Entries[1] with
-                { Message = context.Entries[1].Message with { ToolCalls = [new LlmToolCall("create-1", "create_json", "{}")] } },
-                    new("tool", "turn-1", new("user", string.Empty)
-                    {
-                        ToolResults = [new LlmToolResult("create-1", new() { Parts = [new LlmToolOutputSessionResource(generated)] })]
-                    })]
-            };
-        }
-        byte[] portable = JsonSerializer.SerializeToUtf8Bytes(context, ConnectLlmJson.AgentContext);
-        var grok = new LlmConnection
-        {
-            Version = "grok",
-            Transport = LlmTransport.XaiResponses,
-            Xai = new(),
-            Endpoint = "https://api.x.ai/v1",
-            Credential = new LlmCredential { OAuth = new() { AccessToken = "token-grok" } }.Serialize()
-        };
-        using (var http = new HttpClient(new Uploads("grok")))
-        await using (var files = new XaiFileClient(http))
-        await using (LlmResourcePreparation prepared = await LlmResourcePreparation.PrepareAsync(grok,
-            new() { ModelId = "grok-model", Resources = access, Messages = [.. context.Entries.Select(entry => entry.Message), new("user", "Compare the files")] },
-            files, () => { }, CancellationToken.None))
-        {
-            Assert.IsType<LlmFileReference>(prepared.Request.Messages[0].Attachments[0]);
-        }
-
-        LlmConnection connection = InlineConnection(destination);
-        bool streaming = destination != "openai-responses" || generatedByTool;
-        if (!streaming) connection = connection with { CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported } };
-        string model = InlineModel(destination);
-        var handler = new Documents(destination: destination, streaming: streaming);
-        using var targetHttp = new HttpClient(handler);
-        LlmClientBase client = InlineClient(destination, targetHttp);
-        LlmAgentContext restored = JsonSerializer.Deserialize(portable, ConnectLlmJson.AgentContext)!;
-        var source = new Source(connection);
-        await using var providers = new LlmProviderService(source, [client]);
-        ILlmAgentClient agent = client switch
-        {
-            VertexLlmClient vertex => new ManagedVertexAgentClient(vertex, providers),
-            GeminiApiLlmClient gemini => new ManagedGeminiApiAgentClient(gemini, providers),
-            OpenAiResponsesLlmClient openai => new ManagedOpenAiResponsesAgentClient(openai, providers),
-            _ => new ManagedAnthropicAgentClient((AnthropicMessagesLlmClient)client, providers)
-        };
-        await using var agents = new LlmAgentProviderService(source, [agent]);
-        await using ILlmAgentSession session = await agents.StartSessionAsync("connection", new()
-        {
-            ModelId = model,
-            SessionId = "session",
-            Context = restored,
-            UnboundContinuationState = LlmUnboundContinuationState.Omit,
-            CallerServices = new() { Resources = access }
-        });
-        LlmAgentContext imported = await session.CaptureContextAsync();
-        var events = new List<LlmAgentEvent>();
-        await foreach (LlmAgentEvent item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("Compare the files")] }))
-            events.Add(item);
-        Assert.Equal("session", session.SessionId);
-        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
-        if (destination is "vertex-gemini" or "gemini-api" && generatedByTool)
-        {
-            Assert.Equal([("reference.txt", "reference text"), ("reference.txt", "reference text")], handler.Items);
-            Assert.Contains("result.json", handler.ToolText, StringComparison.Ordinal);
-            Assert.Contains("{\"answer\":42}", handler.ToolText, StringComparison.Ordinal);
-        }
-        else Assert.Equal([("reference.txt", "reference text"), ("reference.txt", "reference text"), ("result.json", "{\"answer\":42}")], handler.Items);
-        Assert.Equal(4, access.Reads.Count);
-        Assert.All(access.Reads, stream => Assert.False(stream.CanRead));
-        Assert.Equal(9, imported.Revision);
-        Assert.Equal(context.ResourceSelectionVersion, imported.ResourceSelectionVersion);
-        Assert.Equal([generated, reference], imported.SelectedResources);
-        Assert.IsType<LlmResourceAttachment>(imported.Entries[0].Message.Attachments[0]);
-        LlmAgentContext captured = await session.CaptureContextAsync();
-        Assert.Equal(context.ResourceSelectionVersion, captured.ResourceSelectionVersion);
-        Assert.Equal([generated, reference], captured.SelectedResources);
-        Assert.IsType<LlmResourceAttachment>(captured.Entries[0].Message.Attachments[0]);
-        if (generatedByTool)
-            Assert.IsType<LlmToolOutputSessionResource>(Assert.IsType<LlmToolResult>(Assert.Single(imported.Entries[2].Message.ToolResults)).Output.Parts[0]);
     }
 
     [Theory]
@@ -538,10 +167,6 @@ public sealed class ResourcePreparationTests
     }
 
     [Theory]
-    [InlineData("anthropic", false)]
-    [InlineData("anthropic", true)]
-    [InlineData("openai-responses", false)]
-    [InlineData("openai-responses", true)]
     [InlineData("claude-cli", false)]
     [InlineData("claude-cli", true)]
     public async Task InlineReaderCleanupRefusalPreventsSuccessAndPreservesAnIndependentOperationFailure(string destination, bool generationFails)
@@ -581,11 +206,6 @@ public sealed class ResourcePreparationTests
     }
 
     [Theory]
-    [InlineData("anthropic")]
-    [InlineData("vertex-claude")]
-    [InlineData("vertex-gemini")]
-    [InlineData("gemini-api")]
-    [InlineData("openai-responses")]
     [InlineData("claude-cli")]
     public async Task ResourceBoundAccountingDoesNotIgnoreSelectedFilesOrOpenThem(string destination)
     {
@@ -628,13 +248,9 @@ public sealed class ResourcePreparationTests
         _ => "claude-sonnet-4-6"
     };
 
-    private static LlmClientBase InlineClient(string destination, HttpClient http, Exception? failure = null) => destination switch
+    private static ClaudeCliLlmClient InlineClient(string destination, HttpClient http, Exception? failure = null) => destination switch
     {
-        "anthropic" => new AnthropicMessagesLlmClient(http),
-        "gemini-api" => new GeminiApiLlmClient(http),
-        "openai-responses" => new OpenAiResponsesLlmClient(http),
-        "claude-cli" => new ClaudeCliLlmClient(http, new CliDocuments(failure), new NoSessionProcesses()),
-        _ => new VertexLlmClient(http, new VertexAuthenticationBoundary())
+        _ => new ClaudeCliLlmClient(http, new CliDocuments(failure), new NoSessionProcesses())
     };
 
     private static LlmConnection InlineConnection(string destination) => destination switch
@@ -644,13 +260,6 @@ public sealed class ResourcePreparationTests
             Version = destination,
             Transport = LlmTransport.AnthropicMessages,
             Endpoint = "https://anthropic.example.test/v1",
-            Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
-        },
-        "gemini-api" => new()
-        {
-            Version = destination,
-            Transport = LlmTransport.GoogleGeminiApi,
-            Endpoint = GeminiApiLlmClient.DefaultEndpoint,
             Credential = new LlmCredential { ApiKey = "test-key" }.Serialize()
         },
         "openai-responses" => new()
@@ -674,12 +283,6 @@ public sealed class ResourcePreparationTests
             Vertex = new() { ProjectId = "project", Location = "global", AuthenticationMode = LlmGoogleAuthenticationMode.ApplicationDefault }
         }
     };
-
-    private sealed class VertexAuthenticationBoundary : IVertexAuthentication
-    {
-        public Task<VertexAccess> ResolveAsync(LlmConnection connection, CancellationToken cancellationToken) =>
-            Task.FromResult(new VertexAccess("test-token", "test-scope"));
-    }
 
     private sealed class CliDocuments(Exception? failure = null) : IClaudeCliRunner
     {

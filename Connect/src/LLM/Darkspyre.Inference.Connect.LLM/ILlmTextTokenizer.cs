@@ -1,6 +1,6 @@
 namespace Darkspyre.Inference.Connect.LLM;
 
-/// <summary>Tokenizes one plain string through the selected provider. This is not a resolved-request counter.</summary>
+/// <summary>Tokenizes one plain string through the selected provider. This is not a resolved-request counter. No phase-1 provider implements this; it is a forward seam under the L2 exception in Inference/AGENTS.md, tracked by DSA-121.</summary>
 public interface ILlmTextTokenizer
 {
     Task<LlmTokenization> TokenizeAsync(string connectionId, string modelId, string text,

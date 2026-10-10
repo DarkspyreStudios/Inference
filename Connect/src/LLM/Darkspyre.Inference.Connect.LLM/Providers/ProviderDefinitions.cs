@@ -253,7 +253,7 @@ internal static class ProviderDefinitions
         DisplayName = "Google AI Studio (Gemini API)",
         Description = "Use Gemini models directly with a Google AI Studio API key.",
         Transport = LlmTransport.GoogleGeminiApi,
-        DefaultEndpoint = GeminiApiLlmClient.DefaultEndpoint,
+        DefaultEndpoint = "https://generativelanguage.googleapis.com",
         DefaultModelId = "gemini-3-flash-preview",
         DisplayOrder = 54,
         SetupSteps =

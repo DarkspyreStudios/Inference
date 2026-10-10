@@ -8,9 +8,6 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.LLM;
-using Darkspyre.Inference.Connect.LLM.Bedrock;
-using Darkspyre.Inference.Connect.LLM.Vertex;
-using Darkspyre.Inference.Connect.Resources;
 using Darkspyre.Inference.Connect.TTS;
 using Microsoft.Extensions.DependencyInjection;
 using SecureStore;
@@ -52,13 +49,7 @@ internal static class Program
         services.AddSingleton<ILlmConnectionSource>(provider =>
             provider.GetRequiredService<SecureConnectionSource>());
         services.AddLlmConnect();
-        if (args[0] == "grok-probe" && args.Contains("batch-list", StringComparer.Ordinal))
-            services.AddHttpClient("XaiResponsesLlmClient")
-                .AddHttpMessageHandler(() => new GrokProbe.BatchShapeHandler(Console.Error));
-        services.AddLlmConnectBedrock();
-        services.AddLlmConnectVertex();
         services.AddTtsConnect();
-        services.AddLlmResources();
         await using ServiceProvider provider = services.BuildServiceProvider();
         try
         {
@@ -86,10 +77,6 @@ internal static class Program
                 "models" => await RunModelsAsync(llms, invocation, cancellation.Token),
                 "usage" => await RunUsageAsync(llms, invocation, cancellation.Token),
                 "prompt" => await RunPromptAsync(llms, invocation, cancellation.Token),
-                "grok-probe" when invocation.Provider.Transport == LlmTransport.XaiResponses =>
-                    await GrokProbe.RunAsync(llms, agent, provider.GetRequiredService<ILlmConnectionSource>(),
-                        provider.GetRequiredService<LlmConnectionAccess>(), provider.GetRequiredService<TtsProviderService>(),
-                        provider.GetRequiredService<LlmResourceProviderService>(), invocation, cancellation.Token),
                 "agy-probe" when invocation.Provider.Transport == LlmTransport.GoogleAntigravityCli =>
                     await NativeCliProbe.RunAsync(llms, agent, invocation, cancellation.Token),
                 "claude-probe" when invocation.Provider.Transport == LlmTransport.AnthropicClaudeCli =>
@@ -353,37 +340,28 @@ internal static class Program
         ConsoleInvocation invocation,
         CancellationToken cancellationToken)
     {
-        LlmChatRequest request;
-        if (invocation.CommandArguments is ["--request", string requestPath])
-        {
-            request = await ReadChatRequestAsync(requestPath, cancellationToken);
-            if (!await CheckReadyAsync(llms, invocation, cancellationToken)) return 3;
-        }
-        else
-        {
-            PromptOptions options = ParsePromptOptions(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId);
-            if (!await CheckReadyAsync(llms, invocation, cancellationToken)) return 3;
+        PromptOptions options = ParsePromptOptions(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId);
+        if (!await CheckReadyAsync(llms, invocation, cancellationToken)) return 3;
 
-            string prompt = await ReadPromptAsync();
-            if (string.IsNullOrWhiteSpace(prompt))
-            {
-                throw new ArgumentException("A prompt is required.");
-            }
-
-            LlmStructuredOutputRequest? structuredOutput = options.SchemaPath is null
-                ? null
-                : await ReadSchemaAsync(options.SchemaPath, cancellationToken);
-            IReadOnlyList<LlmAttachment> attachments = await ReadAttachmentsAsync(
-                options.Attachments,
-                cancellationToken);
-            request = new LlmChatRequest
-            {
-                ModelId = options.Model,
-                Messages = [new LlmChatMessage("user", prompt) { Attachments = attachments }],
-                ReasoningLevel = options.Effort,
-                StructuredOutput = structuredOutput
-            };
+        string prompt = await ReadPromptAsync();
+        if (string.IsNullOrWhiteSpace(prompt))
+        {
+            throw new ArgumentException("A prompt is required.");
         }
+
+        LlmStructuredOutputRequest? structuredOutput = options.SchemaPath is null
+            ? null
+            : await ReadSchemaAsync(options.SchemaPath, cancellationToken);
+        IReadOnlyList<LlmAttachment> attachments = await ReadAttachmentsAsync(
+            options.Attachments,
+            cancellationToken);
+        LlmChatRequest request = new LlmChatRequest
+        {
+            ModelId = options.Model,
+            Messages = [new LlmChatMessage("user", prompt) { Attachments = attachments }],
+            ReasoningLevel = options.Effort,
+            StructuredOutput = structuredOutput
+        };
 
         bool wroteOutput = false;
         int exitCode = 1;
@@ -743,7 +721,6 @@ internal static class Program
                 "--max-model-iterations" when allowModelIterationLimit && index + 1 < args.Length => args[++index],
                 "--max-model-iterations" when allowModelIterationLimit =>
                     throw new ArgumentException($"{option} requires a value."),
-                "--request" => throw new ArgumentException("--request is valid only as prompt's sole request option with one file path."),
                 _ => throw new ArgumentException($"Unknown prompt option '{option}'.")
             };
 
@@ -863,13 +840,6 @@ internal static class Program
         };
     }
 
-    internal static async Task<LlmChatRequest> ReadChatRequestAsync(string path, CancellationToken cancellationToken)
-    {
-        string json = await File.ReadAllTextAsync(path, cancellationToken);
-        return JsonSerializer.Deserialize(json, ConnectLlmJson.ChatRequest)
-            ?? throw new ArgumentException("The request file must contain a chat request.", nameof(path));
-    }
-
     internal static void WriteCompletion(LlmChatResult result, TextWriter diagnostics)
     {
         string usage = result.Usage is null
@@ -921,13 +891,11 @@ internal static class Program
               darkspyre-inference-connect-tester models --provider <codex|antigravity|bedrock>
               darkspyre-inference-connect-tester usage  --provider <codex|claude|antigravity>
               darkspyre-inference-connect-tester agy-probe --provider antigravity [--model <id>] [--case all|text|structured|native-tools|session|resume|controls|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
-              darkspyre-inference-connect-tester claude-probe --provider claude [--model <id>] [--case all|resume|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
+              darkspyre-inference-connect-tester claude-probe --provider claude [--model <id>] [--case all|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
               darkspyre-inference-connect-tester codex-probe --provider codex --model <model-id>
-              darkspyre-inference-connect-tester grok-probe --provider grok-subscription [--model <id>] [--case all|strict|files|tts|batch|batch-list|deferred] [--repeat 1..20] [--timeout-seconds 1..600] [--xai-region Global|UnitedStates]
               darkspyre-inference-connect-tester managed-probe --provider codex --model <model-id>
-              darkspyre-inference-connect-tester prompt --provider <codex|claude|antigravity|bedrock|agentcore|grok-subscription> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--non-streaming] [--xai-region Global|UnitedStates]
-              darkspyre-inference-connect-tester prompt --provider <provider-id> --request <file> [--harness-arn <arn>] [--non-streaming] [--xai-region Global|UnitedStates]
-              darkspyre-inference-connect-tester agent  --provider <codex|claude|agentcore|antigravity|bedrock|grok-subscription> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--max-model-iterations <positive integer>]
+              darkspyre-inference-connect-tester prompt --provider <codex|claude|antigravity|bedrock|agentcore> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--non-streaming]
+              darkspyre-inference-connect-tester agent  --provider <codex|claude|agentcore|antigravity|bedrock> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--max-model-iterations <positive integer>]
 
             prompt reads one line interactively, or the complete prompt from redirected standard input:
               echo 'Reply only with OK.' | darkspyre-inference-connect-tester prompt --provider codex --model gpt-5.6-terra
@@ -940,9 +908,6 @@ internal static class Program
               echo 'Call darkspyre_inference_connect_attachment with kind image and confirm you received it.' | darkspyre-inference-connect-tester agent --provider codex --model gpt-5.6-terra
               echo 'Call darkspyre_inference_connect_attachment with kind document and quote its text.' | darkspyre-inference-connect-tester agent --provider claude --model sonnet
 
-            --request loads the complete ChatRequest JSON through ConnectLlmJson.ChatRequest instead of stdin.
-            It cannot be combined with --model, --effort, --schema or attachment options and is not an agent option.
-            The selected connection still owns credentials and transport controls; live authorities cannot be loaded from JSON.
 
             providers and setup display adapter-owned metadata without generation or authentication.
             OpenAI-compatible --endpoint selects an anonymous test endpoint without reading or writing stored credentials.
@@ -952,8 +917,6 @@ internal static class Program
             --google-authentication ApiKey selects projectless express mode; login reads VERTEX_API_KEY and stores it in the vault.
             gemini-probe performs explicit metered Gemini API generation with the key that login --provider gemini stored from GEMINI_API_KEY.
             apple-probe performs explicit local generation, reports each case and never retries a failed case.
-            grok-probe runs explicit selected checks without retries; batch-list reads one page without mutation or generation.
-            Files cleanup deletes only the file identified by that case's upload receipt.
             agy-probe runs explicit subscription turns through the Antigravity native session in a temporary
             workspace, reports the CLI version and turn count, and never retries a failed case.
             agent offers host tools only to runtimes that support them, and selects the provider's configured

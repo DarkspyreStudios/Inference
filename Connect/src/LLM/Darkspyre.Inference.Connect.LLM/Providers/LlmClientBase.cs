@@ -125,7 +125,6 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
         IReadOnlySet<string>? nativeToolNames = null)
     {
         EnsureTransport(connection);
-        ProviderControlPolicy.Validate(connection, request);
         ExplicitCaches.Validate(request, (capabilities.SupportsExplicitCache != InferenceSupport.Unsupported));
         RequestJson.ValidateSamplingOptions(connection, request);
         HostedTools.Validate(request, capabilities);
@@ -349,13 +348,11 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
     /// <summary>
     /// Projects a tool output with the connection's support as the route and the model's support as the target.
     /// </summary>
-    internal ProjectedToolOutput ProjectToolOutput(LlmConnection connection, string modelId, LlmToolOutput output,
-        Func<Common.Resources.InferenceResourceReference, SentToolPart>? resource = null) =>
+    internal ProjectedToolOutput ProjectToolOutput(LlmConnection connection, string modelId, LlmToolOutput output) =>
         ToolOutputProjector.Project(
             output,
             GetCapabilities(connection).RichContentSupported,
-            GetCapabilities(connection, modelId).RichContentSupported,
-            resource);
+            GetCapabilities(connection, modelId).RichContentSupported);
 
     protected LlmProviderException ProtocolException(
         string message,

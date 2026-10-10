@@ -12,8 +12,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// Resolves one configured connection and dispatches to exactly one matching transport. It never
 /// retries against, or falls back to, another provider.
 /// </summary>
-public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClient, IXaiFilePublicUrlClient,
-    IXaiSkillClient, IDocumentSearchClient, IDisposable, IAsyncDisposable
+public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable, IAsyncDisposable
 {
     private ILlmConnectionSource? _connections;
     private ILlmConnectionSource Connections => _connections ?? throw new ObjectDisposedException(nameof(LlmProviderService));
@@ -31,7 +30,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
     private readonly LlmOperationLifetime _lifetime = new();
     private readonly Lock _disposeGate = new();
     private Task? _disposal;
-    private Providers.XaiFileClient? _xaiFiles;
     private readonly GeminiCacheBindings _cacheBindings = new();
     private readonly LlmCleanupOutcomes _cleanupOutcomes = new();
 
@@ -120,7 +118,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
                 .OrderBy(provider => provider.DisplayOrder)
                 .ThenBy(provider => provider.DisplayName, StringComparer.Ordinal)
         ];
-        _xaiFiles = clientArray.OfType<Providers.XaiResponsesLlmClient>().SingleOrDefault()?.CreateFileClient();
     }
 
     public IReadOnlyList<LlmTransport> SupportedTransports { get; }
@@ -154,7 +151,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         return new ConnectLlmInference(this, connectionId);
     }
 
-    /// <summary>Validates an explicit connection without refreshing credentials or invoking a provider.</summary>
+    /// <summary>Validates an explicit connection without refreshing credentials or invoking a provider. No phase-1 provider implements this; it is a forward seam under the L2 exception in Inference/AGENTS.md, tracked by DSA-121.</summary>
     public async Task<ILlmContextCacheClient> BindContextCacheAsync(
         string connectionId, CancellationToken cancellationToken = default)
     {
@@ -171,137 +168,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         return new BoundContextCache(this, connectionId);
     }
 
-    /// <summary>Uploads borrowed source bytes through the selected implemented native file route.</summary>
-    public Task<LlmProviderFile> UploadAsync(string connectionId, Stream source, string fileName,
-        LlmFileUploadOptions? options = null, CancellationToken cancellationToken = default) =>
-        FileOperationAsync(connectionId, () => { _ = XaiFileRequestData.Upload(source, fileName, options); },
-            (client, connection, fence, token) => client.UploadAsync(connection, source, fileName, options, fence, token), cancellationToken);
-
-    public Task<LlmFilePage> ListAsync(string connectionId, LlmFileListRequest request,
-        CancellationToken cancellationToken = default) => FileOperationAsync(connectionId,
-            () => { _ = XaiFileRequestData.List(request); },
-            (client, connection, fence, token) => client.ListAsync(connection, request, fence, token), cancellationToken);
-
-    public Task<LlmProviderFile> GetAsync(string connectionId, string fileId,
-        CancellationToken cancellationToken = default) => FileOperationAsync(connectionId,
-            () => { _ = XaiFileRequestData.Path(fileId); },
-            (client, connection, fence, token) => client.GetAsync(connection, fileId, fence, token), cancellationToken);
-
-    public Task<ResourceDownloadReceipt> DownloadAsync(string connectionId, string fileId, Stream destination,
-        LlmFileDownloadOptions? options = null, CancellationToken cancellationToken = default) =>
-        FileOperationAsync(connectionId, () => { _ = XaiFileRequestData.Download(fileId, destination, options); },
-            (client, connection, fence, token) => client.DownloadAsync(connection, fileId, destination, options, fence, token), cancellationToken);
-
-    public Task<LlmFileDeletion> DeleteAsync(string connectionId, string fileId,
-        CancellationToken cancellationToken = default) => FileOperationAsync(connectionId,
-            () => { _ = XaiFileRequestData.Path(fileId); },
-            (client, connection, fence, token) => client.DeleteAsync(connection, fileId, fence, token), cancellationToken);
-
-    public Task<XaiPublicUrl> CreatePublicUrlAsync(string connectionId, string fileId,
-        XaiPublicUrlOptions? options = null, CancellationToken cancellationToken = default) =>
-        FileOperationAsync(connectionId, () => { _ = XaiFileRequestData.Path(fileId); _ = XaiFileRequestData.Expiry(options?.ExpiresAfter); },
-            (client, connection, fence, token) => client.CreatePublicUrlAsync(connection, fileId, options, fence, token), cancellationToken);
-
-    public Task<XaiPublicUrlRevocation> RevokePublicUrlAsync(string connectionId, string fileId,
-        CancellationToken cancellationToken = default) => FileOperationAsync(connectionId,
-            () => { _ = XaiFileRequestData.Path(fileId); },
-            (client, connection, fence, token) => client.RevokePublicUrlAsync(connection, fileId, fence, token), cancellationToken);
-
-    private async Task<T> FileOperationAsync<T>(string connectionId, Action validate,
-        Func<Providers.XaiFileClient, LlmConnection, Action, CancellationToken, Task<T>> dispatch,
-        CancellationToken cancellationToken)
-    {
-        using var operation = _lifetime.Enter(cancellationToken);
-        cancellationToken = operation.Token;
-        Providers.XaiFileClient files = _xaiFiles ?? throw new NotSupportedException("No Files resource adapter is implemented.");
-        LlmConnection connection = await ResolveConnectionAsync(connectionId, cancellationToken).ConfigureAwait(false);
-        ThrowIfOperationCanceled(cancellationToken);
-        connection = EmbeddingRequestData.Snapshot(connection);
-        ILlmClient client = ClientFor(connection.Transport);
-        if (!HasFileRoute(client))
-            throw new NotSupportedException("The selected transport has no Files resource adapter.");
-        validate();
-        ThrowIfOperationCanceled(cancellationToken);
-        XaiFileRequestData.Connection(connection);
-        ThrowIfOperationCanceled(cancellationToken);
-        connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken).ConfigureAwait(false);
-        ThrowIfOperationCanceled(cancellationToken);
-        T result = await dispatch(files, connection, () => ThrowIfOperationCanceled(cancellationToken), cancellationToken).ConfigureAwait(false);
-        ThrowIfOperationCanceled(cancellationToken);
-        return result;
-    }
-
-    private bool HasFileRoute(ILlmClient client) => _xaiFiles is not null && client is Providers.XaiResponsesLlmClient;
-
-    private LlmProviderCapabilities FileCapabilities(ILlmClient client, LlmProviderCapabilities capabilities) =>
-        HasFileRoute(client) ? capabilities : capabilities with { Files = new() };
-
-    // The provider's remote Skill bundle-upload protocol is unknown. No upload is attempted.
-    Task<XaiSkill> IXaiSkillClient.UploadAsync(string connectionId, XaiSkillUpload upload,
-        CancellationToken cancellationToken) => UnavailableResourceAsync<XaiSkill>(cancellationToken);
-
-    Task<XaiSkillPage> IXaiSkillClient.ListAsync(string connectionId, XaiSkillListRequest request,
-        CancellationToken cancellationToken) => FileOperationAsync(connectionId,
-            () => { _ = XaiFileClient.SkillListPath(request); },
-            (client, connection, fence, token) => client.ListSkillsAsync(connection, request, fence, token), cancellationToken);
-
-    Task<XaiSkill> IXaiSkillClient.GetAsync(string connectionId, string skillId,
-        CancellationToken cancellationToken) => FileOperationAsync(connectionId,
-            () => { _ = XaiFileClient.SkillPath(skillId); },
-            (client, connection, fence, token) => client.GetSkillAsync(connection, skillId, fence, token), cancellationToken);
-
-    Task<ResourceDownloadReceipt> IXaiSkillClient.DownloadAsync(string connectionId, string skillId, Stream destination,
-        CancellationToken cancellationToken) => FileOperationAsync(connectionId,
-            () => { _ = XaiFileClient.SkillDownloadPath(skillId, destination); },
-            (client, connection, fence, token) => client.DownloadSkillAsync(connection, skillId, destination, fence, token), cancellationToken);
-
-    Task<XaiSkillDeletion> IXaiSkillClient.DeleteAsync(string connectionId, string skillId,
-        CancellationToken cancellationToken) => FileOperationAsync(connectionId,
-            () => { _ = XaiFileClient.SkillPath(skillId); },
-            (client, connection, fence, token) => client.DeleteSkillAsync(connection, skillId, fence, token), cancellationToken);
-
-    /// <summary>Searches existing collections through the selected implemented document-search route.</summary>
-    public async Task<DocumentSearchResult> SearchAsync(string connectionId, DocumentSearchRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        using var operation = _lifetime.Enter(cancellationToken);
-        cancellationToken = operation.Token;
-        try
-        {
-            request = XaiDocumentSearch.Snapshot(request);
-            Fence();
-            LlmConnection connection = await ResolveConnectionAsync(connectionId, cancellationToken).ConfigureAwait(false);
-            Fence();
-            connection = EmbeddingRequestData.Snapshot(connection);
-            Fence();
-            if (ClientFor(connection.Transport) is not XaiResponsesLlmClient client)
-                throw new NotSupportedException("The selected transport has no document-search adapter.");
-            Validate(connection);
-            connection = await ConnectionAccess.RefreshAsync(connectionId, connection, Validate, Fence,
-                cancellationToken).ConfigureAwait(false);
-            Fence();
-            DocumentSearchResult result = await XaiDocumentSearch.SearchAsync(client.SharedHttp, connection,
-                request, Fence, cancellationToken).ConfigureAwait(false);
-            Fence();
-            return result;
-        }
-        catch (Exception error) { _cleanupOutcomes.Record(error); throw; }
-
-        void Fence() => ThrowIfOperationCanceled(cancellationToken);
-        void Validate(LlmConnection snapshot)
-        {
-            Fence();
-            XaiDocumentSearch.ValidateConnection(snapshot);
-            Fence();
-        }
-    }
-
-    private Task<T> UnavailableResourceAsync<T>(CancellationToken cancellationToken,
-        string message = "No Files or Skills resource adapter is implemented.")
-    {
-        using var operation = _lifetime.Enter(cancellationToken);
-        return Task.FromException<T>(new NotSupportedException(message));
-    }
+    private static LlmProviderCapabilities FileCapabilities(LlmProviderCapabilities capabilities) =>
+        capabilities with { Files = new() };
 
     public async Task<bool> IsAuthenticatedAsync(
         string connectionId,
@@ -313,9 +181,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         ThrowIfOperationCanceled(cancellationToken);
         if (connection is not null) RuntimeInputAdmission.Validate(connection);
         LlmCredential? credential = LlmCredential.Parse(connection?.Credential);
-        if (connection?.Transport == LlmTransport.XaiResponses
-            && (!string.IsNullOrEmpty(credential?.ApiKey) || !XaiAuthorization.IsValid(credential)))
-            return false;
         if (connection is not null
             && _clients.TryGetValue(connection.Transport, out ILlmClient? client)
             && client is IExternalLlmAuthenticationProbe externalProbe)
@@ -323,8 +188,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
             return await externalProbe.IsAuthenticatedAsync(connection, cancellationToken);
         }
 
-        if (connection?.Transport == LlmTransport.XaiResponses)
-            return true;
         return credential is not null
             && (!string.IsNullOrWhiteSpace(credential.ApiKey)
                 || !string.IsNullOrWhiteSpace(credential.OAuth?.AccessToken)
@@ -349,8 +212,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
             connectionId,
             expectedVersion,
             cancellationToken);
-        if (connection.Transport == LlmTransport.XaiResponses)
-            throw new NotSupportedException("Grok requires OAuth sign-in; an API key is not supported.");
         if (connection.Transport is LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat
             && connection.Azure is { AuthenticationMode: not LlmAzureAuthenticationMode.ApiKey })
             throw new NotSupportedException("The selected Azure authentication mode does not accept an API key.");
@@ -391,39 +252,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
             credential.Serialize(),
             connection.Version,
             cancellationToken);
-    }
-
-    /// <summary>Starts Grok device authorization. The xAI authenticator must be registered.</summary>
-    public async Task<LlmDeviceCode> StartXaiLoginAsync(CancellationToken cancellationToken = default)
-    {
-        using var operation = _lifetime.Enter(cancellationToken);
-        LlmDeviceCode code = await XaiLogin().StartAsync(operation.Token).ConfigureAwait(false);
-        ThrowIfOperationCanceled(operation.Token);
-        return code;
-    }
-
-    /// <summary>Performs one Grok token poll and saves only against the supplied connection version.</summary>
-    public async Task CompleteXaiLoginAsync(
-        string connectionId,
-        string deviceAuthId,
-        string userCode,
-        string expectedVersion,
-        CancellationToken cancellationToken = default)
-    {
-        using var operation = _lifetime.Enter(cancellationToken);
-        cancellationToken = operation.Token;
-        ArgumentException.ThrowIfNullOrWhiteSpace(deviceAuthId);
-        ArgumentException.ThrowIfNullOrWhiteSpace(userCode);
-        LlmConnection connection = await RequireExpectedVersionAsync(connectionId, expectedVersion, cancellationToken)
-            .ConfigureAwait(false);
-        ThrowIfOperationCanceled(cancellationToken);
-        if (connection.Transport != LlmTransport.XaiResponses)
-            throw new InvalidOperationException("Grok OAuth can be attached only to an xAI connection.");
-        LlmCredential credential = await XaiLogin().CompleteAsync(deviceAuthId, userCode, cancellationToken)
-            .ConfigureAwait(false);
-        ThrowIfOperationCanceled(cancellationToken);
-        await SaveXaiCredentialAsync(connectionId, connection.Version, credential, cancellationToken).ConfigureAwait(false);
-        ThrowIfOperationCanceled(cancellationToken);
     }
 
     /// <summary>Starts the optional OAuth flow used only for Claude subscription model discovery.</summary>
@@ -518,7 +346,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
     }
 
     /// <summary>
-    /// Runs the interactive sign-in flow for a Codex, Grok or Claude connection. The connection version is
+    /// Runs the interactive sign-in flow for a Codex or Claude connection. The connection version is
     /// captured before authentication starts, so a delayed result cannot overwrite a connection that
     /// the host changed or replaced while the user was signing in.
     /// </summary>
@@ -546,18 +374,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
                     codexCredential.Serialize(),
                     connection.Version,
                     cancellationToken);
-                break;
-
-            case LlmTransport.XaiResponses:
-                ThrowIfOperationCanceled(cancellationToken);
-                LlmDeviceCode xaiCode = await XaiLogin().StartAsync(cancellationToken).ConfigureAwait(false);
-                ThrowIfOperationCanceled(cancellationToken);
-                await prompt.ShowDeviceCodeAsync(xaiCode, cancellationToken).ConfigureAwait(false);
-                ThrowIfOperationCanceled(cancellationToken);
-                LlmCredential xaiCredential = await PollXaiAsync(xaiCode, cancellationToken).ConfigureAwait(false);
-                ThrowIfOperationCanceled(cancellationToken);
-                await SaveXaiCredentialAsync(connectionId, connection.Version, xaiCredential, cancellationToken).ConfigureAwait(false);
-                ThrowIfOperationCanceled(cancellationToken);
                 break;
 
             case LlmTransport.AnthropicClaudeCli:
@@ -628,25 +444,17 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
             cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
-        request = ProviderControlPolicy.Resolve(connection, request);
         ILlmClient client = ClientFor(connection.Transport);
-        if (publishCompaction is not null && client is not (OpenAiCodexLlmClient or XaiResponsesLlmClient))
+        if (publishCompaction is not null && client is not OpenAiCodexLlmClient)
             throw new NotSupportedException("The selected route has no provider compactor.");
         string? resolvedCredential = connection.Credential;
         connection = WithContextCache(EmbeddingRequestData.Snapshot(connection), client);
-        if (client is GeminiApiLlmClient) GeminiApiLlmClient.ValidateCachedSuffix(request);
         if (request.ExplicitCache is not null)
             ExplicitCaches.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache != InferenceSupport.Unsupported));
         LlmAttachments.ValidateReferences(request, () => (client.GetCapabilities(connection, request.ModelId).SupportsFileReferences != InferenceSupport.Unsupported),
             client is ILlmResourcePreparationClient { CanPrepareResources: true });
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
         ClientTools.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsShellTools != InferenceSupport.Unsupported));
-        if (client is Providers.XaiResponsesLlmClient resourceDestination)
-        {
-            if (publishCompaction is not null)
-                resourceDestination.PreflightCompactionRequest(connection, request);
-            else resourceDestination.PreflightResourceRequest(connection, request);
-        }
         ThrowIfOperationCanceled(cancellationToken);
         (connection, request) = await AdmitContextCacheAsync(connectionId, connection, client, request, cacheSequence, cancellationToken).ConfigureAwait(false);
         if (client is not IStreamingCredentialRefreshPolicy refreshPolicy
@@ -701,20 +509,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
         connection = await AttachCatalogCoreAsync(connectionId, connection, client, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
-        if (publishCompaction is not null && client is XaiResponsesLlmClient xaiCompactor)
-        {
-            ProviderCompactionResult compacted = await xaiCompactor.CompactWithResourcesAsync(connection, request,
-                _xaiFiles!, () => ThrowIfOperationCanceled(cancellationToken), cancellationToken).ConfigureAwait(false);
-            ThrowIfOperationCanceled(cancellationToken);
-            connection.CacheAdmission?.Check(connection, request.ExplicitCache);
-            publishCompaction(compacted);
-            yield break;
-        }
         IAsyncEnumerable<LlmStreamEvent> stream = publishCompaction is not null && client is OpenAiCodexLlmClient codex
             ? codex.StreamCompactionAsync(connection, request, cancellationToken)
-            : client is Providers.XaiResponsesLlmClient xai
-            ? xai.StreamWithResourcesAsync(connection, request, _xaiFiles!, () => ThrowIfOperationCanceled(cancellationToken),
-                _cleanupOutcomes.Record, cancellationToken)
             : client.StreamAsync(connection, request, cancellationToken);
         ProviderCompactionResult? compactionResult = null;
         IAsyncEnumerator<LlmStreamEvent> enumerator = stream.GetAsyncEnumerator(cancellationToken);
@@ -776,7 +572,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         }
     }
 
-    /// <summary>Tokenizes only the supplied plain text. No request projection, catalog, usage or estimate is substituted.</summary>
+    /// <summary>Tokenizes only the supplied plain text. No request projection, catalog, usage or estimate is substituted. No phase-1 provider implements this; it is a forward seam under the L2 exception in Inference/AGENTS.md, tracked by DSA-121.</summary>
     public async Task<LlmTokenization> TokenizeAsync(string connectionId, string modelId, string text,
         CancellationToken cancellationToken = default)
     {
@@ -816,13 +612,11 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         LlmConnection connection = await ResolveConnectionAsync(connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
-        request = ProviderControlPolicy.Resolve(connection, request);
         ExplicitCaches.ValidateProviderTokenCount(connection, request);
         ILlmClient client = ClientFor(connection.Transport);
         if (client is not ILlmProviderTokenCounter counter)
             throw new NotSupportedException("This route does not implement provider input-token counting.");
         connection = WithContextCache(EmbeddingRequestData.Snapshot(connection), client);
-        if (client is GeminiApiLlmClient) GeminiApiLlmClient.ValidateCachedSuffix(request);
         if (request.ExplicitCache is not null)
             ExplicitCaches.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache != InferenceSupport.Unsupported));
         LlmAttachments.ValidateReferences(request, () => (client.GetCapabilities(connection, request.ModelId).SupportsFileReferences != InferenceSupport.Unsupported));
@@ -866,7 +660,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         var connection = await ResolveConnectionAsync(connectionId, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RequestJson.ValidateSamplingOptions(connection, request);
-        request = ProviderControlPolicy.Resolve(connection, request);
         var client = ClientFor(connection.Transport);
         connection = WithContextCache(connection, client);
         ValidateCacheEstimate(connectionId, connection, client, request, cacheSequence);
@@ -880,8 +673,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         // Their nonmutating estimator reports unknown for opaque state instead of dropping it.
         if (client is not ILlmConnectionPreparation)
         { request = ContinuationStateProjection.Project(request, connection).Request; }
-        if (client is XaiResponsesLlmClient resourceDestination)
-            resourceDestination.PreflightResourceRequest(connection, request);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
         var capabilities = client.GetCapabilities(connection, request.ModelId);
         LlmRequestAccounting Unsupported(string diagnostic) => new()
@@ -985,7 +776,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
     }
 
     /// <summary>
-    /// The connection's models. A list is kept until its exact version/scope or admitted xAI configuration changes or
+    /// The connection's models. A list is kept until its exact version/scope changes or
     /// <see cref="RefreshModelsAsync"/> replaces it, so repeated calls do not ask the provider again.
     /// </summary>
     public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(
@@ -1081,7 +872,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
         connection = WithContextCache(connection, client);
-        LlmProviderCapabilities capabilities = FileCapabilities(client, client.GetCapabilities(connection));
+        LlmProviderCapabilities capabilities = FileCapabilities(client.GetCapabilities(connection));
         ThrowIfOperationCanceled(cancellationToken);
         return capabilities;
     }
@@ -1131,7 +922,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         ILlmClient client = ClientFor(connection.Transport);
         connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
         connection = WithContextCache(connection, client);
-        LlmProviderCapabilities capabilities = FileCapabilities(client, client.GetCapabilities(connection, modelId));
+        LlmProviderCapabilities capabilities = FileCapabilities(client.GetCapabilities(connection, modelId));
         ThrowIfOperationCanceled(cancellationToken);
         return capabilities;
     }
@@ -1288,27 +1079,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         }
     }
 
-    private async Task<LlmCredential> PollXaiAsync(LlmDeviceCode code, CancellationToken token)
-    {
-        while (true)
-        {
-            ThrowIfOperationCanceled(token);
-            await XaiDevicePolling.WaitAsync(code, token).ConfigureAwait(false);
-            ThrowIfOperationCanceled(token);
-            try
-            {
-                LlmCredential credential = await XaiLogin().CompleteAsync(code.DeviceAuthId, code.UserCode, token).ConfigureAwait(false);
-                ThrowIfOperationCanceled(token);
-                return credential;
-            }
-            catch (LlmAuthPendingException pending)
-            {
-                ThrowIfOperationCanceled(token);
-                code = XaiDevicePolling.AfterPending(code, pending);
-            }
-        }
-    }
-
     private void ThrowIfOperationCanceled(CancellationToken token)
     {
         token.ThrowIfCancellationRequested();
@@ -1318,18 +1088,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
         {
             throw new OperationCanceledException("The operation was canceled by facade retirement.", error, token);
         }
-    }
-
-    private async Task SaveXaiCredentialAsync(string connectionId, string version, LlmCredential credential, CancellationToken token)
-    {
-        ThrowIfOperationCanceled(token);
-        RuntimeInputAdmission.ValidateCredential(LlmTransport.XaiResponses, credential);
-        if (!string.IsNullOrEmpty(credential.ApiKey) || !XaiAuthorization.IsValid(credential))
-            throw new InvalidOperationException("Grok sign-in did not return an OAuth credential.");
-        string serialized = credential.Serialize();
-        ThrowIfOperationCanceled(token);
-        await Connections.SaveCredentialAsync(connectionId, serialized, version, token).ConfigureAwait(false);
-        ThrowIfOperationCanceled(token);
     }
 
     private ILlmClient ClientFor(LlmTransport transport) =>
@@ -1361,12 +1119,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
                 ? login
                 : throw new NotSupportedException("Codex login is not registered.");
 
-    private IXaiDeviceLogin XaiLogin() =>
-        _authenticators.TryGetValue(LlmTransport.XaiResponses, out ILlmAuthenticator? authenticator)
-            && authenticator is IXaiDeviceLogin login
-                ? login
-                : throw new NotSupportedException("Grok login is not registered.");
-
     private IClaudePkceLogin ClaudeLogin() =>
         _authenticators.TryGetValue(LlmTransport.AnthropicClaudeCli, out ILlmAuthenticator? authenticator)
             && authenticator is IClaudePkceLogin login
@@ -1384,22 +1136,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
 
     private async Task RetireAsync()
     {
-        Task operations = _lifetime.RetireAsync(async () =>
-        {
-            Task files;
-            try { files = _xaiFiles is { } client ? client.DisposeAsync().AsTask() : Task.CompletedTask; }
-            catch (Exception error) { files = Task.FromException(error); }
-            Task outcomes;
-            try { outcomes = _cleanupOutcomes.ReleaseAsync(); }
-            catch (Exception error) { outcomes = Task.FromException(error); }
-            Task cleanup = Task.WhenAll(files, outcomes);
-            try { await cleanup.ConfigureAwait(false); }
-            catch
-            {
-                if (cleanup.Exception is { InnerExceptions.Count: > 1 } failures) throw failures;
-                throw;
-            }
-        });
+        Task operations = _lifetime.RetireAsync(_cleanupOutcomes.ReleaseAsync);
         Task credentials = _ownsConnectionAccess ? ConnectionAccess.DisposeAsync().AsTask() : Task.CompletedTask;
         Task catalogs = _ownsModelLists ? _modelLists.DisposeAsync().AsTask() : Task.CompletedTask;
         Task retirement = Task.WhenAll(operations, credentials, catalogs);
@@ -1418,7 +1155,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, ILlmFileClie
             _setupEnvironments.Clear();
             _connections = null;
             _connectionAccess = null;
-            _xaiFiles = null;
             if (_ownsObservations) { _observations.Dispose(); }
         }
     }

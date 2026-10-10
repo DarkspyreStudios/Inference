@@ -27,8 +27,6 @@ public sealed record TtsConnection
     /// <summary>Short-lived protected values supplied by the host. Never log or display this map.</summary>
     public IReadOnlyDictionary<string, string> Headers { get; init => field = TtsData.Copy(TtsData.Required(value), StringComparer.OrdinalIgnoreCase)!; } = TtsData.Copy(new Dictionary<string, string>(), StringComparer.OrdinalIgnoreCase)!;
     public PocketTtsEndpointOptions PocketTts { get; init => field = TtsData.Required(value); } = new();
-    public XaiConnectionSelection? Xai { get; init; }
-    public XaiTtsOptions? XaiDefaults { get; init; }
     public IProviderAuthorization? Authorization { get; init; }
     public override string ToString() => "TtsConnection { <data> }";
 }
@@ -43,7 +41,6 @@ public sealed record TtsRequest
     public int? SampleRate { get; init; }
     public int? BitRate { get; init; }
     public bool? IncludeTimestamps { get; init; }
-    public XaiTtsOptions? Xai { get; init; }
     public override string ToString() => "TtsRequest { <data> }";
 }
 
@@ -97,6 +94,6 @@ public interface ITtsProvider
 {
     TtsTransport Transport { get; }
     InferenceSetupDefinition SetupDefinition { get; }
-    ITtsClient Bind(TtsConnection connection, XaiFamilyBinding? xai = null,
+    ITtsClient Bind(TtsConnection connection,
         IInferenceResourceAccess? resources = null);
 }

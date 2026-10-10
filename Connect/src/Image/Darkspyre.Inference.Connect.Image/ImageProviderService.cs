@@ -49,21 +49,20 @@ public sealed class ImageProviderService : IDisposable, IAsyncDisposable
     /// </summary>
     public ImageSettingsManager CreateSettingsManager(
         Common.Setup.ISetupCommitTarget<ImageSetupChanges> target,
-        IImageWorkflowChoiceSource? workflows = null,
-        Func<XaiConnectionSelection, XaiFamilyBinding>? xaiBindings = null)
+        IImageWorkflowChoiceSource? workflows = null)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
-        return new(this, target, workflows, xaiBindings);
+        return new(this, target, workflows);
     }
 
     public async Task<IReadOnlyList<ImageWorkflow>> GetWorkflowsAsync(ImageConnection connection,
-        XaiFamilyBinding? xai = null, CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-        ConnectImageInference.ValidateBinding(connection, xai);
+        ConnectImageInference.ValidateBinding(connection);
         IReadOnlyList<ImageWorkflow> workflows = await RequiredTransport(connection.Transport)
-            .GetWorkflowsAsync(connection, xai, operation.Token).ConfigureAwait(false);
+            .GetWorkflowsAsync(connection, operation.Token).ConfigureAwait(false);
         ThrowIfOperationCanceled(operation.Token);
         return workflows;
     }
@@ -71,7 +70,6 @@ public sealed class ImageProviderService : IDisposable, IAsyncDisposable
     public Darkspyre.Inference.Common.Image.IImageInference Bind(
         ImageConnection connection,
         ImageWorkflow workflow,
-        XaiFamilyBinding? xai = null,
         IInferenceResourceAccess? resources = null,
         TimeSpan? pollInterval = null)
     {
@@ -87,7 +85,6 @@ public sealed class ImageProviderService : IDisposable, IAsyncDisposable
             RequiredTransport(connection.Transport),
             connection,
             workflow,
-            xai,
             resources,
             pollInterval ?? TimeSpan.FromMilliseconds(250));
     }

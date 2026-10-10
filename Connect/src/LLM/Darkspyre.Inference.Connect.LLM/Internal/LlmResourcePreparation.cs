@@ -18,7 +18,6 @@ internal interface ILlmResourcePreparationClient
 internal sealed class LlmResourcePreparation : IAsyncDisposable
 {
     private readonly List<(IInferenceResourceReadHandle Handle, InferenceResourceReference Reference)> _handles = [];
-    private readonly Dictionary<InferenceResourceReference, LlmProviderFile> _files = [];
     private readonly object _gate = new();
     private Task? _retirement;
     private Scope? _readScope;
@@ -269,73 +268,6 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
                 "The admitted resource operation failed.", facts, error);
     }
 
-    internal static async Task<LlmResourcePreparation> PrepareAsync(LlmConnection connection, LlmChatRequest request,
-        XaiFileClient files, Action fence, CancellationToken token,
-        Func<InferenceResourceReference, (Action OnDispatched, Action<LlmProviderFile> OnObserved)>? observeUpload = null,
-        IReadOnlyList<string>? secretContext = null, Action<HttpResponseMessage>? onUploadResponse = null)
-    {
-        ValidateArguments(request);
-        var operation = new LlmResourcePreparation(request);
-        InferenceResourceOperationPhase phase = InferenceResourceOperationPhase.ReadSelection;
-        InferenceResourceReference? current = null;
-        CountingReadStream? reading = null;
-        try
-        {
-            Check(fence, token);
-            if (request.Resources is not { } access) return operation;
-            InferenceResourceSelection selection = await ReadSelectionAsync(access, fence, token).ConfigureAwait(false);
-            request = AppendSelection(request, selection);
-            Scope scope = new(selection.WorkspaceId, selection.SessionId);
-            operation._readScope = scope;
-            operation.SelectionVersion = new(selection.WorkspaceId, selection.SessionId, selection.Revision);
-            CheckScope(access, scope, fence, token);
-            foreach (InferenceResourceReference reference in References(request).Distinct())
-            {
-                current = reference;
-                phase = InferenceResourceOperationPhase.OpenRead;
-                var opened = await operation.OpenNamedAsync(access, reference, descriptor =>
-                {
-                    if (string.IsNullOrWhiteSpace(descriptor.FileName))
-                        throw new NotSupportedException("The file destination requires an observed resource filename.");
-                }, fence, token).ConfigureAwait(false);
-                InferenceResourceDescriptor descriptor = opened.Descriptor;
-                reading = opened.Content;
-                phase = InferenceResourceOperationPhase.Materialize;
-                var observer = observeUpload?.Invoke(reference);
-                LlmProviderFile uploaded = await files.UploadAsync(connection, reading, descriptor.FileName!, null, fence, token,
-                    onDispatched: observer?.OnDispatched, onObserved: observer?.OnObserved,
-                    secretContext: secretContext, onResponse: onUploadResponse).ConfigureAwait(false);
-                operation.VerifyRead(access, descriptor, reading, fence, token);
-                operation._files.Add(reference, uploaded);
-                reading = null;
-            }
-            operation.Request = request with
-            {
-                Resources = null,
-                Messages = request.Messages.Select(message => message.ContinuationState is not null ? message : message with
-                {
-                    Attachments = message.Attachments.Select(attachment => attachment is LlmResourceAttachment logical
-                        ? (LlmMessageAttachment)new LlmFileReference(new ProviderFileReference(operation._files[logical.Resource].Id))
-                        : attachment).ToArray()
-                }).ToArray()
-            };
-            Check(fence, token);
-            return operation;
-        }
-        catch (Exception original)
-        {
-            Exception error = AsInputFailure(original, phase, current, reading?.BytesRead, token);
-            try { await operation.DisposeAsync().ConfigureAwait(false); }
-            catch (Exception cleanup)
-            {
-                if (error is PreparationFailure sequence)
-                    throw new PreparationFailure(sequence.InnerExceptions.Concat([cleanup]), sequence);
-                throw new PreparationFailure([error, cleanup], error);
-            }
-            ExceptionDispatchInfo.Capture(error).Throw();
-            throw;
-        }
-    }
 
     internal static async IAsyncEnumerable<LlmStreamEvent> StreamInlineAsync(LlmChatRequest request,
         Action<LlmChatRequest> validate, Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> stream,
@@ -502,9 +434,6 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
     internal static Exception AsInputFailure(Exception error, InferenceResourceOperationPhase phase,
         InferenceResourceReference? reference, long? bytesRead, CancellationToken token)
     {
-        if (error is XaiFileClient.ExchangeFailure files)
-            return new PreparationFailure(new[] { AsInputFailure(files.InnerExceptions[0], phase, reference, bytesRead, token) }
-                .Concat(files.InnerExceptions.Skip(1)), files);
         if (IsResourceFailure(error)) return error;
         var facts = new InferenceResourceOperationFailure(phase, reference,
             InferenceResourceCommitOutcome.NotAttempted, bytesRead);
@@ -519,10 +448,6 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
     {
         internal Exception? Original { get; } = original;
     }
-
-    internal SentToolPart Project(InferenceResourceReference reference) => _files.TryGetValue(reference, out var file)
-        ? new SentNativeFile(file.Id)
-        : throw new InvalidOperationException("The admitted tool resource has no materialized file receipt.");
 
     internal static LlmChatRequest AppendSelection(LlmChatRequest request, InferenceResourceSelection selection)
     {
@@ -612,7 +537,6 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         }
         _handles.Clear();
         _handles.AddRange(failedHandles);
-        _files.Clear();
         if (_request is not null) _request = _request with { Resources = null };
         if (failures.Count == 0) return;
         if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();

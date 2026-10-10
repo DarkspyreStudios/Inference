@@ -24,14 +24,14 @@ public sealed class TtsProviderService : IDisposable, IAsyncDisposable
             return _providers!.Values.Select(provider => provider.SetupDefinition).ToArray();
         }
     }
-    public ITtsClient Bind(TtsConnection connection, XaiFamilyBinding? xai = null,
+    public ITtsClient Bind(TtsConnection connection,
         IInferenceResourceAccess? resources = null)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
         ArgumentNullException.ThrowIfNull(connection);
         ITtsProvider provider = RequiredProvider(_providers!, connection.Transport);
-        ValidateBinding(connection, xai);
-        return provider.Bind(connection, xai, resources);
+        ValidateBinding(connection);
+        return provider.Bind(connection, resources);
     }
     internal static ITtsProvider RequiredProvider(IReadOnlyDictionary<TtsTransport, ITtsProvider> providers, TtsTransport transport)
     {
@@ -41,11 +41,10 @@ public sealed class TtsProviderService : IDisposable, IAsyncDisposable
     }
     /// <summary>Creates the settings manager that opens, acts on and saves TTS settings through <paramref name="target"/>.</summary>
     public TtsSettingsManager CreateSettingsManager(ISetupCommitTarget<TtsSetupChanges> target,
-        Func<XaiConnectionSelection, XaiFamilyBinding>? xaiBindings = null,
         IInferenceResourceAccess? resources = null)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
-        return new(this, target, xaiBindings, resources);
+        return new(this, target, resources);
     }
 
     internal ITtsProvider Provider(TtsTransport transport)
@@ -64,30 +63,16 @@ public sealed class TtsProviderService : IDisposable, IAsyncDisposable
         return Task.CompletedTask;
     });
 
-    internal static void ValidateBinding(TtsConnection connection, XaiFamilyBinding? xai)
+    internal static void ValidateBinding(TtsConnection connection)
     {
         ValidateConnection(connection);
-        if (connection.Transport == TtsTransport.PocketTtsHttp)
-        {
-            if (xai is not null || connection.Xai is not null || connection.Authorization is not null)
-                throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "PocketTTS does not implement borrowed provider authorization or xAI binding.");
-            return;
-        }
-        if (connection.Xai is null || xai is null || connection.Xai != xai.Selection
-            || connection.Authorization is not null && !ReferenceEquals(connection.Authorization, xai.Authorization))
-            throw new ArgumentException("The selected TTS connection requires its matching borrowed xAI binding.");
+        if (connection.Transport == TtsTransport.PocketTtsHttp && connection.Authorization is not null)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "PocketTTS does not implement borrowed provider authorization.");
     }
 
     internal static void ValidateConnection(TtsConnection connection)
     {
-        if (connection.Transport == TtsTransport.PocketTtsHttp) { PocketTtsHttpProvider.ValidateConnection(connection); return; }
-        if (connection.Transport != TtsTransport.XaiTts || connection.Endpoint is not { IsAbsoluteUri: true, Scheme: "https" }
-            || connection.Endpoint.UserInfo.Length != 0 || connection.Endpoint.Query.Length != 0 || connection.Endpoint.Fragment.Length != 0
-            || connection.RequestTimeout <= TimeSpan.Zero)
-            throw new ArgumentException("xAI TTS requires an explicit HTTPS endpoint and positive timeout.");
-        ProviderHttp.ValidateAdditionalHeaders(connection.Headers);
-        if (connection.Headers.ContainsKey("api-key"))
-            throw new ArgumentException("Static authentication headers cannot replace the selected xAI authorization.");
+        if (connection.Transport == TtsTransport.PocketTtsHttp) PocketTtsHttpProvider.ValidateConnection(connection);
     }
 }
 
@@ -99,9 +84,6 @@ public static class ServiceCollectionExtensions
         services.AddInferenceHttpClient<PocketTtsHttpProvider>(client => client.Timeout = Timeout.InfiniteTimeSpan)
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         services.AddTransient<ITtsProvider>(provider => provider.GetRequiredService<PocketTtsHttpProvider>());
-        services.AddInferenceHttpClient<XaiTtsProvider>(client => client.Timeout = Timeout.InfiniteTimeSpan)
-            .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
-        services.AddTransient<ITtsProvider>(provider => provider.GetRequiredService<XaiTtsProvider>());
         services.AddTransient<TtsProviderService>();
         return services;
     }

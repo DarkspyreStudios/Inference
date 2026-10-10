@@ -15,6 +15,8 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
+    <!-- Phase 1 leaves the xAI transport out of the build. Its tests stay in the repository. -->
+    <Compile Remove="XaiImagineImageTransportTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

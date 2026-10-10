@@ -75,7 +75,7 @@ public sealed record LlmContextCachePage(IReadOnlyList<LlmContextCache> Items, s
 
 public sealed record LlmContextCacheDeleteResult([property: JsonRequired] bool AlreadyAbsent);
 
-/// <summary>Explicit provider cache operations. This contract alone does not enable a provider route.</summary>
+/// <summary>Explicit provider cache operations. This contract alone does not enable a provider route. No phase-1 provider implements this; it is a forward seam under the L2 exception in Inference/AGENTS.md, tracked by DSA-121.</summary>
 public interface ILlmContextCacheClient
 {
     Task<LlmContextCache> CreateAsync(LlmContextCacheCreate request, CancellationToken cancellationToken = default);

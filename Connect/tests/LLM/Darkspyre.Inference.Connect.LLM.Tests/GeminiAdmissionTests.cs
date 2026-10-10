@@ -244,15 +244,6 @@ public sealed class GeminiAdmissionTests
     }
 
     [Theory]
-    [InlineData("000000206674797068656963000000006d69663168656963")]
-    [InlineData("00000010667479706d703432000000006d69663168656963")]
-    public void ImageMimeDetectionDoesNotReadCompatibleBrandsOutsideTheFileTypeBox(string hex)
-    {
-        var image = new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "photo.heic", Data = Convert.FromHexString(hex) };
-        Assert.Throws<NotSupportedException>(() => LlmAttachments.ResolveMediaType(image));
-    }
-
-    [Theory]
     [InlineData(false, "gemini-unfamiliar")]
     [InlineData(true, "gemini-unfamiliar")]
     [InlineData(false, "gemini-3-flash-preview")]

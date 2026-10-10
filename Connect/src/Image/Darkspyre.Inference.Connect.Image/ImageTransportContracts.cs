@@ -141,14 +141,12 @@ public interface IImageTransport
 
     Task<IReadOnlyList<ImageWorkflow>> GetWorkflowsAsync(
         ImageConnection connection,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default);
 
     Task<ImageCapabilities> GetCapabilitiesAsync(
         ImageConnection connection,
         ImageWorkflow workflow,
         string? modelId = null,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default);
 
     PreparedImageTransportRequest Prepare(ImageTransportPreparationRequest request);
@@ -156,51 +154,43 @@ public interface IImageTransport
     Task<ImageProviderHealth> TestAsync(
         ImageConnection connection,
         ImageWorkflow? workflow = null,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default);
 
     Task<IImageTransportProgressConnection?> TryConnectProgressAsync(
         ImageConnection connection,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default);
 
     Task<ImagePreparedReference> UploadReferenceAsync(
         ImageConnection connection,
         ImageReference reference,
         Stream content,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default);
 
     Task<ImagePreparedReference> ResolveReferenceAsync(
         ImageConnection connection,
         InferenceMediaSource source,
-        XaiFamilyBinding? xai = null,
         IInferenceResourceAccess? resources = null,
         CancellationToken cancellationToken = default);
 
     Task<string> SubmitAsync(
         ImageConnection connection,
         PreparedImageTransportRequest request,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default);
 
     Task<ImageTransportJobSnapshot> GetJobAsync(
         ImageConnection connection,
         string providerJobId,
         ImageWorkflow workflow,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default);
 
     Task<ImageTransportDownload> DownloadAsync(
         ImageConnection connection,
         ImageTransportOutput output,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default);
 
     Task<bool> TryCancelAsync(
         ImageConnection connection,
         string providerJobId,
         bool interruptRunning,
-        XaiFamilyBinding? xai = null,
         CancellationToken cancellationToken = default);
 }

@@ -23,7 +23,6 @@ public static class ConnectTtsJson
     public static JsonTypeInfo<TtsSetupHeaderChanges> TtsSetupHeaderChanges => Metadata<TtsSetupHeaderChanges>();
     public static JsonTypeInfo<TtsSetupChanges> TtsSetupChanges => Metadata<TtsSetupChanges>();
     public static JsonTypeInfo<TtsTimestamp> TtsTimestamp => Metadata<TtsTimestamp>();
-    public static JsonTypeInfo<XaiTtsOptions> XaiTtsOptions => Metadata<XaiTtsOptions>();
     public static JsonTypeInfo<TtsStreamOptions> TtsStreamOptions => Metadata<TtsStreamOptions>();
     public static JsonTypeInfo<TtsAudioChunk> TtsAudioChunk => Metadata<TtsAudioChunk>();
     public static JsonTypeInfo<TtsUtteranceCompleted> TtsUtteranceCompleted => Metadata<TtsUtteranceCompleted>();
@@ -47,8 +46,6 @@ public static class ConnectTtsJson
         foreach (Type type in new[] { typeof(IProviderAuthorization), typeof(IInferenceResourceAccess), typeof(IInferenceResourceReadHandle), typeof(IInferenceResourceWriteHandle),
             typeof(InferenceResourceOperationPhase), typeof(InferenceResourceCommitOutcome) })
             options.Converters.Add(InferenceJson.InferenceResourceReference.Options.Converters.Single(converter => converter.CanConvert(type)));
-        options.Converters.Add(ConnectLlmJson.Connection.Options.Converters.Single(converter => converter.CanConvert(typeof(XaiFamilyBinding))));
-        options.Converters.Add(new TtsRuntimeJsonConverter<Func<XaiConnectionSelection, XaiFamilyBinding>>());
         options.Converters.Add(new TtsRuntimeJsonConverter<TtsProviderService>());
         options.Converters.Add(new TtsRuntimeJsonConverter<TtsSettings>());
         options.Converters.Add(new TtsRuntimeJsonConverter<TtsSettingsManager>());
@@ -70,8 +67,6 @@ public static class ConnectTtsJson
             if (type == typeof(IInferenceResourceAccess)) return RuntimeValue<IInferenceResourceAccess>(options);
             if (type == typeof(IInferenceResourceReadHandle)) return RuntimeValue<IInferenceResourceReadHandle>(options);
             if (type == typeof(IInferenceResourceWriteHandle)) return RuntimeValue<IInferenceResourceWriteHandle>(options);
-            if (type == typeof(XaiFamilyBinding)) return RuntimeValue<XaiFamilyBinding>(options);
-            if (type == typeof(Func<XaiConnectionSelection, XaiFamilyBinding>)) return RuntimeValue<Func<XaiConnectionSelection, XaiFamilyBinding>>(options);
             if (type == typeof(TtsProviderService)) return RuntimeValue<TtsProviderService>(options);
             if (type == typeof(TtsSettings)) return RuntimeValue<TtsSettings>(options);
             if (type == typeof(TtsSettingsManager)) return RuntimeValue<TtsSettingsManager>(options);
@@ -128,7 +123,6 @@ internal sealed class TtsRuntimeJsonConverter<T> : JsonConverter<T> where T : cl
 [JsonSerializable(typeof(TtsSetupHeaderChanges))]
 [JsonSerializable(typeof(TtsSetupChanges))]
 [JsonSerializable(typeof(TtsTimestamp))]
-[JsonSerializable(typeof(XaiTtsOptions))]
 [JsonSerializable(typeof(TtsStreamOptions))]
 [JsonSerializable(typeof(TtsAudioChunk))]
 [JsonSerializable(typeof(TtsUtteranceCompleted))]

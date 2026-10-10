@@ -18,12 +18,11 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
     private IImageTransport? _transport;
     private ImageConnection? _connection;
     private ImageWorkflow? _workflow;
-    private XaiFamilyBinding? _xai;
     private IInferenceResourceAccess? _resources;
     private readonly List<(Exception Original, Exception Safe)> _cleanupFailures = [];
 
     internal ConnectImageInference(IImageTransport transport, ImageConnection connection,
-        ImageWorkflow workflow, XaiFamilyBinding? xai, IInferenceResourceAccess? resources,
+        ImageWorkflow workflow, IInferenceResourceAccess? resources,
         TimeSpan pollInterval)
     {
         _transport = transport;
@@ -33,7 +32,6 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
             TransportConfiguration = workflow.TransportConfiguration.ValueKind == System.Text.Json.JsonValueKind.Undefined
             ? default : workflow.TransportConfiguration.Clone()
         };
-        _xai = xai;
         _resources = resources;
         _pollInterval = pollInterval;
     }
@@ -47,8 +45,8 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
     {
         using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
         ImageConnection connection = CaptureConnection(_connection!);
-        ValidateBinding(connection, _xai);
-        ImageCapabilities result = await _transport!.GetCapabilitiesAsync(connection, _workflow!, modelId, _xai, lease.Token).ConfigureAwait(false);
+        ValidateBinding(connection);
+        ImageCapabilities result = await _transport!.GetCapabilitiesAsync(connection, _workflow!, modelId, lease.Token).ConfigureAwait(false);
         Fence(lease.Token);
         return result;
     }
@@ -69,15 +67,13 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
         IImageTransport transport = _transport!;
         ImageWorkflow workflow = _workflow!;
         ImageConnection connection = CaptureConnection(_connection!);
-        XaiFamilyBinding? xai = _xai;
-        XaiFamilyBinding? entered = null;
         var generatedResources = new List<InferenceResourceCommitResult>();
         try
         {
             IInferenceResourceAccess? resources = _resources;
             InferenceMediaSource[] references = request.References.Select(source => source is BinaryMediaSource binary
                 ? binary with { Data = binary.Data.ToArray() } : source).ToArray();
-            ValidateBinding(connection, xai);
+            ValidateBinding(connection);
             if (!string.Equals(request.ModelId, workflow.Id, StringComparison.Ordinal))
                 throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The requested workflow is not bound.");
             if (request.Count < 1)
@@ -92,31 +88,15 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                 throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Logical image references require caller-owned resource access.");
             if (workflow.RequiresReferenceImage && references.Length == 0)
                 throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The workflow requires a reference image.");
-            if (xai is not null)
-            {
-                XaiImagineImageTransport.ValidateConnection(connection, xai);
-                xai.RequireCatalogService();
-                XaiImageProtocol.Validate(request with { References = references }, workflow);
-                foreach (InferenceMediaSource source in references) XaiImagineImageTransport.ValidateSource(source, resources);
-                xai = await xai.AcquireBoundAsync(snapshot =>
-                {
-                    XaiImagineImageTransport.ValidateSelected(connection, snapshot);
-                }, () => Fence(lease.Token), lease.Token).ConfigureAwait(false);
-                entered = xai;
-                Fence(lease.Token);
-                connection = connection with { Authorization = xai.Authorization };
-            }
-            ImageCapabilities capabilities = await transport.GetCapabilitiesAsync(connection, workflow, request.ModelId, xai, lease.Token).ConfigureAwait(false);
+            ImageCapabilities capabilities = await transport.GetCapabilitiesAsync(connection, workflow, request.ModelId, lease.Token).ConfigureAwait(false);
             Fence(lease.Token);
             ValidateCapabilities(request, references, capabilities);
             var receipts = new List<ImagePreparedReference>();
             foreach (InferenceMediaSource source in references)
             {
                 Fence(lease.Token);
-                ImagePreparedReference receipt = await transport.ResolveReferenceAsync(connection, source, xai, resources, lease.Token).ConfigureAwait(false);
+                ImagePreparedReference receipt = await transport.ResolveReferenceAsync(connection, source, resources, lease.Token).ConfigureAwait(false);
                 receipts.Add(receipt);
-                if (connection.Transport == ImageTransport.XaiImagine)
-                    generatedResources.AddRange(XaiImagineImageTransport.PreparedResources(receipt));
                 Fence(lease.Token);
             }
             long? seed = request.Seed ?? (connection.Transport == ImageTransport.ComfyUi ? Random.Shared.NextInt64() : null);
@@ -141,11 +121,11 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
             long started = Stopwatch.GetTimestamp();
             try
             {
-                jobId = await transport.SubmitAsync(connection, prepared, xai, lease.Token).ConfigureAwait(false);
+                jobId = await transport.SubmitAsync(connection, prepared, lease.Token).ConfigureAwait(false);
                 Fence(lease.Token);
                 while (true)
                 {
-                    ImageTransportJobSnapshot snapshot = await transport.GetJobAsync(connection, jobId, workflow, xai, lease.Token).ConfigureAwait(false);
+                    ImageTransportJobSnapshot snapshot = await transport.GetJobAsync(connection, jobId, workflow, lease.Token).ConfigureAwait(false);
                     Fence(lease.Token);
                     switch (snapshot.State)
                     {
@@ -163,7 +143,7 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                             foreach (ImageTransportOutput output in snapshot.Outputs.ToArray())
                             {
                                 ArgumentNullException.ThrowIfNull(output);
-                                ImageTransportDownload download = await transport.DownloadAsync(connection, output, xai, lease.Token).ConfigureAwait(false);
+                                ImageTransportDownload download = await transport.DownloadAsync(connection, output, lease.Token).ConfigureAwait(false);
                                 Fence(lease.Token);
                                 byte[] bytes = download.Data.ToArray();
                                 string? contentType = download.ContentType ?? output.ContentType;
@@ -185,9 +165,7 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                                     Seed = seed,
                                     File = output.File,
                                     Resource = resource,
-                                    Selection = selection,
-                                    Width = connection.Transport == ImageTransport.XaiImagine ? OutputDimension(output, "width") : null,
-                                    Height = connection.Transport == ImageTransport.XaiImagine ? OutputDimension(output, "height") : null
+                                    Selection = selection
                                 });
                             }
                             Fence(lease.Token);
@@ -220,23 +198,17 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
             }
             catch (OperationCanceledException error) when (jobId is not null)
             {
-                try { await transport.TryCancelAsync(connection, jobId, interruptRunning: true, xai, CancellationToken.None).ConfigureAwait(false); }
+                try { await transport.TryCancelAsync(connection, jobId, interruptRunning: true, CancellationToken.None).ConfigureAwait(false); }
                 catch (Exception cleanup) when (cleanup is not OutOfMemoryException) { throw new AggregateException(error, cleanup); }
                 throw;
             }
         }
         catch (Exception error)
         {
-            if (connection.Transport == ImageTransport.XaiImagine) error = XaiImagineImageTransport.SafeFailure(error);
             System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(LlmResourcePreparation.WithGeneratedResources(error, generatedResources));
             throw;
         }
-        finally { entered?.DetachOperationFence(); }
     }
-
-    private static int? OutputDimension(ImageTransportOutput output, string name) =>
-        output.ProviderState.TryGetProperty(name, out System.Text.Json.JsonElement value)
-            && value.ValueKind == System.Text.Json.JsonValueKind.Number && value.TryGetInt32(out int observed) ? observed : null;
 
     private static void ValidateCapabilities(ImageGenerationRequest request, InferenceMediaSource[] references, ImageCapabilities capabilities)
     {
@@ -257,18 +229,10 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "The selected image transport does not support the requested controls or references.");
     }
 
-    internal static void ValidateBinding(ImageConnection connection, XaiFamilyBinding? xai)
+    internal static void ValidateBinding(ImageConnection connection)
     {
-        if (connection.Transport != ImageTransport.XaiImagine)
-        {
-            if (xai is not null || connection.Xai is not null)
-                throw new ArgumentException("This image transport does not accept an xAI binding.");
-            if (connection.Transport == ImageTransport.ComfyUi && connection.Authorization is not null)
-                throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "ComfyUI dynamic authorization is not qualified; use static protected headers.");
-        }
-        else if (connection.Xai is null || xai is null || connection.Xai != xai.Selection
-            || (connection.Authorization is not null && !ReferenceEquals(connection.Authorization, xai.Authorization)))
-            throw new ArgumentException("The image connection requires its matching borrowed xAI binding.");
+        if (connection.Transport == ImageTransport.ComfyUi && connection.Authorization is not null)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "ComfyUI dynamic authorization is not qualified; use static protected headers.");
     }
 
     private static ImageConnection CaptureConnection(ImageConnection connection) => connection with
@@ -285,7 +249,7 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
     public ValueTask DisposeAsync() => new(RetireAsync());
     private Task RetireAsync() => _lifetime.RetireAsync(() =>
     {
-        _transport = null; _connection = null; _workflow = null; _xai = null; _resources = null;
+        _transport = null; _connection = null; _workflow = null; _resources = null;
         if (_cleanupFailures.Count == 1) return Task.FromException(_cleanupFailures[0].Safe);
         if (_cleanupFailures.Count > 1) return Task.FromException(new AggregateException(_cleanupFailures.Select(item => item.Safe)));
         return Task.CompletedTask;
@@ -311,7 +275,6 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                 if (current is AggregateException aggregate)
                     for (int index = aggregate.InnerExceptions.Count - 1; index >= 0; index--) pending.Push(aggregate.InnerExceptions[index]);
                 else if (current is ImageResourceOperations.FailureEvidence evidence) pending.Push(evidence.Original);
-                else if (current is XaiImagineImageTransport.ImageEvidence imageEvidence) pending.Push(imageEvidence.Original);
                 else if (current.InnerException is { } inner) pending.Push(inner);
             }
         }

@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Globalization;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM;
-using Darkspyre.Inference.Connect.Resources;
 
 namespace Darkspyre.Inference.Connect.ConsoleTester;
 
@@ -109,15 +108,8 @@ internal static class ProbeRunner
         AggregateException aggregate => string.Join("; ", aggregate.InnerExceptions.Select(FailureDetail)),
         ProbeFailure assertion => assertion.Message,
         ProbeUnavailable unavailable => unavailable.Message,
-        LlmResourceOperationException resource => ResourceFailureDetail(resource.Observation, resource.InnerException),
-        LlmResourceOperationCanceledException resource => ResourceFailureDetail(resource.Observation, resource.InnerException),
         InferenceException inference => Program.FormatInferenceFailure(inference),
         LlmProviderException provider => Program.FormatProviderFailure(provider),
         _ => $"{error.GetType().Name} (provider details omitted)"
     };
-
-    private static string ResourceFailureDetail(LlmResourceOperationObservation observation, Exception? cause) =>
-        $"Resource {observation.Operation}: HTTP {observation.HttpStatusCode?.ToString(CultureInfo.InvariantCulture) ?? "unknown"}; "
-        + $"request={observation.RequestId ?? "unknown"}; "
-        + (cause is null ? "cause unavailable" : FailureDetail(cause));
 }

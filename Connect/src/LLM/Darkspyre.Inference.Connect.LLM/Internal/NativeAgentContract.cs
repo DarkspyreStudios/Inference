@@ -11,9 +11,6 @@ internal static class NativeAgentContract
     private static IReadOnlySet<LlmAgentRuntimePolicyKind> HostControlled { get; } =
         FrozenSet.Create(LlmAgentRuntimePolicyKind.HostControlled);
 
-    private static IReadOnlySet<LlmAgentRuntimePolicyKind> ProviderConfigured { get; } =
-        FrozenSet.Create(LlmAgentRuntimePolicyKind.ProviderConfigured);
-
     public static LlmAgentCapabilities Claude { get; } = new()
     {
         ContextOwnership = LlmAgentOwnership.Provider,
@@ -26,29 +23,6 @@ internal static class NativeAgentContract
         RichContentSupported = RichContentRoutes.ClaudeMcp,
         SupportedRuntimePolicies = HostControlled,
         ResourceObservation = LlmOperationSupport.Supported
-    };
-
-    public static LlmAgentCapabilities AgentCore { get; } = new()
-    {
-        ContextOwnership = LlmAgentOwnership.Provider,
-        ContextImport = LlmAgentContextImport.OpeningContext,
-        SupportsNativeResume = InferenceSupport.Supported,
-        CompactionOwnership = LlmAgentOwnership.Provider,
-        ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed,
-        RichContentSupported = RichContentRoutes.AgentCore,
-        SupportedRuntimePolicies = HostControlled,
-        // Not measured: no AgentCore credentials were available.
-        ResourceObservation = LlmOperationSupport.Unknown
-    };
-
-    public static LlmAgentCapabilities Antigravity { get; } = new()
-    {
-        ContextOwnership = LlmAgentOwnership.Provider,
-        SupportsNativeResume = InferenceSupport.Supported,
-        CompactionOwnership = LlmAgentOwnership.Provider,
-        ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Provider,
-        RichContentSupported = RichContentRoutes.TextOnly,
-        SupportedRuntimePolicies = ProviderConfigured
     };
 
     /// <summary>The validated start settings of a runtime that declares <paramref name="agent"/>.</summary>
@@ -126,7 +100,6 @@ internal static class NativeAgentContract
         IReadOnlyList<LlmAgentClientToolDefinition> tools,
         LlmAgentToolHandler? toolHandler)
     {
-        ProviderControlPolicy.Validate(connection, new() { ModelId = modelId ?? string.Empty });
         var implemented = new LlmProviderCapabilities
         {
             SupportsAgentSessions = InferenceSupport.Supported,

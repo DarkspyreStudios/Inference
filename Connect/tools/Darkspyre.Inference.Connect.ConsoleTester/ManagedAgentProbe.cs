@@ -59,42 +59,6 @@ internal static class ManagedAgentProbe
         }, cancellationToken));
         RequireCompleted(result, "FORK");
         Console.WriteLine("PASS: independent host-context fork.");
-
-        await using var compacting = await agents.StartSessionAsync(connectionId, options with
-        {
-            Tools = [],
-            Context = new()
-            {
-                Entries = [new("old", "old-turn", new("user", string.Join(' ', Enumerable.Repeat("Earlier irrelevant context.", 3000))))]
-            },
-            ExecutionOptions = new()
-            {
-                ContextPolicy = new()
-                { MaxContextTokens = 2048, ReservedOutputTokens = 256, SafetyMarginTokens = 32 }
-            }
-        }, cancellationToken);
-        var turn = new LlmAgentTurnRequest
-        {
-            Input = [new LlmAgentTextContent("Confirm the current request.")],
-            Instructions = "Reply with COMPACTED only.",
-            ReasoningLevel = LlmReasoningLevel.Low
-        };
-        var preview = await compacting.GetContextStatusAsync(turn, cancellationToken);
-        if (preview.NeedsCompaction != true) { throw new InvalidOperationException("Expected low-cap context pressure."); }
-        result = await ReadAsync(compacting.RunTurnAsync(turn, cancellationToken));
-        var pause = result.OfType<LlmAgentCompactionRequiredEvent>().Single();
-        if (!pause.CanCompactHistory || result.OfType<LlmAgentTurnCompletedEvent>().Any())
-        { throw new InvalidOperationException("Compaction must suspend, not complete, the logical run."); }
-        var captured = await compacting.CaptureContextAsync(new() { IncludeAttachmentData = true }, cancellationToken);
-        // This tiny fixture replaces deliberately irrelevant history. Real summarization belongs to Agent DS.
-        var replacement = captured with { Entries = captured.Entries.Where(entry => pause.ProtectedEntryIds.Contains(entry.Id)).ToArray() };
-        result = await ReadAsync(compacting.ContinueTurnAsync(new(pause.TurnId, pause.PauseId, captured.Revision, replacement), cancellationToken));
-        RequireCompleted(result, "COMPACTED");
-        if (result.Any(item => item.TurnId != pause.TurnId)) { throw new InvalidOperationException("Continuation changed turn identity."); }
-        var final = await compacting.CaptureContextAsync(cancellationToken: cancellationToken);
-        if (final.Entries.Count(entry => entry.Message.Role == "user") != 1)
-        { throw new InvalidOperationException("Continuation duplicated the original prompt."); }
-        Console.WriteLine("PASS: prospective budget, host compaction, same-run continuation, retained override, no duplicate prompt.");
         return 0;
     }
 

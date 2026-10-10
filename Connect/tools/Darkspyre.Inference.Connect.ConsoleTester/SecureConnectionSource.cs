@@ -117,14 +117,13 @@ internal sealed class SecureConnectionSource(
         string? credential)
     {
         ConsoleInvocation? selected = invocation?.Provider.ConnectionId == provider.ConnectionId ? invocation : null;
-        string endpoint = selected?.Xai?.GetEndpoint() ?? selected?.EndpointOverride ?? provider.Endpoint;
+        string endpoint = selected?.EndpointOverride ?? provider.Endpoint;
         return provider.CreateConnection(
             ComputeVersion(provider, endpoint + selected?.Vertex?.ProjectId + "/" + selected?.Vertex?.Location + "/" + selected?.Vertex?.AuthenticationMode
                 + (selected?.NonStreaming == true ? "/non-streaming" : string.Empty), credential), credential) with
         {
             Endpoint = endpoint,
             Vertex = selected?.Vertex,
-            Xai = selected?.Xai,
             CapabilityOverrides = selected?.NonStreaming == true ? new() { SupportsStreaming = InferenceSupport.Unsupported } : null
         };
     }
@@ -155,7 +154,6 @@ internal sealed class SecureConnectionSource(
 
     private static bool StoresHostCredential(LlmTransport transport) => transport is
         LlmTransport.OpenAiCodex
-        or LlmTransport.XaiResponses
         or LlmTransport.OpenAiResponses
         or LlmTransport.OpenAiCompatibleChat
         or LlmTransport.AnthropicMessages

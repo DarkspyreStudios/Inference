@@ -72,6 +72,6 @@ internal sealed class SdkHttpConfiguration
         foreach ((string name, List<SdkHttpLoggerDefinition> loggers) in _loggers) snapshot._loggers.Add(name, [.. loggers]);
         return snapshot;
     }
-    internal SdkHttpLoggerDefinition[] GetLoggers(string name) => name == "XaiMediaDownloadClient" ? [] : _loggers[name].ToArray();
+    internal SdkHttpLoggerDefinition[] GetLoggers(string name) => _loggers[name].ToArray();
     internal void Detach() => _loggers.Clear();
 }

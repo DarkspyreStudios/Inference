@@ -1246,16 +1246,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         var capabilities = _capabilities(turn.ModelId ?? _options.ModelId);
         HostedTools.Validate(_hostedTools, _options.MaxHostedTurns, capabilities.HostedTools);
         ClientTools.ValidateManagedOpening(_options with { ToolHandler = _toolHandler, CallerServices = _callerServices }, capabilities, _supportsResources);
-        LlmChatRequest effective = ProviderControlPolicy.Resolve(_connection, new()
-        {
-            ModelId = turn.ModelId ?? _options.ModelId,
-            ProviderControls = turn.ProviderControls,
-            ReasoningLevel = turn.ReasoningLevel
-        });
-        if (effective.ProviderControls is null && effective.ReasoningLevel is null
-            && _connection.Transport == LlmTransport.XaiResponses
-            && XaiModelProfiles.Get(_connection, effective.ModelId).MultiAgent is not null)
-            effective = effective with { ProviderControls = new XaiMultiAgentControls() };
         if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported) || (_options.Tools.Count > 0 && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported))
             || (turn.Instructions is not null && (capabilities.SupportsAgentTurnInstructions == InferenceSupport.Unsupported)))
         {
@@ -1264,7 +1254,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         return ClientTools.Snapshot(turn) with
         {
             ModelId = turn.ModelId ?? _options.ModelId,
-            ProviderControls = effective.ProviderControls,
+            ProviderControls = turn.ProviderControls,
             OutputSchema = turn.OutputSchema?.Clone()
         };
     }

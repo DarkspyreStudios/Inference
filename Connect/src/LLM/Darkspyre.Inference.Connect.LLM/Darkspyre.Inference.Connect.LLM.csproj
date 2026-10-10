@@ -26,13 +26,26 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Image" />
-    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.STT" />
-    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Video" />
-    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Realtime" />
-    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Resources" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.TTS" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Audio" />
-    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Bedrock" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Phase 1 builds only the Codex and Claude CLI providers. Excluded source stays in the repository. -->
+    <Compile Remove="Providers/Anthropic*.cs;Providers/ManagedAnthropicAgentClient.cs" />
+    <Compile Remove="Providers/Antigravity*.cs;Providers/IAntigravityCliRunner.cs" />
+    <Compile Remove="Providers/Apple*.cs;Providers/ManagedAppleAgentClient.cs" />
+    <Compile Remove="Providers/ChatCompletionsLlmClientBase.cs;Providers/OpenAiCompatibleChatLlmClient.cs;Providers/ManagedOpenAiCompatibleAgentClient.cs" />
+    <Compile Remove="Providers/GeminiApiLlmClient*.cs;Providers/ManagedGeminiApiAgentClient.cs" />
+    <Compile Remove="Providers/OpenAiResponsesLlmClient.cs;Providers/ManagedOpenAiResponsesAgentClient.cs" />
+    <Compile Remove="Providers/SelfHost*.cs;Providers/ManagedSelfHostAgentClient.cs" />
+    <Compile Remove="Providers/Xai*.cs;Providers/ManagedXaiAgentClient.cs" />
+    <Compile Remove="Internal/AnthropicContentStream.cs;Internal/AnthropicProgrammaticSchemas.cs;Internal/AnthropicPromptCache.cs;Internal/AnthropicSchemas.cs;Internal/AnthropicToolContinuation.cs;Internal/AnthropicTools.cs" />
+    <Compile Remove="Internal/ChatReasoning.cs;Internal/OpenAiCompatibleChatContinuationCodec.cs;Internal/OpenRouter*.cs;Internal/ProviderTokenCounting.cs" />
+    <Compile Remove="Internal/Gemini/**" />
+    <Compile Include="Internal/Gemini/GeminiCacheBindings.cs;Internal/Gemini/GoogleCacheData.cs" />
+    <Compile Remove="Internal/Xai*.cs;Internal/DocumentSearchEnumConverters.cs" />
+    <Compile Remove="DocumentSearch.cs;XaiFamilyBinding.cs;XaiFileStorageOptions.cs;XaiHostedTools.cs;XaiSkills.cs;LlmProviderService.Xai.cs" />
   </ItemGroup>
 
 </Project>

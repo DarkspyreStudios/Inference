@@ -9,4 +9,8 @@
     <ProjectReference Include="../../../../Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj" />
     <ProjectReference Include="../../LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <!-- Phase 1 leaves the xAI transport out of the build. Its source stays in the repository. -->
+    <Compile Remove="XaiTts*.cs" />
+  </ItemGroup>
 </Project>

@@ -13,7 +13,6 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
     private LlmConnectionAccess? _connectionAccess;
     private LlmConnectionAccess ConnectionAccess => _connectionAccess ?? throw new ObjectDisposedException(nameof(LlmEmbeddingProviderService));
     private readonly bool _ownsConnectionAccess;
-    private LlmProviderService? _providerService;
     private readonly LlmCleanupOutcomes _cleanupOutcomes = new();
     private readonly LlmOperationLifetime _lifetime = new();
     private readonly Lock _disposeGate = new();
@@ -23,23 +22,15 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
         ILlmConnectionSource connections,
         IEnumerable<ILlmEmbeddingClient> clients,
         IEnumerable<ILlmAuthenticator>? authenticators = null,
-        LlmConnectionAccess? connectionAccess = null,
-        LlmProviderService? providerService = null)
+        LlmConnectionAccess? connectionAccess = null)
     {
         _connections = connections ?? throw new ArgumentNullException(nameof(connections));
         ArgumentNullException.ThrowIfNull(clients);
         if (connectionAccess is not null && !connectionAccess.UsesSource(connections))
             throw new ArgumentException("Credential access must use the facade's connection source.", nameof(connectionAccess));
-        if (providerService is not null)
-        {
-            if (connectionAccess is null)
-                throw new ArgumentException("A catalog facade requires explicitly shared credential access.", nameof(connectionAccess));
-            providerService.ValidateXaiAccess(connectionAccess);
-        }
         _clients = [.. clients];
         _connectionAccess = connectionAccess ?? new LlmConnectionAccess(connections, authenticators ?? []);
         _ownsConnectionAccess = connectionAccess is null;
-        _providerService = providerService;
     }
 
     public async Task<LlmEmbeddingResult> EmbedAsync(
@@ -61,48 +52,12 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
             ThrowIfRequestCanceled(cancellationToken);
             client.ValidateRequest(connection, request);
             ThrowIfRequestCanceled(cancellationToken);
-            LlmProviderService? catalog = connection.Transport == LlmTransport.XaiResponses ? RequireCatalogService() : null;
-            ThrowIfRequestCanceled(cancellationToken);
             connection = await ConnectionAccess.RefreshAsync(connectionId, connection,
                 current => client.ValidateRequest(current, request), () => ThrowIfRequestCanceled(cancellationToken), cancellationToken).ConfigureAwait(false);
             ThrowIfRequestCanceled(cancellationToken);
-            if (catalog is not null)
-            {
-                IReadOnlyList<LlmModel> models = await catalog.GetXaiCatalogSnapshotAsync(connectionId,
-                    connection, ModelCatalogFamily.Embedding, () => ThrowIfRequestCanceled(cancellationToken), cancellationToken).ConfigureAwait(false);
-                ThrowIfRequestCanceled(cancellationToken);
-                connection = connection with { Catalog = models };
-            }
-            LlmEmbeddingResult result = client is XaiEmbeddingClient xai
-                ? await xai.EmbedAsync(connection, request, () => ThrowIfRequestCanceled(cancellationToken), cancellationToken).ConfigureAwait(false)
-                : await client.EmbedAsync(connection, request, cancellationToken).ConfigureAwait(false);
+            LlmEmbeddingResult result = await client.EmbedAsync(connection, request, cancellationToken).ConfigureAwait(false);
             ThrowIfRequestCanceled(cancellationToken);
             return result;
-        }
-        catch (Exception error) { _cleanupOutcomes.Record(error); throw; }
-    }
-
-    /// <summary>Lists observed xAI embedding models through the explicitly shared LLM catalog owner.</summary>
-    public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(string connectionId,
-        CancellationToken cancellationToken = default)
-    {
-        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-        cancellationToken = operation.Token;
-        try
-        {
-            LlmProviderService catalog = RequireCatalogService();
-            ThrowIfRequestCanceled(cancellationToken);
-            LlmConnection connection = await ResolveAsync(connectionId, cancellationToken).ConfigureAwait(false);
-            ValidateCatalogConnection(connection);
-            _ = ClientFor(connection.Transport);
-            ThrowIfRequestCanceled(cancellationToken);
-            connection = await ConnectionAccess.RefreshAsync(connectionId, connection, ValidateCatalogConnection,
-                () => ThrowIfRequestCanceled(cancellationToken), cancellationToken).ConfigureAwait(false);
-            ThrowIfRequestCanceled(cancellationToken);
-            IReadOnlyList<LlmModel> models = await catalog.GetXaiCatalogSnapshotAsync(connectionId, connection,
-                ModelCatalogFamily.Embedding, () => ThrowIfRequestCanceled(cancellationToken), cancellationToken).ConfigureAwait(false);
-            ThrowIfRequestCanceled(cancellationToken);
-            return models;
         }
         catch (Exception error) { _cleanupOutcomes.Record(error); throw; }
     }
@@ -120,17 +75,6 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
     private ILlmEmbeddingClient ClientFor(LlmTransport transport) =>
         _clients.SingleOrDefault(value => value.Supports(transport))
         ?? throw new NotSupportedException($"The configured {transport} provider does not support embeddings in this client.");
-
-    private LlmProviderService RequireCatalogService() => _providerService?.SupportsXaiSnapshot == true
-        ? _providerService : throw new NotSupportedException("xAI embedding catalog operations require the explicitly shared LLM facade.");
-
-    private static void ValidateCatalogConnection(LlmConnection connection)
-    {
-        if (connection.Transport != LlmTransport.XaiResponses)
-            throw new NotSupportedException("Shared embedding listing is implemented only for the xAI transport.");
-        ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
-        XaiFileRequestData.Connection(connection);
-    }
 
     private void ThrowIfRequestCanceled(CancellationToken token)
     {
@@ -165,7 +109,6 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
             _clients.Clear();
             _connections = null;
             _connectionAccess = null;
-            _providerService = null;
         }
     }
 

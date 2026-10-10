@@ -26,7 +26,7 @@
   </ItemGroup>
   <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect'))' != ''">
     <_InferenceSourceProject Include="$(_InferenceSourceRoot)Connect/src/**/*.csproj"
-        Exclude="$(_InferenceSourceRoot)Connect/src/Darkspyre.Inference.Connect/**"
+        Exclude="$(_InferenceSourceRoot)Connect/src/Darkspyre.Inference.Connect/**;$(_InferenceSourceRoot)Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure/**;$(_InferenceSourceRoot)Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock/**;$(_InferenceSourceRoot)Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex/**;$(_InferenceSourceRoot)Connect/src/STT/**;$(_InferenceSourceRoot)Connect/src/Realtime/**;$(_InferenceSourceRoot)Connect/src/Video/**;$(_InferenceSourceRoot)Connect/src/Resources/**"
         ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect')->'%(ExcludeAssets)')"
         PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect')->'%(PrivateAssets)')" />
     <PackageReference Remove="Darkspyre.Inference.Connect" />

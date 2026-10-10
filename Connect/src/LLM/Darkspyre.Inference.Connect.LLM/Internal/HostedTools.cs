@@ -35,9 +35,6 @@ internal static class HostedTools
                     Strings(mcp.AllowedTools);
                     if (mcp.Headers?.Any(pair => pair.Key is null || pair.Value is null) is true) { throw new ArgumentException("MCP headers cannot contain null values."); }
                     break;
-                case XaiXSearchTool search:
-                    Strings(search.AllowedHandles); Strings(search.ExcludedHandles);
-                    break;
                 default:
                     throw new NotSupportedException("This hosted-tool definition is not a supported contract variant.");
             }
@@ -58,7 +55,6 @@ internal static class HostedTools
                 AllowedTools = Copy(mcp.AllowedTools),
                 Headers = mcp.Headers is null ? null : new System.Collections.ObjectModel.ReadOnlyDictionary<string, string>(new Dictionary<string, string>(mcp.Headers, StringComparer.Ordinal))
             },
-            XaiXSearchTool search => search with { AllowedHandles = Copy(search.AllowedHandles), ExcludedHandles = Copy(search.ExcludedHandles) },
             _ => throw new NotSupportedException("This hosted-tool definition is not a supported contract variant.")
         }).ToArray());
 

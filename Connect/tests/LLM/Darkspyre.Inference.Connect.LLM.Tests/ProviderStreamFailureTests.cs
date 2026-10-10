@@ -79,41 +79,6 @@ public sealed class ProviderStreamFailureTests
         }
     }
 
-    /// <summary>Only a broken HTTP body or premature valid SSE EOF receives the interruption classification.</summary>
-    [Theory]
-    [InlineData("http")]
-    [InlineData("io")]
-    [InlineData("eof")]
-    [InlineData("malformed")]
-    public async Task ResponsesClassifiesOnlyInterruptedBodyReads(string kind)
-    {
-        const string partial = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"partial\"}\n\n";
-        using MemoryStream body = kind is "http" or "io"
-            ? new BrokenResponseBody(System.Text.Encoding.UTF8.GetBytes(partial), kind == "io")
-            : new MemoryStream(System.Text.Encoding.UTF8.GetBytes(kind == "eof" ? partial : "data: {invalid-json}\n\n"));
-        using var handler = new ResponseHandler(body);
-        using var http = new HttpClient(handler);
-        await using var service = new LlmProviderService(new Source(), [new OpenAiResponsesLlmClient(http)]);
-        List<LlmStreamEvent> observed = [];
-
-        var failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
-        {
-            await foreach (var item in service.StreamAsync("connection", new() { ModelId = "gpt-5" }))
-                observed.Add(item);
-        });
-
-        Assert.Equal(kind != "malformed", failure.IsResponseStreamInterrupted);
-        Assert.False(body.CanRead);
-        if (kind != "malformed")
-        {
-            Assert.Equal("partial", Assert.Single(observed.OfType<LlmTextDeltaEvent>()).Delta);
-            Assert.Equal("The model response stream was interrupted.", failure.Message);
-            Assert.Equal(HttpStatusCode.OK, failure.StatusCode);
-        }
-        if (kind == "http") Assert.IsType<HttpIOException>(failure.InnerException);
-        if (kind == "io") Assert.IsType<IOException>(failure.InnerException);
-    }
-
     private sealed class BrokenResponseBody(byte[] bytes, bool plainIoFailure) : MemoryStream(bytes)
     {
         /// <summary>Returns the partial body, then reports an HTTP or TLS response read failure.</summary>

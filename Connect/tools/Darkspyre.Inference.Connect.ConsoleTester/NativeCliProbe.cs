@@ -23,7 +23,7 @@ internal sealed class NativeCliProbe(LlmAgentProviderService agents, string conn
     public int Turns => _turns;
 
     public IReadOnlyList<ProbeCase> Cases => transport == LlmTransport.AnthropicClaudeCli
-        ? [new("resume", ResumeAsync), new("cancel", CancelAsync)]
+        ? [new("cancel", CancelAsync)]
         :
     [
         new("text", TextAsync), new("structured", StructuredAsync), new("native-tools", NativeToolsAsync),
