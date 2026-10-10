@@ -3,9 +3,6 @@
     <Project Path="../Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj" />
     <Project Path="../Common/tests/Darkspyre.Inference.Common.Tests/Darkspyre.Inference.Common.Tests.csproj" />
   </Folder>
-  <Folder Name="/Common/examples/">
-    <Project Path="../Common/examples/Darkspyre.Inference.Setup.Examples/Darkspyre.Inference.Setup.Examples.csproj" />
-  </Folder>
   <Folder Name="/src/LLM/">
     <Project Path="src/LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
   </Folder>
