@@ -1,5 +1,9 @@
 # Cross-family xAI binding
 
+The phase-1 build does not compile this binding. `XaiFamilyBinding.cs` and the xAI Image and TTS transports are
+excluded from compilation, and no Image or TTS member takes an `xai` binding. The source stays in the repository
+under the L2 exception in `Inference/AGENTS.md`. The rest of this page describes that kept source.
+
 `XaiConnectionSelection` is data-only connection selection. `XaiFamilyBinding` borrows the existing
 `LlmConnectionAccess`; its authorization delegates to that same owner. Its optional third constructor
 argument borrows an existing `LlmProviderService` whose access must be the exact same instance. It

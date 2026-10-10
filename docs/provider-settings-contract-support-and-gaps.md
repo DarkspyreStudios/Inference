@@ -193,26 +193,20 @@ the gaps below are not a request to move the application's database or vault int
 `LlmConnectionAccess` owns runtime OAuth refresh for chat and embeddings. Its connection-bound
 `LlmConnectionAuthorization` supplies Common's neutral authorization header without exposing storage.
 
-The xAI connection contract supplies `XaiResponses`, typed region/tier options, fixed endpoints,
-and OAuth-only draft setup and sign-in routing. The internal authenticator implements the device
-protocol, refresh and `/v1/me`; subscription-specific 403 matching remains unqualified.
-`AddLlmConnect` registers the Grok provider, authenticator, Responses client and managed agent.
-An additional `AddLlmConnectXai` call does not duplicate these registrations. Registration and
-provider discovery perform no authentication or network requests.
+The phase-1 build does not compile the xAI provider. `AddLlmConnect` registers no Grok provider,
+authenticator, Responses client or managed agent. [Connect's phase-1 build](../Connect/README.md#phase-1-build)
+lists the built providers and the excluded source.
 The shared Responses pipeline handles terminal-authoritative function/shell calls, account-bound
 opaque replay and encrypted-context diagnostic redaction. A recognized `context_length_exceeded`
 raises a provider failure with `IsContextOverflow`; other incomplete reasons keep their completion
 status. The caller supplies shell execution through a borrowed executor; Connect does not run commands.
-The internal `XaiResponsesLlmClient` supplies OAuth-only chat requests with typed endpoint/tier checks,
-catalog-driven profiles and numeric schema preflight. `LlmModelListCache` owns the shared generic
-listing and lazy chat, image, video and embedding views. Profile-backed multi-agent setup exposes
-the supported counts and provider default. The facade implements native Files operations.
-Skills list, metadata retrieval, ZIP download and deletion are implemented. Skills upload and
-generation attachment remain unavailable; [the Files and Skills contract](../Connect/README.md#files-and-skills-facade) describes
-the operation boundaries. The complete provider schema/regex subset and actual OAuth/provider
-qualification remain incomplete.
+`LlmModelListCache` keeps one chat listing per connection version and scope. No route implements
+native Files operations.
 [Connect's setup contract](../Connect/README.md#provider-setup-and-editing) describes the registered
 provider. Registration does not establish live qualification or another family's implementation.
+
+The phase-1 build compiles only the ChatGPT subscription and Claude subscription rows. The other rows
+describe source the build excludes.
 
 | Provider | Current definition/behavior | Needed in the configuration contract |
 |---|---|

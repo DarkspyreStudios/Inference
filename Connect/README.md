@@ -1,5 +1,43 @@
 # Darkspyre.Inference.Connect
 
+## Phase-1 build
+
+This build compiles two LLM providers: the native Codex client (`OpenAiCodexLlmClient` and
+`ManagedCodexAgentClient`) and the Claude CLI (`ClaudeCliLlmClient` and `ClaudeAgentClient`).
+`AddLlmConnect` registers only these clients, their authenticators, the Claude and ChatGPT subscription
+setup definitions and `OpenAiEmbeddingClient`. Setup offers only the Claude and ChatGPT subscription providers.
+
+Every other LLM provider is out of the build. `Darkspyre.Inference.Connect.LLM.csproj` excludes the
+Anthropic API, Antigravity, Apple, OpenAI-compatible chat, Gemini API, OpenAI Responses API, SelfHost and
+xAI files with `Compile Remove`. The Image project excludes the xAI image transport and the TTS project
+excludes the xAI speech transport. The Bedrock, Vertex, Azure, STT, Realtime, Video, Resources and examples
+projects are out of the solution, the `Darkspyre.Inference.Connect` package and the source references in
+`eng/SourceReferences.targets`. The Tensor ConsoleTester is out of the Tensor solution because it uses the
+excluded SelfHost registration. The excluded source stays in the repository under the L2 exception in
+`Inference/AGENTS.md`. Sections of this page that describe an excluded provider, transport or project
+describe that kept source, which this build does not compile.
+
+Stored data keeps its shape. `LlmConnection.Xai`, `LlmTransport.XaiResponses`, `ImageTransport.XaiImagine`
+and `TtsTransport.XaiTts` stay, so a saved connection or setting that names them still reads. No adapter is
+registered for those transports, so a request through one fails with the existing missing-client refusal.
+
+The phase-1 build removes these public surfaces: `ILlmFileClient`, `IXaiFilePublicUrlClient`,
+`IXaiSkillClient`, `IDocumentSearchClient` and their request and result types; `LlmProviderCapabilities.Skills`;
+`LlmProviderService.CreatePublicUrlAsync`, `RevokePublicUrlAsync`, `StartXaiLoginAsync` and
+`CompleteXaiLoginAsync`; `AddLlmConnectXai` and `AddLlmConnectSelfHost`;
+`LlmEmbeddingProviderService.ListModelsAsync` and its `providerService` constructor parameter; the `xai`
+parameters of `IImageTransport`, `ImageProviderService` and `ITtsProvider`; `ImageConnection.Xai`,
+`ImageSetupConfiguration.Xai`, `TtsConnection.Xai`, `TtsConnection.XaiDefaults`, `TtsRequest.Xai`,
+`TtsStreamOptions.Xai` and `XaiTtsOptions`. `LlmProviderCapabilities.Files` always reports no Files operation.
+
+The tokenizer facade (`LlmProviderService.TokenizeAsync`, `ILlmTextTokenizer`) and the context-cache facade
+(`BindContextCacheAsync`, `ILlmContextCacheClient`) stay compiled with no implementing provider. Every call
+reaches the existing refusal: `This route does not implement plain-text tokenization.` and
+`No explicit context cache adapter is implemented.`
+
+The console tester has no `grok-probe` command and no `prompt --request` option, and `claude-probe` runs
+only its `cancel` case.
+
 ## Support Evidence
 
 Capability flags use Common's `InferenceSupport` enum. `Unknown` permits an explicit attempt through
@@ -5153,12 +5191,6 @@ generated image bytes.
 Image-generation completions also report the actual typed image byte count, or `unknown` when
 the payload is absent. This diagnostic reports payload presence, not pixel validity, dimensions
 or a resource commit. It writes neither binary content nor base64 to either output stream.
-`prompt --request <file>` loads a complete `LlmChatRequest` using `ConnectLlmJson.ChatRequest`
-instead of reading stdin. The file supplies model, messages, supported controls and ordered hosted
-descriptors. It cannot be combined with inline model, effort, schema or attachment options and is
-not an `agent` option. Credentials, region and streaming selection remain on the selected connection.
-Owned JSON converters reject live resource and authorization services; the tester does not reconstruct
-them from data. The normal prompt/attachment mode uses the same request facade unchanged.
 The attachment-tool enum adds primitive string nodes through `JsonArray.Add(JsonNode)`. An explicit
 node conversion prevents overload resolution from selecting the generic, trim-unsafe serializer.
 The tool's required `kind` property and supported image/document values remain unchanged.
@@ -5418,18 +5450,15 @@ or store the CLI credential. `models --provider claude` discovers native choices
 initialization response without an HTTP catalog credential or generation prompt. A prompt accepts
 `sonnet`, `opus`, another returned choice, or a manually entered exact model ID.
 
-`claude-probe` uses the shared native CLI probe for `resume` and `cancel`. Resume disposes the
-first session and requires a completed second turn in the same conversation with exact marker
-recall. Cancellation stops after the first text delta and requires caller cancellation plus
-successful owned-session disposal. It does not claim remote work termination or an unusable
-session after interruption. Both cases use Claude's read-only host runtime policy and no host tools.
-Native qualification passes on installed Claude CLI 2.1.289 with the selected `sonnet` alias.
-Resume completes both turns across the process replacement with exact conversation identity and marker
-recall. Cancellation reaches the first text delta, surfaces caller cancellation and completes owned
-session disposal. These three turn attempts qualify the named cases, not credential refresh, remote
-work termination, every model or other CLI platforms.
+`claude-probe` uses the shared native CLI probe for `cancel`. Cancellation stops after the first
+text delta and requires caller cancellation plus successful owned-session disposal. It does not claim
+remote work termination or an unusable session after interruption. The case uses Claude's read-only
+host runtime policy and no host tools. Native qualification passes on installed Claude CLI 2.1.289 with
+the selected `sonnet` alias. Cancellation reaches the first text delta, surfaces caller cancellation and
+completes owned session disposal. This qualifies the named case, not credential refresh, remote work
+termination, every model or other CLI platforms.
 
-The same resume case at source `ef626b8` passes on Antigravity CLI 1.3.1 with
+The Antigravity native resume case at source `ef626b8` passes on Antigravity CLI 1.3.1 with
 `claude-sonnet-4-6`. Two completed turns retain the exact conversation ID across process replacement
 and recall the synthetic marker. The case passes in 18.23 seconds with two turn attempts, no retry
 and no skipped prerequisite. This qualifies that selected model's native resume, not GPT-OSS
@@ -5443,10 +5472,6 @@ exactly `Darkspyre.Inference.Connect.LLM attachment smoke test document.` The tu
 name only the attachment tool. This qualifies that synthetic document result, not strict tools,
 Files uploads, logical resource references, cross-provider transfer or other models and platforms.
 The tester uses its existing read-only host policy and does not copy CLI credentials or retry.
-
-```bash
-dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- claude-probe --provider claude --model sonnet --case resume --repeat 1 --timeout-seconds 90
-```
 
 ```bash
 dotnet run --project tools/Darkspyre.Inference.Connect.ConsoleTester -- claude-probe --provider claude --model sonnet --case cancel --repeat 1 --timeout-seconds 90

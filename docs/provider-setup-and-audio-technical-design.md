@@ -249,6 +249,9 @@ through the shared descriptions. Replace the old input/action-description mechan
 callers as one unit; do not keep two authoritative setup catalogs. Execution and authentication
 services stay first-class and callable independently of a wizard.
 
+The phase-1 build compiles only the Direct Codex and Claude CLI rows. The other rows describe source
+the build excludes.
+
 | Provider | Fields/choices | Bound operations and special rules |
 |---|---|---|
 | OpenAI Responses | Endpoint, secret API key, model | Validate, discover models, explicit potentially billed test |
@@ -261,33 +264,9 @@ services stay first-class and callable independently of a wizard.
 | Bedrock Converse | AWS profile and region choices, model | SDK-owned choices/checks in Bedrock assembly; standard credential chain remains owner |
 | AgentCore Harness | Profile, region, Harness ARN, optional model override | Validate ARN/region; default/manual override semantics; explicit session-based test |
 
-`XaiResponses` has a registered Grok connection/setup contract. Region and service-tier
-fields are bounded choices on `XaiConnectionOptions`. Opening preserves the supplied endpoint/options;
-only an explicit region edit derives the endpoint, and missing/mismatched routing blocks local
-validation and model discovery. Setup has no API-key field. A saved OAuth token or completed draft
-sign-in satisfies Save; read-only saved/draft presence is separate from actual authentication checks.
-Both setup continuation and facade interactive sign-in use the same expiry/interval/slow-down helper. The internal
-`XaiAuthenticator` implements the device grant, token refresh and one `/v1/me` check. The shared
-`XaiErrorClassifier` sanitizes errors; subscription-specific 403 matching remains unqualified and is
-not implemented. `AddLlmConnect` registers the provider, authenticator, Responses client and managed
-agent through the existing finite SDK HTTP pipelines. `AddLlmConnectXai` shares that registration
-path and does not duplicate services. Registration and discovery perform no OAuth or model requests.
-The shared Responses pipeline retains ordered xAI output verbatim, binds replay to the account/endpoint/model
-and uses terminal output for function/shell completion. A recognized `context_length_exceeded` raises
-a provider failure with `IsContextOverflow`; other incomplete reasons keep their completion status.
-Managed shell execution uses a borrowed caller executor and preserves genuine results and an unfinished
-mixed tail on failure. Connect does not select a directory or run commands. Encrypted replay data remains opaque
-and is redacted from diagnostics. The internal `XaiResponsesLlmClient` sends OAuth-only Responses
-requests, applies model profiles and catalog modalities, and checks numeric schema guarantees.
-Its catalog reads the facade's published snapshot. `LlmModelListCache` owns the generic listing and
-lazy chat, image, video and embedding views. Profile-backed setup offers supported multi-agent counts
-and the provider default. The facade implements native Files operations. Skills list, metadata retrieval,
-ZIP download and deletion are implemented. Skills upload and generation attachment remain unavailable; see
-[Files and Skills](../Connect/README.md#files-and-skills-facade). Full schema/regex checks and actual
-OAuth/provider qualification remain incomplete. Image and Video register separately through
-`AddImageConnect` and `AddVideoConnect`; their source adapters use the shared family binding.
-See [Grok Image](../Connect/README.md#grok-image) and
-[Video bindings](../Connect/README.md#video-bindings). LLM registration does not register or qualify those families.
+The phase-1 build does not compile the xAI provider, so `AddLlmConnect` registers no Grok setup,
+authenticator, client or managed agent, and the Image and TTS projects exclude their xAI transports.
+[Connect's phase-1 build](../Connect/README.md#phase-1-build) lists the built providers and the excluded source.
 
 ComfyUI setup edits endpoint, timeout, protected headers and workflow selection. An
 `IImageWorkflowChoiceSource` supplied by the host provides paged/searchable workflow identities and

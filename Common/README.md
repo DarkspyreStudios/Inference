@@ -184,8 +184,7 @@ Unknown positions and optional output remain absent, not inferred. Concrete host
 have exact-name `InferenceJson` getters; their event base has no discriminator. Live remote-MCP
 authorization is borrowed and refuses non-null owned JSON read/write without invoking its callback.
 Null authorization roundtrips; explicitly serialized header data remains secret data, while
-remote-MCP diagnostics are redacted. Common's union rejects caller-defined variants; Connect owns
-the fixed xAI search extension and its extension-aware portable metadata.
+remote-MCP diagnostics are redacted. Common's union rejects caller-defined variants.
 Owned hosted metadata requires explicit completed-call ID/status members; null represents an
 unreported fact. Started/progress identities, kind/phase facts and image bytes remain mandatory.
 `LlmHostedSearchSource.Url` also requires an explicit JSON member and may be null when the source

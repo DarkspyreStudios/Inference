@@ -74,8 +74,9 @@ back from Connect to Tensor.
 
 ### Connect: out-of-process providers
 
-- **Text and agents:** OpenAI Responses, OpenAI-compatible chat, Anthropic Messages, direct ChatGPT
-  subscription access, official Claude and Antigravity CLIs, AWS Bedrock Converse, and AgentCore.
+- **Text and agents:** direct ChatGPT subscription access through the native Codex client, and the
+  official Claude CLI. The phase-1 build excludes every other provider; see
+  [Connect's phase-1 build](Connect/README.md#phase-1-build).
 - **Capability-dependent LLM features:** streaming, model discovery, structured output, attachments,
   embeddings, host-executed tools, managed-agent sessions, and account-usage reporting.
 - **Typed reasoning levels:** `None`, `Minimal`, `Low`, `Medium`, `High`, `ExtraHigh`, and `Maximum`.
@@ -158,8 +159,7 @@ services or storage from the caller so they do not invent a database or credenti
 ### Ask a configured text provider
 
 Register `AddLlmConnect()` and a host implementation of `ILlmConnectionSource` with dependency
-injection, then resolve `LlmProviderService`. Register `AddLlmConnectBedrock()` as well when using
-AWS transports. The connection source supplies versioned connection metadata and protected
+injection, then resolve `LlmProviderService`. The connection source supplies versioned connection metadata and protected
 credentials; credential replacement must be atomic. See [host integration](Connect/README.md#host-integration).
 
 ```csharp
