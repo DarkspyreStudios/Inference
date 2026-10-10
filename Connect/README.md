@@ -3255,7 +3255,11 @@ are not replacement attachment input and do not discard the estimate. This permi
 budgeting with either `Mixed` or `Estimated` occupancy, not an exact provider admission proof.
 Any retained Codex compaction suppresses historical count anchors, including protected pre-compaction
 reports. Compaction-request usage never becomes replacement occupancy. Other providers do not inherit
-this heuristic; actual media and resources remain unknown. Hosts that keep continuation state keep the counts with it. Each
+this heuristic. Codex and Claude CLI estimates count inline attachments and binary tool output with
+`AttachmentTokens` (an image 1,600 tokens, a PDF page 4,600, text by content, other bytes/3) and caller-owned
+resources by their descriptors (an image 1,600, text and JSON bytes/4, a PDF one page per 100 KB, other bytes/3),
+which the caller resolves through `IInferenceResourceAccess.GetAsync` before each measure. Accounting never opens
+resource content. The Claude CLI estimate is the local count, uncorrected. Hosts that keep continuation state keep the counts with it. Each
 Bedrock model has its own tokenizer, so a Bedrock estimate of the unreported tail is approximate and its
 diagnostic says so. Provider context-overflow errors trigger a handoff only in host-compaction mode. Catalog limits
 are optional. Configure an explicit output reserve when the catalog provides none; without a

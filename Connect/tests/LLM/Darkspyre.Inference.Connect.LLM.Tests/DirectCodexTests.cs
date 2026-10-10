@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -199,7 +200,7 @@ public sealed class DirectCodexTests
                 new("user", "") { ToolResults = [new LlmToolResult("call", LlmToolOutput.FromText("answer"))] }]
         };
 
-        ContextEstimate estimate = client.EstimateInputTokens(Connection(), followup)!.Value;
+        ContextEstimate estimate = client.EstimateInputTokens(Connection(), followup, ResourceSizes.None)!.Value;
 
         Assert.True(estimate.IncludesProviderReport);
         Assert.InRange(estimate.Tokens, 1281, 1400); // The report, plus the tokenized tool result after it.
@@ -213,6 +214,34 @@ public sealed class DirectCodexTests
         data: {"type":"response.completed","response":{"status":"completed","output":[],"id":"r"}}
 
         """;
+
+    [Fact]
+    public void FilesAndResourcesAreCounted()
+    {
+        using var handler = new Handler(_ => Json("{\"models\":[{\"slug\":\"model\",\"context_window\":272000}]}"));
+        using var http = new HttpClient(handler);
+        var client = new OpenAiCodexLlmClient(http);
+        var reference = new InferenceResourceReference("workspace", "notes");
+        var resources = new Dictionary<InferenceResourceReference, InferenceResourceDescriptor?>
+        {
+            [reference] = new(reference, "session", "notes.txt", "text/plain", 4000)
+        };
+        var image = new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "chart.png", MediaType = "image/png", Data = new byte[] { 1, 2, 3 } };
+        var output = new LlmToolOutput { Parts = [new LlmToolOutputText("done"), new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", new byte[] { 4, 5 }, "shot.png")] };
+        LlmChatMessage[] Messages(bool media) =>
+        [
+            new("assistant", "") { ToolCalls = [new LlmToolCall("call", "echo", "{}")] },
+            new("user", "") { ToolResults = [new LlmToolResult("call", media ? output : output with { Parts = [output.Parts[0]] })] },
+            new("user", "Compare these") { Attachments = media ? [image] : [] }
+        ];
+        var plain = new LlmChatRequest { ModelId = "model", Messages = Messages(media: false) };
+
+        long baseline = client.EstimateInputTokens(Connection(), plain, ResourceSizes.None)!.Value.Tokens;
+        long counted = client.EstimateInputTokens(Connection(), plain with { Messages = Messages(media: true) }, resources)!.Value.Tokens;
+
+        // Two images at 1,600 each and the selected text resource at four bytes per token.
+        Assert.Equal(baseline + 1_600 + 1_600 + 1_000, counted);
+    }
 
     [Theory]
     [InlineData(false, false)]
@@ -247,7 +276,7 @@ public sealed class DirectCodexTests
         var policy = new LlmAgentContextPolicy { ReservedOutputTokens = 8000 };
         LlmContextMeasurementSource source = reported && !compacted
             ? LlmContextMeasurementSource.Mixed : LlmContextMeasurementSource.Estimated;
-        ContextEstimate expected = client.EstimateInputTokens(connection, request)!.Value;
+        ContextEstimate expected = client.EstimateInputTokens(connection, request, ResourceSizes.None)!.Value;
         var context = new LlmAgentContext
         {
             Revision = 7,

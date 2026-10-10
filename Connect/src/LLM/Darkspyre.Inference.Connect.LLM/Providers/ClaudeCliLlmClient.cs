@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -677,38 +678,38 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     public string? EstimateDiagnostic => LocalTokenCount.CliDiagnostic;
 
-    /// <summary>Counts the prompt this client would send. Attachment content is not countable here.</summary>
-    // Claude's tokenizer counts more tokens than the local one. On a real 321-entry session history, Haiku 5.5, Sonnet 5.5
-    // and Opus 5.5 each charged 1.50 input tokens per locally counted token (measured through this CLI, 2026-10-09).
-    private const double ClaudeTokensPerLocalToken = 1.5;
-
-    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    /// <summary>
+    /// Counts the prompt this client would send, its inline attachments and binary tool parts, and caller-owned resources
+    /// by their resolved descriptors. The local count is not corrected for Claude's tokenizer here; correction is learned
+    /// per model from reported counts.
+    /// </summary>
+    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
     {
         // Another provider's continuation state is never sent to the CLI: an agent opening and chat both drop it.
         // The estimate counts what the CLI receives.
         request = request with { Messages = [.. request.Messages.Select(message => message with { ContinuationState = null })] };
         _ = ValidateChatRequest(connection, request);
-        // Selected caller-owned content is unknown to local accounting.
-        if (request.Resources is not null) return null;
-        long attachments = 0;
+        long attachments = ResourceSizes.Tokens(request.Messages, request.Messages, resources);
         foreach (var message in request.Messages)
         {
-            foreach (LlmMessageAttachment attachment in message.Attachments)
-            {
-                if (attachment is not LlmAttachment inline) return null;
-                attachments += ClaudeAttachmentTokens.Estimate(inline.Kind, inline.MediaType, inline.Data.Span);
-            }
+            foreach (LlmAttachment inline in message.Attachments.OfType<LlmAttachment>())
+                attachments += AttachmentTokens.Estimate(inline.Kind, inline.MediaType, inline.Data.Span);
             foreach (var result in ClientTools.Functions(message.ToolResults))
                 foreach (SentToolPart part in ProjectToolOutput(connection, request.ModelId, result.Output).Parts)
                     attachments += part switch
                     {
-                        SentImage image => ClaudeAttachmentTokens.Estimate(LlmBinaryKind.Image, image.MediaType, image.Data.Span),
-                        SentFile file => ClaudeAttachmentTokens.Estimate(LlmBinaryKind.Document, file.MediaType, file.Data.Span),
+                        SentImage image => AttachmentTokens.Estimate(LlmBinaryKind.Image, image.MediaType, image.Data.Span),
+                        SentFile file => AttachmentTokens.Estimate(LlmBinaryKind.Document, file.MediaType, file.Data.Span),
                         _ => 0,
                     };
         }
-        long text = (long)Math.Ceiling(LocalTokenCount.Count(BuildClaudePrompt(connection, request)) * ClaudeTokensPerLocalToken);
-        return new ContextEstimate(text + attachments);
+        // The prompt text names inline attachments only; a reference is counted above by its descriptor.
+        LlmChatRequest prompt = request with
+        {
+            Messages = [.. request.Messages.Select(message => message with { Attachments = [.. message.Attachments.OfType<LlmAttachment>()] })]
+        };
+        return new ContextEstimate(LocalTokenCount.Count(BuildClaudePrompt(connection, prompt)) + attachments);
     }
 
     private string BuildClaudePrompt(LlmConnection connection, LlmChatRequest request)

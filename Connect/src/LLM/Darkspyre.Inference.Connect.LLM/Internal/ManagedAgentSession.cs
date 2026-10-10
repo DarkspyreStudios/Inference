@@ -127,7 +127,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         SessionId = options.SessionId ?? ThreadId;
         ArgumentException.ThrowIfNullOrWhiteSpace(ThreadId);
         ArgumentException.ThrowIfNullOrWhiteSpace(SessionId);
-        _ = Measure(_context, BaseTurn());
+        _ = Measure(_context, BaseTurn(), ResourceSizes.None);
     }
 
     public string ThreadId { get; }
@@ -151,10 +151,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         }
     }
 
-    public Task<LlmAgentContextStatus> GetContextStatusAsync(LlmAgentTurnRequest? prospectiveTurn = null,
+    public async Task<LlmAgentContextStatus> GetContextStatusAsync(LlmAgentTurnRequest? prospectiveTurn = null,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        IInferenceResourceAccess? access;
+        InferenceResourceReference[] references;
+        LlmAgentTurnRequest? prospective = null;
         lock (_sync)
         {
             ThrowIfDisposed();
@@ -162,12 +165,23 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             if (prospectiveTurn is not null)
             {
                 RequireIdle();
-                var turn = FreezeTurn(prospectiveTurn);
-                var preview = Append(_context, new("preview", "preview", UserMessage(turn)), increment: false);
-                return Task.FromResult(Measure(preview, turn));
+                prospective = FreezeTurn(prospectiveTurn);
             }
-            return Task.FromResult(_segmentActive && _latestStatus is not null
-                ? _latestStatus : Measure(_run is null ? _context : WithQueuedSteering(_context, _run), _run?.Turn ?? BaseTurn()));
+            access = _callerServices?.Resources;
+            references = [.. ResourceReferences(_context, prospective ?? _run?.Turn ?? BaseTurn())];
+        }
+        var resources = await ResolveResourcesAsync(access, references, cancellationToken).ConfigureAwait(false);
+        lock (_sync)
+        {
+            ThrowIfDisposed();
+            if (prospective is { } turn)
+            {
+                RequireIdle();
+                var preview = Append(_context, new("preview", "preview", UserMessage(turn)), increment: false);
+                return Measure(preview, turn, resources);
+            }
+            return _segmentActive && _latestStatus is not null
+                ? _latestStatus : Measure(_run is null ? _context : WithQueuedSteering(_context, _run), _run?.Turn ?? BaseTurn(), resources);
         }
     }
 
@@ -183,7 +197,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             var turn = _run?.Turn ?? BaseTurn();
             var proposal = ManagedAgentContext.Import(proposedContext, _connection, turn.ModelId!, _supportsResources).Context;
             if (_run is not null) { proposal = WithQueuedSteering(proposal, _run); }
-            ContextEstimate? used = EstimateInputTokens(proposal, turn);
+            ContextEstimate? used = EstimateInputTokens(proposal, turn, ResourceSizes.None);
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(ManagedAgentPolicy.Account(turn.ModelId!, used,
                 _execution.ContextPolicy, Model(turn.ModelId!), learnedLimit: null) with
@@ -266,7 +280,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             if (protectedIds.Contains(entry.Id) || entry.Message.Role != "user" || entry.Message.ToolResults.Count > 0) continue;
             var candidate = source with { Entries = new[] { entry }.Concat(retained).ToArray() };
-            ContextEstimate? cost = EstimateInputTokens(candidate, turn);
+            ContextEstimate? cost = EstimateInputTokens(candidate, turn, ResourceSizes.None);
             if (cost is null || cost.Value.Tokens > request.RetainedUserTokens) break;
             retained.Insert(0, entry);
         }
@@ -344,7 +358,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             FenceResourceCallback(cancellationToken);
             RequireIdle();
             RequireRevision(expectedRevision);
-            _ = Measure(replacement, BaseTurn());
+            _ = Measure(replacement, BaseTurn(), ResourceSizes.None);
             _context = replacement with { Revision = checked(_context.Revision + 1) };
             _latestStatus = null;
         }
@@ -374,7 +388,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             LlmAgentContextEntry? user = turn.Input.Count == 0 && turn.Attachments.Count == 0
                 ? null : new LlmAgentContextEntry(NewId(), turnId, UserMessage(turn));
             var projected = user is null ? _context : Append(_context, user);
-            _latestStatus = Measure(projected, turn);
+            _latestStatus = Measure(projected, turn, ResourceSizes.None);
             run = new(turn, turnId);
             _context = projected;
             if (!_automaticProviderCompaction && user is not null)
@@ -446,8 +460,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 throw new ArgumentException("Compaction must retain protected records intact or reduce only their tool-result parts, in order.");
             }
             var projected = WithQueuedSteering(replacement, run);
-            var before = Measure(WithQueuedSteering(_context, run), run.Turn);
-            var after = Measure(projected, run.Turn);
+            var before = Measure(WithQueuedSteering(_context, run), run.Turn, ResourceSizes.None);
+            var after = Measure(projected, run.Turn, ResourceSizes.None);
             bool reduced = before.UsedContextTokens is long prior && after.UsedContextTokens is long next
                 ? next < prior
                 : _context.Entries.Any(entry => !run.Protected.Contains(entry.Id)
@@ -672,11 +686,19 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             {
                 LlmChatRequest request;
                 LlmAgentContextStatus status;
+                IInferenceResourceAccess? access;
+                InferenceResourceReference[] references;
+                lock (_sync)
+                {
+                    access = _callerServices?.Resources;
+                    references = [.. ResourceReferences(_context, run.Turn)];
+                }
+                var resources = await ResolveResourcesAsync(access, references, token).ConfigureAwait(false);
                 lock (_sync)
                 {
                     AdmitSteering(run);
                     request = Request(_context, run.Turn, firstStep: run.Iterations == 0);
-                    status = _latestStatus = Measure(_context, run.Turn);
+                    status = _latestStatus = Measure(_context, run.Turn, resources);
                 }
                 await writer.WriteAsync(new LlmAgentContextStatusEvent(ThreadId, run.Id, status), token);
                 if (_automaticProviderCompaction && ExceedsHardWindow(status, run.Turn))
@@ -700,7 +722,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     lock (_sync)
                     {
                         request = Request(_context, run.Turn);
-                        status = _latestStatus = Measure(_context, run.Turn);
+                        status = _latestStatus = Measure(_context, run.Turn, resources);
                     }
                     if (ExceedsHardWindow(status, run.Turn))
                     {
@@ -1134,7 +1156,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             run.PauseId = NewId();
             var protectedOnly = _context with { Entries = _context.Entries.Where(entry => run.Protected.Contains(entry.Id)).ToArray() };
-            bool? needsCompaction = Measure(protectedOnly, run.Turn).NeedsCompaction;
+            bool? needsCompaction = Measure(protectedOnly, run.Turn, ResourceSizes.None).NeedsCompaction;
             bool compactable = protectedOnly.Entries.Count < _context.Entries.Count
                 || protectedOnly.Entries.SelectMany(entry => entry.Message.ToolResults).OfType<LlmToolResult>()
                     .SelectMany(result => result.Output.Parts)
@@ -1257,10 +1279,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             Resources = _callerServices?.Resources
         }, _capabilities(turn.ModelId!));
 
-    private LlmAgentContextStatus Measure(LlmAgentContext context, LlmAgentTurnRequest turn)
+    private LlmAgentContextStatus Measure(LlmAgentContext context, LlmAgentTurnRequest turn,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
     {
         LlmAgentContextPolicy policy = ManagedAgentPolicy.Normalize(_execution, Model(turn.ModelId!)).ContextPolicy;
-        ContextEstimate? used = EstimateInputTokens(context, turn);
+        ContextEstimate? used = EstimateInputTokens(context, turn, resources);
         return ManagedAgentPolicy.Status(turn.ModelId!, context.Revision, used, policy, Model(turn.ModelId!), learnedLimit: null);
     }
 
@@ -1315,10 +1338,24 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         run.UsageCalls++;
     }
 
-    private ContextEstimate? EstimateInputTokens(LlmAgentContext context, LlmAgentTurnRequest turn)
+    private ContextEstimate? EstimateInputTokens(LlmAgentContext context, LlmAgentTurnRequest turn,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources) =>
+        _estimator.EstimateInputTokens(_connection, Request(context, turn), resources);
+
+    /// <summary>The caller-owned resources a request built from the context and turn sends.</summary>
+    private static IEnumerable<InferenceResourceReference> ResourceReferences(LlmAgentContext context, LlmAgentTurnRequest turn) =>
+        context.Entries.SelectMany(entry => ResourceSizes.References(entry.Message)).Concat(context.SelectedResources)
+            .Concat(turn.Attachments.OfType<LlmResourceAttachment>().Select(attachment => attachment.Resource));
+
+    /// <summary>Resolves descriptors outside the session lock, fenced like every resource callback.</summary>
+    private async Task<IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?>> ResolveResourcesAsync(
+        IInferenceResourceAccess? access, InferenceResourceReference[] references, CancellationToken token)
     {
-        return ManagedAgentPolicy.Estimate(_estimator, _connection, Request(context, turn),
-            context.Entries.Any(entry => entry.Message.OmittedAttachments.Count > 0));
+        if (access is null || references.Length == 0) return ResourceSizes.None;
+        using var callback = _resourceCallbacks.Enter(token);
+        var resolved = await ResourceSizes.ResolveAsync(access, references, callback.Token).ConfigureAwait(false);
+        FenceResourceCallback(callback.Token);
+        return resolved;
     }
 
     private LlmAgentTurnRequest FreezeTurn(LlmAgentTurnRequest turn)

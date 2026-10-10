@@ -4,10 +4,11 @@ using Darkspyre.Inference.Common.LLM;
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 /// <summary>
-/// Estimates what attachments cost Claude, so a request that carries images or documents still has a size. Each part is
-/// counted at no less than Claude's published cost, so a history is compacted before it overflows rather than after.
+/// Estimates what attachments and resources cost a model, so a request that carries images, documents or caller-owned
+/// resources still has a size. Each part is counted at no less than Claude's published cost, so a history is compacted
+/// before it overflows rather than after. Codex and Claude both use it.
 /// </summary>
-internal static class ClaudeAttachmentTokens
+internal static class AttachmentTokens
 {
     // Claude scales an image whose long edge exceeds 1,568 pixels, or that would cost more than about 1,600 tokens,
     // down to that size: https://platform.claude.com/docs/en/build-with-claude/vision#evaluate-image-size
@@ -20,6 +21,12 @@ internal static class ClaudeAttachmentTokens
     // A document whose content cannot be read counts one token per three bytes.
     private const long BytesPerToken = 3;
 
+    // o200k's English average is four bytes per token.
+    private const long TextBytesPerToken = 4;
+
+    // A PDF known only by its size counts one page per 100 KB (inferred).
+    private const long PdfBytesPerPage = 100 * 1024;
+
     /// <summary>The estimated cost of one attachment or tool-output part of <paramref name="mediaType"/>.</summary>
     public static long Estimate(LlmBinaryKind kind, string? mediaType, ReadOnlySpan<byte> data)
     {
@@ -29,6 +36,20 @@ internal static class ClaudeAttachmentTokens
         if (string.Equals(mediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
             return Math.Max(1, PdfPages(data)) * PdfPageTokens;
         return Math.Max(1, data.Length / BytesPerToken);
+    }
+
+    /// <summary>
+    /// The estimated cost of a resource known only by its descriptor: an image 1,600; text/* and JSON bytes/4; a PDF one
+    /// page per 100 KB at 4,600; other bytes/3; unknown bytes 0.
+    /// </summary>
+    public static long Estimate(string? mediaType, long? bytes)
+    {
+        if (mediaType?.StartsWith("image/", StringComparison.OrdinalIgnoreCase) == true) return ImageTokens;
+        if (bytes is not long size) return 0;
+        if (mediaType is not null && LlmToolOutputResource.IsTextMediaType(mediaType)) return size / TextBytesPerToken;
+        if (string.Equals(mediaType, "application/pdf", StringComparison.OrdinalIgnoreCase))
+            return Math.Max(1, (size + PdfBytesPerPage - 1) / PdfBytesPerPage) * PdfPageTokens;
+        return size / BytesPerToken;
     }
 
     // Counts "/Type /Page" objects, not "/Type /Pages" tree nodes; a PDF that hides its pages in compressed object

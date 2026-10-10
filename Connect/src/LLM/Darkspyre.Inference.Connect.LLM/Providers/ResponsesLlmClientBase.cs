@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -14,14 +15,17 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 {
     public string? EstimateDiagnostic => null;
 
-    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
         ValidateModelSampling(connection, request);
         var enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
-        // Selected caller-owned content is unknown to local accounting. Accounting never reads or uploads it.
-        if (request.Resources is not null) return null;
+        // Attachments, binary tool parts and caller-owned resources are counted by AttachmentTokens and the resolved
+        // descriptors; the tokenized projection leaves them out. Accounting never reads or uploads resource content.
+        IReadOnlyList<LlmChatMessage> sent = request.Messages;
+        request = request with { Resources = null, Messages = [.. sent.Select(WithoutMedia)] };
         JsonObject payload = BuildPayload(connection, request, enforcement, (capabilities.SupportsStreaming != InferenceSupport.Unsupported));
         RequestJson.ApplyProviderOptions(payload, connection, request);
 
@@ -36,10 +40,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         if (Transport == LlmTransport.OpenAiCodex && ((JsonArray)payload["input"]!).OfType<JsonObject>()
             .Any(item => item["type"]?.GetValue<string>() is "compaction" or "compaction_summary")) reported = -1;
         bool approximateCipher = Transport == LlmTransport.OpenAiCodex && reported < 0;
-        if (request.Messages.Skip(reported + 1).Any(message => approximateCipher ? UncountableMedia(message) : Uncountable(message)))
-        {
-            return null;
-        }
+        long media = checked(sent.Skip(reported + 1).Sum(MediaTokens)
+            + ResourceSizes.Tokens(sent.Skip(reported + 1), sent, resources));
         if (reported < 0)
         {
             // Tokenize the actual textual projection, including schemas/framing. This is an estimate:
@@ -65,7 +67,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                     item.Remove("encrypted_content");
                 }
             }
-            return new ContextEstimate(checked(LocalTokenCount.Count(input.ToJsonString()) + cipherTokens));
+            return new ContextEstimate(checked(LocalTokenCount.Count(input.ToJsonString()) + cipherTokens + media));
         }
 
         // Input items are built message by message, so the prefix's own projection marks where the rest begins.
@@ -76,17 +78,38 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             (capabilities.SupportsStreaming != InferenceSupport.Unsupported))["input"]!).Count;
         var tail = new JsonArray([.. full.Skip(prefixItems).Select(item => item?.DeepClone())]);
         LlmContinuationState state = request.Messages[reported].ContinuationState!;
-        return new ContextEstimate(state.InputTokens!.Value + state.OutputTokens!.Value
-            + (tail.Count == 0 ? 0 : LocalTokenCount.Count(tail.ToJsonString())), IncludesProviderReport: true);
+        return new ContextEstimate(checked(state.InputTokens!.Value + state.OutputTokens!.Value
+            + (tail.Count == 0 ? 0 : LocalTokenCount.Count(tail.ToJsonString())) + media), IncludesProviderReport: true);
     }
 
-    /// <summary>Content the local tokenizer cannot count: bytes, and encrypted reasoning.</summary>
-    private static bool Uncountable(LlmChatMessage message) => UncountableMedia(message)
-        || message.ContinuationState?.Payload.Contains("encrypted_content", StringComparison.Ordinal) == true;
+    /// <summary>The message as the tokenizer counts it: without attachments, binary tool parts or resource parts.</summary>
+    private static LlmChatMessage WithoutMedia(LlmChatMessage message) => message with
+    {
+        Attachments = [],
+        ToolResults = [.. message.ToolResults.Select(result => result is LlmToolResult function
+            ? function with { Output = function.Output with { Parts = [.. function.Output.Parts.Where(part => !IsMedia(part))] } }
+            : result)]
+    };
 
-    private static bool UncountableMedia(LlmChatMessage message) => message.Attachments.Count > 0
-        || message.ToolResults.Any(result => result is LlmToolResult function
-            && function.Output.Parts.Any(part => part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null }));
+    private static bool IsMedia(LlmToolOutputPart part) =>
+        part is LlmToolOutputBinary or LlmToolOutputResource { Data: not null } or LlmToolOutputSessionResource;
+
+    /// <summary>The AttachmentTokens cost of a message's inline attachments and binary tool parts.</summary>
+    private static long MediaTokens(LlmChatMessage message)
+    {
+        long tokens = 0;
+        foreach (LlmAttachment attachment in message.Attachments.OfType<LlmAttachment>())
+            tokens = checked(tokens + AttachmentTokens.Estimate(attachment.Kind, attachment.MediaType, attachment.Data.Span));
+        foreach (LlmToolOutputPart part in message.ToolResults.OfType<LlmToolResult>().SelectMany(result => result.Output.Parts))
+            tokens = checked(tokens + part switch
+            {
+                LlmToolOutputBinary binary => AttachmentTokens.Estimate(binary.Kind, binary.MediaType, binary.Data.Span),
+                LlmToolOutputResource { Data: { } data } resource =>
+                    AttachmentTokens.Estimate(resource.BodyKind!.Value, resource.MediaType, data.Span),
+                _ => 0
+            });
+        return tokens;
+    }
 
     public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
         CancellationToken cancellationToken = default) => StreamCoreAsync(connection, request, false, cancellationToken);

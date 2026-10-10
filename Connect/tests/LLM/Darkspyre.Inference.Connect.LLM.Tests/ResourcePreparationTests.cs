@@ -203,7 +203,7 @@ public sealed class ResourcePreparationTests
 
     [Theory]
     [InlineData("claude-cli")]
-    public void ResourceBoundAccountingDoesNotIgnoreSelectedFilesOrOpenThem(string destination)
+    public async Task ResourceBoundAccountingDoesNotIgnoreSelectedFilesOrOpenThem(string destination)
     {
         var reference = new InferenceResourceReference("workspace", "reference");
         var access = new Resources(new("workspace", "session", 1, [reference]),
@@ -220,9 +220,13 @@ public sealed class ResourcePreparationTests
             Resources = access,
             Messages = [new("user", "Read the file")]
         };
-        Assert.Null(estimator.EstimateInputTokens(connection, request));
-        Assert.Null(estimator.EstimateInputTokens(connection, request with
-        { Messages = [new("user", "Read the file") { Attachments = [new LlmResourceAttachment(reference)] }] }));
+        var resources = await ResourceSizes.ResolveAsync(access, [reference], CancellationToken.None);
+        long withoutResource = estimator.EstimateInputTokens(connection, request with { Resources = null }, ResourceSizes.None)!.Value.Tokens;
+        long resourceTokens = AttachmentTokens.Estimate(null, "reference text"u8.Length);
+        // The selected file counts once, whether only the selection or also an attachment names it.
+        Assert.Equal(withoutResource + resourceTokens, estimator.EstimateInputTokens(connection, request, resources)!.Value.Tokens);
+        Assert.Equal(withoutResource + resourceTokens, estimator.EstimateInputTokens(connection, request with
+        { Messages = [new("user", "Read the file") { Attachments = [new LlmResourceAttachment(reference)] }] }, resources)!.Value.Tokens);
         Assert.Equal(0, handler.Requests);
         Assert.Empty(access.Reads);
         Assert.Equal(0, access.ReleaseAttempts);

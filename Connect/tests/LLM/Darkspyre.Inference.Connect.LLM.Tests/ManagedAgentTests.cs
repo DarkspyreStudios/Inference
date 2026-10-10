@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
@@ -780,7 +781,8 @@ public sealed class ManagedAgentTests
             }).GetAwaiter().GetResult();
         public string? EstimateDiagnostic => null;
 
-        public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+        public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request,
+            IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
         {
             Estimates.Add(request);
             return UnknownEstimate ? null
