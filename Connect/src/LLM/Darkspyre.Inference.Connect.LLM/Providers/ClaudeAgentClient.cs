@@ -1468,6 +1468,14 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                     case "stream_event" when parent is null:
                         {
                             TurnTarget target = EnsureTarget();
+                            // The step's model is known from message start, before the first usage event of the step.
+                            if (root.TryGetProperty("event", out JsonElement started)
+                                && OptionalString(started, "type") == "message_start"
+                                && started.TryGetProperty("message", out JsonElement startedMessage)
+                                && OptionalString(startedMessage, "model") is { } startedModel)
+                            {
+                                target.ModelId = startedModel;
+                            }
                             if (root.TryGetProperty("event", out JsonElement messageEvent)
                                 && OptionalString(messageEvent, "type") is ("message_start" or "message_stop") and { } boundary)
                             {
@@ -1857,7 +1865,10 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                 ["inputSchema"] = JsonNode.Parse(ToolSchemas.Wire(tool.InputSchema).GetRawText()),
                 ["_meta"] = new JsonObject
                 {
-                    ["anthropic/alwaysLoad"] = !tool.DeferLoading
+                    ["anthropic/alwaysLoad"] = !tool.DeferLoading,
+                    // The CLI files a result over a tool's size cap, which the model cannot read back with Read off.
+                    // 4,000,000 characters is the largest Claude window, 1,000,000 tokens, at four characters a token.
+                    ["anthropic/maxResultSizeChars"] = 4_000_000
                 }
             })])
         };
