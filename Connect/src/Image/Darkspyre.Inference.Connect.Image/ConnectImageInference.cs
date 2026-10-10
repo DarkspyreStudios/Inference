@@ -6,7 +6,6 @@ using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
-using Darkspyre.Inference.Connect.Image.Internal;
 using Darkspyre.Inference.Connect.Image.Providers;
 
 namespace Darkspyre.Inference.Connect.Image;

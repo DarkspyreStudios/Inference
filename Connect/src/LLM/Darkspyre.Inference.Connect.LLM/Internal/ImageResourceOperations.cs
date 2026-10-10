@@ -1,9 +1,8 @@
 using System.Runtime.ExceptionServices;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Resources;
-using Darkspyre.Inference.Connect.LLM.Internal;
 
-namespace Darkspyre.Inference.Connect.Image.Internal;
+namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 internal static class ImageResourceOperations
 {
