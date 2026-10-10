@@ -1301,10 +1301,13 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             string turnId,
             HashSet<string> completedMessages)
         {
+            // The CLI writes a failed request as an assistant message marked with an error. The model said nothing: the
+            // turn's error result reports the failure.
             if (!root.TryGetProperty("message", out JsonElement message)
                 || message.ValueKind != JsonValueKind.Object
                 || !message.TryGetProperty("content", out JsonElement content)
-                || content.ValueKind != JsonValueKind.Array)
+                || content.ValueKind != JsonValueKind.Array
+                || OptionalString(root, "error") is not null)
             {
                 yield break;
             }

@@ -125,6 +125,8 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         Assert.False(terminal.IsContextOverflow);
     }
 
+    // The CLI reports the refusal twice: as an assistant message marked with an error, then as the error result. Only the
+    // result reaches the host, so the refusal is never shown as the model's reply.
     [Fact]
     public async Task APromptTooLongForTheWindowEndsTheTurnAsAContextOverflow()
     {
@@ -142,6 +144,16 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         process.Push(new { type = "user", uuid = turnId, isReplay = true });
         process.Push(new
         {
+            type = "assistant",
+            error = "invalid_request",
+            message = new
+            {
+                id = "synthetic", role = "assistant", model = "<synthetic>",
+                content = new[] { new { type = "text", text = "Prompt is too long" } },
+            },
+        });
+        process.Push(new
+        {
             type = "result",
             subtype = "success",
             is_error = true,
@@ -151,6 +163,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
 
         Assert.True(Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).IsContextOverflow);
+        Assert.Empty(events.OfType<LlmAgentMessageCompletedEvent>());
     }
 
     [Fact]
