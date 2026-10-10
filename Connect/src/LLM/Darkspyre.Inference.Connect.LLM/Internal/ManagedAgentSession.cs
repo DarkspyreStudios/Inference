@@ -758,9 +758,9 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                         if (run.Steering.Count > 0) { continue; }
                         run.Terminal = true;
                     }
-                    await CompleteAsync(run, writer, result.Status == LlmCompletionStatus.Unknown
-                        ? LlmAgentCompletionReason.Unknown : LlmAgentCompletionReason.Completed, token,
-                        structuredOutput: AnswerCheck(run, result, null));
+                    LlmAgentCompletionReason reason = result.Status == LlmCompletionStatus.Unknown
+                        ? LlmAgentCompletionReason.Unknown : LlmAgentCompletionReason.Completed;
+                    await CompleteAsync(run, writer, reason, token, structuredOutput: AnswerCheck(run, result, reason));
                     return;
                 }
             }
@@ -890,7 +890,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             }
             catch (Exception error)
             {
-                return await FailedAsync(HandlerFailure(error));
+                return await FailedAsync(ClientTools.HandlerFailure(error, _connection));
             }
             finally { if (entered) { concurrency.Release(); } }
         }
@@ -995,10 +995,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             new LlmResourceAttachment(committed.Resource.Reference), mediaType), token);
     }
 
-    /// <summary>A handler failure as the model sees it, with the connection's credential and header values removed.</summary>
-    private string HandlerFailure(Exception error) =>
-        $"{error.GetType().Name}: {SecretRedactor.Sanitize(error.Message, LlmCredential.Parse(_connection.Credential), _connection.AdditionalHeaders.Values)} External outcome is unknown. Do not automatically replay.";
-
     private async Task<LlmShellCallResult> InvokeShellAsync(LiveRun run, LlmShellCall call, CancellationToken token)
     {
         using var callback = _resourceCallbacks.Enter(token);
@@ -1032,20 +1028,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         }, token);
     }
 
-    /// <summary>
-    /// The final answer's check against the turn's schema, or null when the turn requested none. An answer that ended
-    /// with <paramref name="unevaluated"/> is reported as not evaluated.
-    /// </summary>
+    /// <summary>The final answer's check against the turn's schema, or null when the turn requested none.</summary>
     private static LlmStructuredOutputValidation? AnswerCheck(LiveRun run, LlmChatResult result,
-        LlmAgentCompletionReason? unevaluated)
-    {
-        if (run.Turn.OutputSchema is not { } schema) return null;
-        LlmStructuredOutputEnforcement enforcement = result.StructuredOutput?.Enforcement
-            ?? LlmStructuredOutputEnforcement.LocalValidationOnly;
-        return unevaluated is { } reason
-            ? new(enforcement, false, false, [$"The answer was not evaluated: {reason}."])
-            : StructuredOutput.Validate(result.Text, new() { Name = "agent_output", Schema = schema }, enforcement);
-    }
+        LlmAgentCompletionReason reason) =>
+        run.Turn.OutputSchema is { } schema
+            ? ClientTools.AnswerCheck(schema, result.Text, reason,
+                result.StructuredOutput?.Enforcement ?? LlmStructuredOutputEnforcement.LocalValidationOnly)
+            : null;
 
     /// <summary>
     /// Ends the turn with the step's calls unrun (B7). The context keeps the assistant text only, so it stays at a
@@ -1085,9 +1074,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     {
         StructuredOutput.Evaluation evaluation = ToolSchemas.EvaluateArguments(definition.InputSchema, arguments);
         instance = evaluation.Instance;
-        return evaluation is { Checked: true, Errors.Count: > 0 }
-            ? $"Tool '{definition.Name}' arguments were rejected:\n{string.Join('\n', evaluation.Errors)}"
-            : null;
+        return ClientTools.ArgumentRejection(definition.Name, evaluation);
     }
 
     /// <summary>The model's arguments as JSON when they parse, otherwise a JSON string holding the raw text.</summary>

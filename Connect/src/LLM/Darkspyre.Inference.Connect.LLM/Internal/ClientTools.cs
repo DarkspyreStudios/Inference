@@ -23,6 +23,30 @@ internal static class ClientTools
     /// <summary>The error text a tool call gets when the session has no handler to run it (6.2 R16).</summary>
     internal static string NoHandler(string toolName) => $"No handler is available for tool '{toolName}'.";
 
+    /// <summary>A handler failure as the model sees it, with the connection's credential and header values removed.</summary>
+    internal static string HandlerFailure(Exception error, LlmConnection connection) =>
+        $"{error.GetType().Name}: {SecretRedactor.Sanitize(error.Message, LlmCredential.Parse(connection.Credential), connection.AdditionalHeaders.Values)} External outcome is unknown. Do not automatically replay.";
+
+    /// <summary>The 6.3 rejection text when the arguments failed the tool's schema, otherwise null.</summary>
+    internal static string? ArgumentRejection(string toolName, StructuredOutput.Evaluation evaluation) =>
+        evaluation is { Checked: true, Errors.Count: > 0 }
+            ? $"Tool '{toolName}' arguments were rejected:\n{string.Join('\n', evaluation.Errors)}"
+            : null;
+
+    /// <summary>
+    /// The final answer's check against the turn's schema (6.4). A completed or unknown end checks the answer; a refusal
+    /// or truncation is reported as not evaluated; any other end carries no check.
+    /// </summary>
+    internal static LlmStructuredOutputValidation? AnswerCheck(JsonElement schema, string answer,
+        LlmAgentCompletionReason reason, LlmStructuredOutputEnforcement enforcement) => reason switch
+    {
+        LlmAgentCompletionReason.Completed or LlmAgentCompletionReason.Unknown =>
+            StructuredOutput.Validate(answer, new() { Name = "agent_output", Schema = schema }, enforcement),
+        LlmAgentCompletionReason.Refusal or LlmAgentCompletionReason.Truncation =>
+            new(enforcement, false, false, [$"The answer was not evaluated: {reason}."]),
+        _ => null
+    };
+
     internal static void ValidateManagedOpening(LlmAgentSessionOptions options, LlmProviderCapabilities capabilities, bool supportsResources = false)
     {
         LlmAgentCapabilities managed = ManagedCapabilities(capabilities);

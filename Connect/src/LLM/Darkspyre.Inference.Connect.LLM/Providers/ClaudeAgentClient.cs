@@ -929,10 +929,9 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             string callId = pending?.Id ?? ReadJsonRpcId(id) ?? controlRequestId;
             // A wrapped schema's value is checked against the tool's own schema and is what the handler receives.
             StructuredOutput.Evaluation evaluation = ToolSchemas.EvaluateArguments(definition.InputSchema, arguments.GetRawText());
-            if (evaluation is { Checked: true, Errors.Count: > 0 })
+            if (ClientTools.ArgumentRejection(name, evaluation) is { } rejection)
             {
                 // The handler does not run; the model receives the errors and the turn continues.
-                string rejection = $"Tool '{name}' arguments were rejected:\n{string.Join('\n', evaluation.Errors)}";
                 return new McpResponse(
                     McpResult(id, new JsonObject
                     {
@@ -969,8 +968,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             foreach (PendingToolCall call in calls)
             {
                 string? rejection = _toolsByName.TryGetValue(call.Name, out LlmAgentToolDefinition? definition)
-                    ? ToolSchemas.EvaluateArguments(definition.InputSchema, call.Arguments.GetRawText()) is { Checked: true, Errors.Count: > 0 } evaluation
-                        ? $"Tool '{call.Name}' arguments were rejected:\n{string.Join('\n', evaluation.Errors)}" : null
+                    ? ClientTools.ArgumentRejection(call.Name, ToolSchemas.EvaluateArguments(definition.InputSchema, call.Arguments.GetRawText()))
                     : "Unknown tool.";
                 Emit(rejection is null
                     ? new LlmAgentToolEvent(ThreadId, host.Id, call.Id, McpServerName, call.Name, call.Arguments, null, "returned")
@@ -1115,7 +1113,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             }
             catch (Exception error)
             {
-                output = LlmToolOutput.FromText(HandlerFailure(error), isError: true);
+                output = LlmToolOutput.FromText(ClientTools.HandlerFailure(error, _connection), isError: true);
             }
             finally
             {
@@ -1143,10 +1141,6 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             ProjectedToolOutput projected = ToolOutputProjector.Project(output, _richRoute, _richContent);
             return ToolResponse(call, id, output, projected);
         }
-
-        /// <summary>A handler failure as the model sees it, with the connection's credential and header values removed.</summary>
-        private string HandlerFailure(Exception error) =>
-            $"{error.GetType().Name}: {SecretRedactor.Sanitize(error.Message, LlmCredential.Parse(_connection.Credential), _connection.AdditionalHeaders.Values)} External outcome is unknown. Do not automatically replay.";
 
         private McpResponse ToolResponse(LlmAgentToolCall call, JsonElement id, LlmToolOutput output, ProjectedToolOutput projected)
         {
@@ -1639,7 +1633,8 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             Emit(new LlmAgentTurnCompletedEvent(ThreadId, target.Id, reason, error)
             {
                 IsContextOverflow = isError && LlmContextOverflow.ClaudeCli(error),
-                StructuredOutput = (target as HostTurn)?.OutputSchema is { } schema ? AnswerCheck(schema, text, reason) : null
+                StructuredOutput = (target as HostTurn)?.OutputSchema is { } schema
+                    ? ClientTools.AnswerCheck(schema, text, reason, LlmStructuredOutputEnforcement.LocalValidationOnly) : null
             });
             lock (_route)
             {
@@ -1655,15 +1650,6 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                 _activeTurnId = null;
             }
         }
-
-        /// <summary>
-        /// The final answer's check against the turn's schema. An answer that ended for another reason than completion
-        /// is reported as not evaluated.
-        /// </summary>
-        private static LlmStructuredOutputValidation AnswerCheck(JsonElement schema, string answer, LlmAgentCompletionReason reason) =>
-            reason is LlmAgentCompletionReason.Completed or LlmAgentCompletionReason.Unknown
-                ? StructuredOutput.Validate(answer, new() { Name = "agent_output", Schema = schema }, LlmStructuredOutputEnforcement.LocalValidationOnly)
-                : new(LlmStructuredOutputEnforcement.LocalValidationOnly, false, false, [$"The answer was not evaluated: {reason}."]);
 
         /// <summary>Records the model the CLI reports for the running turn's step.</summary>
         private void ObserveModel(string model)

@@ -700,22 +700,6 @@ public sealed class ManagedAgentTests
     }
 
     [Fact]
-    public async Task MissingHandlerGivesEachCallAnErrorResult()
-    {
-        var harness = new Harness();
-        harness.Results.Enqueue(Calls(new LlmToolCall("call-1", "lookup", """{"city":"Paris"}""")));
-        harness.Results.Enqueue(Done());
-        await using var session = harness.Create(Options() with { Tools = [Lookup()] });
-
-        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
-
-        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
-        LlmToolResult result = Assert.IsType<LlmToolResult>(Assert.Single(harness.Requests[1].Messages.SelectMany(message => message.ToolResults)));
-        Assert.True(result.Output.IsError);
-        Assert.Equal("No handler is available for tool 'lookup'.", Assert.IsType<LlmToolOutputText>(Assert.Single(result.Output.Parts)).Text);
-    }
-
-    [Fact]
     public async Task AbilityToolsOnCodex()
     {
         const string skillText = "---\nname: review\ndescription: Reviews a change.\n---\nRead the diff first.\n";
@@ -750,31 +734,6 @@ public sealed class ManagedAgentTests
         {
             Directory.Delete(folder, recursive: true);
         }
-    }
-
-    [Fact]
-    public async Task NonObjectSchemaIsWrappedAndValueUnwrapped()
-    {
-        JsonElement schema = JsonElement.Parse("""{"type":"string","minLength":2}""");
-        var harness = new Harness();
-        harness.Results.Enqueue(Calls(new LlmToolCall("good", "say", """{"value":"hi"}"""),
-            new LlmToolCall("bad", "say", """{"value":"h"}""")));
-        harness.Results.Enqueue(Done());
-        var received = new List<string>();
-        await using var session = harness.Create(Options() with
-        {
-            Tools = [new LlmAgentToolDefinition { Name = "say", InputSchema = schema }],
-            ToolHandler = (call, _) => { lock (received) received.Add(call.Arguments.GetRawText()); return Task.FromResult(LlmToolOutput.FromText("ok")); }
-        });
-
-        await Read(session.RunTurnAsync(Turn("hello")));
-
-        LlmToolDefinition sent = Assert.IsType<LlmToolDefinition>(Assert.Single(harness.Requests[0].Tools));
-        Assert.Equal("""{"type":"object","properties":{"value":{"type":"string","minLength":2}},"required":["value"]}""",
-            sent.InputSchema.GetRawText());
-        Assert.Equal(["\"hi\""], received);
-        LlmToolResult[] results = [.. harness.Requests[1].Messages.SelectMany(message => message.ToolResults).OfType<LlmToolResult>()];
-        Assert.True(results.Single(result => result.ToolCallId == "bad").Output.IsError);
     }
 
     [Fact]

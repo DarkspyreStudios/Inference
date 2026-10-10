@@ -175,12 +175,9 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         {
             instructions.Add(request.Instructions);
         }
+        // An instruction message's state and tool exchanges are dropped; only its text is sent (6.2 R43).
         foreach (var message in request.Messages.Where(message => message.Role is "system" or "developer"))
         {
-            if (message.ContinuationState is not null || message.ToolCalls.Count > 0 || message.ToolResults.Count > 0)
-            {
-                throw new ArgumentException("Assistant state and tool exchanges cannot be used as instructions.");
-            }
             instructions.Add(message.Content);
         }
         LlmChatRequest projected = request with
