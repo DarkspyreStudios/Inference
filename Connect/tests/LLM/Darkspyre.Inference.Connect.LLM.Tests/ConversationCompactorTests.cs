@@ -47,6 +47,23 @@ public sealed class ConversationCompactorTests
     }
 
     [Fact]
+    public async Task RecentTurnsFillTheTargetTheSummaryLeaves()
+    {
+        // Target 30,000 tokens; a 3,000-word summary takes 4,000, so 13 turns of 2,000 tokens fit.
+        var limits = new CompactionLimits(Window: 100_000, Reserve: 10_000, UsableWindow: 90_000, TriggerTokens: 76_500,
+            TargetTokens: 30_000);
+        LlmAgentContextEntry[] older = [.. Enumerable.Range(1, 20).SelectMany(index => Turn("t" + index, new string('w', 8_000)))];
+        var context = new LlmAgentContext { Entries = [.. older, .. Turn("now", "go")] };
+        var harness = new Harness(null);
+
+        CompactionResult result = await harness.Compactor.CompactAsync(context, "model", "now", new HashSet<string>(), limits,
+            NoStage, CancellationToken.None);
+
+        Assert.Equal([.. Enumerable.Range(8, 13).Select(index => "t" + index), "now"],
+            result.Context.Entries.Skip(1).Select(entry => entry.TurnId).Distinct());
+    }
+
+    [Fact]
     public async Task LongTranscriptIsSummarizedInParts()
     {
         LlmAgentContextEntry[] older = [.. Enumerable.Range(1, 10).SelectMany(index => Turn("t" + index, $"turn {index} " + new string('y', 8_000)))];

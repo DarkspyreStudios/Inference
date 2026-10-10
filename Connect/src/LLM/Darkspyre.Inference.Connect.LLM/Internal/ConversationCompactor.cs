@@ -116,8 +116,10 @@ internal sealed class ConversationCompactor(
         long currentMeasure = await Measure(shortened, current, cancellationToken).ConfigureAwait(false);
         var keptTurns = new HashSet<string>(StringComparer.Ordinal) { currentTurnId };
         long keptMeasure = currentMeasure;
-        // Older whole turns, newest first, take at most half the room under the target; the summary gets the rest.
-        long olderRoom = Math.Max(0, limits.TargetTokens - currentMeasure) / 2;
+        // Older whole turns, newest first, fill the room under the target that the longest summary leaves. Under a
+        // target too small for that summary, the summary keeps half the room.
+        long room = Math.Max(0, limits.TargetTokens - currentMeasure);
+        long olderRoom = room - Math.Min((long)(MaximumSummaryWords / WordsPerToken), room / 2);
         foreach (string turnId in entries.Select(entry => entry.TurnId)
             .Where(turnId => turnId != currentTurnId && turnId != SummaryTurnId).Distinct(StringComparer.Ordinal).Reverse())
         {

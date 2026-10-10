@@ -204,8 +204,8 @@ emits `LlmAgentContextStatusEvent`. A local estimate that does not rest on a pro
 with the rate the model's reported counts taught; the rate and any learned limit are kept per transport and model for
 the process and never stored. At or above the trigger the session compacts toward the target: it cuts each
 unprotected tool-result text part to its first and last 1,000 characters and replaces binary parts with a notice,
-then keeps the current turn and the newest whole turns that fit in half the room under the target, and replaces the
-rest with one user entry `Summary of the earlier conversation:\n{summary}`. The summary is built from
+then keeps the current turn and the newest whole turns that fit in the room under the target that a 3,000-word
+summary leaves, and replaces the rest with one user entry `Summary of the earlier conversation:\n{summary}`. The summary is built from
 `LlmAgentCallerServices.Transcript` when the caller supplies it, else from the live context's real entries, and never
 from an earlier summary. The summary input cuts tool output the same way. Summary requests run on the conversation's
 own connection and model, all parts at once, each within half the usable window, and the summary holds at most
