@@ -33,7 +33,7 @@
   </ItemGroup>
   <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor'))' != ''">
     <_InferenceSourceProject Include="$(_InferenceSourceRoot)Tensor/src/**/*.csproj"
-        Exclude="$(_InferenceSourceRoot)Tensor/src/Darkspyre.Inference.Tensor/**"
+        Exclude="$(_InferenceSourceRoot)Tensor/src/Darkspyre.Inference.Tensor/**;$(_InferenceSourceRoot)Tensor/src/LLM/Darkspyre.Inference.Tensor.LLM.Qwen/**"
         ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor')->'%(ExcludeAssets)')"
         PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor')->'%(PrivateAssets)')" />
     <PackageReference Remove="Darkspyre.Inference.Tensor" />
