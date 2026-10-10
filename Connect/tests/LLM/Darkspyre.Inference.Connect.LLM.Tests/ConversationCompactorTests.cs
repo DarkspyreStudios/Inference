@@ -32,6 +32,21 @@ public sealed class ConversationCompactorTests
     }
 
     [Fact]
+    public async Task SummaryInputCutsTranscriptToolOutput()
+    {
+        LlmAgentContextEntry[] older = [.. ToolTurn("t1", new string('q', 20_000)), .. Turn("t2", "older " + new string('z', 16_000))];
+        LlmAgentContextEntry[] current = Turn("t3", "now");
+        var context = new LlmAgentContext { Entries = [.. older, .. current] };
+        var harness = new Harness(new Transcript([.. older, .. current]));
+
+        await harness.Compactor.CompactAsync(context, "model", "t3", new HashSet<string>(), Limits, NoStage, CancellationToken.None);
+
+        string material = string.Join("\n", harness.Requests.Select(request => request.Messages.Single().Content));
+        Assert.Contains("[18000 of 20000 characters removed by compaction.]", material, StringComparison.Ordinal);
+        Assert.DoesNotContain(new string('q', 1_001), material, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task LongTranscriptIsSummarizedInParts()
     {
         LlmAgentContextEntry[] older = [.. Enumerable.Range(1, 10).SelectMany(index => Turn("t" + index, $"turn {index} " + new string('y', 8_000)))];

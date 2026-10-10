@@ -207,8 +207,8 @@ unprotected tool-result text part to its first and last 1,000 characters and rep
 then keeps the current turn and the newest whole turns that fit in half the room under the target, and replaces the
 rest with one user entry `Summary of the earlier conversation:\n{summary}`. The summary is built from
 `LlmAgentCallerServices.Transcript` when the caller supplies it, else from the live context's real entries, and never
-from an earlier summary. Summary requests run on the conversation's own connection and model, one at a time, in parts
-within half the usable window. The working indicator shows `Pruning old context`, `Summarizing earlier messages` and
+from an earlier summary. The summary input cuts tool output the same way. Summary requests run on the conversation's
+own connection and model, one at a time, in parts within half the usable window. The working indicator shows `Pruning old context`, `Summarizing earlier messages` and
 `Applying the compacted context` as `LlmAgentActivityEvent` text, cleared by empty text. A compaction that changed the
 context emits `LlmAgentCompactedEvent` with the dropped-entry, shortened-output and removed-image counts, then an
 `LlmAgentUsageEvent` with the summary requests' usage. Results of a current-turn call to a tool with

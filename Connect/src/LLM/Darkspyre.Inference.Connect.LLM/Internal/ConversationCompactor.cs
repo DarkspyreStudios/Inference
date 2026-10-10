@@ -235,8 +235,10 @@ internal sealed class ConversationCompactor(
         // Half the usable window leaves the other half for the prompt and the answer.
         long partLimit = Math.Max(1, limits.UsableWindow / 2);
         var pieces = new List<(string Text, long Tokens)>();
+        int shortened = 0, removedImages = 0;
+        // The summary input cuts tool output as step 1 does; the counts describe the context, not the input.
         foreach (LlmAgentContextEntry entry in source)
-            pieces.AddRange(Split(Render(entry.Message), partLimit));
+            pieces.AddRange(Split(Render(Shorten(entry, ref shortened, ref removedImages).Message), partLimit));
         var usage = new UsageSum();
         List<(string Text, long Tokens)> summaries = await SummarizePartsAsync(Group(pieces, partLimit), modelId, words,
             usage, cancellationToken).ConfigureAwait(false);
@@ -324,50 +326,50 @@ internal sealed class ConversationCompactor(
         int shortened = 0, removedImages = 0;
         var entries = new List<LlmAgentContextEntry>(context.Entries.Count);
         foreach (LlmAgentContextEntry entry in context.Entries)
+            entries.Add(protectedEntryIds.Contains(entry.Id) ? entry : Shorten(entry, ref shortened, ref removedImages));
+        return (context with { Entries = entries }, shortened, removedImages);
+    }
+
+    /// <summary>Shortens the tool results of one entry and adds them to the counts.</summary>
+    private static LlmAgentContextEntry Shorten(LlmAgentContextEntry entry, ref int shortened, ref int removedImages)
+    {
+        if (entry.Message.ToolResults.Count == 0) return entry;
+        var results = new List<LlmClientToolResult>(entry.Message.ToolResults.Count);
+        foreach (LlmClientToolResult result in entry.Message.ToolResults)
         {
-            if (protectedEntryIds.Contains(entry.Id) || entry.Message.ToolResults.Count == 0)
+            if (result is not LlmToolResult function)
             {
-                entries.Add(entry);
+                results.Add(result);
                 continue;
             }
-            var results = new List<LlmClientToolResult>(entry.Message.ToolResults.Count);
-            foreach (LlmClientToolResult result in entry.Message.ToolResults)
+            bool cut = false, image = false;
+            var parts = new List<LlmToolOutputPart>(function.Output.Parts.Count);
+            foreach (LlmToolOutputPart part in function.Output.Parts)
             {
-                if (result is not LlmToolResult function)
+                switch (part)
                 {
-                    results.Add(result);
-                    continue;
+                    case LlmToolOutputText { Text: var text } when text.Length > 2 * KeptCharacters && !IsShortened(text):
+                        parts.Add(new LlmToolOutputText(Cut(text)));
+                        cut = true;
+                        break;
+                    case LlmToolOutputBinary binary:
+                        parts.Add(new LlmToolOutputText($"[{binary.FileName ?? binary.MediaType} removed by compaction.]"));
+                        image |= binary.Kind == LlmBinaryKind.Image;
+                        break;
+                    case LlmToolOutputResource { Data: not null } resource:
+                        parts.Add(new LlmToolOutputText($"[{resource.Name ?? resource.Uri} removed by compaction.]"));
+                        image |= resource.BodyKind == LlmBinaryKind.Image;
+                        break;
+                    default:
+                        parts.Add(part);
+                        break;
                 }
-                bool cut = false, image = false;
-                var parts = new List<LlmToolOutputPart>(function.Output.Parts.Count);
-                foreach (LlmToolOutputPart part in function.Output.Parts)
-                {
-                    switch (part)
-                    {
-                        case LlmToolOutputText { Text: var text } when text.Length > 2 * KeptCharacters && !IsShortened(text):
-                            parts.Add(new LlmToolOutputText(Cut(text)));
-                            cut = true;
-                            break;
-                        case LlmToolOutputBinary binary:
-                            parts.Add(new LlmToolOutputText($"[{binary.FileName ?? binary.MediaType} removed by compaction.]"));
-                            image |= binary.Kind == LlmBinaryKind.Image;
-                            break;
-                        case LlmToolOutputResource { Data: not null } resource:
-                            parts.Add(new LlmToolOutputText($"[{resource.Name ?? resource.Uri} removed by compaction.]"));
-                            image |= resource.BodyKind == LlmBinaryKind.Image;
-                            break;
-                        default:
-                            parts.Add(part);
-                            break;
-                    }
-                }
-                if (cut) shortened++;
-                if (image) removedImages++;
-                results.Add(function with { Output = function.Output with { Parts = parts } });
             }
-            entries.Add(entry with { Message = entry.Message with { ToolResults = results } });
+            if (cut) shortened++;
+            if (image) removedImages++;
+            results.Add(function with { Output = function.Output with { Parts = parts } });
         }
-        return (context with { Entries = entries }, shortened, removedImages);
+        return entry with { Message = entry.Message with { ToolResults = results } };
     }
 
     private static string Cut(string text) =>
