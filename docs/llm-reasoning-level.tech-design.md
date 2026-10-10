@@ -74,11 +74,12 @@ public enum LlmReasoningLevel
 
 ## 4. Validation
 
-- A request whose level is not in the resolved model's `ReasoningLevels` fails with
-  `InferenceException` and `InvalidRequest` before any provider call. The adapter never substitutes a
-  nearby level: a silent substitution would record a decision the caller did not make.
-- `LlmClientBase` performs this check once for every Connect adapter, so no adapter repeats ad hoc
-  string validation (L14). Tensor engines perform the same check in their request validation.
+- Connect never refuses a level. `LlmReasoningEffort.Nearest` sends the offered level closest to the request:
+  the highest offered level at or below it, else the lowest offered level above it. An empty offered set sends
+  the requested level, so an unknown model is attempted.
+- `LlmRequestNormalizer` applies this once for every Connect request, before the client runs and in each managed
+  session request, so no adapter maps levels on its own. Tensor engines check the level in their request
+  validation.
 
 ## 5. Adapter mappings
 
@@ -176,9 +177,9 @@ Consumers outside this repository migrate in their own units after the release:
 
 ## 8. Verification
 
-- Each adapter has a mapping test for every level it offers, and a rejection test for a level it does
-  not.
-- `LlmClientBase` validation has a test for null, for an offered level and for an unoffered level.
+- Each adapter has a mapping test for every level it offers.
+- The normalizer has a test that an unoffered level maps to the nearest offered level and that an empty offered
+  set sends the requested level.
 - The setup session has a test for the level-set override and its effect on the resolved capabilities.
 - Live provider calls are not gates (L7).
 

@@ -159,7 +159,7 @@ services or storage from the caller so they do not invent a database or credenti
 ### Ask a configured text provider
 
 Register `AddLlmConnect()` and a host implementation of `ILlmConnectionSource` with dependency
-injection, then resolve `LlmProviderService`. The connection source supplies versioned connection metadata and protected
+injection, then resolve `LlmAgentProviderService`. The connection source supplies versioned connection metadata and protected
 credentials; credential replacement must be atomic. See [host integration](Connect/README.md#host-integration).
 
 ```csharp
@@ -171,23 +171,26 @@ namespace MyApp.Examples;
 public static class TextExample
 {
     public static async Task<string> AskAsync(
-        LlmProviderService providers, string connectionId, string modelId,
+        LlmAgentProviderService agents, string connectionId, string modelId,
         string prompt, CancellationToken cancellationToken = default)
     {
-        ILlmInference llm = providers.Bind(connectionId);
-        LlmInferenceResult result = await llm.CompleteAsync(new LlmInferenceRequest
+        await using ILlmAgentSession session = await agents.StartSessionAsync(
+            connectionId, new LlmAgentSessionOptions { ModelId = modelId }, cancellationToken);
+        var text = new System.Text.StringBuilder();
+        await foreach (LlmAgentEvent item in session.RunTurnAsync(
+            new LlmAgentTurnRequest { Input = [new LlmAgentTextContent(prompt)] }, cancellationToken))
         {
-            ModelId = modelId,
-            Messages = [new LlmMessage("user", prompt)]
-        }, cancellationToken);
+            if (item is LlmAgentTextDeltaEvent delta) { text.Append(delta.Delta); }
+        }
 
-        return result.Text;
+        return text.ToString();
     }
 }
 ```
 
-The `ILlmInference` request/result surface is also implemented by Tensor's Qwen engine. The host
-still needs to install and load that engine's model before issuing a request.
+Connect's agent session is the one conversation surface for its providers. The `ILlmInference`
+request/result surface is implemented by Tensor's Qwen engine. The host still needs to install and load
+that engine's model before issuing a request.
 
 ### Stream text through the same contract
 

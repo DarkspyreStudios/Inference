@@ -1632,11 +1632,9 @@ Task<ILlmAgentSession> StartSessionAsync(
     string connectionId, LlmConnection connection, LlmAgentSessionOptions options, CancellationToken cancellationToken);
 ```
 
-Resume and fork move to optional interfaces, `ILlmAgentResumeClient` and `ILlmAgentForkClient`, with the
-same connection ID and connection parameters. The Claude CLI client implements both. AgentCore implements
-resume only. The managed Codex and Bedrock clients implement neither. The internal
-`IConnectionBoundAgentClient` is removed. `LlmAgentProviderService` keeps its members and throws
-`NotSupportedException` naming the transport when the client lacks the interface.
+No built client resumes or forks a provider thread: Codex and the Claude CLI continue, fork and rewind by
+starting a new session with the history. `LlmAgentProviderService.ResumeSessionAsync` keeps its signature and
+throws `NotSupportedException` naming the transport. The internal `IConnectionBoundAgentClient` is removed.
 
 ### 3. Native runtime options apart from managed options
 

@@ -141,7 +141,6 @@ public interface IInferenceSettingsManager
 Public inference/agent stream methods return IAsyncEnumerable<T> directly:
 
 - Common ILlmInference.StreamAsync and CompleteAsStreamAsync.
-- Connect ILlmClient/LlmProviderService.StreamAsync.
 - Connect ILlmAgentSession.RunTurnAsync, ContinueTurnAsync and ObserveAsync.
 - Tensor Qwen StreamAsync and Whisper TranscribeStreamAsync.
 

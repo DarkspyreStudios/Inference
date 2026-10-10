@@ -38,6 +38,105 @@ reaches the existing refusal: `This route does not implement plain-text tokeniza
 The console tester has no `grok-probe` command and no `prompt --request` option, and `claude-probe` runs
 only its `cancel` case.
 
+## Conversation contract
+
+`LlmAgentProviderService` and `ILlmAgentSession` are the host's one LLM conversation surface.
+`LlmProviderService` keeps connections, sign-in, settings, model listing and capabilities. A one-off request is
+a session with one turn: start it with the messages in `LlmAgentSessionOptions.Context`, run one turn with empty
+`Input`, and dispose it.
+
+The chat lane is internal adapter plumbing: `LlmChatRequest`, `LlmChatResult`, `LlmChatCompletionEvent`,
+`ILlmClient`, `ILlmAgentClient`, `LlmProviderService.StreamAsync`, `CompleteAsync` and `Bind`, the
+tool-output projection types and `LlmRichContentSupported`. `LlmChatMessage` stays public because hosts store
+it. The constructors of `LlmProviderService`, `LlmAgentProviderService` and `LlmConnectionAccess` are internal;
+`AddLlmConnect` registers them with factories.
+
+These public surfaces are deleted: `LlmProviderService.MeasureRequestAsync`, `CountInputTokensAsync` and
+`ProjectToolOutputAsync`; `ILlmProviderTokenCounter` and `LlmProviderInputTokenCount`; `LlmToolOutputLane`;
+`ConnectLlmJson.ChatRequest` and `ChatResult`; `LlmAgentProviderService.ForkSessionAsync`,
+`ILlmAgentResumeClient` and `ILlmAgentForkClient`; `LlmAgentSessionOptions.UnboundContinuationState`;
+`ProviderControls` on `LlmAgentTurnRequest` and `LlmChatRequest`; `Strict` on `LlmToolDefinition` and
+`LlmAgentToolDefinition`; `Strict` and `Fallback` on `LlmStructuredOutputRequest`, `LlmStructuredOutputFallback`,
+`LlmToolCapabilities.StrictInputSchema` and `LlmStrictInputSchemaSupport`; and the agent mechanics
+`ContextOwnership`, `NativeFork`, `CompactionOwnership`, `ToolExecutionOwnership`, `Steering` and
+`SupportedCallerServices` with their enums `LlmAgentOwnership`, `LlmAgentNativeFork`,
+`LlmAgentToolExecutionOwnership`, `LlmAgentSteering` and `LlmAgentCallerServiceKind`.
+`LlmAgentCapabilities.SupportsSteering` replaces `Steering`.
+
+**Turn settings.** `LlmAgentTurnRequest` carries `Instructions`, `Input` (may be empty), `Attachments`, `ModelId`,
+`ReasoningLevel`, `OutputSchema`, `Temperature`, `MaxOutputTokens` and `ToolChoice`. A managed session applies
+`ToolChoice` to the turn's first model step and `Auto` after it. Empty `Input` appends no user message: the turn
+sends the context as it is, and with an empty context the turn completes at once as `Completed`.
+
+**Values the model cannot use.** Every request passes one normalizer before its client runs, and a managed
+session normalizes each request it builds, so its measure sees what is sent. A dropped setting is not reported.
+
+- Reasoning goes to the offered level closest to the request: the highest offered level at or below it, else the
+  lowest offered level above it. An empty offered set sends the requested level.
+- A sampling value the model does not support, or one out of range (TopP in (0,1], TopK > 0, Seed >= 0, all
+  finite), is not sent. A connection or request provider option named as a standard sampling field is skipped.
+- Empty stop strings are dropped and the first `MaxStopSequences` are sent. An output cap <= 0, or one the route
+  cannot enforce, is not sent. A hosted-turn limit <= 0, or one on a route with no hosted tools, is not sent.
+- Tool choice and parallel control on a request without tools are not sent. A Specific choice naming no request
+  tool becomes Auto. The first definition of a duplicated tool name is sent. A message holding both calls and
+  results is sent as two messages, calls first.
+- An attachment the model or route cannot take is left out of the outgoing request only; the stored history is
+  unchanged. This notice is appended to that message's text:
+  `[Attachment {i} ({file name}): {reason} This content was not supplied to the model.]`. An attachment on a
+  non-user message moves to the next user message, or is left out with the notice when none follows. A resource
+  reference with no resource access gets the reason `No resource access was supplied.`
+- A managed context is repaired in the copy that is sent: a duplicate entry id keeps the first entry, a duplicate
+  call id keeps the first call, a result with no call is dropped, roles keep their recorded order, and function
+  calls left unsettled get the error result `The tool was not run; no result is available.`
+- An image URL in managed `Input` becomes the text `[Image: {url}]`. A deferred tool is presented with the others.
+- Structured output is checked locally when the schema root is not an object or the route has no JSON format.
+
+A refusal remains only for an operation the conversation marks Unsupported, and it names the feature: steering on
+Claude; resume (`{transport} agent sessions cannot resume a provider thread.`); a hosted tool kind the route does
+not implement; context capture, replacement or compaction handoff where unsupported; tool use on a model without
+it; and an opening on a model that marks agent sessions or agent tool use Unsupported
+(`The selected model does not support agent sessions.` or `... agent tool use.`).
+
+**Continuing, forking and rewinding.** Codex and the Claude CLI continue a conversation by starting a new session
+with its history through `StartSessionAsync`. Neither keeps provider-side state the host must resume. Continuation
+state the selected model, provider and account cannot replay is left out and counted, so a history from any
+provider or connection continues, including one whose connection was removed. `ResumeSessionAsync` keeps its
+signature and refuses on both transports.
+
+**Feature list.** `LlmAgentCapabilities` reports public features only. Phase-1 values:
+
+| Member | Codex | Claude |
+| --- | --- | --- |
+| HostedTools | ImageGeneration | none |
+| SupportsShellTools | Unsupported | Unsupported |
+| SupportsContextCapture, SupportsContextReplacement | Supported | Unsupported |
+| SupportsContextStatus | Supported | Unsupported |
+| SupportsCompactionHandoff | Supported | Unsupported |
+| SupportsNativeResume | Unsupported | Unsupported |
+| SupportsSteering | Supported | Unsupported |
+| SupportsInterrupt | Supported | Supported |
+| SupportsExternalToolHandoff | Supported | Unknown |
+| ResourceObservation | Unsupported | Supported |
+| SupportsFallbackModels | Unsupported | Unknown |
+| SupportsTurnCap | Supported | Unknown |
+| SupportsSpendCap | Unsupported | Unknown |
+| SupportsCompactNow | Unsupported | Unsupported |
+
+**Declared for later behaviour.** These public members exist; the behaviour behind each arrives with its own
+change: `LlmAgentSessionOptions.ToolHandling` (`LlmAgentToolHandling`), `SkillFolders` and `FallbackModelIds`;
+`ILlmAgentSession.CompactionResponsibility` (`LlmCompactionResponsibility`; managed sessions report `Host` and
+Claude sessions `Provider`) and `CompactNowAsync` (refused while `SupportsCompactNow` is Unsupported);
+`LlmAgentContextPolicy.CompactionTargetRatio` and `PreserveSuppliedContext`; `LlmAgentToolDefinition.ProtectedResults`;
+`ILlmConversationTranscript`, `LlmTranscriptPage` and `LlmAgentCallerServices.Transcript`;
+`LlmProviderException.Usage`; `LlmAgentExecutionOptions.MaxSpendUsd`; `LlmAgentCompletionReason.ToolRequests` and
+`SpendLimit`; `LlmAgentTurnCompletedEvent.StructuredOutput`; `LlmAgentImageOutputEvent`;
+`LlmAgentResponseRecoveryEvent.Delay` and `Error`; and `LlmAgentCompactedEvent.ShortenedToolOutputCount` and
+`RemovedImageCount`. `LlmAgentUsageEvent.ModelId` names the model a Codex step used: the step request's model on
+streamed usage, and the reported model on the step's final usage.
+
+An unclassified managed failure ends the turn with `{exception type}: {message}`, the message with credentials
+removed. Provider errors keep `LlmProviderException.Message`.
+
 ## Support Evidence
 
 Capability flags use Common's `InferenceSupport` enum. `Unknown` permits an explicit attempt through
@@ -818,9 +917,7 @@ numeric and string request IDs distinct; input/tool parts retain their ordered m
 explicit nulls and omitted optional fields. The process wrapper owns the final newline. JSON writing
 does not change host-tool cancellation, response routing or session retirement.
 
-`LlmToolCapabilities.StrictInputSchema` reports Supported, Unsupported or Unknown. Unknown allows an
-explicit `Strict=true` request unchanged so the host can try it and handle the provider result.
-Known Unsupported rejects that request. Ordinary tools default to `Strict=false` independently.
+Tool definitions carry no strictness flag; see [Conversation contract](#conversation-contract).
 Gemini API and Vertex Gemini resolve native tool formatting inside the shared Google writer.
 With functions present, implicit or explicit Auto selects `VALIDATED` for the entire tool set,
 including ordinary tools. Consumers do not select a provider format or arrange strictness flags.
@@ -888,7 +985,7 @@ authentication, provider-management, and job contracts remain in their capabilit
 semantic inference contracts that are also implemented by Tensor belong in
 `Darkspyre.Inference.Common`.
 
-Connect's chat lane uses Common's LLM primitives directly: the stream events, tool definitions, tool
+Connect's internal chat lane uses Common's LLM primitives directly: the stream events, tool definitions, tool
 choice, tool calls, tool results with `LlmToolOutput`, attachments, structured-output types, completion
 status and `LlmUsage`, all in `Darkspyre.Inference.Common.LLM`. Connect adds only what carries
 Connect-specific data: `LlmChatMessage` and `LlmChatResult` with provider diagnostics and the shared continuation envelope,
@@ -897,17 +994,8 @@ Connect-specific data: `LlmChatMessage` and `LlmChatResult` with provider diagno
 
 ## Portable inference lane
 
-Bind a configured Connect implementation when an application wants to select Connect or Tensor
-without changing its request and result types:
-
-```csharp
-ILlmInference llm = providerService.Bind(connectionId);
-LlmInferenceResult result = await llm.CompleteAsync(new LlmInferenceRequest
-{
-    ModelId = modelId,
-    Messages = [new LlmMessage("user", prompt)]
-}, cancellationToken);
-```
+`LlmProviderService.Bind(connectionId)` is internal. It binds Common's `ILlmInference` contract to one Connect
+connection for code inside Inference; hosts use agent sessions.
 
 Image workflows expose the same boundary through `ImageProviderService.Bind(connection, workflow)`.
 Binding is explicit and retains exactly one backend. Neither adapter retries through a different
@@ -1263,18 +1351,18 @@ services.AddScoped<ILlmConnectionSource, MyProtectedConnectionSource>();
 services.AddLlmConnectBedrock();
 ```
 
-Call the provider facade with an opaque connection ID and a model selected by the host:
+Open a conversation with an opaque connection ID and a model selected by the host:
 
 ```csharp
-var result = await provider.CompleteAsync(
+await using ILlmAgentSession session = await agents.StartSessionAsync(
     connectionId,
-    new LlmChatRequest
-    {
-        ModelId = modelId,
-        Instructions = "Return a concise answer.",
-        Messages = [new LlmChatMessage("user", prompt)]
-    },
+    new LlmAgentSessionOptions { ModelId = modelId, Instructions = "Return a concise answer." },
     cancellationToken);
+await foreach (LlmAgentEvent item in session.RunTurnAsync(
+    new LlmAgentTurnRequest { Input = [new LlmAgentTextContent(prompt)] }, cancellationToken))
+{
+    // Text deltas, tool events, usage and the completion event arrive here.
+}
 ```
 
 ### Credential access
@@ -2458,65 +2546,9 @@ OpenAI-compatible calls emit their tool start before argument deltas. Missing pr
 receive distinct Connect-generated IDs. Preserve these IDs unchanged in assistant history and tool
 results; a late provider ID does not replace an already published generated ID.
 
-Define tools on the request and branch on `RequiresAction`:
-
-```csharp
-var weatherTool = new LlmToolDefinition
-{
-    Name = "get_weather",
-    Description = "Get the current weather for a city.",
-    InputSchema = JsonSerializer.SerializeToElement(new
-    {
-        type = "object",
-        properties = new
-        {
-            city = new { type = "string" }
-        },
-        required = new[] { "city" },
-        additionalProperties = false
-    })
-};
-
-LlmChatResult result = await provider.CompleteAsync(
-    connectionId,
-    new LlmChatRequest
-    {
-        ModelId = modelId,
-        Messages = [new LlmChatMessage("user", "What is the weather in Chicago?")],
-        Tools = [weatherTool]
-    },
-    cancellationToken);
-
-if (result.Status == LlmCompletionStatus.RequiresAction)
-{
-    LlmToolCall call = AssertSingleAuthorizedCall(result.ToolCalls);
-    string toolOutput = await ExecuteWeatherToolAsync(call.ArgumentsJson, cancellationToken);
-
-    result = await provider.CompleteAsync(
-        connectionId,
-        new LlmChatRequest
-        {
-            ModelId = modelId,
-            Messages =
-            [
-                new LlmChatMessage("user", "What is the weather in Chicago?"),
-                new LlmChatMessage("assistant", result.Text)
-                {
-                    ToolCalls = result.ToolCalls,
-                    ContinuationState = result.ContinuationState
-                },
-                new LlmChatMessage("user", string.Empty)
-                {
-                    ToolResults = [new LlmToolResult(call.Id, LlmToolOutput.FromText(toolOutput))]
-                }
-            ],
-            Tools = [weatherTool]
-        },
-        cancellationToken);
-}
-```
-
-During streaming, tool calls arrive as `LlmToolCallStartedEvent`, one or more `LlmToolCallArgumentsDeltaEvent` values, and `LlmToolCallCompletedEvent`. The terminal `LlmChatCompletionEvent` repeats the complete calls in `LlmChatResult.ToolCalls`. `ArgumentsJson` is deliberately raw JSON; the host should deserialize it into its own validated input type before execution.
+Hosts define tools on the session as `LlmAgentToolDefinition` values and run them in the session's
+`LlmAgentToolHandler`; see the agent example under [Direct ChatGPT subscription transport and managed agents](#direct-chatgpt-subscription-transport-and-managed-agents). The chat
+request and its tool calls are internal adapter plumbing.
 
 ### 2.0 attachment migration
 
@@ -2924,17 +2956,24 @@ followed by its text, or an embedded text resource where the route carries those
 content becomes its JSON as the final text part. A converted error flag becomes a leading
 `[Tool error]` text part.
 
-`LlmProviderService.ProjectToolOutputAsync` reports what one output sends for a connection, model and
-lane, without a network call. Each part is `Delivered`, `Converted` to text, or `Omitted` with a
-reason: `UnsupportedByRoute`, `UnsupportedByModel`, `InvalidContent` or `Empty`. Invalid content is
-structured content that is not a JSON object, a resource with both a text and a byte body, text that is
-not UTF-8, or a part over `MaxBinaryBytes`. Adapters serialize through the same projection, so the
-report matches the request. An omitted part never fails the request, the turn or the tool, and never
-changes `IsError`. Connect adds no notice for an omitted part. A host that wants one adds a text part
-and projects again.
+Adapters project each tool output through one internal projection. Each part is delivered, converted to text,
+or omitted because the route or the model cannot take it, it is invalid, or it is empty. Invalid content is
+structured content that is not a JSON object, a resource with both a text and a byte body, text that is not
+UTF-8, or a part over `MaxBinaryBytes`. An omitted part never fails the request, the turn or the tool, and never
+changes `IsError`. After each omitted part the model receives the text
+`[Content[{i}]: {reason} This content was not supplied to the model.]`, where `{i}` is the part's index:
 
-The facade checks caller cancellation and facade retirement after each route/model capability
-callback and before publishing the projection report.
+| Omission | Part | Reason |
+| --- | --- | --- |
+| Model | image | `The selected model does not support tool-result images.` |
+| Model | document | `The selected model does not support tool-result documents.` |
+| Model | other | `The selected model does not support this content.` |
+| Route | image | `The transport cannot carry tool-result images.` |
+| Route | document | `The transport cannot carry this tool-result document.` |
+| Route | other binary | `The transport cannot carry this binary kind.` |
+| Route | resource | `The transport cannot carry this resource.` |
+| Empty | any | `The transport cannot carry an empty attachment.` |
+| Invalid | any | `The tool content is invalid.` |
 
 ### Continuation state
 
@@ -2961,13 +3000,12 @@ the identities required for tool-enabled replay.
 
 ### Carrying history to another model or provider
 
-A conversation that moves to another model or provider starts a new provider-side conversation from
-the host's retained history. Set `UnboundContinuationState = LlmUnboundContinuationState.Omit` on those
-requests. Each message whose state does not bind to the target transport, model and account is sent
-without it; its visible text, tool calls, tool results and attachments are kept. The result's
-`OmittedContinuationStateCount` reports how many messages were sent without state. The default,
-`Reject`, fails before any request. The caller's messages are not modified, so the original state
-stays in host storage.
+A conversation that moves to another model or provider starts a new session from the host's retained history.
+Each message whose state does not bind to the target transport, model and account is sent without it; its
+visible text, tool calls, tool results and attachments are kept. A managed session's first turn emits one
+`LlmAgentWarningEvent` with the count. The caller's context is not modified, so the original state stays in host
+storage. Inside Inference the internal chat request keeps its own `UnboundContinuationState`; managed sessions
+always send `Omit`.
 
 Gemini API and Vertex Gemini accept visible foreign tool-call groups with explicit Omit. Gemini 3
 places the documented dummy thought signature on the first imported call; original bound native
@@ -2994,51 +3032,14 @@ calls and results already in the history reach their prompt as `[TOOL CALL id=â€
 
 `LlmAgentCapabilities.ContextImport` reports how a session start takes `LlmAgentSessionOptions.Context`:
 
-- Managed Codex and managed Bedrock Converse import it as host-owned context (`Structured`). With `Omit`, unbound state is removed
-  and the first turn emits one `LlmAgentWarningEvent` with the count.
-- Claude CLI and AgentCore sessions report `OpeningContext`. A start with `Omit` begins a new provider
+- Managed Codex and managed Bedrock Converse import it as host-owned context (`Structured`). Unbound state is
+  removed and the first turn emits one `LlmAgentWarningEvent` with the count.
+- Claude CLI and AgentCore sessions report `OpeningContext`. A start begins a new provider
   conversation and sends the history once, as a `CONVERSATION SO FAR` transcript ahead of the first
   turn's input. The first turn emits one warning that names what was not carried; AgentCore carries
-  no history attachments. A start context with `Reject` fails on these runtimes.
+  no history attachments.
 
-`MeasureRequestAsync` measures the request as it would be sent. Claude CLI chat and Antigravity CLI
-chat estimate it with the bundled `o200k_base` tokenizer and say so in the diagnostic; the estimate
-excludes each CLI's own framing.
-
-### Provider input-token counting
-
-`LlmProviderService.CountInputTokensAsync(connectionId, request, ct)` explicitly calls the selected
-provider's count API. `ILlmProviderTokenCounter` is the optional adapter capability. Anthropic
-Messages, Gemini API, Vertex Gemini and Vertex Claude implement it. A route without it throws
-`NotSupportedException`; counting never substitutes a local estimate or creates a completion.
-`MeasureRequestAsync` remains local nonmutating accounting and does not call a count API.
-
-Counting refreshes and prepares the selected credential, binds continuation state, and attaches the
-same catalog as generation. It uses the canonical generation request builder. Anthropic excludes
-generation-only controls but preserves system/messages, tools, tool choice, thinking and output
-format. Gemini API wraps the complete request in `generateContentRequest`. Vertex Gemini sends
-the count API's input fields and generation config without `toolConfig`. Fields a count API cannot
-represent are rejected, not silently stripped from the prompt.
-
-The focused counting tests compare the real count and nonstreaming generation builders on all four
-routes. They check instructions, explicit document bytes, function schemas and reasoning controls,
-plus native count routing and generation-only field removal. Scripted HTTP and a borrowed Vertex
-authentication stand-in qualify request projection only; they do not qualify provider acceptance.
-
-`LlmProviderInputTokenCount` carries the resolved model, provider-reported input count, nullable
-cached-input and billable-character counts, modality breakdowns, and omitted continuation-state
-count. Unknown modalities retain their counts as `Unknown`. Missing optional values stay null;
-malformed, negative and overflowing counts fail. These are preflight provider counts, not actual
-generation usage, billing records or guaranteed admission. No output-token usage is invented.
-
-Each count HTTP operation has a 100-second deadline through response parsing. Caller cancellation
-remains cancellation. Service disposal cancels and drains active counts and rejects late results.
-The facade retains the adapter's failure as the cancellation cause when both occur together.
-Failures expose safe status/retry information without response bodies or nested transport diagnostics.
-Vertex Claude uses `count-tokens:rawPredict` with the bare model ID. Its count regions differ from
-generation regions; an unsupported selected location fails without rerouting or changing the model.
-Vertex accepts Google text and Claude model IDs without a local model or generation-location allowlist.
-Express mode counts Gemini input with its projectless API-key endpoint.
+A managed session's `GetContextStatusAsync` measures the request a turn sends.
 
 ### Host-owned managed agent runtime
 
@@ -3055,12 +3056,8 @@ ends. Consumers discard unfinished text and reasoning without changing completed
 replacement event clears transient recovery progress through an empty `LlmAgentActivityEvent`.
 After three interruptions, the turn reports that recovery failed and completed tool results are retained.
 
-**Accounting extension (11.14.0-rc.1):** the library includes
-`LlmProviderService.MeasureRequestAsync(connectionId, request, policy, ct)` and
-`ILlmAgentSession.MeasureContextAsync(proposedContext, ct)`, both returning `LlmRequestAccounting`.
-These APIs are introduced in the coordinated `11.14.0-rc.1` contract release.
-Standalone accounting resolves the selected connection read-only and may read its model catalog,
-but never refreshes/persists credentials or runs inference. Session accounting uses base settings
+**Accounting:** `ILlmAgentSession.MeasureContextAsync(proposedContext, ct)` returns `LlmRequestAccounting`.
+Session accounting uses base settings
 while idle and the frozen executing model/instructions/tools while paused, including queued steering
 without consuming it. Active execution is rejected. It never replaces context or consumes a pause.
 
@@ -3712,7 +3709,7 @@ The facade drains active tokenization during retirement and rejects late results
 synchronous owner fence. Injected access and clients remain borrowed. Cancellation that races a
 provider failure retains the actual error as its cause. Tokenization does not count instructions,
 tool schemas, media or protocol framing. It does not report request occupancy, generated
-usage or billing, and it does not implement `ILlmProviderTokenCounter`.
+usage or billing.
 OAuth access to its tokenizer endpoint has not been live-qualified.
 
 `ImageProviderService.SetupDefinitions` and `CreateSettingsManager` provide the same editing surface for
@@ -4079,15 +4076,9 @@ and never consumes credits. The upstream route is evidenced in
 The old Codex process/App Server implementation is removed, not retained as a second lane.
 Claude and AgentCore still use their native session adapters.
 
-Tools are sent non-strict unless their definition sets `Strict`: `LlmToolDefinition` and
-`LlmAgentToolDefinition` both default to false, because a host schema describes what the tool accepts.
-Structured output keeps `Strict = true`, because its schema describes the reply the host requires. A strict
-tool's schema must meet the provider's strict rules; for OpenAI, every object closes
-`additionalProperties` and lists every property as required, and any other schema fails the whole
-request.
-
-OpenAI Responses and Codex send the flag as given. Anthropic Messages, OpenAI-compatible Chat Completions and Bedrock Converse send `strict` only
-for a strict tool, because some models and compatible servers reject the field even when it is false.
+Tools and structured output carry no strictness flag. Codex sends `"strict": false` for every tool and for a
+structured answer's JSON schema, because a host schema describes what it accepts and need not meet the
+provider's strict rules.
 
 ```csharp
 LlmAgentProviderService agents = services.GetRequiredService<LlmAgentProviderService>();
@@ -4143,7 +4134,8 @@ await foreach (LlmAgentEvent agentEvent in session.RunTurnAsync(
 ```
 
 `LlmAgentSessionOptions.Runtime` (`LlmAgentNativeRuntimeOptions`) controls a provider-owned runtime:
-its working directory, `Ephemeral` and `Policy`. Native runtimes require it; managed sessions reject it.
+its working directory, `Ephemeral` and `Policy`. A provider-owned runtime reads it; a managed session accepts
+and ignores it.
 `Policy` is one of two variants:
 
 - `LlmAgentHostRuntimePolicy` (the default): host-selected writable roots, network access, sandbox,
@@ -4154,11 +4146,8 @@ its working directory, `Ephemeral` and `Policy`. Native runtimes require it; man
 
 `LlmAgentCapabilities.SupportedRuntimePolicies` lists the variants a runtime accepts. The Claude CLI and
 AgentCore accept `HostControlled`; the Antigravity CLI accepts only `ProviderConfigured`; managed runtimes
-report an empty set. A runtime rejects any other
-variant before effects. A resume without `Runtime` uses the current directory as working directory and a
-host-controlled policy with that directory as its only writable root, `WorkspaceWrite`, network allowed,
-`OnRequest` and no runtime background work. A runtime that accepts only `ProviderConfigured` therefore
-rejects a resume without `Runtime`. A supplied `Runtime` is used whole. Managed Codex has no built-in shell, file editor,
+report an empty set. No runtime refuses a policy variant: the Claude CLI runs the default host-controlled
+policy when it receives another. Managed Codex has no built-in shell, file editor,
 network tool, or approval executor. Agent DS must enforce authorization, filesystem roots, and network
 policy inside each tool handler. Managed sessions are always live/in-memory; persistence is explicit
 host capture.
@@ -4172,7 +4161,7 @@ the exact registered host MCP tools are pre-approved, and permission prompts rem
 The caller's handler owns the effects of its registered tools. This mode does not enable native
 file edits or shell commands. Claude's [permission contract](https://code.claude.com/docs/en/agent-sdk/permissions)
 separates explicit tool approval from planning mode's write restrictions.
-Claude start, resume and fork retire an unsuccessfully initialized session before returning.
+Claude start retires an unsuccessfully initialized session before returning.
 Successful cleanup preserves the original opening error. Failed cleanup returns an aggregate
 containing the original opening error followed by the cleanup error, without retrying cleanup.
 
@@ -4196,11 +4185,8 @@ attachment access must survive reopen or live compaction. Keep the original file
 cache affinity is not file storage.
 
 Managed sessions expose `ThreadId` and `SessionId`, explicit interrupt, safe-boundary steering,
-and host context operations. Resume and fork are optional: a client that implements
-`ILlmAgentResumeClient` or `ILlmAgentForkClient` supports them, and `LlmAgentProviderService` throws
-`NotSupportedException` for one that does not. Native `ResumeSessionAsync` and `ForkSessionAsync` are
-unsupported for managed Codex and managed Bedrock Converse; AgentCore resumes but does not fork. Claude retains native resume/current-position fork and interrupt; its steering method
-is unsupported. Tools return
+and host context operations. Codex and Claude continue, fork and rewind by starting a new session with the cut
+history; `ResumeSessionAsync` refuses on both. Claude supports interrupt; its steering method is unsupported. Tools return
 text plus provider-neutral image/document attachments. Managed tools reject URL-based image/audio
 content; use `Attachments`. Claude materializes MCP document resources through its read-only
 `Read` tool. Every tool-capable session must receive a host tool handler.
