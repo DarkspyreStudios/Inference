@@ -3281,8 +3281,8 @@ which the caller resolves through `IInferenceResourceAccess.GetAsync` before eac
 resource content. The Claude CLI estimate is the local count, uncorrected. Hosts that keep continuation state keep the counts with it. Each
 Bedrock model has its own tokenizer, so a Bedrock estimate of the unreported tail is approximate and its
 diagnostic says so. Provider context-overflow errors trigger a handoff only in host-compaction mode. Catalog limits
-are optional. Configure an explicit output reserve when the catalog provides none; without a
-known limit, reserve and occupancy, `NeedsCompaction` stays null.
+are optional. Limits follow `CompactionLimits.For`: the reserve is the policy's, else the model's output
+limit, else 8,000; without a known window or occupancy, `NeedsCompaction` stays null.
 
 Tools execute sequentially by default. Parallel mode is opt-in and bounded; a tool marked
 `RequiresSequentialExecution` serializes its whole batch. Schemas are validated before callbacks.

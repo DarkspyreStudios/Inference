@@ -350,14 +350,15 @@ tools when parallel mode is explicitly selected. `LlmAgentToolDefinition.Require
 forces the entire containing batch to be sequential. Host handlers still enforce authorization,
 filesystem/network policy and sandboxing themselves. Native sandbox options are not a host sandbox.
 
-`LlmAgentContextPolicy` defaults to ratio 0.85 and safety margin 4096; host context cap/output reserve
-are optional. Runtime admission validates positive limits, positive concurrency/iteration counts,
-nonnegative margin, finite ratio in `(0, 1]`, and cap precedence before effects. With known quantities:
+`LlmAgentContextPolicy` carries an optional host context cap and output reserve and a compaction target
+ratio. One rule sets every request's limits (`CompactionLimits.For`): the window is the smallest known
+value of the listed model window, a learned limit and the cap; the reserve is the policy's, else the
+model's output limit, else 8,000. Policy values are never refused. With a known window:
 
 ```text
-inputBudget = max(0, MaxContextTokens - ReservedOutputTokens - SafetyMarginTokens)
+inputBudget = max(0, window - reserve)
 available = max(0, inputBudget - UsedContextTokens)
-needsCompaction = UsedContextTokens >= floor(inputBudget * CompactionThresholdRatio)
+needsCompaction = UsedContextTokens >= floor(inputBudget * 0.85)
 ```
 
 ### Same-run pause protocol

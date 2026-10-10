@@ -344,7 +344,7 @@ Native-owned sessions return unsupported; their resolved model may itself be unk
 
 `LlmRequestAccounting` contains `ModelId`, `IsSupported`, safe `Diagnostic`, nullable `ContextRevision`,
 `ModelMaxContextTokens`, `ModelMaxOutputTokens`, effective `MaxContextTokens`, `UsedContextTokens`,
-`ReservedOutputTokens`, `SafetyMarginTokens`, `InputBudgetTokens`, `AvailableInputTokens`, nullable
+`ReservedOutputTokens`, `InputBudgetTokens`, `AvailableInputTokens`, nullable
 `NeedsCompaction`, `Source`, and `OutputLimitEnforcement`. Token fields are nullable long.
 Counts include full projected instructions/tools/schema/messages, not just summarizable history.
 The existing managed policy calculation is shared by live status and both accounting operations.
@@ -411,24 +411,22 @@ overflow handling.
 
 Execution options define `ContextPolicy`:
 
-- `CompactionThresholdRatio`: default 0.85, validated greater than zero and at most one.
-- `SafetyMarginTokens`: default 4096, nonnegative.
-- `ReservedOutputTokens`: optional host reserve; otherwise resolve a verified adapter/model reserve.
-- `MaxContextTokens`: optional host cap; never greater than a known hard limit.
+- `ReservedOutputTokens`: optional host reserve.
+- `MaxContextTokens`: optional host cap.
+- `CompactionTargetRatio`: default 0.35, clamped to 0.05-0.80.
 
-The ratio and margin are library planning defaults, not provider facts. If no output reserve can be
-resolved, the recommendation remains unknown until the host supplies one; no invented model limit.
-
-When all quantities are known:
+One rule sets every request's limits (`CompactionLimits.For`). The window is the smallest known value of
+the listed model window, a learned limit and `MaxContextTokens`; without one the limits are unknown. The
+reserve is `ReservedOutputTokens`, else the model's output limit, else 8,000:
 
 ```text
-inputBudget = max(0, MaxContextTokens - ReservedOutputTokens - SafetyMarginTokens)
+inputBudget = max(0, window - reserve)
 AvailableInputTokens = max(0, inputBudget - UsedContextTokens)
-NeedsCompaction = UsedContextTokens >= floor(inputBudget * CompactionThresholdRatio)
+NeedsCompaction = UsedContextTokens >= floor(inputBudget * 0.85)
 ```
 
-A 200,000-token context, 16,000-token reserve, and 4,000-token margin give a 180,000-token input
-budget and a 153,000-token compaction threshold at 0.85. These are illustrative numbers.
+A 200,000-token window and a 16,000-token reserve give a 184,000-token input budget and a
+156,400-token compaction trigger. These are illustrative numbers.
 
 Measurement resolution:
 
