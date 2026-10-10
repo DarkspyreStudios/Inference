@@ -183,7 +183,7 @@ A Codex retry reports `Delay` as the wait before the next attempt and `Error` as
 
 `LlmAgentUsageEvent.ModelId` names the model a Codex step used: the step request's model on
 streamed usage, and the reported model on the step's final usage. On Claude it is the `model` the CLI reports on
-the turn's latest assistant message or message start.
+the turn's latest assistant message.
 
 **Context limits.** One rule sets every request's limits (`CompactionLimits.For`). The window is the smallest
 known value of the listed model window, a learned limit when one is known and `LlmAgentContextPolicy.MaxContextTokens`.

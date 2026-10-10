@@ -1476,13 +1476,6 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                     case "stream_event" when parent is null:
                         {
                             TurnTarget target = EnsureTarget();
-                            if (root.TryGetProperty("event", out JsonElement started)
-                                && OptionalString(started, "type") == "message_start"
-                                && started.TryGetProperty("message", out JsonElement startedMessage)
-                                && OptionalString(startedMessage, "model") is { } startedModel)
-                            {
-                                target.ModelId = startedModel;
-                            }
                             if (root.TryGetProperty("event", out JsonElement messageEvent)
                                 && OptionalString(messageEvent, "type") is ("message_start" or "message_stop") and { } boundary)
                             {
