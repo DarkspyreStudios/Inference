@@ -36,6 +36,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(ProviderDefinitions.ClaudeSubscription);
         services.AddSingleton(ProviderDefinitions.ChatGptSubscription);
         services.AddSingleton<LlmProviderCatalog>();
+        // What reported counts and refusals taught about each model, shared by every session on that model.
+        services.AddSingleton<LearnedModelContext>();
         services.AddInferenceHttpClient<ClaudeCliLlmClient>();
         services.AddInferenceHttpClient<OpenAiEmbeddingClient>();
         services.AddLogging();
