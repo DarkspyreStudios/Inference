@@ -4262,8 +4262,8 @@ Managed sessions expose `ThreadId` and `SessionId`, explicit interrupt, safe-bou
 and host context operations. Codex and Claude continue, fork and rewind by starting a new session with the cut
 history; `ResumeSessionAsync` refuses on both. Claude supports interrupt; its steering method is unsupported. Tools return
 text plus provider-neutral image/document attachments. Managed tools reject URL-based image/audio
-content; use `Attachments`. Claude materializes MCP document resources through its read-only
-`Read` tool. A tool-capable session receives a host tool handler unless it returns its calls
+content; use `Attachments`. Claude receives tool-result resources inline in the bridge's MCP results;
+its built-in tools, `Read` included, are off (`--tools ""`). A tool-capable session receives a host tool handler unless it returns its calls
 (`ToolHandling = ReturnRequests`); a Claude call with no handler gets an error result. On Claude, returned calls run
 without session persistence: the first host tool call of a step interrupts the CLI unanswered, every call of that step
 is returned with its argument check, and the next turn opens a new CLI session from the saved history.
