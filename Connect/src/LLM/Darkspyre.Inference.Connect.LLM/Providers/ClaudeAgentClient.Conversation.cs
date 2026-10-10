@@ -1,7 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
-using System.Globalization;
 using System.Runtime.CompilerServices;
-using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
@@ -20,7 +18,7 @@ internal sealed partial class ClaudeAgentClient
     /// The Claude conversation the Host holds. It owns the saved history and the current CLI session, measures before
     /// each send, and compacts by opening a new CLI session with the compacted history as its opening.
     /// </summary>
-    private sealed partial class ClaudeConversation : ILlmAgentSession
+    private sealed class ClaudeConversation : ILlmAgentSession
     {
         private const string ContinueLine =
             "Continue from where you stopped. The tool results above are complete; do not repeat finished tool calls.";
@@ -671,15 +669,10 @@ internal sealed partial class ClaudeAgentClient
             }
             var resources = await ResolveAsync(saved, added, turn.Token);
             long estimate = Local(turn.ModelId, _framing, [.. saved.Entries.Select(entry => entry.Message), .. added], resources);
-            Match sizes = RefusalSizes().Match(detail ?? string.Empty);
-            long? reportedTokens = sizes.Success ? long.Parse(sizes.Groups[1].Value, CultureInfo.InvariantCulture) : null;
-            long? reportedLimit = sizes.Success ? long.Parse(sizes.Groups[2].Value, CultureInfo.InvariantCulture) : null;
+            (long? reportedTokens, long? reportedLimit) = ReadRefusalSizes(detail);
             _owner.Learned.ObserveRefusal(_connection.Transport, turn.ModelId, estimate, reportedTokens, reportedLimit,
                 ClaudeModelLimits.Get(turn.ModelId).ContextTokens);
         }
-
-        [GeneratedRegex(@"(\d+) tokens > (\d+)")]
-        private static partial Regex RefusalSizes();
 
         /// <summary>Sends one summary request in print mode on the conversation's connection and returns its result.</summary>
         private async Task<LlmChatResult> SideRequestAsync(LlmChatRequest request, CancellationToken cancellationToken)

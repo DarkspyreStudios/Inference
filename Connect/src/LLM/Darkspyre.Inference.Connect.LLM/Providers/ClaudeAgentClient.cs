@@ -1,9 +1,11 @@
 using Darkspyre.Inference.Common;
 using System.Runtime.CompilerServices;
 using System.Diagnostics.CodeAnalysis;
+using System.Globalization;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
@@ -193,6 +195,21 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
 
         _ = CliInfrastructure.NormalizeWorkingDirectory(workingDirectory);
     }
+
+    /// <summary>
+    /// The request size and limit a Claude CLI too-long refusal reports, such as
+    /// <c>Prompt is too long · the request is ~1053843 tokens (limit 1000000)</c>; null for a value the text lacks.
+    /// </summary>
+    internal static (long? Tokens, long? Limit) ReadRefusalSizes(string? detail)
+    {
+        Match sizes = RefusalSizes().Match(detail ?? string.Empty);
+        return sizes.Success
+            ? (long.Parse(sizes.Groups[1].Value, CultureInfo.InvariantCulture), long.Parse(sizes.Groups[2].Value, CultureInfo.InvariantCulture))
+            : (null, null);
+    }
+
+    [GeneratedRegex(@"~?(\d+) tokens \(limit (\d+)\)")]
+    private static partial Regex RefusalSizes();
 
     /// <summary>The MCP tool-name rule. A name outside it is sent as its <see cref="LlmToolNames.Alias"/>.</summary>
     private static bool IsValidMcpToolName(string name) =>
