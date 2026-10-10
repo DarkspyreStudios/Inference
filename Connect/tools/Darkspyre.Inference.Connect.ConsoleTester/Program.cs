@@ -8,6 +8,7 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.LLM;
+using Darkspyre.Inference.Connect.LLM.Providers;
 using Darkspyre.Inference.Connect.TTS;
 using Microsoft.Extensions.DependencyInjection;
 using SecureStore;
@@ -50,6 +51,13 @@ internal static class Program
             provider.GetRequiredService<SecureConnectionSource>());
         services.AddLlmConnect();
         services.AddTtsConnect();
+        if (args[0] == "claude-probe")
+        {
+            // The Claude checks read the CLI's own init and control lines, which no public event carries.
+            services.AddSingleton(container => new ClaudeCliRecorder(
+                new ClaudeCliSessionProcessFactory(container.GetRequiredService<ClaudeCliExits>())));
+            services.AddSingleton<IClaudeCliSessionProcessFactory>(container => container.GetRequiredService<ClaudeCliRecorder>());
+        }
         await using ServiceProvider provider = services.BuildServiceProvider();
         try
         {
@@ -78,15 +86,17 @@ internal static class Program
                 "usage" => await RunUsageAsync(llms, invocation, cancellation.Token),
                 "prompt" => await RunPromptAsync(llms, invocation, cancellation.Token),
                 "agy-probe" when invocation.Provider.Transport == LlmTransport.GoogleAntigravityCli =>
-                    await NativeCliProbe.RunAsync(llms, agent, invocation, cancellation.Token),
+                    await NativeCliProbe.RunAsync(llms, agent, invocation, null, cancellation.Token),
                 "claude-probe" when invocation.Provider.Transport == LlmTransport.AnthropicClaudeCli =>
-                    await NativeCliProbe.RunAsync(llms, agent, invocation, cancellation.Token),
+                    await NativeCliProbe.RunAsync(llms, agent, invocation, provider.GetRequiredService<ClaudeCliRecorder>(),
+                        cancellation.Token),
                 "codex-probe" when invocation.Provider.Transport == LlmTransport.OpenAiCodex =>
                     await CodexProtocolProbe.RunAsync(llms, invocation.Provider.ConnectionId,
                         ParsePromptOptions(invocation.CommandArguments).Model, cancellation.Token),
                 "managed-probe" when invocation.Provider.Transport == LlmTransport.OpenAiCodex =>
                     await ManagedAgentProbe.RunAsync(agent, invocation.Provider.ConnectionId,
                         ParsePromptOptions(invocation.CommandArguments).Model, cancellation.Token),
+                "limit-probe" => await LimitProbe.RunAsync(llms, agent, invocation, cancellation.Token),
                 "agent" => await RunAgentAsync(
                     llms,
                     agent,
@@ -891,9 +901,10 @@ internal static class Program
               darkspyre-inference-connect-tester models --provider <codex|antigravity|bedrock>
               darkspyre-inference-connect-tester usage  --provider <codex|claude|antigravity>
               darkspyre-inference-connect-tester agy-probe --provider antigravity [--model <id>] [--case all|text|structured|native-tools|session|resume|controls|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
-              darkspyre-inference-connect-tester claude-probe --provider claude [--model <id>] [--case all|cancel] [--repeat 1..20] [--timeout-seconds 1..600]
+              darkspyre-inference-connect-tester claude-probe --provider claude [--model <id>] [--case all|cancel|isolation|large-result|return-requests] [--repeat 1..20] [--timeout-seconds 1..600]
               darkspyre-inference-connect-tester codex-probe --provider codex --model <model-id>
               darkspyre-inference-connect-tester managed-probe --provider codex --model <model-id>
+              darkspyre-inference-connect-tester limit-probe --provider codex|claude [--model <id>]
               darkspyre-inference-connect-tester prompt --provider <codex|claude|antigravity|bedrock|agentcore> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--non-streaming]
               darkspyre-inference-connect-tester agent  --provider <codex|claude|agentcore|antigravity|bedrock> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--max-model-iterations <positive integer>]
 
