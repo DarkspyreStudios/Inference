@@ -170,6 +170,12 @@ signature and refuses on both transports.
 | SupportsSpendCap | Unsupported | Unknown |
 | SupportsCompactNow | Supported | Supported |
 
+**Images out on Codex.** An `LlmImageGenerationTool` in `HostedTools` adds `{"type":"image_generation"}` to the
+Codex payload. Each finished `image_generation_call` is committed through `CallerServices.Resources` as
+`image-{callId}.{ext}` and reported as `LlmAgentImageOutputEvent` with the resource reference and media type. Without
+`CallerServices.Resources` the session drops the image tool at opening. A failed commit ends the turn with
+`ProviderFailure`.
+
 **Fallback models, caps and retries.** Codex refuses a non-empty `FallbackModelIds` and a `MaxSpendUsd` greater
 than 0 at opening. Claude passes `FallbackModelIds`, without the session model and without repeats, as
 `--fallback-model a,b`; the CLI stops at launch when a fallback equals the main model. When `ExecutionOptions` is
