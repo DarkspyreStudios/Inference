@@ -216,7 +216,6 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmEmbeddingResult> LlmEmbeddingResult => Metadata<LlmEmbeddingResult>();
     public static JsonTypeInfo<LlmEmbeddingUsage> LlmEmbeddingUsage => Metadata<LlmEmbeddingUsage>();
     public static JsonTypeInfo<LlmAgentContext> AgentContext => Metadata<LlmAgentContext>();
-    public static JsonTypeInfo<LlmProviderCompactionRequest> LlmProviderCompactionRequest => Metadata<LlmProviderCompactionRequest>();
     public static JsonTypeInfo<LlmAgentContextEntry> AgentContextEntry => Metadata<LlmAgentContextEntry>();
     public static JsonTypeInfo<LlmAgentContextStatus> AgentContextStatus => Metadata<LlmAgentContextStatus>();
 }
@@ -347,7 +346,6 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmEmbeddingResult))]
 [JsonSerializable(typeof(LlmEmbeddingUsage))]
 [JsonSerializable(typeof(LlmAgentContext))]
-[JsonSerializable(typeof(LlmProviderCompactionRequest))]
 [JsonSerializable(typeof(AgentContextFormat3))]
 [JsonSerializable(typeof(LegacyAgentContext))]
 [JsonSerializable(typeof(LlmAgentContextEntry))]

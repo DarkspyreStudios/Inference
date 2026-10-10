@@ -290,7 +290,7 @@ public sealed class DirectCodexTests
             ExecutionOptions = new() { ContextPolicy = policy }
         }, [new("model", "Model") { MaxContextTokens = 272000 }], client,
             (_, _) => throw new InvalidOperationException("Accounting must not generate a response."),
-            model => client.GetCapabilities(connection, model));
+            model => client.GetCapabilities(connection, model), new LearnedModelContext());
         LlmRequestAccounting measured = await session.MeasureContextAsync(context);
         LlmAgentContextStatus status = await session.GetContextStatusAsync();
 

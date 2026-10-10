@@ -408,32 +408,15 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         string connectionId, LlmChatRequest request, string expectedScope, CancellationToken cancellationToken) =>
         StreamCoreAsync(connectionId, request, expectedScope, cancellationToken);
 
-    internal async Task<ProviderCompactionResult> CompactAgentAsync(
-        string connectionId, LlmChatRequest request, string expectedScope, CancellationToken cancellationToken)
-    {
-        ProviderCompactionResult? result = null;
-        try
-        {
-            await foreach (LlmStreamEvent _ in StreamCoreAsync(connectionId, request, expectedScope, cancellationToken,
-                compacted => result = compacted).ConfigureAwait(false))
-            {
-                throw new InvalidOperationException("Provider compaction cannot dispatch generation events.");
-            }
-            return result ?? throw new InvalidOperationException("Provider compaction returned no result.");
-        }
-        catch (Exception error) { _cleanupOutcomes.Record(error); throw; }
-    }
-
     private IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(
         string connectionId, LlmChatRequest request, string? expectedScope,
-        CancellationToken cancellationToken, Action<ProviderCompactionResult>? publishCompaction = null) =>
-        _lifetime.StreamAsync(token => ProduceStreamAsync(connectionId, request, expectedScope, token, publishCompaction), cancellationToken);
+        CancellationToken cancellationToken) =>
+        _lifetime.StreamAsync(token => ProduceStreamAsync(connectionId, request, expectedScope, token), cancellationToken);
 
     [SuppressMessage("Usage", "CA2219", Justification = "Iterator disposal executes finally; provider or projection failure must survive independently refused enumeration cleanup.")]
     private async IAsyncEnumerable<LlmStreamEvent> ProduceStreamAsync(
         string connectionId, LlmChatRequest request, string? expectedScope,
-        [EnumeratorCancellation] CancellationToken cancellationToken,
-        Action<ProviderCompactionResult>? publishCompaction = null)
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
         request = ClientTools.Snapshot(request with { HostedTools = HostedTools.Snapshot(request.HostedTools) });
@@ -444,8 +427,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
-        if (publishCompaction is not null && client is not OpenAiCodexLlmClient)
-            throw new NotSupportedException("The selected route has no provider compactor.");
         string? resolvedCredential = connection.Credential;
         connection = WithContextCache(EmbeddingRequestData.Snapshot(connection), client);
         if (request.ExplicitCache is not null)
@@ -507,10 +488,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         ThrowIfOperationCanceled(cancellationToken);
         // The catalog is attached first: it can narrow what the model accepts, such as its reasoning levels.
         request = LlmRequestNormalizer.Normalize(connection, request, client.GetCapabilities(connection, request.ModelId));
-        IAsyncEnumerable<LlmStreamEvent> stream = publishCompaction is not null && client is OpenAiCodexLlmClient codex
-            ? codex.StreamCompactionAsync(connection, request, cancellationToken)
-            : client.StreamAsync(connection, request, cancellationToken);
-        ProviderCompactionResult? compactionResult = null;
+        IAsyncEnumerable<LlmStreamEvent> stream = client.StreamAsync(connection, request, cancellationToken);
         IAsyncEnumerator<LlmStreamEvent> enumerator = stream.GetAsyncEnumerator(cancellationToken);
         Exception? operationFailure = null;
         try
@@ -526,17 +504,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
                     connection.CacheAdmission?.Check(connection, request.ExplicitCache);
                     if (streamEvent is AccountUsageObservedEvent observed)
                     { observationBinding?.Record(observed.Snapshot); continue; }
-                    if (publishCompaction is not null)
-                    {
-                        if (compactionResult is not null || streamEvent is not LlmChatCompletionEvent compacted)
-                            throw new InvalidOperationException("Provider compaction returned an unexpected event.");
-                        LlmChatResult result = SanitizeDiagnostics(compacted.Result, connection);
-                        if (result.Status != LlmCompletionStatus.Completed || result.ContinuationState is null
-                            || string.IsNullOrWhiteSpace(result.ProviderResponseId))
-                            throw new InvalidOperationException("Provider compaction returned no completed continuation.");
-                        compactionResult = new(result.ContinuationState, result.ProviderResponseId, result.Usage);
-                        continue;
-                    }
                     projected = streamEvent is LlmChatCompletionEvent completion
                         ? new LlmChatCompletionEvent(SanitizeDiagnostics(completion.Result, connection) with
                         {
@@ -551,8 +518,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             {
                 ThrowIfOperationCanceled(cancellationToken);
                 connection.CacheAdmission?.Check(connection, request.ExplicitCache);
-                if (publishCompaction is not null)
-                    publishCompaction(compactionResult ?? throw new InvalidOperationException("Provider compaction returned no result."));
             }
             catch (Exception error) { operationFailure = error; throw; }
         }

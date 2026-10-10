@@ -42,9 +42,6 @@ public sealed record LlmAgentCapabilities
 
     public InferenceSupport SupportsCompactionHandoff { get; init; }
 
-    /// <summary>Creates a provider compaction proposal; the host still commits the replacement.</summary>
-    public InferenceSupport SupportsProviderCompaction { get; init; }
-
     public InferenceSupport SupportsNativeResume { get; init; }
 
     /// <summary>SteerAsync adds input to a running turn.</summary>

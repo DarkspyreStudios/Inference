@@ -11,8 +11,8 @@ internal static class ManagedAgentPolicy
         SupportsContextCapture = InferenceSupport.Supported,
         SupportsContextReplacement = InferenceSupport.Supported,
         SupportsContextStatus = InferenceSupport.Supported,
-        SupportsCompactionHandoff = InferenceSupport.Supported,
-        SupportsCompactNow = InferenceSupport.Unsupported,
+        SupportsCompactionHandoff = InferenceSupport.Unsupported,
+        SupportsCompactNow = InferenceSupport.Supported,
         SupportsSteering = InferenceSupport.Supported,
         SupportsInterrupt = InferenceSupport.Supported,
         // The managed runtime sends tool output through Direct Codex Responses.

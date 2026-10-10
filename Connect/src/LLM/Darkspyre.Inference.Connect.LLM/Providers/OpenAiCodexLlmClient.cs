@@ -22,9 +22,6 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
 
     protected override bool SupportsResourcePreparation => true;
 
-    internal IAsyncEnumerable<LlmStreamEvent> StreamCompactionAsync(LlmConnection connection, LlmChatRequest request,
-        CancellationToken cancellationToken = default) => StreamCompactionCoreAsync(connection, request, cancellationToken);
-
     protected override LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
         CodexRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
 
@@ -56,7 +53,6 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         SupportsAgentTurnInstructions = InferenceSupport.Supported,
         Agent = ManagedAgentPolicy.Capabilities with
         {
-            SupportsProviderCompaction = InferenceSupport.Supported,
             SupportsShellTools = InferenceSupport.Unsupported,
             SupportsNativeResume = InferenceSupport.Unsupported,
             SupportsExternalToolHandoff = InferenceSupport.Supported,

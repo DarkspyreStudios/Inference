@@ -159,7 +159,7 @@ signature and refuses on both transports.
 | SupportsShellTools | Unsupported | Unsupported |
 | SupportsContextCapture, SupportsContextReplacement | Supported | Unsupported |
 | SupportsContextStatus | Supported | Unsupported |
-| SupportsCompactionHandoff | Supported | Unsupported |
+| SupportsCompactionHandoff | Unsupported | Unsupported |
 | SupportsNativeResume | Unsupported | Unsupported |
 | SupportsSteering | Supported | Unsupported |
 | SupportsInterrupt | Supported | Supported |
@@ -168,18 +168,13 @@ signature and refuses on both transports.
 | SupportsFallbackModels | Unsupported | Unknown |
 | SupportsTurnCap | Supported | Unknown |
 | SupportsSpendCap | Unsupported | Unknown |
-| SupportsCompactNow | Unsupported | Unsupported |
+| SupportsCompactNow | Supported | Unsupported |
 
 **Declared for later behaviour.** These public members exist; the behaviour behind each arrives with its own
 change: `ToolHandling = ReturnRequests` on Claude; `LlmAgentSessionOptions.SkillFolders` and `FallbackModelIds`;
-`ILlmAgentSession.CompactionResponsibility` (`LlmCompactionResponsibility`; managed sessions report `Host` and
-Claude sessions `Provider`) and `CompactNowAsync` (refused while `SupportsCompactNow` is Unsupported);
-`LlmAgentContextPolicy.CompactionTargetRatio` and `PreserveSuppliedContext`; `LlmAgentToolDefinition.ProtectedResults`;
-`ILlmConversationTranscript`, `LlmTranscriptPage` and `LlmAgentCallerServices.Transcript`;
-`LlmProviderException.Usage`; `LlmAgentExecutionOptions.MaxSpendUsd`; `LlmAgentCompletionReason.SpendLimit`;
-`LlmAgentImageOutputEvent`;
-`LlmAgentResponseRecoveryEvent.Delay` and `Error`; and `LlmAgentCompactedEvent.ShortenedToolOutputCount` and
-`RemovedImageCount`. `LlmAgentUsageEvent.ModelId` names the model a Codex step used: the step request's model on
+compaction on Claude, whose `CompactNowAsync` is refused while its `SupportsCompactNow` is Unsupported;
+`LlmAgentExecutionOptions.MaxSpendUsd`; `LlmAgentCompletionReason.SpendLimit`; `LlmAgentImageOutputEvent`; and
+`LlmAgentResponseRecoveryEvent.Delay` and `Error`. `LlmAgentUsageEvent.ModelId` names the model a Codex step used: the step request's model on
 streamed usage, and the reported model on the step's final usage. On Claude it is the `model` the CLI reports on
 the turn's latest assistant message or message start.
 
@@ -191,6 +186,35 @@ compaction target is `CompactionTargetRatio` (clamped to 0.05-0.80) of it. `LlmR
 `ReservedOutputTokens` and `InputBudgetTokens` report the window, the reserve and the usable window. Execution
 options never refuse: a non-positive iteration or tool-concurrency limit uses the record default, a non-positive
 reserve or cap is ignored, and a cap above the model limit uses the model limit.
+
+**Compaction on Codex.** Every conversation reports `CompactionResponsibility = Provider`: Codex compacts inside
+Inference and never pauses for the host, and its `ContinueTurnAsync` refuses because `SupportsCompactionHandoff` is
+Unsupported. Codex's own compaction is never requested. Before every model step the session measures the request and
+emits `LlmAgentContextStatusEvent`. A local estimate that does not rest on a provider-reported count is corrected
+with the rate the model's reported counts taught; the rate and any learned limit are kept per transport and model for
+the process and never stored. At or above the trigger the session compacts toward the target: it cuts each
+unprotected tool-result text part to its first and last 1,000 characters and replaces binary parts with a notice,
+then keeps the current turn and the newest whole turns that fit in half the room under the target, and replaces the
+rest with one user entry `Summary of the earlier conversation:\n{summary}`. The summary is built from
+`LlmAgentCallerServices.Transcript` when the caller supplies it, else from the live context's real entries, and never
+from an earlier summary. Summary requests run on the conversation's own connection and model, one at a time, in parts
+within half the usable window. The working indicator shows `Pruning old context`, `Summarizing earlier messages` and
+`Applying the compacted context` as `LlmAgentActivityEvent` text, cleared by empty text. A compaction that changed the
+context emits `LlmAgentCompactedEvent` with the dropped-entry, shortened-output and removed-image counts, then an
+`LlmAgentUsageEvent` with the summary requests' usage. Results of a current-turn call to a tool with
+`ProtectedResults = true` are never shortened or summarized. A result at or above the usable window ends the turn with
+`ProviderFailure` and `Compaction could not bring this request under the limit: {measured} tokens remain in a
+{usable}-token usable window. The current turn alone measures {mandatory} tokens.` A failed summary request ends the
+turn with the provider's message after the usage it reported; the context is unchanged.
+
+A too-long refusal teaches the model's size, compacts whatever the measure says and sends the same step again once; a
+second refusal in the turn ends it with `ProviderFailure` and the provider's message. With
+`PreserveSuppliedContext` the session measures and reports but never compacts or resends. An opened history whose
+entry held only continuation state the import left out, such as a native compaction from another connection or model,
+has that entry replaced at the first step with a summary of the transcript turns the context no longer holds, or
+dropped when no transcript is supplied. `CompactNowAsync` runs the same compaction on an idle conversation, keeps its
+last turn whole, and returns the compacted event, or null when there is nothing to compact or no known window; it is
+refused while a turn runs.
 
 An unclassified managed failure ends the turn with `{exception type}: {message}`, the message with credentials
 removed. Provider errors keep `LlmProviderException.Message`.
@@ -3158,9 +3182,8 @@ its existing session store, restore/fork decisions and compactor; Darkspyre.Infe
 `LlmAgentContextStatus.NeedsCompaction` and token counts are nullable: unknown is not zero/false.
 `MaxContextTokens` is effective context capacity; model discovery also exposes nullable context
 and output limits. Context occupancy includes cached input and differs from accumulated usage or
-account quota. A `LlmAgentCompactionRequiredEvent` ends an execution segment, **not the logical run**.
-After host compaction, `ContinueTurnAsync` uses the same turn ID, pause ID and expected revision,
-without resubmitting the prompt or re-executing settled tools. Managed clients cover direct
+account quota. `LlmAgentCompactionRequiredEvent` and `ContinueTurnAsync` are the host-compaction contract for a
+conversation that reports `CompactionResponsibility = Host`; no phase-1 conversation does. Managed clients cover direct
 Codex, API-key OpenAI Responses, Anthropic Messages, OpenAI-compatible Chat, Gemini API, Apple Foundation Models
 and Grok OAuth Responses through `AddLlmConnect`. Separate registration
 extensions add Bedrock Converse and Vertex Gemini/Claude. SelfHost opens a managed session only after resolving the selected host
@@ -3169,7 +3192,7 @@ selected model/connection before opening. Each managed lane uses its actual requ
 continuation scope and facade stream as its chat route; it does not enable Azure agent sessions.
 `LlmProviderException.IsContextOverflow` identifies recognized provider input-context failures.
 Adapters classify their own HTTP, stream or typed SDK errors and keep `ProviderCode` unchanged.
-Host-compaction managed sessions pause on this flag. Grok's provider-owned automatic mode ends
+Grok's provider-owned automatic mode ends
 `ProviderFailure` without a host pause. Responses/Codex, compatible chat, Anthropic Messages,
 Gemini/Vertex, Bedrock Converse and Apple recognize their supported overflow error patterns.
 Bedrock Converse SDK failures surface the actual error kind and credential-redacted message,
@@ -3182,38 +3205,11 @@ for public diagnostics. They retain the actual AWS error kind and explanation in
 the explanation with a generic context-window message. Their observed status and overflow flag remain intact.
 xAI input overflow raises this failure instead of returning an incomplete completion; output-token
 truncation remains an incomplete completion.
-Each model step permits at most two provider-overflow pauses, including across continued segments.
-A third overflow ends the run with `ProviderFailure` and
-"The context could not be reduced enough for this step." A completed model step resets the count.
 
 An unclassified managed-run exception emits a `LlmAgentWarningEvent` with its runtime type and
 managed stack frames before the generic failure completion. The diagnostic omits exception messages,
 source-file paths and provider payloads. Agent DS records this warning in the application log,
 not in the conversation.
-
-Paused continuation retains protected records exactly or reduces only their function tool-output
-parts. A reduction keeps the same ordered part count and replaces each part with text. Replacement
-text cannot exceed the original text part's length, including any recovery notice. Binary and
-resource parts can become caller-authored notices; Connect does not interpret notice grammar or
-host storage IDs. Entry identities, role, call order/count, error flags, structured content and all
-other fields remain unchanged. Shell results remain exact. The existing whole-context shrink/fit
-checks still apply, including the fallback that requires removal of unprotected history when
-occupancy is unknown. Idle `ReplaceContextAsync` retains its separate revision-checked replacement
-behavior; it has no live protected set.
-
-`CompactWithProviderAsync(LlmProviderCompactionRequest, ct)` declares a provider-created replacement
-proposal for a separate host commit. Managed Codex advertises `SupportsProviderCompaction`;
-other sessions reject this operation. The caller supplies the current revision and, when paused,
-the exact turn/pause IDs. The request has an exact `ConnectLlmJson.LlmProviderCompactionRequest`
-metadata getter. It uses the same fresh credential, model catalog, continuation scope and Responses
-stream as generation. Visible tools remain present, parallel calls are allowed, and the output schema
-is absent. Successful completion must contain exactly one encrypted compaction item; extra completed
-text/tool items are ignored and never dispatched. The complete compaction item remains unchanged in replay.
-The returned context keeps budgeted newest real user prompts in chronological order, then the opaque
-compaction entry, then the paused protected tail. Protected records stay outside `RetainedUserTokens`;
-unknown prompt cost stops optional retention. Actual resource selection/version remains separate.
-The proposal retains the current revision, installs nothing and consumes no pause. The host commits it
-through `ReplaceContextAsync` or `ContinueTurnAsync`, including their existing shrink/fit checks.
 
 Grok uses the separate provider-owned automatic mode, not this proposal API. A known threshold triggers
 one `/responses/compact` call before the model step. Known hard-window excess or provider overflow ends

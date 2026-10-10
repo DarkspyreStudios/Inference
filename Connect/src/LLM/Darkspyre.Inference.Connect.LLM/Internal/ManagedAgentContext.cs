@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
@@ -253,56 +252,4 @@ internal static class ManagedAgentContext
         }).ToArray()),
         StructuredContent = output.StructuredContent?.Clone()
     };
-
-    public static bool Equivalent(LlmAgentContextEntry left, LlmAgentContextEntry right) =>
-        JsonElement.DeepEquals(JsonSerializer.SerializeToElement(left, ConnectLlmJson.AgentContextEntry),
-            JsonSerializer.SerializeToElement(right, ConnectLlmJson.AgentContextEntry));
-
-    public static bool IsReducedToolResults(LlmAgentContextEntry original, LlmAgentContextEntry candidate)
-    {
-        var originalResults = original.Message.ToolResults;
-        var candidateResults = candidate.Message.ToolResults;
-        if (originalResults.Count == 0 || originalResults.Count != candidateResults.Count) return false;
-
-        var normalizedResults = new LlmClientToolResult[candidateResults.Count];
-        for (int resultIndex = 0; resultIndex < originalResults.Count; resultIndex++)
-        {
-            if (originalResults[resultIndex] is LlmToolResult originalFunction
-                && candidateResults[resultIndex] is LlmToolResult candidateFunction)
-            {
-                var originalParts = originalFunction.Output.Parts;
-                var candidateParts = candidateFunction.Output.Parts;
-                if (originalParts.Count != candidateParts.Count) return false;
-                for (int partIndex = 0; partIndex < originalParts.Count; partIndex++)
-                {
-                    if (candidateParts[partIndex] is not LlmToolOutputText { Text: { } replacement }) return false;
-                    switch (originalParts[partIndex])
-                    {
-                        case LlmToolOutputText { Text: { } text } when replacement.Length <= text.Length:
-                        case LlmToolOutputBinary:
-                        case LlmToolOutputResource:
-                        case LlmToolOutputSessionResource:
-                            break;
-                        default:
-                            return false;
-                    }
-                }
-                normalizedResults[resultIndex] = candidateFunction with
-                {
-                    Output = candidateFunction.Output with { Parts = originalParts }
-                };
-            }
-            else if (originalResults[resultIndex] is LlmShellCallResult && candidateResults[resultIndex] is LlmShellCallResult)
-            {
-                normalizedResults[resultIndex] = candidateResults[resultIndex];
-            }
-            else return false;
-        }
-
-        // Restore only the permitted part changes; the existing comparison preserves every other field.
-        return Equivalent(original, candidate with
-        {
-            Message = candidate.Message with { ToolResults = normalizedResults }
-        });
-    }
 }

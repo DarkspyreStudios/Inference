@@ -140,6 +140,37 @@ internal sealed class ConversationCompactor(
             shortenedCount, removedImages, limits, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Replaces the entries left empty when a provider's own compaction state was omitted with one summary of the
+    /// transcript turns the context no longer holds (steps 4-7). Without a transcript, or when the transcript holds no
+    /// such turn, the empty entries are dropped and nothing is summarized.
+    /// </summary>
+    /// <exception cref="CompactionFailedException">The result stays at or above the usable window.</exception>
+    /// <exception cref="LlmProviderException">A summary side request failed; the caller keeps its context.</exception>
+    internal async Task<CompactionResult> SummarizeOmittedAsync(LlmAgentContext context, string modelId,
+        string currentTurnId, IReadOnlySet<string> emptyEntryIds, CompactionLimits limits,
+        Func<string, CancellationToken, ValueTask> stage, CancellationToken cancellationToken)
+    {
+        LlmAgentContext remaining = context with { Entries = [.. context.Entries.Where(entry => !emptyEntryIds.Contains(entry.Id))] };
+        if (transcript is null) return new(remaining, null, null, 0, 0);
+        var keptTurns = remaining.Entries.Select(entry => entry.TurnId).Where(turnId => turnId != SummaryTurnId)
+            .ToHashSet(StringComparer.Ordinal);
+        IReadOnlyList<LlmAgentContextEntry> source = await SourceAsync(remaining.Entries, keptTurns, cancellationToken)
+            .ConfigureAwait(false);
+        if (source.Count == 0) return new(remaining, null, null, 0, 0);
+        LlmAgentContextEntry[] kept = Kept(remaining.Entries, keptTurns);
+        await stage("Summarizing earlier messages", cancellationToken).ConfigureAwait(false);
+        long keptMeasure = await Measure(remaining, kept, cancellationToken).ConfigureAwait(false);
+        int words = (int)Math.Max(MinimumSummaryWords, WordsPerToken * (limits.TargetTokens - keptMeasure));
+        (string summary, LlmUsage? usage) = await SummarizeAsync(source, modelId, words, limits, cancellationToken)
+            .ConfigureAwait(false);
+        var summaryEntry = new LlmAgentContextEntry(Guid.NewGuid().ToString("N"), SummaryTurnId,
+            new LlmChatMessage("user", SummaryPrefix + summary));
+        LlmAgentContextEntry[] current = [.. kept.Where(entry => entry.TurnId == currentTurnId)];
+        return await FinishAsync(remaining with { Entries = [summaryEntry, .. kept] }, current,
+            context.Entries.Count - kept.Length, usage, 0, 0, limits, cancellationToken).ConfigureAwait(false);
+    }
+
     /// <summary>Returns the result below the usable window, or throws with the sizes when it cannot be sent.</summary>
     private async Task<CompactionResult> FinishAsync(LlmAgentContext result, LlmAgentContextEntry[] current, int? dropped,
         LlmUsage? usage, int shortenedCount, int removedImages, CompactionLimits limits, CancellationToken cancellationToken)

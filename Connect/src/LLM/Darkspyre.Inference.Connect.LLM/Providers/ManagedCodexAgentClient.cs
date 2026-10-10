@@ -4,7 +4,8 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Codex registration for the provider-neutral live engine.</summary>
-internal sealed class ManagedCodexAgentClient(OpenAiCodexLlmClient client, LlmProviderService providers)
+internal sealed class ManagedCodexAgentClient(OpenAiCodexLlmClient client, LlmProviderService providers,
+    LearnedModelContext learned)
     : ILlmAgentClient
 {
     public LlmTransport Transport => LlmTransport.OpenAiCodex;
@@ -35,8 +36,7 @@ internal sealed class ManagedCodexAgentClient(OpenAiCodexLlmClient client, LlmPr
         string scope = ProviderContinuationStateCodec.Scope(connection);
         return await ManagedAgentSession.CreateAsync(connection, options, connection.Catalog ?? [], client,
             (request, token) => providers.StreamAgentAsync(connectionId, request, scope, token),
-            model => client.GetCapabilities(connection, model), openingFence: Fence,
-            compactor: (request, token) => providers.CompactAgentAsync(connectionId, request, scope, token),
+            model => client.GetCapabilities(connection, model), learned, openingFence: Fence,
             cancellationToken: opening.Token).ConfigureAwait(false);
     }
 }

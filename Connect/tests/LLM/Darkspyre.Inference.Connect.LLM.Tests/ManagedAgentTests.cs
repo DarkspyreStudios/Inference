@@ -724,6 +724,196 @@ public sealed class ManagedAgentTests
         Assert.True(results.Single(result => result.ToolCallId == "bad").Output.IsError);
     }
 
+    [Fact]
+    public async Task CodexCompactsAtTriggerToTarget()
+    {
+        // A 10,000-token window with a 100-token reserve: trigger 8,415, target 3,465.
+        var harness = new Harness { Window = 10000 };
+        harness.Results.Enqueue(new()
+        {
+            Diagnostics = new(200, null, null), Text = string.Empty, Status = LlmCompletionStatus.RequiresAction,
+            ToolCalls = [new LlmToolCall("call-1", "echo", "{}")]
+        });
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "done", Status = LlmCompletionStatus.Completed });
+        await using var session = harness.Create(ToolsOptions(_ => LlmToolOutput.FromText(new string('x', 9000))));
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        Assert.Empty(events.OfType<LlmAgentCompactionRequiredEvent>());
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        // The first step measured below the trigger and did not compact; the second compacted by shortening alone.
+        LlmAgentCompactedEvent compacted = Assert.Single(events.OfType<LlmAgentCompactedEvent>());
+        Assert.Null(compacted.DroppedMessageCount);
+        Assert.Equal(1, compacted.ShortenedToolOutputCount);
+        Assert.Empty(harness.Summaries);
+        Assert.Equal(2, harness.Requests.Count);
+        LlmToolResult sent = Assert.IsType<LlmToolResult>(
+            Assert.Single(harness.Requests[1].Messages.SelectMany(message => message.ToolResults)));
+        Assert.Contains("of 9000 characters removed by compaction.]", Assert.IsType<LlmToolOutputText>(Assert.Single(sent.Output.Parts)).Text);
+        Assert.InRange(harness.EstimateInputTokens(Harness.Connection, harness.Requests[1], ResourceSizes.None)!.Value.Tokens, 0, 3465);
+    }
+
+    [Fact]
+    public async Task CodexRefusalCompactsAndResendsOnce()
+    {
+        static LlmProviderException TooLong() => new("Your input exceeds the context window of this model.",
+            LlmTransport.OpenAiCodex, isContextOverflow: true);
+        // The first refusal is compacted and the step sent again; the Host never sees it.
+        var recovered = new Harness { RequestFailure = request => request == 1 ? TooLong() : null, SummaryText = "summary of turn one" };
+        recovered.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "answer", Status = LlmCompletionStatus.Completed });
+        await using (var session = recovered.Create(Options() with { Context = History(("t1", new string('a', 600), "first answer")) }))
+        {
+            List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+
+            Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+            Assert.Single(events.OfType<LlmAgentCompactedEvent>());
+            Assert.Equal(2, recovered.Requests.Count);
+            string resent = string.Join("\n", recovered.Requests[1].Messages.Select(message => message.Content));
+            Assert.Contains("summary of turn one", resent);
+            Assert.DoesNotContain(new string('a', 600), resent);
+        }
+
+        // A second refusal in the same turn ends it with the provider's message and is not sent again.
+        var refused = new Harness { RequestFailure = _ => TooLong() };
+        await using (var session = refused.Create(Options() with { Context = History(("t1", new string('a', 600), "first answer")) }))
+        {
+            List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+
+            LlmAgentTurnCompletedEvent completed = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+            Assert.Equal(LlmAgentCompletionReason.ProviderFailure, completed.Reason);
+            Assert.Equal("Your input exceeds the context window of this model.", completed.Error);
+            Assert.Equal(2, refused.Requests.Count);
+        }
+    }
+
+    [Fact]
+    public async Task PreservedContextNeverCompacts()
+    {
+        var harness = new Harness
+        {
+            RequestFailure = _ => new LlmProviderException("Prompt is too long.", LlmTransport.OpenAiCodex, isContextOverflow: true)
+        };
+        await using var session = harness.Create(Options() with
+        {
+            Context = History(("t1", new string('a', 800), "first answer")),
+            ExecutionOptions = new() { ContextPolicy = new() { PreserveSuppliedContext = true } }
+        });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        Assert.True(Assert.Single(events.OfType<LlmAgentContextStatusEvent>()).Status.NeedsCompaction);
+        Assert.Empty(events.OfType<LlmAgentCompactedEvent>());
+        LlmAgentTurnCompletedEvent completed = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal(LlmAgentCompletionReason.ProviderFailure, completed.Reason);
+        Assert.Equal("Prompt is too long.", completed.Error);
+        Assert.Contains(new string('a', 800), Assert.Single(harness.Requests).Messages.Select(message => message.Content));
+    }
+
+    [Fact]
+    public async Task FailedSummaryReportsErrorAndKeepsContext()
+    {
+        var harness = new Harness
+        {
+            SummaryFailure = new LlmProviderException("The summary model is overloaded.", LlmTransport.OpenAiCodex)
+            { Usage = new(10, 2, 12) }
+        };
+        LlmAgentContext history = History(("t1", new string('a', 800), "first answer"));
+        await using var session = harness.Create(Options() with { Context = history });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        LlmAgentTurnCompletedEvent completed = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal(LlmAgentCompletionReason.ProviderFailure, completed.Reason);
+        Assert.Equal("The summary model is overloaded.", completed.Error);
+        LlmAgentUsageEvent usage = Assert.Single(events.OfType<LlmAgentUsageEvent>());
+        Assert.Equal(new LlmUsage(10, 2, 12), usage.Usage);
+        Assert.True(events.IndexOf(usage) < events.IndexOf(completed));
+        Assert.Empty(events.OfType<LlmAgentCompactedEvent>());
+        Assert.Single(harness.Summaries);
+        Assert.Empty(harness.Requests);
+        LlmAgentContext kept = await session.CaptureContextAsync();
+        Assert.Equal([.. history.Entries.Select(entry => entry.Message.Content), "hello"],
+            kept.Entries.Select(entry => entry.Message.Content));
+    }
+
+    [Fact]
+    public async Task OmittedNativeCompactionIsSummarizedBeforeFirstSend()
+    {
+        // A Codex session another connection compacted natively: one entry holds only the compaction state, and the
+        // turns it replaced exist only in the Host's transcript.
+        var foreignState = new LlmContinuationState
+        { ImplementationId = "openai-codex", ModelId = "other", ScopeId = "other-account", Payload = "opaque" };
+        LlmAgentContext recent = History(("t2", "recent question", "recent answer"));
+        var context = recent with
+        {
+            Entries = [new("native", "native", new("assistant", string.Empty) { ContinuationState = foreignState }), .. recent.Entries]
+        };
+        var transcript = new Transcript([.. History(("t0", "oldest question", "oldest answer"),
+            ("t1", "older question", "older answer")).Entries, .. recent.Entries]);
+        var harness = new Harness { SummaryText = "summary of t0 and t1" };
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "answer", Status = LlmCompletionStatus.Completed });
+        await using var session = harness.Create(Options() with
+        {
+            Context = context,
+            CallerServices = new() { Transcript = transcript }
+        });
+        Assert.Empty(harness.Summaries);
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("next")));
+
+        Assert.Equal(1, Assert.Single(events.OfType<LlmAgentCompactedEvent>()).DroppedMessageCount);
+        string summarized = Assert.Single(Assert.Single(harness.Summaries).Messages).Content;
+        Assert.Contains("oldest question", summarized);
+        Assert.Contains("older answer", summarized);
+        Assert.DoesNotContain("recent question", summarized);
+        Assert.Equal(["Summary of the earlier conversation:\nsummary of t0 and t1", "recent question", "recent answer", "next"],
+            Assert.Single(harness.Requests).Messages.Select(message => message.Content));
+    }
+
+    [Fact]
+    public async Task CompactNowSummarizesAnIdleConversation()
+    {
+        var harness = new Harness { SummaryText = "summary of t1" };
+        LlmAgentContext history = History(("t1", new string('a', 400), "first answer"), ("t2", new string('b', 300), "second answer"));
+        await using var session = harness.Create(Options() with { Context = history });
+
+        LlmAgentCompactedEvent? compacted = await session.CompactNowAsync();
+
+        Assert.NotNull(compacted);
+        Assert.Equal(2, compacted.DroppedMessageCount);
+        Assert.Equal("t2", compacted.TurnId);
+        LlmAgentContext result = await session.CaptureContextAsync();
+        Assert.Equal(compacted.ContextRevision, result.Revision);
+        Assert.Equal(["Summary of the earlier conversation:\nsummary of t1", new string('b', 300), "second answer"],
+            result.Entries.Select(entry => entry.Message.Content));
+
+        // A running session refuses instead of compacting.
+        var running = new Harness();
+        running.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "answer", Status = LlmCompletionStatus.Completed });
+        await using var busy = running.Create(Options() with { Context = history });
+        await using IAsyncEnumerator<LlmAgentEvent> turn = busy.RunTurnAsync(Turn("hello")).GetAsyncEnumerator();
+        Assert.True(await turn.MoveNextAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => busy.CompactNowAsync());
+        while (await turn.MoveNextAsync()) { }
+        Assert.Single(running.Requests);
+    }
+
+    /// <summary>A context of whole turns, each a user message and the assistant's answer.</summary>
+    private static LlmAgentContext History(params (string TurnId, string Question, string Answer)[] turns) => new()
+    {
+        Entries = [.. turns.SelectMany(turn => new LlmAgentContextEntry[]
+        {
+            new(turn.TurnId + "-user", turn.TurnId, new("user", turn.Question)),
+            new(turn.TurnId + "-assistant", turn.TurnId, new("assistant", turn.Answer))
+        })]
+    };
+
+    private sealed class Transcript(IReadOnlyList<LlmAgentContextEntry> entries) : ILlmConversationTranscript
+    {
+        public Task<LlmTranscriptPage> ReadAsync(string? cursor, int limit, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new LlmTranscriptPage(entries, null));
+    }
+
     private sealed class CodexClient : ILlmAgentClient
     {
         public LlmTransport Transport => LlmTransport.OpenAiCodex;
@@ -755,6 +945,10 @@ public sealed class ManagedAgentTests
         public Queue<IReadOnlyList<LlmUsage>> UsageObservations { get; } = new();
         public List<LlmChatRequest> Requests { get; } = [];
         public List<LlmChatRequest> Estimates { get; } = [];
+        /// <summary>Compaction summary requests, answered with <see cref="SummaryText"/> or <see cref="SummaryFailure"/>.</summary>
+        public List<LlmChatRequest> Summaries { get; } = [];
+        public string SummaryText { get; init; } = "summary";
+        public Exception? SummaryFailure { get; init; }
         public Exception? Failure { get; set; }
         /// <summary>An optional scripted failure for each numbered model request.</summary>
         public Func<int, Exception?>? RequestFailure { get; init; }
@@ -769,7 +963,7 @@ public sealed class ManagedAgentTests
         public LlmConnection SessionConnection { get; init; } = Connection;
         public ManagedAgentSession Create(LlmAgentSessionOptions? options = null) => ManagedAgentSession.CreateAsync(
             SessionConnection,
-            options ?? Options(), [new("test", "Test") { MaxContextTokens = 1000, MaxOutputTokens = 100 }, new("other", "Other") { MaxContextTokens = 2000, MaxOutputTokens = 100 }], this, Stream,
+            options ?? Options(), [new("test", "Test") { MaxContextTokens = Window, MaxOutputTokens = 100 }, new("other", "Other") { MaxContextTokens = 2000, MaxOutputTokens = 100 }], this, Stream,
             _ => Capabilities ?? new()
             {
                 SupportsAgentSessions = InferenceSupport.Supported,
@@ -778,7 +972,10 @@ public sealed class ManagedAgentTests
                 RichContentSupported = RichContentRoutes.Responses,
                 HostedTools = new HashSet<LlmHostedToolKind> { LlmHostedToolKind.WebSearch },
                 Agent = ManagedAgentPolicy.Capabilities
-            }).GetAwaiter().GetResult();
+            }, Learned).GetAwaiter().GetResult();
+        public LearnedModelContext Learned { get; } = new();
+        /// <summary>The test model's context window.</summary>
+        public long Window { get; init; } = 1000;
         public string? EstimateDiagnostic => null;
 
         public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request,
@@ -786,14 +983,24 @@ public sealed class ManagedAgentTests
         {
             Estimates.Add(request);
             return UnknownEstimate ? null
-                : new ContextEstimate(request.Messages.Sum(message => message.Content.Length) + (request.Instructions?.Length ?? 0));
+                : new ContextEstimate(request.Messages.Sum(message => message.Content.Length + message.ToolResults
+                    .OfType<LlmToolResult>().SelectMany(result => result.Output.Parts).OfType<LlmToolOutputText>()
+                    .Sum(part => part.Text.Length)) + (request.Instructions?.Length ?? 0));
         }
         private async IAsyncEnumerable<LlmStreamEvent> Stream(LlmChatRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            Requests.Add(request);
             await Task.Yield();
+            if (request.Instructions?.StartsWith("Summarize these conversation records", StringComparison.Ordinal) == true)
+            {
+                Summaries.Add(request);
+                if (SummaryFailure is not null) throw SummaryFailure;
+                yield return new LlmChatCompletionEvent(new()
+                { Diagnostics = new(200, null, null), Text = SummaryText, Status = LlmCompletionStatus.Completed });
+                yield break;
+            }
+            Requests.Add(request);
             if (ExposeBeforeFailure) { yield return new LlmTextDeltaEvent("partial"); }
             Exception? failure = RequestFailure is null ? Failure : RequestFailure(Requests.Count);
             if (failure is not null) { throw failure; }
