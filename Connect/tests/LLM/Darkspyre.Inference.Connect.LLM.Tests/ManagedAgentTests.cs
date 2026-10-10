@@ -330,6 +330,22 @@ public sealed class ManagedAgentTests
         Assert.Empty(events.OfType<LlmAgentMessageCompletedEvent>());
     }
 
+    /// <summary>A retried stream interruption reports the wait before the next attempt and the failure that caused it.</summary>
+    [Fact]
+    public async Task StreamInterruptionReportsDelayAndError()
+    {
+        var harness = new Harness { RequestFailure = number => number == 1 ? Interrupted() : null };
+        harness.Results.Enqueue(Done());
+        await using var session = harness.Create();
+
+        var events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        var recovery = Assert.Single(events.OfType<LlmAgentResponseRecoveryEvent>());
+        Assert.Equal(2, recovery.NextAttempt);
+        Assert.Equal(TimeSpan.FromSeconds(1), recovery.Delay);
+        Assert.Equal("The model response stream was interrupted.", recovery.Error);
+    }
+
     /// <summary>A hosted-tool request is never replayed even without observed hosted activity.</summary>
     [Fact]
     public async Task InterruptedHostedToolRequestDoesNotReplay()

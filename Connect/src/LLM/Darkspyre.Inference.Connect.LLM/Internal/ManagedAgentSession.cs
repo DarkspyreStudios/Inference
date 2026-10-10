@@ -647,7 +647,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                             bool hostedTools = request.HostedTools.Count > 0;
                             int? nextAttempt = hostedTools || attempt == 3 ? null : attempt + 1;
                             run.UsageUnknown = true;
-                            await writer.WriteAsync(new LlmAgentResponseRecoveryEvent(ThreadId, run.Id, stepId, nextAttempt), token);
+                            await writer.WriteAsync(new LlmAgentResponseRecoveryEvent(ThreadId, run.Id, stepId, nextAttempt)
+                            {
+                                Delay = nextAttempt is null ? null : TimeSpan.FromSeconds(attempt),
+                                Error = error.Message
+                            }, token);
                             if (nextAttempt is null)
                             {
                                 string message = hostedTools

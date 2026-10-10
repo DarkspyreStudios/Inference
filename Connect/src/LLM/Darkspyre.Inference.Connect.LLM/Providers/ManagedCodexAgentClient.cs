@@ -30,6 +30,10 @@ internal sealed class ManagedCodexAgentClient(OpenAiCodexLlmClient client, LlmPr
                 throw new NotSupportedException(NativeAgentContract.AgentSessionsUnsupported);
             if (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported))
                 throw new NotSupportedException(NativeAgentContract.AgentToolUseUnsupported);
+            if (options.FallbackModelIds.Count > 0 && capabilities.Agent.SupportsFallbackModels == InferenceSupport.Unsupported)
+                throw new NotSupportedException("The selected model does not support fallback models.");
+            if (options.ExecutionOptions?.MaxSpendUsd > 0 && capabilities.Agent.SupportsSpendCap == InferenceSupport.Unsupported)
+                throw new NotSupportedException("The selected model does not support spend caps.");
         }
         connection = await providers.PrepareManagedConnectionAsync(connectionId, connection, client, Preflight, opening.Token).ConfigureAwait(false);
         Fence();
