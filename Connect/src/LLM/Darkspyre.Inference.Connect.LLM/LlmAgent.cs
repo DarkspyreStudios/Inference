@@ -31,17 +31,13 @@ public sealed record LlmAgentToolDefinition : LlmAgentClientToolDefinition
 
     public required JsonElement InputSchema { get; init; }
 
-    /// <summary>
-    /// Requests provider-enforced schema adherence. The schema must then meet the provider's strict
-    /// rules; for OpenAI that means every object closes <c>additionalProperties</c> and lists every
-    /// property as required. A host schema describes what the tool accepts, so the default is false.
-    /// </summary>
-    public bool Strict { get; init; }
-
     public bool DeferLoading { get; init; }
 
     /// <summary>Forces an entire managed tool batch to execute sequentially.</summary>
     public bool RequiresSequentialExecution { get; init; }
+
+    /// <summary>Compaction keeps this tool's calls and results in the current turn whole.</summary>
+    public bool ProtectedResults { get; init; }
 }
 
 public abstract record LlmAgentContent;
@@ -121,7 +117,7 @@ public sealed record LlmAgentProviderRuntimePolicy : LlmAgentRuntimePolicy
 
 /// <summary>
 /// Settings only a provider-owned runtime reads: where it works, whether its conversation persists, and
-/// the policy it runs under. Native runtimes require them; managed transports reject them.
+/// the policy it runs under. A runtime that does not read them accepts and ignores them.
 /// </summary>
 public sealed record LlmAgentNativeRuntimeOptions
 {
@@ -142,22 +138,20 @@ public sealed record LlmAgentSessionOptions
     /// Settled context to start from. <see cref="LlmAgentCapabilities.ContextImport"/> reports how the runtime
     /// takes it.
     /// </summary>
+    /// <remarks>
+    /// Continuation state the selected model, provider and account cannot replay is left out and counted, so a
+    /// history from any provider or connection continues here.
+    /// </remarks>
     public LlmAgentContext? Context { get; init; }
-
-    /// <summary>
-    /// Set to <see cref="LlmUnboundContinuationState.Omit"/> when <see cref="Context"/> carries retained history
-    /// from another model or provider. An opening-context start carries no state, so it requires Omit.
-    /// </summary>
-    public LlmUnboundContinuationState UnboundContinuationState { get; init; } = LlmUnboundContinuationState.Reject;
 
     public string? ThreadId { get; init; }
 
     public string? SessionId { get; init; }
 
-    /// <summary>Null selects managed defaults. Native adapters reject supplied managed options.</summary>
+    /// <summary>Null selects the defaults. Each adapter reads the members it uses.</summary>
     public LlmAgentExecutionOptions? ExecutionOptions { get; init; }
 
-    /// <summary>Required by provider-owned runtimes; managed transports reject it.</summary>
+    /// <summary>Read by provider-owned runtimes; a managed runtime accepts and ignores it.</summary>
     public LlmAgentNativeRuntimeOptions? Runtime { get; init; }
 
     public required string ModelId { get; init; }
@@ -176,8 +170,27 @@ public sealed record LlmAgentSessionOptions
 
     public LlmAgentToolHandler? ToolHandler { get; init; }
 
+    /// <summary>Execute runs the handler; ReturnRequests ends the turn with the calls unrun.</summary>
+    public LlmAgentToolHandling ToolHandling { get; init; } = LlmAgentToolHandling.Execute;
+
+    /// <summary>Folders that each hold a SKILL.md. The model can load any of them with the load_skill tool.</summary>
+    public IReadOnlyList<string> SkillFolders { get; init; } = [];
+
+    /// <summary>Models tried in order when the session model is overloaded or unavailable for a turn.</summary>
+    public IReadOnlyList<string> FallbackModelIds { get; init; } = [];
+
     /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it.</summary>
     public long ResourceOutputRetentionBytes { get; init; } = 1_048_576;
+}
+
+/// <summary>What a conversation does with the tool calls the model makes.</summary>
+public enum LlmAgentToolHandling
+{
+    /// <summary>Inference runs the supplied handler and continues the turn.</summary>
+    Execute,
+
+    /// <summary>The turn ends with the model's tool calls returned unrun, with their validation results.</summary>
+    ReturnRequests
 }
 
 public sealed record LlmAgentResumeOptions
@@ -216,17 +229,14 @@ public sealed record LlmAgentResumeOptions
 
 public sealed record LlmAgentTurnRequest
 {
-    /// <summary>Typed provider controls frozen for this run, including its tool and compaction continuations.</summary>
-    public LlmProviderControls? ProviderControls { get; init; }
-
     /// <summary>
-    /// Null uses session base instructions; empty clears them for this run; nonempty replaces them.
-    /// Applies through tool iterations and compaction continuations, never to subsequent runs.
-    /// Requires SupportsAgentTurnInstructions; unsupported adapters reject even an empty override.
+    /// Null uses session instructions; empty clears them for this turn; nonempty replaces them.
+    /// Applies through the turn's tool iterations, never to later turns.
     /// </summary>
     public string? Instructions { get; init; }
 
-    public required IReadOnlyList<LlmAgentContent> Input { get; init; }
+    /// <summary>May be empty: the turn then sends the context as it is.</summary>
+    public IReadOnlyList<LlmAgentContent> Input { get; init; } = [];
 
     /// <summary>Provider-neutral binary content supplied with this turn.</summary>
     public IReadOnlyList<LlmMessageAttachment> Attachments { get; init; } = [];
@@ -237,6 +247,15 @@ public sealed record LlmAgentTurnRequest
     public Darkspyre.Inference.Common.LLM.LlmReasoningLevel? ReasoningLevel { get; init; }
 
     public JsonElement? OutputSchema { get; init; }
+
+    /// <summary>Sampling temperature. A value the selected model cannot use is not sent.</summary>
+    public double? Temperature { get; init; }
+
+    /// <summary>Output token cap for each model step. A value the selected route cannot enforce is not sent.</summary>
+    public int? MaxOutputTokens { get; init; }
+
+    /// <summary>Tool choice for the turn's first model step; later steps use Auto. Not sent without tools.</summary>
+    public LlmToolChoice? ToolChoice { get; init; }
 }
 
 public enum LlmAgentTurnStatus
@@ -328,7 +347,7 @@ public sealed record LlmAgentToolEvent(
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
 
-/// <summary>Discards the interrupted attempt's unfinished output and reports an optional replacement attempt.</summary>
+/// <summary>An attempt failed. Unfinished output of the failed attempt is discarded; NextAttempt, when set, starts after Delay.</summary>
 /// <param name="ThreadId">The owning conversation.</param>
 /// <param name="TurnId">The active turn.</param>
 /// <param name="ItemId">The failed model attempt.</param>
@@ -344,6 +363,12 @@ public sealed record LlmAgentResponseRecoveryEvent(
     /// <summary>The normalized identity of the active turn.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+
+    /// <summary>The wait before NextAttempt starts.</summary>
+    public TimeSpan? Delay { get; init; }
+
+    /// <summary>The failure that caused the retry, with credentials removed.</summary>
+    public string? Error { get; init; }
 }
 
 /// <summary>Adapter-owned progress text. It is not assistant transcript content.</summary>
@@ -384,13 +409,17 @@ public sealed record LlmAgentTurnCompletedEvent(
     /// </summary>
     public bool IsContextOverflow { get; init; }
 
+    /// <summary>The final answer's check against the turn's OutputSchema; null when the turn requested none.</summary>
+    public LlmStructuredOutputValidation? StructuredOutput { get; init; }
+
     /// <summary>
-    /// Derived from <see cref="Reason"/>: <c>Completed</c> for a completed turn, <c>Interrupted</c> for an
-    /// interruption, <c>Unknown</c> for unreported termination, and <c>Failed</c> for every other reason.
+    /// Derived from <see cref="Reason"/>: <c>Completed</c> for a completed turn or returned tool requests,
+    /// <c>Interrupted</c> for an interruption, <c>Unknown</c> for unreported termination, and <c>Failed</c> for
+    /// every other reason.
     /// </summary>
     public LlmAgentTurnStatus Status => Reason switch
     {
-        LlmAgentCompletionReason.Completed => LlmAgentTurnStatus.Completed,
+        LlmAgentCompletionReason.Completed or LlmAgentCompletionReason.ToolRequests => LlmAgentTurnStatus.Completed,
         LlmAgentCompletionReason.Interruption => LlmAgentTurnStatus.Interrupted,
         LlmAgentCompletionReason.Unknown => LlmAgentTurnStatus.Unknown,
         _ => LlmAgentTurnStatus.Failed
@@ -401,7 +430,7 @@ public sealed record LlmAgentTurnCompletedEvent(
 /// A transport-specific agent client exposed through provider-neutral session semantics. Hosts open
 /// sessions through <see cref="LlmAgentProviderService"/>, which resolves the connection by its ID.
 /// </summary>
-public interface ILlmAgentClient
+internal interface ILlmAgentClient
 {
     LlmTransport Transport { get; }
 
@@ -412,27 +441,14 @@ public interface ILlmAgentClient
         CancellationToken cancellationToken = default);
 }
 
-/// <summary>An agent client whose runtime can reopen a persisted provider thread by its ID.</summary>
-public interface ILlmAgentResumeClient : ILlmAgentClient
+/// <summary>Who compacts a conversation when its context fills.</summary>
+public enum LlmCompactionResponsibility
 {
-    Task<ILlmAgentSession> ResumeSessionAsync(
-        string connectionId,
-        LlmConnection connection,
-        string threadId,
-        LlmAgentResumeOptions? options = null,
-        CancellationToken cancellationToken = default);
-}
+    /// <summary>Compaction happens inside Inference or the provider; the Host never supplies a replacement.</summary>
+    Provider,
 
-/// <summary>An agent client whose runtime can fork a persisted provider thread.</summary>
-public interface ILlmAgentForkClient : ILlmAgentClient
-{
-    Task<ILlmAgentSession> ForkSessionAsync(
-        string connectionId,
-        LlmConnection connection,
-        string threadId,
-        string? lastTurnId = null,
-        LlmAgentResumeOptions? options = null,
-        CancellationToken cancellationToken = default);
+    /// <summary>The conversation pauses with LlmAgentCompactionRequiredEvent; the Host supplies the replacement.</summary>
+    Host
 }
 
 /// <summary>
@@ -456,6 +472,17 @@ public interface ILlmAgentSession : IAsyncDisposable
     string SessionId { get; }
 
     Task<LlmAgentCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>Who compacts this conversation when its context fills. The Host reads this directly.</summary>
+    LlmCompactionResponsibility CompactionResponsibility { get; }
+
+    /// <summary>
+    /// Compacts the conversation now with the compactor a send uses, whatever the measure says.
+    /// Returns the compaction's event, or null when there is nothing to compact.
+    /// </summary>
+    /// <gotcha>Refused while a turn runs (InvalidOperationException) and where SupportsCompactNow is Unsupported
+    /// (NotSupportedException).</gotcha>
+    Task<LlmAgentCompactedEvent?> CompactNowAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Prospective requests are idle-only and do not mutate context or generate output.</summary>
     Task<LlmAgentContextStatus> GetContextStatusAsync(

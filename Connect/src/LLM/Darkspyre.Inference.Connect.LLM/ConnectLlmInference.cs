@@ -148,7 +148,6 @@ internal sealed class ConnectLlmInference(
         ConversationKey = request.ConversationKey,
         PromptCache = request.PromptCache,
         ExplicitCache = request.ExplicitCache,
-        ProviderControls = request.ProviderControls,
         Resources = request.Resources
     };
 

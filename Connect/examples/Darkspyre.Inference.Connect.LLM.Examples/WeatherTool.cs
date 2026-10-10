@@ -14,8 +14,7 @@ internal static class WeatherTool
     {
         Name = "get_weather",
         Description = "Return the example weather fixture for one city.",
-        InputSchema = InputSchema.Clone(),
-        Strict = true
+        InputSchema = InputSchema.Clone()
     };
 
     public static LlmAgentToolDefinition AgentDefinition => new()

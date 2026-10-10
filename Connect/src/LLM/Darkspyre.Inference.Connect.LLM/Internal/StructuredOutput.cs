@@ -7,40 +7,35 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 internal static class StructuredOutput
 {
-    public static void ValidateRequest(LlmChatRequest request)
-    {
-        if (request.StructuredOutput is { } structured
-            && (string.IsNullOrWhiteSpace(structured.Name)
-                || structured.Schema.ValueKind is not (JsonValueKind.Object or JsonValueKind.True)))
-        {
-            throw new ArgumentException(
-                "Structured output requires a name and an object or true JSON Schema.", nameof(request));
-        }
-    }
-
+    /// <summary>
+    /// How the structured answer is enforced. Never throws: a schema whose root is not an object, or a route
+    /// without a JSON format, is checked locally.
+    /// </summary>
     public static LlmStructuredOutputEnforcement ResolveEnforcement(
         LlmStructuredOutputRequest request,
         LlmProviderCapabilities capabilities)
     {
-        if ((capabilities.SupportsJsonSchema != InferenceSupport.Unsupported))
-        {
-            return LlmStructuredOutputEnforcement.ProviderJsonSchema;
-        }
-
-        if (request.Fallback >= LlmStructuredOutputFallback.JsonObject
-            && (capabilities.SupportsJsonObject != InferenceSupport.Unsupported))
-        {
-            return LlmStructuredOutputEnforcement.ProviderJsonObject;
-        }
-
-        if (request.Fallback == LlmStructuredOutputFallback.LocalValidation)
+        // A JSON format would force an object answer, so another root is checked locally only.
+        if (!HasObjectRoot(request.Schema))
         {
             return LlmStructuredOutputEnforcement.LocalValidationOnly;
         }
 
-        throw new NotSupportedException(
-            "The selected connection cannot enforce JSON Schema and the request does not permit an available fallback.");
+        if (capabilities.SupportsJsonSchema != InferenceSupport.Unsupported)
+        {
+            return LlmStructuredOutputEnforcement.ProviderJsonSchema;
+        }
+
+        return capabilities.SupportsJsonObject != InferenceSupport.Unsupported
+            ? LlmStructuredOutputEnforcement.ProviderJsonObject
+            : LlmStructuredOutputEnforcement.LocalValidationOnly;
     }
+
+    private static bool HasObjectRoot(JsonElement schema) =>
+        schema.ValueKind == JsonValueKind.Object
+        && schema.TryGetProperty("type", out JsonElement type)
+        && type.ValueKind == JsonValueKind.String
+        && type.GetString() == "object";
 
     public static LlmStructuredOutputValidation Validate(
         string text,

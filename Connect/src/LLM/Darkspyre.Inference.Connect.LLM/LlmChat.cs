@@ -23,7 +23,7 @@ public sealed record LlmChatMessage(string Role, string Content)
 }
 
 /// <summary>Provider-neutral generation request. The model is selected per request.</summary>
-public sealed record LlmChatRequest
+internal sealed record LlmChatRequest
 {
     /// <summary>Borrowed caller-owned resource authority. Never part of a portable request.</summary>
     public IInferenceResourceAccess? Resources { get; init; }
@@ -84,9 +84,6 @@ public sealed record LlmChatRequest
     /// <summary>An explicitly selected native cache, independently of advisory prompt-cache hints.</summary>
     public LlmExplicitCacheReference? ExplicitCache { get; init; }
 
-    /// <summary>Typed provider controls. Null inherits the selected connection default.</summary>
-    public LlmProviderControls? ProviderControls { get; init; }
-
     /// <summary>Per-operation provider JSON properties; standard request fields cannot be replaced.</summary>
     public IReadOnlyDictionary<string, JsonElement> ProviderOptions { get; init; } =
         new Dictionary<string, JsonElement>(StringComparer.Ordinal);
@@ -107,7 +104,7 @@ public sealed record LlmProviderDiagnostics(
     public string? ServiceTier { get; init; }
 }
 
-public sealed record LlmChatResult
+internal sealed record LlmChatResult
 {
     public required string Text { get; init; }
 

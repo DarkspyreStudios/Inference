@@ -24,8 +24,10 @@ internal sealed class ManagedCodexAgentClient(OpenAiCodexLlmClient client, LlmPr
             var capabilities = client.GetCapabilities(selected, options.ModelId);
             HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities.HostedTools);
             ClientTools.ValidateManagedOpening(options, capabilities);
-            if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported) || (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported)))
-                throw new NotSupportedException("The selected model/connection disables the requested agent operation.");
+            if (capabilities.SupportsAgentSessions == InferenceSupport.Unsupported)
+                throw new NotSupportedException(NativeAgentContract.AgentSessionsUnsupported);
+            if (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported))
+                throw new NotSupportedException(NativeAgentContract.AgentToolUseUnsupported);
         }
         connection = await providers.PrepareManagedConnectionAsync(connectionId, connection, client, Preflight, opening.Token).ConfigureAwait(false);
         Fence();

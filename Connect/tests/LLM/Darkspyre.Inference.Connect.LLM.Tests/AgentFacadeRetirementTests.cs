@@ -69,6 +69,7 @@ public sealed class AgentFacadeRetirementTests
     {
         public string ThreadId => "thread";
         public string SessionId => "session";
+        public LlmCompactionResponsibility CompactionResponsibility => LlmCompactionResponsibility.Host;
         public int Disposals { get; private set; }
 
         public ValueTask DisposeAsync()
@@ -83,6 +84,7 @@ public sealed class AgentFacadeRetirementTests
         public Task<LlmAgentContext> CaptureContextAsync(LlmAgentContextCaptureOptions? options = null, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task ReplaceContextAsync(LlmAgentContext context, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<LlmAgentContext> CompactWithProviderAsync(LlmProviderCompactionRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<LlmAgentCompactedEvent?> CompactNowAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public IAsyncEnumerable<LlmAgentEvent> ContinueTurnAsync(LlmAgentTurnContinuation continuation, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public IAsyncEnumerable<LlmAgentEvent> RunTurnAsync(LlmAgentTurnRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input, CancellationToken cancellationToken = default) => throw new NotSupportedException();

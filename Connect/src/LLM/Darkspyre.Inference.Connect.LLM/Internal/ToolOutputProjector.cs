@@ -67,16 +67,23 @@ internal static class ToolOutputProjector
             }
         }
 
-        foreach (LlmToolOutputPart part in output.Parts)
+        for (int index = 0; index < output.Parts.Count; index++)
         {
-            report.Add(part switch
+            LlmToolOutputPart part = output.Parts[index];
+            LlmToolPartProjection projection = part switch
             {
                 LlmToolOutputText text => Add(sent, new SentText(text.Text), LlmToolPartDelivery.Delivered),
                 LlmToolOutputBinary binary => Binary(sent, binary.Kind, binary.MediaType, binary.Data, binary.FileName, route, model),
                 LlmToolOutputResource embedded => Resource(sent, embedded, route, model),
                 LlmToolOutputSessionResource => throw new NotSupportedException("This route cannot materialize workspace tool content."),
                 _ => new LlmToolPartProjection(LlmToolPartDelivery.Omitted, LlmToolPartOmission.InvalidContent)
-            });
+            };
+            report.Add(projection);
+            // The model is told about a part it does not receive.
+            if (projection.Delivery == LlmToolPartDelivery.Omitted)
+            {
+                sent.Add(new SentText($"[Content[{index}]: {OmissionReason(part, projection.Omission)} This content was not supplied to the model.]"));
+            }
         }
 
         LlmToolPartProjection? structured = output.StructuredContent is not { } value ? null
@@ -190,6 +197,35 @@ internal static class ToolOutputProjector
 
     private static LlmToolPartProjection Omit(LlmRichContentCarriage routeCarriage) => new(LlmToolPartDelivery.Omitted,
         routeCarriage == LlmRichContentCarriage.Unsupported ? LlmToolPartOmission.UnsupportedByRoute : LlmToolPartOmission.UnsupportedByModel);
+
+    /// <summary>Why an omitted part was not sent, in the words the model receives.</summary>
+    private static string OmissionReason(LlmToolOutputPart part, LlmToolPartOmission? omission)
+    {
+        LlmBinaryKind? kind = part switch
+        {
+            LlmToolOutputBinary binary => binary.Kind,
+            LlmToolOutputResource { Data: not null, BodyKind: { } body } => body,
+            _ => null
+        };
+        return omission switch
+        {
+            LlmToolPartOmission.UnsupportedByModel => kind switch
+            {
+                LlmBinaryKind.Image => "The selected model does not support tool-result images.",
+                LlmBinaryKind.Document => "The selected model does not support tool-result documents.",
+                _ => "The selected model does not support this content."
+            },
+            LlmToolPartOmission.UnsupportedByRoute => kind switch
+            {
+                LlmBinaryKind.Image => "The transport cannot carry tool-result images.",
+                LlmBinaryKind.Document => "The transport cannot carry this tool-result document.",
+                null when part is LlmToolOutputResource => "The transport cannot carry this resource.",
+                _ => "The transport cannot carry this binary kind."
+            },
+            LlmToolPartOmission.Empty => "The transport cannot carry an empty attachment.",
+            _ => "The tool content is invalid."
+        };
+    }
 
     private static bool TryDecode(ReadOnlyMemory<byte> data, out string text)
     {

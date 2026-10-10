@@ -226,7 +226,6 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         {
             ModelId = "claude-test",
             Context = restored,
-            UnboundContinuationState = LlmUnboundContinuationState.Omit,
             CallerServices = new() { Resources = access },
             Runtime = new() { WorkingDirectory = _directory }
         });
@@ -269,62 +268,11 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         {
             ModelId = "claude-test",
             Context = new() { ResourceSelectionVersion = new("workspace", "session", 3), SelectedResources = [reference] },
-            UnboundContinuationState = LlmUnboundContinuationState.Omit,
             CallerServices = new() { Resources = access },
             Runtime = new() { WorkingDirectory = _directory }
         }));
         Assert.Null(factory.Invocation);
         Assert.Empty(access.Reads);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task NativeResumedAndForkedPromptsCarryTheBoundSelection(bool fork)
-    {
-        var reference = new InferenceResourceReference("workspace", "reference");
-        var access = new ResourcePreparationTests.Resources(new("workspace", "session", 4, [reference]),
-            [(reference, "reference.txt", "reference text"u8.ToArray())]);
-        var process = new ManualProcess();
-        var client = new ClaudeAgentClient(new Factory(process));
-        var options = new LlmAgentResumeOptions
-        { ModelId = "claude-test", CallerServices = new() { Resources = access }, Runtime = new() { WorkingDirectory = _directory } };
-        string threadId = Guid.NewGuid().ToString();
-        await using ILlmAgentSession session = fork
-            ? await client.ForkSessionAsync("connection", Connection(), threadId, options: options)
-            : await client.ResumeSessionAsync("connection", Connection(), threadId, options);
-        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(
-            new() { Input = [new LlmAgentTextContent("Read the file")] }, limit.Token).GetAsyncEnumerator(limit.Token);
-        Assert.True(await feed.MoveNextAsync());
-        string turnId = await process.WaitForUserMessage(limit.Token);
-        JsonElement input = Assert.Single(process.Writes(), item => item.GetProperty("type").GetString() == "user");
-        JsonElement document = Assert.Single(input.GetProperty("message").GetProperty("content").EnumerateArray(),
-            part => part.GetProperty("type").GetString() == "document");
-        Assert.Equal("reference text", document.GetProperty("source").GetProperty("data").GetString());
-        Assert.Equal("reference.txt", document.GetProperty("title").GetString());
-        Assert.Single(access.Reads);
-        Assert.False(access.Reads[0].CanRead);
-        process.Push(new { type = "user", uuid = turnId, isReplay = true });
-        process.Push(new { type = "result", subtype = "success", is_error = false, result = "answer", stop_reason = "end_turn" });
-        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
-        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
-        Assert.Equal(4, access.Selection.Revision);
-
-        access.Selection = new("workspace", "session", 5, []);
-        await using IAsyncEnumerator<LlmAgentEvent> next = session.RunTurnAsync(
-            new() { Input = [new LlmAgentTextContent("Continue")] }, limit.Token).GetAsyncEnumerator(limit.Token);
-        Assert.True(await next.MoveNextAsync());
-        string nextTurnId = await process.WaitForUserMessage(limit.Token, index: 1);
-        JsonElement nextInput = process.Writes().Last(item => item.GetProperty("type").GetString() == "user");
-        Assert.DoesNotContain(nextInput.GetProperty("message").GetProperty("content").EnumerateArray(),
-            part => part.GetProperty("type").GetString() == "document");
-        process.Push(new { type = "user", uuid = nextTurnId, isReplay = true });
-        process.Push(new { type = "result", subtype = "success", is_error = false, result = "answer", stop_reason = "end_turn" });
-        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single((await ReadUntil(next,
-            item => item is LlmAgentTurnCompletedEvent)).OfType<LlmAgentTurnCompletedEvent>()).Reason);
-        Assert.Single(access.Reads);
-        Assert.Equal(5, access.Selection.Revision);
     }
 
     [Theory]

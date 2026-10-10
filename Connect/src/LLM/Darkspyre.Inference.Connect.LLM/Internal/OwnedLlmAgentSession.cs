@@ -16,10 +16,15 @@ internal sealed class OwnedLlmAgentSession : ILlmAgentSession
         _retired = retired;
         ThreadId = session.ThreadId;
         SessionId = session.SessionId;
+        CompactionResponsibility = session.CompactionResponsibility;
     }
 
     public string ThreadId { get; }
     public string SessionId { get; }
+    public LlmCompactionResponsibility CompactionResponsibility { get; }
+
+    public Task<LlmAgentCompactedEvent?> CompactNowAsync(CancellationToken cancellationToken = default) =>
+        InvokeAsync((session, token) => session.CompactNowAsync(token), cancellationToken);
 
     public Task<LlmAgentCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default) =>
         InvokeAsync((session, token) => session.GetCapabilitiesAsync(token), cancellationToken);

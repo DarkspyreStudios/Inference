@@ -53,9 +53,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         cancellationToken.ThrowIfCancellationRequested();
         openingFence?.Invoke();
         options = ClientTools.Snapshot(options);
-        if (options.CallerServices?.Resources is null && options.Context is { } openingContext
-            && (openingContext.ResourceSelectionVersion is not null || openingContext.SelectedResources.Count > 0))
-            throw new NotSupportedException("Resource-bearing context requires explicit caller-owned access.");
         bool supportsResources = estimator is ILlmResourcePreparationClient { CanPrepareResources: true }
             && (capabilities(options.ModelId).SupportsPromptDocuments != InferenceSupport.Unsupported);
         cancellationToken.ThrowIfCancellationRequested();
@@ -97,11 +94,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         bool automaticProviderCompaction)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(options.ModelId);
-        if (options.Runtime is not null)
-        {
-            throw new NotSupportedException(
-                "Managed sessions run no provider-owned runtime, so they reject native runtime options.");
-        }
         AgentResourceOptions.Validate(ManagedAgentPolicy.Capabilities, allowRuntimeBackgroundWork: false, options.ResourceOutputRetentionBytes);
         _supportsResources = supportsResources;
         _compactor = compactor;
@@ -118,10 +110,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         ClientTools.ValidateManagedOpening(options, capabilities(options.ModelId), supportsResources);
         _hostedTools = options.HostedTools;
         ManagedAgentPolicy.Validate(_execution, Model(options.ModelId));
-        if (options.Tools.Any(tool => tool is LlmAgentToolDefinition { DeferLoading: true }))
-        {
-            throw new NotSupportedException("Managed agents do not implement deferred tool loading.");
-        }
         if (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && options.ToolHandler is null)
         {
             throw new ArgumentException("Managed tools require a host tool handler.");
@@ -135,9 +123,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             HostedTools = [],
             Context = null
         };
-        _tools = _options.Tools.OfType<LlmAgentToolDefinition>().ToDictionary(tool => tool.Name, StringComparer.Ordinal);
+        // The first definition of a duplicated name is the one used.
+        _tools = _options.Tools.OfType<LlmAgentToolDefinition>().DistinctBy(tool => tool.Name, StringComparer.Ordinal)
+            .ToDictionary(tool => tool.Name, StringComparer.Ordinal);
         (_context, _startOmittedContinuationStates) = ManagedAgentContext.Import(
-            options.Context ?? new(), connection, options.ModelId, options.UnboundContinuationState, supportsResources);
+            options.Context ?? new(), connection, options.ModelId, supportsResources);
         ThreadId = options.ThreadId ?? Guid.NewGuid().ToString();
         SessionId = options.SessionId ?? ThreadId;
         ArgumentException.ThrowIfNullOrWhiteSpace(ThreadId);
@@ -147,6 +137,14 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
 
     public string ThreadId { get; }
     public string SessionId { get; }
+
+    public LlmCompactionResponsibility CompactionResponsibility => LlmCompactionResponsibility.Host;
+
+    public Task<LlmAgentCompactedEvent?> CompactNowAsync(CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        throw new NotSupportedException("The selected model does not support compacting now.");
+    }
 
     public Task<LlmAgentCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
     {
@@ -188,7 +186,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             RequireCapability(Capabilities.SupportsContextStatus);
             if (_segmentActive) { throw new InvalidOperationException("Proposal accounting requires idle or paused execution."); }
             var turn = _run?.Turn ?? BaseTurn();
-            var proposal = ManagedAgentContext.Import(proposedContext, _connection, turn.ModelId!, _supportsResources);
+            var proposal = ManagedAgentContext.Import(proposedContext, _connection, turn.ModelId!, _supportsResources).Context;
             if (_run is not null) { proposal = WithQueuedSteering(proposal, _run); }
             ContextEstimate? used = EstimateInputTokens(proposal, turn);
             cancellationToken.ThrowIfCancellationRequested();
@@ -280,7 +278,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         proposal = ManagedAgentContext.Import(proposal with
         {
             Entries = [.. retained, .. proposal.Entries, .. source.Entries.Where(entry => protectedIds.Contains(entry.Id))]
-        }, _connection, turn.ModelId!, _supportsResources);
+        }, _connection, turn.ModelId!, _supportsResources).Context;
         await ValidateCompactionResourcesAsync(proposal, access, cancellationToken).ConfigureAwait(false);
         lock (_sync)
         {
@@ -322,7 +320,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         return ManagedAgentContext.Import(source with
         {
             Entries = [new(id, id, new("assistant", "") { ContinuationState = result.ContinuationState })]
-        }, _connection, turn.ModelId!, _supportsResources);
+        }, _connection, turn.ModelId!, _supportsResources).Context;
     }
 
     public async Task ReplaceContextAsync(LlmAgentContext context, long expectedRevision, CancellationToken cancellationToken = default)
@@ -337,7 +335,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             RequireCapability(Capabilities.SupportsContextReplacement);
             RequireIdle();
             RequireRevision(expectedRevision);
-            replacement = ManagedAgentContext.Import(context, _connection, _options.ModelId, _supportsResources);
+            replacement = ManagedAgentContext.Import(context, _connection, _options.ModelId, _supportsResources).Context;
             access = _callerServices?.Resources;
         }
         if (access is not null)
@@ -377,12 +375,14 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             // Validate the entire projected request before mutating context or emitting start.
             _ = ManagedAgentContext.Import(_context, _connection, turn.ModelId!, _supportsResources);
             string turnId = NewId();
-            var user = new LlmAgentContextEntry(NewId(), turnId, UserMessage(turn));
-            var projected = Append(_context, user);
+            // Empty input appends no user entry: the turn sends the context as it is.
+            LlmAgentContextEntry? user = turn.Input.Count == 0 && turn.Attachments.Count == 0
+                ? null : new LlmAgentContextEntry(NewId(), turnId, UserMessage(turn));
+            var projected = user is null ? _context : Append(_context, user);
             _latestStatus = Measure(projected, turn);
             run = new(turn, turnId);
             _context = projected;
-            if (!_automaticProviderCompaction)
+            if (!_automaticProviderCompaction && user is not null)
             {
                 run.Protected.Add(user.Id);
                 run.UserEntryId = user.Id;
@@ -420,7 +420,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             RequireRevision(continuation.ExpectedContextRevision);
             admittedRun = run;
             source = _context;
-            replacement = ManagedAgentContext.Import(continuation.ReplacementContext, _connection, run.Turn.ModelId!, _supportsResources);
+            replacement = ManagedAgentContext.Import(continuation.ReplacementContext, _connection, run.Turn.ModelId!, _supportsResources).Context;
             access = _callerServices?.Resources;
         }
         var validator = _estimator as ILlmCompactionValidator;
@@ -482,8 +482,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             ThrowIfDisposed();
             LiveRun run = RequireRun(turnId);
-            if (Capabilities.Steering != LlmAgentSteering.SafeBoundary)
-                throw new NotSupportedException("The selected connection disables this agent operation.");
+            if (Capabilities.SupportsSteering != InferenceSupport.Supported)
+                throw new NotSupportedException("The selected model does not support steering.");
             run.Steering.Enqueue(text);
             return Task.CompletedTask;
         }
@@ -657,6 +657,12 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             await writer.WriteAsync(continuedPause is null
                 ? new LlmAgentTurnStartedEvent(ThreadId, run.Id)
                 : new LlmAgentTurnContinuedEvent(ThreadId, run.Id, continuedPause), token);
+            if (_context.Entries.Count == 0)
+            {
+                // Empty input on an empty context leaves nothing to send.
+                await CompleteAsync(run, writer, LlmAgentCompletionReason.Completed, token);
+                return;
+            }
             if (_context.Entries.Any(entry => entry.Message.OmittedAttachments.Count > 0))
             {
                 await writer.WriteAsync(new LlmAgentWarningEvent(ThreadId, run.Id,
@@ -674,7 +680,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 lock (_sync)
                 {
                     AdmitSteering(run);
-                    request = Request(_context, run.Turn);
+                    request = Request(_context, run.Turn, firstStep: run.Iterations == 0);
                     status = _latestStatus = Measure(_context, run.Turn);
                 }
                 await writer.WriteAsync(new LlmAgentContextStatusEvent(ThreadId, run.Id, status), token);
@@ -736,7 +742,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                                         LlmUsage? runningTotal = run.UsageUnknown ? null
                                             : UsageTotals.Add(run.Usage, usage.Cumulative, run.UsageCalls == 0);
                                         await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId,
-                                            usage.Cumulative, runningTotal), token);
+                                            usage.Cumulative, runningTotal) { ModelId = request.ModelId }, token);
                                         break;
                                     case LlmTextDeltaEvent text:
                                         await writer.WriteAsync(new LlmAgentTextDeltaEvent(ThreadId, run.Id, stepId, text.Delta), token);
@@ -824,7 +830,10 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 run.ProviderOverflowCount = 0;
                 run.Iterations++;
                 AddUsage(run, result.Usage);
-                await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId, result.Usage, run.Usage), token);
+                await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId, result.Usage, run.Usage)
+                {
+                    ModelId = result.ModelId ?? request.ModelId
+                }, token);
                 if (result.Status is not (LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction or LlmCompletionStatus.Unknown))
                 {
                     if (result.Status == LlmCompletionStatus.Incomplete
@@ -891,7 +900,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         }
         catch (Exception error)
         {
-            // Unclassified exception messages and opaque provider payloads stay out of diagnostics and context.
+            // An unclassified failure reports its type and its message with credentials removed.
             try
             {
                 if (error is not LlmProviderException)
@@ -901,7 +910,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                         $"Managed execution exception: {error.GetType().FullName}\n{new System.Diagnostics.StackTrace(error, fNeedFileInfo: false)}"), token);
                 }
                 await writer.WriteAsync(new LlmAgentTurnCompletedEvent(ThreadId, run.Id, LlmAgentCompletionReason.ProviderFailure,
-                    error is LlmProviderException provider ? provider.Message : "Managed execution failed; inspect the host operation boundary."), token);
+                    error is LlmProviderException provider ? provider.Message
+                        : $"{error.GetType().Name}: {SecretRedactor.Sanitize(error.Message, LlmCredential.Parse(_connection.Credential))}"), token);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             if (executingMixedTools || LlmResourcePreparation.IsResourceFailure(error)) writer.TryComplete(error);
@@ -1145,33 +1155,39 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             reason == LlmAgentCompletionReason.Completed ? null : error ?? reason.ToString()), token);
     }
 
-    private LlmChatRequest Request(LlmAgentContext context, LlmAgentTurnRequest turn) => new()
-    {
-        ModelId = turn.ModelId!,
-        UnboundContinuationState = _options.UnboundContinuationState,
-        Instructions = turn.Instructions ?? _options.Instructions,
-        Messages = context.Entries.Select(entry => entry.Message with { OmittedAttachments = [] }).ToArray(),
-        ConversationKey = ThreadId,
-        PromptCache = new LlmPromptCacheHint { Scope = LlmPromptCacheScope.Conversation },
-        ProviderControls = turn.ProviderControls,
-        ReasoningLevel = turn.ReasoningLevel,
-        StructuredOutput = turn.OutputSchema is { } schema ? new() { Name = "agent_output", Schema = schema } : null,
-        Tools = _options.Tools.Select(tool => tool switch
+    /// <summary>
+    /// The request one model step sends, normalized as the provider receives it. <paramref name="firstStep"/> applies
+    /// the turn's tool choice; later steps use Auto, so a Required or Specific choice does not force every step.
+    /// </summary>
+    private LlmChatRequest Request(LlmAgentContext context, LlmAgentTurnRequest turn, bool firstStep = true) =>
+        LlmRequestNormalizer.Normalize(_connection, new()
         {
-            LlmAgentToolDefinition function => (LlmClientToolDefinition)new LlmToolDefinition
+            ModelId = turn.ModelId!,
+            UnboundContinuationState = LlmUnboundContinuationState.Omit,
+            Instructions = turn.Instructions ?? _options.Instructions,
+            Messages = ManagedAgentContext.Outgoing(context.Entries),
+            ConversationKey = ThreadId,
+            PromptCache = new LlmPromptCacheHint { Scope = LlmPromptCacheScope.Conversation },
+            ReasoningLevel = turn.ReasoningLevel,
+            Temperature = turn.Temperature,
+            MaxOutputTokens = turn.MaxOutputTokens,
+            ToolChoice = turn.ToolChoice is null || firstStep ? turn.ToolChoice : new LlmToolChoice { Mode = LlmToolChoiceMode.Auto },
+            StructuredOutput = turn.OutputSchema is { } schema ? new() { Name = "agent_output", Schema = schema } : null,
+            Tools = _options.Tools.Select(tool => tool switch
             {
-                Name = function.Name,
-                Description = function.Description,
-                InputSchema = function.InputSchema,
-                Strict = function.Strict
-            },
-            LlmAgentShellTool shell => shell.Tool,
-            _ => throw new NotSupportedException("Unknown agent tool definition.")
-        }).ToArray(),
-        HostedTools = _hostedTools,
-        MaxHostedTurns = _options.MaxHostedTurns,
-        Resources = _callerServices?.Resources
-    };
+                LlmAgentToolDefinition function => (LlmClientToolDefinition)new LlmToolDefinition
+                {
+                    Name = function.Name,
+                    Description = function.Description,
+                    InputSchema = function.InputSchema
+                },
+                LlmAgentShellTool shell => shell.Tool,
+                _ => throw new NotSupportedException("Unknown agent tool definition.")
+            }).ToArray(),
+            HostedTools = _hostedTools,
+            MaxHostedTurns = _options.MaxHostedTurns,
+            Resources = _callerServices?.Resources
+        }, _capabilities(turn.ModelId!));
 
     private LlmAgentContextStatus Measure(LlmAgentContext context, LlmAgentTurnRequest turn)
     {
@@ -1240,21 +1256,18 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private LlmAgentTurnRequest FreezeTurn(LlmAgentTurnRequest turn)
     {
         ArgumentNullException.ThrowIfNull(turn);
-        if (turn.Input.Count == 0 && turn.Attachments.Count == 0) { throw new ArgumentException("A turn requires input."); }
-        _ = TextContent(turn.Input);
-        LlmAttachments.Validate(turn.Attachments, true, true, nameof(turn), _supportsResources);
+        ArgumentNullException.ThrowIfNull(turn.Input);
+        ArgumentNullException.ThrowIfNull(turn.Attachments);
         var capabilities = _capabilities(turn.ModelId ?? _options.ModelId);
         HostedTools.Validate(_hostedTools, _options.MaxHostedTurns, capabilities.HostedTools);
         ClientTools.ValidateManagedOpening(_options with { ToolHandler = _toolHandler, CallerServices = _callerServices }, capabilities, _supportsResources);
-        if ((capabilities.SupportsAgentSessions == InferenceSupport.Unsupported) || (_options.Tools.Count > 0 && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported))
-            || (turn.Instructions is not null && (capabilities.SupportsAgentTurnInstructions == InferenceSupport.Unsupported)))
-        {
-            throw new NotSupportedException("The selected model disables the requested agent operation.");
-        }
+        if (capabilities.SupportsAgentSessions == InferenceSupport.Unsupported)
+            throw new NotSupportedException(NativeAgentContract.AgentSessionsUnsupported);
+        if (_options.Tools.Count > 0 && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported))
+            throw new NotSupportedException(NativeAgentContract.AgentToolUseUnsupported);
         return ClientTools.Snapshot(turn) with
         {
             ModelId = turn.ModelId ?? _options.ModelId,
-            ProviderControls = turn.ProviderControls,
             OutputSchema = turn.OutputSchema?.Clone()
         };
     }
@@ -1274,14 +1287,14 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     }
     private LlmModel? Model(string id) => _models.FirstOrDefault(model => model.Id == id);
     private static LlmChatMessage UserMessage(LlmAgentTurnRequest turn) => new("user", TextContent(turn.Input)) { Attachments = turn.Attachments };
-    private static string TextContent(IReadOnlyList<LlmAgentContent> input)
+    /// <summary>The input as message text; an image URL becomes the text <c>[Image: {url}]</c>.</summary>
+    private static string TextContent(IReadOnlyList<LlmAgentContent> input) => string.Join("\n", input.Select(item => item switch
     {
-        if (input.Any(item => item is not LlmAgentTextContent))
-        {
-            throw new NotSupportedException("Managed agents accept text content and binary Attachments; use attachments instead of provider-specific image/audio URLs.");
-        }
-        return string.Join("\n", input.Cast<LlmAgentTextContent>().Select(item => item.Text));
-    }
+        LlmAgentTextContent text => text.Text,
+        LlmAgentImageContent image => $"[Image: {image.ImageUrl}]",
+        null => throw new ArgumentNullException(nameof(input)),
+        _ => throw new NotSupportedException("Unknown agent content.")
+    }));
     private void AdmitSteering(LiveRun run)
     {
         while (run.Steering.TryDequeue(out var text))

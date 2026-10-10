@@ -84,6 +84,20 @@ public sealed record LlmAgentCompactedEvent(string ThreadId, string TurnId, stri
 
     [JsonRequired]
     public string RequestId { get; init => field = HostedEventFacts.Identity(value); } = HostedEventFacts.Scope(ThreadId, TurnId, RequestId);
+
+    /// <summary>Tool results whose text compaction shortened.</summary>
+    public int ShortenedToolOutputCount { get; init; }
+
+    /// <summary>Tool results whose images compaction removed.</summary>
+    public int RemovedImageCount { get; init; }
+}
+
+/// <summary>An image the model produced, saved as a session resource.</summary>
+public sealed record LlmAgentImageOutputEvent(string ThreadId, string TurnId, string ItemId,
+    LlmResourceAttachment Image, string MediaType) : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
+{
+    [AllowNull]
+    public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
 
 internal static class HostedEventFacts

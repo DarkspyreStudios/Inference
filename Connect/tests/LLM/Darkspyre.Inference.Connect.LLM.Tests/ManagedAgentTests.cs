@@ -199,7 +199,7 @@ public sealed class ManagedAgentTests
     }
 
     [Fact]
-    public async Task HostToolsAreSentNonStrictUnlessTheHostRequestsStrictness()
+    public async Task HostToolSchemasAreSentUnchanged()
     {
         // An optional property without additionalProperties is a valid host schema but not a strict one.
         JsonElement loose = JsonElement.Parse(
@@ -208,11 +208,11 @@ public sealed class ManagedAgentTests
         harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "done", Status = LlmCompletionStatus.Completed });
         await using var session = harness.Create(ToolsOptions(_ => new()) with
         {
-            Tools = [new LlmAgentToolDefinition() { Name = "bash", InputSchema = loose }, new LlmAgentToolDefinition() { Name = "echo", InputSchema = loose, Strict = true }]
+            Tools = [new LlmAgentToolDefinition() { Name = "bash", InputSchema = loose }, new LlmAgentToolDefinition() { Name = "echo", InputSchema = loose }]
         });
         await Read(session.RunTurnAsync(Turn("hello")));
         LlmToolDefinition[] sent = [.. harness.Requests.Single().Tools.Select(tool => Assert.IsType<LlmToolDefinition>(tool))];
-        Assert.Equal([("bash", false), ("echo", true)], sent.Select(tool => (tool.Name, tool.Strict)));
+        Assert.Equal(["bash", "echo"], sent.Select(tool => tool.Name));
         Assert.Equal(loose.GetRawText(), sent[0].InputSchema.GetRawText()); // The schema itself is sent unchanged.
     }
 
@@ -367,6 +367,193 @@ public sealed class ManagedAgentTests
         Assert.Single(harness.Requests);
     }
 
+    private static LlmChatResult Done(string text = "done", string? modelId = null) =>
+        new() { Diagnostics = new(200, null, null), Text = text, Status = LlmCompletionStatus.Completed, ModelId = modelId };
+
+    private static LlmProviderCapabilities Capable(InferenceSupport support, LlmOutputLimitEnforcement output) => new()
+    {
+        SupportsAgentSessions = InferenceSupport.Supported,
+        SupportsAgentToolUse = InferenceSupport.Supported,
+        SupportsToolUse = InferenceSupport.Supported,
+        SupportsTemperature = support,
+        SupportsPromptImages = support,
+        OutputLimitEnforcement = output,
+        RichContentSupported = RichContentRoutes.Responses,
+        Agent = ManagedAgentPolicy.Capabilities
+    };
+
+    [Fact]
+    public async Task UnusableSettingsAreDropped()
+    {
+        var harness = new Harness { Capabilities = Capable(InferenceSupport.Unsupported, LlmOutputLimitEnforcement.Unsupported) };
+        harness.Results.Enqueue(Done());
+        await using var session = harness.Create();
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello") with
+        {
+            Temperature = 0.5,
+            MaxOutputTokens = 100,
+            ToolChoice = new() { Mode = LlmToolChoiceMode.Required }
+        }));
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        LlmChatRequest sent = Assert.Single(harness.Requests);
+        Assert.Null(sent.Temperature);
+        Assert.Null(sent.MaxOutputTokens);
+        Assert.Null(sent.ToolChoice); // The session has no tools.
+    }
+
+    [Fact]
+    public async Task TurnSettingsReachTheRequest()
+    {
+        var harness = new Harness { Capabilities = Capable(InferenceSupport.Supported, LlmOutputLimitEnforcement.ProviderEnforced) };
+        harness.Results.Enqueue(new()
+        {
+            Diagnostics = new(200, null, null), Text = string.Empty, Status = LlmCompletionStatus.RequiresAction,
+            ToolCalls = [new LlmToolCall("call-1", "echo", "{}")]
+        });
+        harness.Results.Enqueue(Done());
+        await using var session = harness.Create(ToolsOptions(_ => LlmToolOutput.FromText("echoed")));
+
+        await Read(session.RunTurnAsync(Turn("hello") with
+        {
+            Temperature = 0.3,
+            MaxOutputTokens = 50,
+            ToolChoice = new() { Mode = LlmToolChoiceMode.Specific, Name = "echo" }
+        }));
+
+        Assert.Equal(2, harness.Requests.Count);
+        Assert.All(harness.Requests, request => Assert.Equal((0.3, 50), (request.Temperature, request.MaxOutputTokens)));
+        Assert.Equal(new LlmToolChoice { Mode = LlmToolChoiceMode.Specific, Name = "echo" }, harness.Requests[0].ToolChoice);
+        // The choice applies to the first step only, so the model is not forced to call the tool again.
+        Assert.Equal(new LlmToolChoice { Mode = LlmToolChoiceMode.Auto }, harness.Requests[1].ToolChoice);
+    }
+
+    [Fact]
+    public async Task UnsendableAttachmentIsOmittedWithNotice()
+    {
+        var harness = new Harness { Capabilities = Capable(InferenceSupport.Unsupported, LlmOutputLimitEnforcement.Unknown) };
+        harness.Results.Enqueue(Done());
+        await using var session = harness.Create();
+        var image = new LlmAttachment
+        { Kind = LlmBinaryKind.Image, FileName = "chart.png", Data = new byte[] { 0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a } };
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("Look") with { Attachments = [image] }));
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        LlmChatMessage sent = Assert.Single(harness.Requests).Messages[^1];
+        Assert.Empty(sent.Attachments);
+        Assert.Equal("Look\n[Attachment 0 (chart.png): The selected model does not support this attachment. "
+            + "This content was not supplied to the model.]", sent.Content);
+        LlmChatMessage stored = (await session.CaptureContextAsync(new() { IncludeAttachmentData = true })).Entries[0].Message;
+        Assert.Equal("Look", stored.Content);
+        Assert.Equal("chart.png", Assert.IsType<LlmAttachment>(Assert.Single(stored.Attachments)).FileName);
+    }
+
+    [Fact]
+    public async Task UnsupportedOperationIsRefusedByName()
+    {
+        await using var providers = new LlmAgentProviderService(new ResourcePreparationTests.Source(Harness.Connection), [new CodexClient()]);
+
+        NotSupportedException error = await Assert.ThrowsAsync<NotSupportedException>(
+            () => providers.ResumeSessionAsync("connection", "thread"));
+
+        Assert.Equal("OpenAiCodex agent sessions cannot resume a provider thread.", error.Message);
+    }
+
+    [Fact]
+    public async Task ForeignHistoryContinuesOnStart()
+    {
+        // State another model wrote cannot be replayed here; it is left out and counted, and the turn runs.
+        LlmContinuationState foreign = ProviderContinuationStateCodec.Encode(Harness.Connection, "removed-model",
+            new JsonArray(new JsonObject { ["type"] = "reasoning", ["encrypted_content"] = "opaque" }));
+        var harness = new Harness();
+        harness.Results.Enqueue(Done());
+        await using var session = harness.Create(Options() with
+        {
+            Context = new()
+            {
+                Entries = [new("e1", "t1", new("user", "earlier")), new("e2", "t1", new("assistant", "answer") { ContinuationState = foreign })]
+            }
+        });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("next")));
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Equal(["earlier", "answer", "next"], Assert.Single(harness.Requests).Messages.Select(message => message.Content));
+        Assert.All(harness.Requests[0].Messages, message => Assert.Null(message.ContinuationState));
+        Assert.Contains(events.OfType<LlmAgentWarningEvent>(), warning => warning.Message.Contains("from 1 earlier messages", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task EmptyInputSendsContextAsIs()
+    {
+        var harness = new Harness();
+        harness.Results.Enqueue(Done());
+        await using var session = harness.Create(Options() with
+        {
+            Context = new() { Entries = [new("e1", "t1", new("user", "question"))] }
+        });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(new()));
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Equal(["question"], Assert.Single(harness.Requests).Messages.Select(message => message.Content));
+
+        await using var empty = new Harness().Create();
+        Assert.Equal(LlmAgentCompletionReason.Completed,
+            Assert.Single((await Read(empty.RunTurnAsync(new()))).OfType<LlmAgentTurnCompletedEvent>()).Reason);
+    }
+
+    [Fact]
+    public async Task MalformedContextIsRepairedNotRefused()
+    {
+        LlmAgentContextEntry[] entries =
+        [
+            new("e1", "t1", new("user", "first")),
+            new("e1", "t1", new("user", "duplicate")),
+            new("e2", "t1", new("user", "") { ToolResults = [new LlmToolResult("orphan", LlmToolOutput.FromText("lost"))] }),
+            new("e3", "t1", new("assistant", "") { ToolCalls = [new LlmToolCall("call-1", "echo", "{}")] })
+        ];
+        var harness = new Harness();
+        harness.Results.Enqueue(Done());
+        await using var session = harness.Create(Options() with { Context = new() { Entries = entries } });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(new()));
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        IReadOnlyList<LlmChatMessage> sent = Assert.Single(harness.Requests).Messages;
+        // The duplicate entry and the result with no call are not sent; the unsettled call gets an error result.
+        Assert.Equal([("user", 0, 0), ("assistant", 1, 0), ("user", 0, 1)],
+            sent.Select(message => (message.Role, message.ToolCalls.Count, message.ToolResults.Count)));
+        Assert.Equal("first", sent[0].Content);
+        LlmToolResult settled = Assert.IsType<LlmToolResult>(Assert.Single(sent[2].ToolResults));
+        Assert.Equal("call-1", settled.ToolCallId);
+        Assert.Equal("The tool was not run; no result is available.", Assert.IsType<LlmToolOutputText>(Assert.Single(settled.Output.Parts)).Text);
+        Assert.Equal(["first", "duplicate", "", "", "done"],
+            (await session.CaptureContextAsync()).Entries.Select(entry => entry.Message.Content));
+    }
+
+    [Fact]
+    public async Task UsageReportsTheModel()
+    {
+        var harness = new Harness();
+        harness.UsageObservations.Enqueue([new(3, 1, 4)]);
+        harness.Results.Enqueue(Done(modelId: "answering-model") with { Usage = new(3, 2, 5) });
+        await using var session = harness.Create();
+
+        LlmAgentUsageEvent[] usage = [.. (await Read(session.RunTurnAsync(Turn("hello")))).OfType<LlmAgentUsageEvent>()];
+
+        Assert.Equal(["test", "answering-model"], usage.Select(item => item.ModelId));
+    }
+
+    private sealed class CodexClient : ILlmAgentClient
+    {
+        public LlmTransport Transport => LlmTransport.OpenAiCodex;
+        public Task<ILlmAgentSession> StartSessionAsync(string connectionId, LlmConnection connection,
+            LlmAgentSessionOptions options, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
     private static LlmProviderException Interrupted() => new("The model response stream was interrupted.",
         LlmTransport.OpenAiCodex, isResponseStreamInterrupted: true);
 
@@ -397,10 +584,14 @@ public sealed class ManagedAgentTests
         public IReadOnlyList<JsonElement> Snapshots { get; init; } = [];
         public bool UnknownEstimate { get; init; }
         public bool ExposeBeforeFailure { get; init; }
+        /// <summary>The provider capabilities the session sees; null uses the default fixture.</summary>
+        public LlmProviderCapabilities? Capabilities { get; init; }
+        public static LlmConnection Connection { get; } =
+            new() { Version = "1", Transport = LlmTransport.OpenAiCodex, Endpoint = "https://provider.test/codex" };
         public ManagedAgentSession Create(LlmAgentSessionOptions? options = null) => ManagedAgentSession.CreateAsync(
-            new() { Version = "1", Transport = LlmTransport.OpenAiCodex, Endpoint = "https://provider.test/codex" },
+            Connection,
             options ?? Options(), [new("test", "Test") { MaxContextTokens = 1000 }, new("other", "Other") { MaxContextTokens = 2000 }], this, Stream,
-            _ => new()
+            _ => Capabilities ?? new()
             {
                 SupportsAgentSessions = InferenceSupport.Supported,
                 SupportsAgentToolUse = InferenceSupport.Supported,

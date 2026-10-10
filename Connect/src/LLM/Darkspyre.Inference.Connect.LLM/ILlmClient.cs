@@ -3,7 +3,7 @@ using Darkspyre.Inference.Common.LLM;
 namespace Darkspyre.Inference.Connect.LLM;
 
 /// <summary>A storage-ignorant adapter for one provider wire protocol.</summary>
-public interface ILlmClient
+internal interface ILlmClient
 {
     LlmTransport Transport { get; }
 

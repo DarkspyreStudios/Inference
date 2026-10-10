@@ -19,7 +19,7 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
     private bool _retiring;
     private TaskCompletionSource? _retirement;
 
-    public LlmAgentProviderService(
+    internal LlmAgentProviderService(
         ILlmConnectionSource connections,
         IEnumerable<ILlmAgentClient> clients,
         LlmAccountUsageObservations? observations = null)
@@ -98,6 +98,8 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
         return await OwnAsync(session, cancellationToken);
     }
 
+    /// <summary>Reopens a provider thread by its ID. No built transport resumes one; a conversation continues by
+    /// <see cref="StartSessionAsync"/> with its history.</summary>
     public async Task<ILlmAgentSession> ResumeSessionAsync(
         string connectionId,
         string threadId,
@@ -116,42 +118,8 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfOpeningCanceled(cancellationToken);
         RuntimeInputAdmission.Validate(connection);
-        ILlmAgentSession session = await ClientFor<ILlmAgentResumeClient>(connection.Transport, "resume").ResumeSessionAsync(
-            connectionId,
-            connection,
-            threadId,
-            options,
-            cancellationToken);
-        return await OwnAsync(session, cancellationToken);
-    }
-
-    public async Task<ILlmAgentSession> ForkSessionAsync(
-        string connectionId,
-        string threadId,
-        string? lastTurnId = null,
-        LlmAgentResumeOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        using LlmOperationLifetime.Lease operation = Enter(cancellationToken);
-        cancellationToken = operation.Token;
-        options = options is null ? null : ClientTools.Snapshot(options);
-        LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
-        LlmConnection connection = await LlmConnectionResolver.ResolveAsync(
-            Connections,
-            connectionId,
-            cancellationToken);
-        connection = connection with { AccountUsageObservationBinding = reservation.Bind(connection) };
-        cancellationToken.ThrowIfCancellationRequested();
-        ThrowIfOpeningCanceled(cancellationToken);
-        RuntimeInputAdmission.Validate(connection);
-        ILlmAgentSession session = await ClientFor<ILlmAgentForkClient>(connection.Transport, "fork").ForkSessionAsync(
-            connectionId,
-            connection,
-            threadId,
-            lastTurnId,
-            options,
-            cancellationToken);
-        return await OwnAsync(session, cancellationToken);
+        _ = ClientFor(connection.Transport);
+        throw new NotSupportedException($"{connection.Transport} agent sessions cannot resume a provider thread.");
     }
 
     private void ThrowIfOpeningCanceled(CancellationToken token)
@@ -254,9 +222,4 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
             ? client
             : throw new NotSupportedException(
                 $"No LLM agent client is registered for transport {transport}.");
-
-    private T ClientFor<T>(LlmTransport transport, string operation) where T : ILlmAgentClient =>
-        ClientFor(transport) is T client
-            ? client
-            : throw new NotSupportedException($"{transport} agent sessions cannot {operation} a provider thread.");
 }

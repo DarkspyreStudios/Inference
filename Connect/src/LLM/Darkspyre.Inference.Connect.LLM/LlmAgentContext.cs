@@ -133,6 +133,15 @@ public sealed record LlmAgentContextPolicy
 
     /// <summary>Optional host cap; cannot increase a known provider limit.</summary>
     public long? MaxContextTokens { get; init; }
+
+    /// <summary>
+    /// Where compaction brings the request, as a share of the usable window (window minus output reserve).
+    /// A value outside 0.05-0.80 uses the nearer bound.
+    /// </summary>
+    public double CompactionTargetRatio { get; init; } = 0.35;
+
+    /// <summary>Send supplied context unchanged: report context use, never compact, return a real overflow error.</summary>
+    public bool PreserveSuppliedContext { get; init; }
 }
 
 public enum LlmAgentToolExecutionMode
@@ -151,6 +160,9 @@ public sealed record LlmAgentExecutionOptions
     public int MaxConcurrentTools { get; init; } = 4;
 
     public LlmAgentContextPolicy ContextPolicy { get; init; } = new();
+
+    /// <summary>Spend cap in US dollars for each turn. Null, 0 or less sets no cap.</summary>
+    public decimal? MaxSpendUsd { get; init; }
 }
 
 /// <summary>
@@ -217,6 +229,9 @@ public sealed record LlmAgentUsageEvent(
 {
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
+
+    /// <summary>The model the provider reports for this step; null when it reported none.</summary>
+    public string? ModelId { get; init; }
 }
 
 public enum LlmAgentCompletionReason
@@ -229,5 +244,11 @@ public enum LlmAgentCompletionReason
     Interruption,
 
     /// <summary>The model operation ended without a reported natural-completion or truncation classification.</summary>
-    Unknown
+    Unknown,
+
+    /// <summary>The turn ended with the model's tool calls returned unrun (LlmAgentToolHandling.ReturnRequests).</summary>
+    ToolRequests,
+
+    /// <summary>The turn reached LlmAgentExecutionOptions.MaxSpendUsd.</summary>
+    SpendLimit
 }

@@ -14,13 +14,11 @@ public sealed record LlmAgentCallerServices
     public ILlmAgentTerminalFactory? Terminals { get; init; }
     public ILlmAgentShellExecutor? ShellExecutor { get; init; }
     public IInferenceResourceAccess? Resources { get; init; }
+    /// <summary>The Host's full transcript of this conversation; compaction summarizes from it when set.</summary>
+    public ILlmConversationTranscript? Transcript { get; init; }
     public override string ToString() => "LlmAgentCallerServices { <borrowed> }";
 }
 
-public enum LlmAgentCallerServiceKind
-{
-    Permission = 0, ReadTextFile = 1, WriteTextFile = 2, Terminal = 3, ShellExecution = 4
-}
 public enum LlmAgentPermissionChoiceKind
 {
     AllowOnce = 0, AllowAlways = 1, RejectOnce = 2, RejectAlways = 3

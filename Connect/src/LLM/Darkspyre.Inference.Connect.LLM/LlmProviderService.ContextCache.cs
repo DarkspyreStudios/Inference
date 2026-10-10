@@ -186,16 +186,6 @@ public sealed partial class LlmProviderService
     private LlmConnection WithContextCache(LlmConnection connection, ILlmClient client) =>
         client is ILlmContextCacheAdapter ? connection with { CacheBindings = _cacheBindings } : connection;
 
-    private void ValidateCacheEstimate(string connectionId, LlmConnection connection, ILlmClient client,
-        LlmChatRequest request, long sequence)
-    {
-        if (client is not ILlmContextCacheAdapter adapter || request.ExplicitCache is not { } reference) return;
-        adapter.ValidateCachedSuffix(request);
-        adapter.ValidateCacheReference(connection, reference);
-        _cacheBindings.ValidateEstimate(connectionId, connection, reference, sequence);
-        // A replaced selection is not revalidated for advisory accounting; occupancy stays unknown.
-    }
-
     private async Task<(LlmConnection Connection, LlmChatRequest Request)> AdmitContextCacheAsync(string connectionId,
         LlmConnection connection, ILlmClient client, LlmChatRequest request, long sequence, CancellationToken token)
     {

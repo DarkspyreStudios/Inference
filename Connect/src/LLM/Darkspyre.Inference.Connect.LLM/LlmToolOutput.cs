@@ -7,7 +7,7 @@ using Darkspyre.Inference.Common.LLM;
 namespace Darkspyre.Inference.Connect.LLM;
 
 /// <summary>How a route carries one kind of tool-output content.</summary>
-public enum LlmRichContentCarriage
+internal enum LlmRichContentCarriage
 {
     /// <summary>The route cannot carry it; projection omits it.</summary>
     Unsupported,
@@ -20,7 +20,7 @@ public enum LlmRichContentCarriage
 }
 
 /// <summary>What a host needs to know to send tool output on a route.</summary>
-public sealed record LlmRichContentSupported
+internal sealed record LlmRichContentSupported
 {
     public LlmRichContentCarriage Images { get; init; }
 
@@ -71,21 +71,14 @@ public sealed record LlmRichContentSupported
     };
 }
 
-/// <summary>Which lane's support a projection applies: chat requests, or agent-session tool calls.</summary>
-public enum LlmToolOutputLane
-{
-    Chat,
-    AgentSession
-}
-
-public enum LlmToolPartDelivery
+internal enum LlmToolPartDelivery
 {
     Delivered,
     Converted,
     Omitted
 }
 
-public enum LlmToolPartOmission
+internal enum LlmToolPartOmission
 {
     UnsupportedByRoute,
     UnsupportedByModel,
@@ -93,10 +86,10 @@ public enum LlmToolPartOmission
     Empty
 }
 
-public sealed record LlmToolPartProjection(LlmToolPartDelivery Delivery, LlmToolPartOmission? Omission = null);
+internal sealed record LlmToolPartProjection(LlmToolPartDelivery Delivery, LlmToolPartOmission? Omission = null);
 
 /// <summary>What one tool output sends on a route: one entry per supplied part, in order.</summary>
-public sealed record LlmToolOutputProjection(
+internal sealed record LlmToolOutputProjection(
     IReadOnlyList<LlmToolPartProjection> Parts,
     LlmToolPartProjection? StructuredContent,
     LlmToolPartProjection ErrorFlag);

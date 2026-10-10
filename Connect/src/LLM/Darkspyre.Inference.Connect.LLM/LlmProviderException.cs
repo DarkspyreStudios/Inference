@@ -47,4 +47,7 @@ public sealed class LlmProviderException : Exception
     /// <summary>The response body stream is interrupted before its terminal response arrives.</summary>
     /// <gotcha>This classification does not authorize replay of requests enabling provider-hosted tools.</gotcha>
     public bool IsResponseStreamInterrupted { get; }
+
+    /// <summary>Usage the provider reported for the failed response, when it reported any.</summary>
+    public Darkspyre.Inference.Common.LLM.LlmUsage? Usage { get; init; }
 }

@@ -35,8 +35,6 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.ClaudeSubscription;
 
-    protected override bool OffersNonStreamingRequests => true;
-
     protected override bool SupportsResourcePreparation => true;
 
     /// <summary>The effort levels the Claude CLI accepts, for its chat and agent lanes.</summary>
@@ -129,9 +127,6 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         return ReasoningLevels.Where(level => levels.EnumerateArray().Any(value =>
             value.ValueKind == JsonValueKind.String && value.GetString() == LlmReasoningEffort.Word(level))).ToFrozenSet();
     }
-
-    protected override void ValidateReasoningRequest(LlmConnection connection, LlmChatRequest request,
-        LlmProviderCapabilities capabilities) => _ = MapReasoning(connection, request.ModelId, request.ReasoningLevel);
 
     /// <summary>Maps caller effort to the CLI's native effort vocabulary for both chat and agent turns.</summary>
     internal static LlmReasoningLevel? MapReasoning(LlmConnection connection, string? modelId, LlmReasoningLevel? requested)

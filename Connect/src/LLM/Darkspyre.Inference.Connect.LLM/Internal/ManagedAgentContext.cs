@@ -8,30 +8,15 @@ internal static class ManagedAgentContext
 {
     /// <summary>Validates portable data without decoding provider state or invoking resource authority.</summary>
     internal static LlmAgentContext ValidatePortable(LlmAgentContext context) =>
-        Validate(context, static message => message, allowIncompleteTail: true);
+        Validate(context, static message => message);
 
-    public static LlmAgentContext Import(LlmAgentContext context, LlmConnection connection, string modelId, bool supportsResources = false)
-    {
-        if (!supportsResources) ValidateRuntimeResources(context);
-        return Validate(context, message =>
-        {
-            _ = ProviderContinuationStateCodec.DecodeMessage(message, connection, modelId);
-            return message;
-        });
-    }
-
-    /// <summary>Imports a start context; with Omit, state this target cannot replay is removed and counted.</summary>
+    /// <summary>
+    /// Imports a context for the selected model. State this target cannot replay is removed and counted, so a history
+    /// from any provider, model or account continues.
+    /// </summary>
     public static (LlmAgentContext Context, int Omitted) Import(
-        LlmAgentContext context, LlmConnection connection, string modelId, LlmUnboundContinuationState unbound, bool supportsResources = false)
+        LlmAgentContext context, LlmConnection connection, string modelId, bool supportsResources = false)
     {
-        if (!Enum.IsDefined(unbound))
-        {
-            throw new ArgumentOutOfRangeException(nameof(unbound), "Unknown unbound continuation state handling.");
-        }
-        if (unbound == LlmUnboundContinuationState.Reject)
-        {
-            return (Import(context, connection, modelId, supportsResources), 0);
-        }
         if (!supportsResources) ValidateRuntimeResources(context);
         int omitted = 0;
         LlmAgentContext imported = Validate(context, message =>
@@ -76,11 +61,10 @@ internal static class ManagedAgentContext
     }
 
     /// <summary>
-    /// One structural pass over a context. <paramref name="continuationState"/> validates or rewrites each message
-    /// that carries continuation state.
+    /// One pass over a context. <paramref name="continuationState"/> validates or rewrites each message that carries
+    /// continuation state. Structure is not refused here: <see cref="Outgoing"/> repairs the copy that is sent.
     /// </summary>
-    private static LlmAgentContext Validate(LlmAgentContext context, Func<LlmChatMessage, LlmChatMessage> continuationState,
-        bool allowIncompleteTail = false)
+    private static LlmAgentContext Validate(LlmAgentContext context, Func<LlmChatMessage, LlmChatMessage> continuationState)
     {
         ArgumentNullException.ThrowIfNull(context);
         context.ValidateResourceSelection();
@@ -89,30 +73,17 @@ internal static class ManagedAgentContext
         {
             throw new ArgumentException("Unsupported context format or revision.");
         }
-        var ids = new HashSet<string>(StringComparer.Ordinal);
-        var calls = new HashSet<string>(StringComparer.Ordinal);
-        var pending = new Dictionary<string, LlmClientToolCall>(StringComparer.Ordinal);
         var entries = new List<LlmAgentContextEntry>(context.Entries.Count);
         foreach (var entry in context.Entries)
         {
             ArgumentNullException.ThrowIfNull(entry);
             ArgumentNullException.ThrowIfNull(entry.Message);
-            if (string.IsNullOrWhiteSpace(entry.Id) || !ids.Add(entry.Id) || string.IsNullOrWhiteSpace(entry.TurnId))
-            {
-                throw new ArgumentException("Context entries require unique IDs and a turn identity.");
-            }
             var message = entry.Message;
+            ArgumentNullException.ThrowIfNull(message.Content);
             ArgumentNullException.ThrowIfNull(message.Attachments);
             ArgumentNullException.ThrowIfNull(message.ToolCalls);
             ArgumentNullException.ThrowIfNull(message.ToolResults);
             ArgumentNullException.ThrowIfNull(message.OmittedAttachments);
-            if (message.Role is not ("user" or "assistant" or "system" or "developer")
-                || message.Content is null || (message.ToolCalls.Count > 0 && message.Role != "assistant")
-                || (message.ToolResults.Count > 0 && message.Role != "user")
-                || (pending.Count > 0 && message.ToolResults.Count == 0))
-            {
-                throw new ArgumentException("Context roles and complete tool groups must remain ordered.");
-            }
             if (message.ContinuationState is not null)
             {
                 message = continuationState(message);
@@ -121,10 +92,6 @@ internal static class ManagedAgentContext
             foreach (var call in message.ToolCalls)
             {
                 ArgumentNullException.ThrowIfNull(call);
-                if (string.IsNullOrWhiteSpace(call.Id) || !calls.Add(call.Id))
-                {
-                    throw new ArgumentException("Context tool-call IDs must be unique and names nonempty.");
-                }
                 if (call is LlmToolCall function)
                 {
                     ArgumentException.ThrowIfNullOrWhiteSpace(function.Name);
@@ -133,17 +100,10 @@ internal static class ManagedAgentContext
                         throw new ArgumentException("Context tool arguments must be JSON objects.");
                 }
                 else if (call is not LlmShellCall) throw new NotSupportedException("Unknown context tool call.");
-                pending.Add(call.Id, call);
             }
             foreach (var result in message.ToolResults)
             {
                 ArgumentNullException.ThrowIfNull(result);
-                if (!pending.Remove(result.ToolCallId, out LlmClientToolCall? call)
-                    || (call is LlmToolCall && result is not LlmToolResult)
-                    || (call is LlmShellCall && result is not LlmShellCallResult))
-                {
-                    throw new ArgumentException("Each tool result must match exactly one preceding call of the same kind.");
-                }
                 if (result is LlmToolResult function)
                 {
                     ArgumentNullException.ThrowIfNull(function.Output);
@@ -152,32 +112,57 @@ internal static class ManagedAgentContext
                 }
                 else if (result is not LlmShellCallResult) throw new NotSupportedException("Unknown context tool result.");
             }
-            var omissions = new HashSet<(string?, int)>();
-            foreach (var omitted in message.OmittedAttachments)
-            {
-                ArgumentNullException.ThrowIfNull(omitted);
-                if (!Enum.IsDefined(omitted.Kind) || string.IsNullOrWhiteSpace(omitted.FileName)
-                    || omitted.Index < 0 || !omissions.Add((omitted.ToolCallId, omitted.Index))
-                    || (omitted.ToolCallId is not null && !message.ToolResults.Any(result => result is LlmToolResult
-                        && result.ToolCallId == omitted.ToolCallId)))
-                {
-                    throw new ArgumentException("Invalid omitted-attachment descriptor.");
-                }
-            }
-            foreach (var group in message.OmittedAttachments.GroupBy(omitted => omitted.ToolCallId))
-            {
-                int retained = group.Key is null ? message.Attachments.Count
-                    : ((LlmToolResult)message.ToolResults.Single(result => result.ToolCallId == group.Key)).Output.Parts.Count;
-                long conceptualCount = (long)retained + group.Count();
-                if (group.Any(omitted => omitted.Index >= conceptualCount))
-                    throw new ArgumentException("Omitted-attachment positions must refer to the original ordered content.");
-            }
-        }
-        if (pending.Count > 0 && !allowIncompleteTail)
-        {
-            throw new ArgumentException("Context must end at a settled tool-group boundary.");
+            foreach (var omitted in message.OmittedAttachments) ArgumentNullException.ThrowIfNull(omitted);
         }
         return Copy(context with { Entries = entries }, includeAttachmentData: true);
+    }
+
+    /// <summary>The result an unsettled tool call receives in the request that is sent.</summary>
+    internal const string UnsettledCallResult = "The tool was not run; no result is available.";
+
+    /// <summary>
+    /// The messages a context sends, repaired; the context itself is unchanged. A duplicate entry id keeps the first
+    /// entry, a duplicate call id keeps the first call, a result with no unsettled call of its kind is dropped, and roles
+    /// keep their recorded order. Function calls still unsettled where their tool group ends get
+    /// <see cref="UnsettledCallResult"/>. Omission descriptors are never sent.
+    /// </summary>
+    internal static IReadOnlyList<LlmChatMessage> Outgoing(IReadOnlyList<LlmAgentContextEntry> entries)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        var calls = new HashSet<string>(StringComparer.Ordinal);
+        var pending = new List<LlmClientToolCall>();
+        var messages = new List<LlmChatMessage>(entries.Count + 1);
+        void Settle()
+        {
+            LlmToolResult[] unsettled = [.. pending.OfType<LlmToolCall>()
+                .Select(call => new LlmToolResult(call.Id, LlmToolOutput.FromText(UnsettledCallResult, isError: true)))];
+            if (unsettled.Length > 0) messages.Add(new("user", "") { ToolResults = unsettled });
+            pending.RemoveAll(call => call is LlmToolCall);
+        }
+        foreach (LlmAgentContextEntry entry in entries)
+        {
+            if (!ids.Add(entry.Id)) continue;
+            LlmChatMessage message = entry.Message;
+            // A message that settles nothing ends the tool group before it.
+            if (message.ToolResults.Count == 0) Settle();
+            var results = new List<LlmClientToolResult>(message.ToolResults.Count);
+            foreach (LlmClientToolResult result in message.ToolResults)
+            {
+                int index = pending.FindIndex(call => call.Id == result.ToolCallId
+                    && (call is LlmToolCall ? result is LlmToolResult : result is LlmShellCallResult));
+                if (index < 0) continue;
+                pending.RemoveAt(index);
+                results.Add(result);
+            }
+            LlmClientToolCall[] sentCalls = [.. message.ToolCalls.Where(call => calls.Add(call.Id))];
+            pending.AddRange(sentCalls);
+            // A message that carried only dropped results has nothing left to send.
+            if (message.ToolResults.Count > 0 && results.Count == 0 && sentCalls.Length == 0 && message.Content.Length == 0
+                && message.Attachments.Count == 0 && message.ContinuationState is null) continue;
+            messages.Add(message with { ToolCalls = sentCalls, ToolResults = results, OmittedAttachments = [] });
+        }
+        Settle();
+        return messages;
     }
 
     public static LlmAgentContext Copy(LlmAgentContext context, bool includeAttachmentData) => context with

@@ -40,10 +40,10 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         // No catalog observation means unknown effort support, not a transport-wide model allowlist.
         ReasoningLevels = LlmReasoningEffort.Levels(),
         SupportsToolUse = InferenceSupport.Supported,
+        HostedTools = new[] { LlmHostedToolKind.ImageGeneration }.ToFrozenSet(),
         Tools = new()
         {
             ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
-            StrictInputSchema = LlmStrictInputSchemaSupport.Supported,
             SupportsParallelCalls = InferenceSupport.Supported,
             SupportsParallelCallControl = InferenceSupport.Supported,
             SupportsArgumentStreaming = InferenceSupport.Supported
@@ -51,7 +51,16 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         SupportsAgentSessions = InferenceSupport.Supported,
         SupportsAgentToolUse = InferenceSupport.Supported,
         SupportsAgentTurnInstructions = InferenceSupport.Supported,
-        Agent = ManagedAgentPolicy.Capabilities with { SupportsProviderCompaction = InferenceSupport.Supported },
+        Agent = ManagedAgentPolicy.Capabilities with
+        {
+            SupportsProviderCompaction = InferenceSupport.Supported,
+            SupportsShellTools = InferenceSupport.Unsupported,
+            SupportsNativeResume = InferenceSupport.Unsupported,
+            SupportsExternalToolHandoff = InferenceSupport.Supported,
+            SupportsFallbackModels = InferenceSupport.Unsupported,
+            SupportsTurnCap = InferenceSupport.Supported,
+            SupportsSpendCap = InferenceSupport.Unsupported
+        },
         SupportsPromptImages = InferenceSupport.Supported,
         SupportsPromptDocuments = InferenceSupport.Supported,
         RichContentSupported = RichContentRoutes.Responses
@@ -158,34 +167,6 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         return levels.ToFrozenSet();
     }
 
-    protected override void ValidateReasoningRequest(LlmConnection connection, LlmChatRequest request,
-        LlmProviderCapabilities capabilities) => _ = MapReasoning(request.ReasoningLevel, capabilities.ReasoningLevels);
-
-    private static LlmReasoningLevel? MapReasoning(LlmReasoningLevel? requested, IReadOnlySet<LlmReasoningLevel> offered)
-    {
-        if (requested is null) return null;
-        // Each row names Codex's downward mappings, then its below-minimum mappings in ascending order.
-        LlmReasoningLevel[] row = requested.Value switch
-        {
-            LlmReasoningLevel.None => [LlmReasoningLevel.None, LlmReasoningLevel.Minimal, LlmReasoningLevel.Low,
-                LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
-            LlmReasoningLevel.Minimal => [LlmReasoningLevel.Minimal, LlmReasoningLevel.None, LlmReasoningLevel.Low,
-                LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
-            LlmReasoningLevel.Low => [LlmReasoningLevel.Low, LlmReasoningLevel.Minimal, LlmReasoningLevel.None,
-                LlmReasoningLevel.Medium, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
-            LlmReasoningLevel.Medium => [LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.Minimal,
-                LlmReasoningLevel.None, LlmReasoningLevel.High, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
-            LlmReasoningLevel.High => [LlmReasoningLevel.High, LlmReasoningLevel.Medium, LlmReasoningLevel.Low,
-                LlmReasoningLevel.Minimal, LlmReasoningLevel.None, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.Maximum],
-            LlmReasoningLevel.ExtraHigh => [LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.High, LlmReasoningLevel.Medium,
-                LlmReasoningLevel.Low, LlmReasoningLevel.Minimal, LlmReasoningLevel.None, LlmReasoningLevel.Maximum],
-            LlmReasoningLevel.Maximum => [LlmReasoningLevel.Maximum, LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.High,
-                LlmReasoningLevel.Medium, LlmReasoningLevel.Low, LlmReasoningLevel.Minimal, LlmReasoningLevel.None],
-            _ => throw new ArgumentOutOfRangeException(nameof(requested), requested, "Unknown reasoning level.")
-        };
-        return offered.Count == 0 ? requested : row.First(offered.Contains);
-    }
-
     protected override JsonObject BuildPayload(
         LlmConnection connection, LlmChatRequest request, LlmStructuredOutputEnforcement? enforcement, bool stream,
         LlmResourcePreparation? resources = null)
@@ -205,8 +186,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         }
         LlmChatRequest projected = request with
         {
-            Messages = [.. request.Messages.Where(message => message.Role is not ("system" or "developer"))],
-            ReasoningLevel = MapReasoning(request.ReasoningLevel, GetCapabilities(connection, request.ModelId).ReasoningLevels)
+            Messages = [.. request.Messages.Where(message => message.Role is not ("system" or "developer"))]
         };
         JsonObject payload = base.BuildPayload(connection, projected, enforcement, stream, resources);
         payload["instructions"] = string.Join("\n\n", instructions);

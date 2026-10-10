@@ -13,7 +13,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Session-oriented agent adapter over the official Claude CLI SDK protocol.</summary>
 internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processFactory)
-    : ILlmAgentResumeClient, ILlmAgentForkClient
+    : ILlmAgentClient
 {
     private const string McpServerName = "darkspyre-inference-connect";
 
@@ -39,8 +39,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         return await CreateSessionAsync(
             threadId,
             threadId,
-            resumeThreadId: null,
-            fork: false,
             ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint),
             options.ModelId,
             runtime.WorkingDirectory,
@@ -54,92 +52,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening,
-            options.CallerServices?.Resources,
-            policy.AllowRuntimeBackgroundWork,
-            options.ResourceOutputRetentionBytes,
-            cancellationToken);
-    }
-
-    public async Task<ILlmAgentSession> ResumeSessionAsync(
-        string connectionId,
-        LlmConnection connection,
-        string threadId,
-        LlmAgentResumeOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        ClaudeCliConfiguration.ValidateConnection(connection);
-        CliInfrastructure.ValidateThreadId(threadId);
-        options = ClientTools.Snapshot(options ?? new LlmAgentResumeOptions());
-        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude, supportsAgentToolUse: true,
-            options.ModelId, options.Tools, options.ToolHandler);
-        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options, NativeAgentContract.Claude, supportsResources: true);
-        LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
-        ValidateOptions(options.ModelId, runtime.WorkingDirectory, ClientTools.Functions(options.Tools), options.ToolHandler, modelOptional: true);
-        return await CreateSessionAsync(
-            threadId,
-            threadId,
-            threadId,
-            fork: false,
-            ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint),
-            options.ModelId,
-            runtime.WorkingDirectory,
-            options.Instructions,
-            policy.WritableRoots,
-            policy.Sandbox,
-            policy.NetworkAllowed,
-            ClientTools.Functions(options.Tools),
-            options.ToolHandler,
-            runtime.Ephemeral,
-            connection,
-            NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
-            opening: (null, 0),
-            options.CallerServices?.Resources,
-            policy.AllowRuntimeBackgroundWork,
-            options.ResourceOutputRetentionBytes,
-            cancellationToken);
-    }
-
-    public async Task<ILlmAgentSession> ForkSessionAsync(
-        string connectionId,
-        LlmConnection connection,
-        string threadId,
-        string? lastTurnId = null,
-        LlmAgentResumeOptions? options = null,
-        CancellationToken cancellationToken = default)
-    {
-        ClaudeCliConfiguration.ValidateConnection(connection);
-        CliInfrastructure.ValidateThreadId(threadId);
-        if (!string.IsNullOrWhiteSpace(lastTurnId))
-        {
-            throw new NotSupportedException(
-                "Claude CLI can fork a session only at its current persisted position.");
-        }
-
-        options = ClientTools.Snapshot(options ?? new LlmAgentResumeOptions());
-        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude, supportsAgentToolUse: true,
-            options.ModelId, options.Tools, options.ToolHandler);
-        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ResumeRuntime(options, NativeAgentContract.Claude, supportsResources: true);
-        LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
-        ValidateOptions(options.ModelId, runtime.WorkingDirectory, ClientTools.Functions(options.Tools), options.ToolHandler, modelOptional: true);
-        string forkedThreadId = Guid.NewGuid().ToString();
-        return await CreateSessionAsync(
-            forkedThreadId,
-            threadId,
-            threadId,
-            fork: true,
-            ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint),
-            options.ModelId,
-            runtime.WorkingDirectory,
-            options.Instructions,
-            policy.WritableRoots,
-            policy.Sandbox,
-            policy.NetworkAllowed,
-            ClientTools.Functions(options.Tools),
-            options.ToolHandler,
-            runtime.Ephemeral,
-            connection,
-            NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
-            opening: (null, 0),
             options.CallerServices?.Resources,
             policy.AllowRuntimeBackgroundWork,
             options.ResourceOutputRetentionBytes,
@@ -172,8 +84,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
     private async Task<ILlmAgentSession> CreateSessionAsync(
         string threadId,
         string sessionId,
-        string? resumeThreadId,
-        bool fork,
         string executable,
         string? modelId,
         string workingDirectory,
@@ -196,8 +106,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(connection, modelId);
         IReadOnlyList<string> arguments = BuildArguments(
             threadId,
-            resumeThreadId,
-            fork,
             modelId,
             tools,
             ephemeral,
@@ -253,8 +161,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
     private static List<string> BuildArguments(
         string threadId,
-        string? resumeThreadId,
-        bool fork,
         string? modelId,
         IReadOnlyList<LlmAgentToolDefinition> tools,
         bool ephemeral,
@@ -326,19 +232,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             arguments.Add(string.Join(',', allowed));
         }
 
-        if (resumeThreadId is null)
-        {
-            arguments.Add($"--session-id={threadId}");
-        }
-        else
-        {
-            arguments.Add($"--resume={resumeThreadId}");
-            if (fork)
-            {
-                arguments.Add("--fork-session");
-                arguments.Add($"--session-id={threadId}");
-            }
-        }
+        arguments.Add($"--session-id={threadId}");
 
         if (ephemeral)
         {
@@ -380,12 +274,11 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         string? modelId,
         string workingDirectory,
         IReadOnlyList<LlmAgentToolDefinition> tools,
-        LlmAgentToolHandler? toolHandler,
-        bool modelOptional = false)
+        LlmAgentToolHandler? toolHandler)
     {
         ArgumentNullException.ThrowIfNull(tools);
         NativeAgentContract.ValidateTools(tools);
-        if (!modelOptional && string.IsNullOrWhiteSpace(modelId))
+        if (string.IsNullOrWhiteSpace(modelId))
         {
             throw new ArgumentException("A model id is required.", nameof(modelId));
         }
@@ -518,6 +411,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         {
             using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
             return Task.FromResult(NativeAgentContract.Claude);
+        }
+
+        public LlmCompactionResponsibility CompactionResponsibility => LlmCompactionResponsibility.Provider;
+
+        public Task<LlmAgentCompactedEvent?> CompactNowAsync(CancellationToken cancellationToken = default)
+        {
+            using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+            throw NativeAgentContract.UnsupportedContext(operation.Token);
         }
 
         public Task<LlmRequestAccounting> MeasureContextAsync(LlmAgentContext proposedContext,

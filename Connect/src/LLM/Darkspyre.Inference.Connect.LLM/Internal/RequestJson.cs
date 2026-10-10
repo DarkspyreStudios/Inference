@@ -8,15 +8,6 @@ internal static class RequestJson
     internal static System.Net.Http.Json.JsonContent Content(JsonObject payload) =>
         System.Net.Http.Json.JsonContent.Create(payload, ConnectLlmJsonContext.Default.JsonObject);
 
-    internal static void ValidateSamplingOptions(LlmConnection connection, LlmChatRequest request)
-    {
-        foreach (string name in connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys))
-        {
-            if (IsSamplingOption(name))
-                throw new InvalidOperationException($"Provider option '{name}' cannot replace a standard request field.");
-        }
-    }
-
     private static bool IsSamplingOption(string name) => name is "temperature" or "top_p" or "top_k" or "seed"
         or "presence_penalty" or "frequency_penalty" or "stop" or "stop_sequences"
         or "topP" or "topK" or "presencePenalty" or "frequencyPenalty" or "stopSequences";
@@ -27,7 +18,6 @@ internal static class RequestJson
         LlmChatRequest request,
         string? consumedOption = null)
     {
-        ValidateSamplingOptions(connection, request);
         var options = new Dictionary<string, JsonElement>(connection.ProviderOptions, StringComparer.Ordinal);
         foreach ((string name, JsonElement value) in request.ProviderOptions)
         {
@@ -36,7 +26,8 @@ internal static class RequestJson
 
         foreach ((string name, JsonElement value) in options)
         {
-            if (name == consumedOption) continue;
+            // A provider option named as a standard sampling field is skipped; the request's own field carries it.
+            if (name == consumedOption || IsSamplingOption(name)) continue;
             if (payload.ContainsKey(name))
             {
                 throw new InvalidOperationException($"Provider option '{name}' cannot replace a standard request field.");

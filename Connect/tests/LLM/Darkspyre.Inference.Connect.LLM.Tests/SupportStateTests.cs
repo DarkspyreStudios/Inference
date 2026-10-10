@@ -58,6 +58,62 @@ public sealed class SupportStateTests
         Assert.Equal(InferenceSupport.Unknown, OpenAiModelProfiles.Get("unlisted-model").SupportsPromptCacheOptions);
     }
 
+    [Fact]
+    public async Task FeatureMarksMatchB31()
+    {
+        // Codex reports what its managed session declares; Claude's sessions report NativeAgentContract.Claude.
+        using var http = new HttpClient();
+        var codex = new OpenAiCodexLlmClient(http);
+        LlmConnection connection = DirectCodexTests.Connection();
+        await using ManagedAgentSession session = await ManagedAgentSession.CreateAsync(connection, new() { ModelId = "model" }, [],
+            codex, (_, _) => throw new InvalidOperationException("Capabilities send no request."),
+            model => codex.GetCapabilities(connection, model));
+        LlmAgentCapabilities codexMarks = await session.GetCapabilitiesAsync();
+        LlmAgentCapabilities claudeMarks = NativeAgentContract.Claude;
+        const InferenceSupport Yes = InferenceSupport.Supported, No = InferenceSupport.Unsupported, Unknown = InferenceSupport.Unknown;
+
+        Assert.Equal([LlmHostedToolKind.ImageGeneration], codexMarks.HostedTools);
+        Assert.Empty(claudeMarks.HostedTools);
+        Assert.Equal(LlmOperationSupport.Unsupported, codexMarks.ResourceObservation);
+        Assert.Equal(LlmOperationSupport.Supported, claudeMarks.ResourceObservation);
+        (string Name, Func<LlmAgentCapabilities, InferenceSupport> Read, InferenceSupport Codex, InferenceSupport Claude)[] rows =
+        [
+            ("SupportsShellTools", marks => marks.SupportsShellTools, No, No),
+            ("SupportsContextCapture", marks => marks.SupportsContextCapture, Yes, No),
+            ("SupportsContextReplacement", marks => marks.SupportsContextReplacement, Yes, No),
+            // Claude answers context status from Task 8 on.
+            ("SupportsContextStatus", marks => marks.SupportsContextStatus, Yes, No),
+            // Codex hands compaction to the Host until Task 6 compacts it in Inference.
+            ("SupportsCompactionHandoff", marks => marks.SupportsCompactionHandoff, Yes, No),
+            ("SupportsNativeResume", marks => marks.SupportsNativeResume, No, No),
+            ("SupportsSteering", marks => marks.SupportsSteering, Yes, No),
+            ("SupportsInterrupt", marks => marks.SupportsInterrupt, Yes, Yes),
+            ("SupportsExternalToolHandoff", marks => marks.SupportsExternalToolHandoff, Yes, Unknown),
+            ("SupportsFallbackModels", marks => marks.SupportsFallbackModels, No, Unknown),
+            ("SupportsTurnCap", marks => marks.SupportsTurnCap, Yes, Unknown),
+            ("SupportsSpendCap", marks => marks.SupportsSpendCap, No, Unknown),
+            // Compact now arrives with Codex compaction (Task 6) and Claude compaction (Task 8).
+            ("SupportsCompactNow", marks => marks.SupportsCompactNow, No, No)
+        ];
+        Assert.Equal(rows.Select(row => (row.Name, row.Codex, row.Claude)),
+            rows.Select(row => (row.Name, row.Read(codexMarks), row.Read(claudeMarks))));
+    }
+
+    [Theory]
+    [InlineData(LlmReasoningLevel.Maximum, new[] { LlmReasoningLevel.None, LlmReasoningLevel.Low }, LlmReasoningLevel.Low)]
+    [InlineData(LlmReasoningLevel.Medium, new[] { LlmReasoningLevel.None, LlmReasoningLevel.High }, LlmReasoningLevel.None)]
+    [InlineData(LlmReasoningLevel.None, new[] { LlmReasoningLevel.Low, LlmReasoningLevel.High }, LlmReasoningLevel.Low)]
+    [InlineData(LlmReasoningLevel.Maximum, new LlmReasoningLevel[0], LlmReasoningLevel.Maximum)]
+    public void ReasoningMapsToNearestOfferedLevel(LlmReasoningLevel requested, LlmReasoningLevel[] offered, LlmReasoningLevel expected)
+    {
+        var capabilities = new LlmProviderCapabilities { ReasoningLevels = LlmReasoningEffort.Levels(offered) };
+
+        LlmChatRequest sent = LlmRequestNormalizer.Normalize(DirectCodexTests.Connection(),
+            new() { ModelId = "model", ReasoningLevel = requested }, capabilities);
+
+        Assert.Equal(expected, sent.ReasoningLevel);
+    }
+
     private static LlmConnection Connection() => new()
     {
         Version = "1",

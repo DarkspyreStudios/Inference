@@ -72,7 +72,6 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmContextCacheUnavailableReason> LlmContextCacheUnavailableReason => Metadata<LlmContextCacheUnavailableReason>();
     public static JsonTypeInfo<LlmContextCacheMutation> LlmContextCacheMutation => Metadata<LlmContextCacheMutation>();
     public static JsonTypeInfo<LlmAgentShellRequest> LlmAgentShellRequest => Metadata<LlmAgentShellRequest>();
-    public static JsonTypeInfo<LlmAgentCallerServiceKind> LlmAgentCallerServiceKind => Metadata<LlmAgentCallerServiceKind>();
     public static JsonTypeInfo<LlmAgentPermissionChoiceKind> LlmAgentPermissionChoiceKind => Metadata<LlmAgentPermissionChoiceKind>();
     public static JsonTypeInfo<LlmAgentPermissionResult> LlmAgentPermissionResult => Metadata<LlmAgentPermissionResult>();
     public static JsonTypeInfo<LlmAgentToolPresentationContent> LlmAgentToolPresentationContent => Metadata<LlmAgentToolPresentationContent>();
@@ -120,7 +119,6 @@ public static class ConnectLlmJson
         {
             options.Converters.Add(InferenceJson.InferenceResourceReference.Options.Converters.Single(converter => converter.CanConvert(type)));
         }
-        options.Converters.Add(new CallerEnumConverter<LlmAgentCallerServiceKind>());
         options.Converters.Add(new CallerEnumConverter<LlmAgentPermissionChoiceKind>());
         options.Converters.Add(new CallerEnumConverter<LlmAgentContentObservationKind>());
         options.Converters.Add(new CallerEnumConverter<LlmAgentContentObservationMode>());
@@ -172,7 +170,8 @@ public static class ConnectLlmJson
                     InferenceJson.LlmHostedImageOutput.Properties.Single(property => property.Name == "Data").CustomConverter;
             if (metadata is not null && (type == typeof(LlmAgentHostedToolCallStartedEvent) || type == typeof(LlmAgentHostedToolCallProgressEvent)
                 || type == typeof(LlmAgentHostedToolCallCompletedEvent) || type == typeof(LlmAgentCitationEvent)
-                || type == typeof(LlmAgentCitationsSnapshotEvent) || type == typeof(LlmAgentCompactedEvent)))
+                || type == typeof(LlmAgentCitationsSnapshotEvent) || type == typeof(LlmAgentCompactedEvent)
+                || type == typeof(LlmAgentImageOutputEvent)))
             {
                 metadata.Properties.Single(property => property.Name == nameof(LlmAgentEvent.ThreadId)).IsRequired = true;
                 metadata.Properties.Single(property => property.Name == nameof(LlmAgentEvent.TurnId)).IsRequired = true;
@@ -200,6 +199,7 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmAgentCitationEvent> LlmAgentCitationEvent => Metadata<LlmAgentCitationEvent>();
     public static JsonTypeInfo<LlmAgentCitationsSnapshotEvent> LlmAgentCitationsSnapshotEvent => Metadata<LlmAgentCitationsSnapshotEvent>();
     public static JsonTypeInfo<LlmAgentCompactedEvent> LlmAgentCompactedEvent => Metadata<LlmAgentCompactedEvent>();
+    public static JsonTypeInfo<LlmAgentImageOutputEvent> LlmAgentImageOutputEvent => Metadata<LlmAgentImageOutputEvent>();
     public static JsonTypeInfo<LlmAgentResourceSelectionChangedEvent> LlmAgentResourceSelectionChangedEvent => Metadata<LlmAgentResourceSelectionChangedEvent>();
     public static JsonTypeInfo<LlmAgentToolPresentationEvent> LlmAgentToolPresentationEvent => Metadata<LlmAgentToolPresentationEvent>();
     public static JsonTypeInfo<LlmAgentContentObservationEvent> LlmAgentContentObservationEvent => Metadata<LlmAgentContentObservationEvent>();
@@ -209,8 +209,6 @@ public static class ConnectLlmJson
     public static JsonTypeInfo<LlmAccountUsageSnapshot> AccountUsageSnapshot => Metadata<LlmAccountUsageSnapshot>();
     public static JsonTypeInfo<LlmConnection> Connection => Metadata<LlmConnection>();
     public static JsonTypeInfo<LlmSetupConfiguration> SetupConfiguration => Metadata<LlmSetupConfiguration>();
-    public static JsonTypeInfo<LlmChatRequest> ChatRequest => Metadata<LlmChatRequest>();
-    public static JsonTypeInfo<LlmChatResult> ChatResult => Metadata<LlmChatResult>();
     public static JsonTypeInfo<LlmChatMessage> ChatMessage => Metadata<LlmChatMessage>();
     public static JsonTypeInfo<LlmTokenization> Tokenization => Metadata<LlmTokenization>();
     public static JsonTypeInfo<LlmToken> Token => Metadata<LlmToken>();
@@ -289,7 +287,6 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmContextCacheUnavailableReason))]
 [JsonSerializable(typeof(LlmContextCacheMutation))]
 [JsonSerializable(typeof(LlmAgentShellRequest))]
-[JsonSerializable(typeof(LlmAgentCallerServiceKind))]
 [JsonSerializable(typeof(LlmAgentPermissionChoiceKind))]
 [JsonSerializable(typeof(LlmAgentPermissionResult))]
 [JsonSerializable(typeof(LlmAgentToolPresentationContent))]
@@ -329,7 +326,6 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmAgentShellTool))]
 [JsonSerializable(typeof(LlmAccountUsageSnapshot))]
 [JsonSerializable(typeof(LlmSetupConfiguration))]
-[JsonSerializable(typeof(LlmChatRequest))]
 [JsonSerializable(typeof(LlmInferenceRequest))]
 [JsonSerializable(typeof(LlmHostedTool))]
 [JsonSerializable(typeof(LlmAgentHostedToolCallStartedEvent))]
@@ -338,12 +334,12 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmAgentCitationEvent))]
 [JsonSerializable(typeof(LlmAgentCitationsSnapshotEvent))]
 [JsonSerializable(typeof(LlmAgentCompactedEvent))]
+[JsonSerializable(typeof(LlmAgentImageOutputEvent))]
 [JsonSerializable(typeof(LlmAgentResourceSelectionChangedEvent))]
 [JsonSerializable(typeof(LlmAgentToolPresentationEvent))]
 [JsonSerializable(typeof(LlmAgentContentObservationEvent))]
 [JsonSerializable(typeof(LlmAgentContentObservationKind))]
 [JsonSerializable(typeof(LlmAgentContentObservationMode))]
-[JsonSerializable(typeof(LlmChatResult))]
 [JsonSerializable(typeof(LlmChatMessage))]
 [JsonSerializable(typeof(LlmTokenization))]
 [JsonSerializable(typeof(LlmToken))]

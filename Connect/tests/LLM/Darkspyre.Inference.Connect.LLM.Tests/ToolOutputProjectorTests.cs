@@ -17,7 +17,6 @@ public sealed class ToolOutputProjectorTests
     public void WeatherFixtureSchemaAndResultsDoNotRequireReflection(string arguments, bool error)
     {
         LlmToolDefinition definition = WeatherTool.ChatDefinition;
-        Assert.True(definition.Strict);
         Assert.False(definition.InputSchema.GetProperty("additionalProperties").GetBoolean());
         Assert.Equal("city", Assert.Single(definition.InputSchema.GetProperty("required").EnumerateArray()).GetString());
         Assert.Equal(definition.InputSchema.GetRawText(), WeatherTool.AgentDefinition.InputSchema.GetRawText());
@@ -89,7 +88,7 @@ public sealed class ToolOutputProjectorTests
     }
 
     [Fact]
-    public void OmissionNamesTheRouteOrTheModelOverride()
+    public void OmittedPartCarriesNotice()
     {
         LlmToolOutput output = new()
         {
@@ -105,7 +104,15 @@ public sealed class ToolOutputProjectorTests
 
         ProjectedToolOutput projected = ToolOutputProjector.Project(output, RichContentRoutes.Responses, lowered);
 
-        Assert.Empty(projected.Parts);
+        // The Host no longer learns how a part is carried, so the model is told about each part it does not receive.
+        Assert.Equal(
+            [
+                "[Content[0]: The selected model does not support tool-result images. This content was not supplied to the model.]",
+                "[Content[1]: The selected model does not support tool-result documents. This content was not supplied to the model.]",
+                "[Content[2]: The transport cannot carry this binary kind. This content was not supplied to the model.]",
+                "[Content[3]: The transport cannot carry this binary kind. This content was not supplied to the model.]"
+            ],
+            projected.Parts.Select(part => Assert.IsType<SentText>(part).Text));
         Assert.Equal(
             [
                 LlmToolPartOmission.UnsupportedByModel,

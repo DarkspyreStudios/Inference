@@ -4,14 +4,6 @@ using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
-/// <summary>Who owns a part of the session: nobody, the host, or the provider-owned runtime.</summary>
-public enum LlmAgentOwnership
-{
-    None,
-    Host,
-    Provider
-}
-
 /// <summary>How a session start takes a host-supplied context.</summary>
 public enum LlmAgentContextImport
 {
@@ -28,26 +20,6 @@ public enum LlmAgentContextImport
     OpeningContext
 }
 
-public enum LlmAgentNativeFork
-{
-    None,
-    CurrentPosition
-}
-
-public enum LlmAgentSteering
-{
-    None,
-    SafeBoundary
-}
-
-public enum LlmAgentToolExecutionOwnership
-{
-    None,
-    Host,
-    Provider,
-    Mixed
-}
-
 /// <summary>
 /// Operations implemented by the selected agent runtime. Unsupported methods fail before effects.
 /// Native runtime memory is not equivalent to a host-owned, exportable conversation.
@@ -58,15 +30,6 @@ public sealed record LlmAgentCapabilities
 
     /// <summary>The agent lane routes shell calls to the borrowed caller executor.</summary>
     public InferenceSupport SupportsShellTools { get; init; }
-
-    /// <summary>Caller services actually mapped by this agent lane.</summary>
-    public IReadOnlySet<LlmAgentCallerServiceKind> SupportedCallerServices
-    {
-        get;
-        init => field = value.ToFrozenSet();
-    } = FrozenSet<LlmAgentCallerServiceKind>.Empty;
-
-    public LlmAgentOwnership ContextOwnership { get; init; }
 
     /// <summary>How a session start accepts <see cref="LlmAgentSessionOptions.Context"/>.</summary>
     public LlmAgentContextImport ContextImport { get; init; }
@@ -84,22 +47,32 @@ public sealed record LlmAgentCapabilities
 
     public InferenceSupport SupportsNativeResume { get; init; }
 
-    public LlmAgentNativeFork NativeFork { get; init; }
-
-    public LlmAgentOwnership CompactionOwnership { get; init; }
-
-    public LlmAgentSteering Steering { get; init; }
+    /// <summary>SteerAsync adds input to a running turn.</summary>
+    public InferenceSupport SupportsSteering { get; init; }
 
     /// <summary>Explicit InterruptAsync support; enumeration cancellation is separate.</summary>
     public InferenceSupport SupportsInterrupt { get; init; }
 
+    /// <summary>LlmAgentToolHandling.ReturnRequests ends a turn with the model's tool calls returned unrun.</summary>
+    public InferenceSupport SupportsExternalToolHandoff { get; init; }
+
+    /// <summary>CompactNowAsync compacts this conversation.</summary>
+    public InferenceSupport SupportsCompactNow { get; init; }
+
+    /// <summary>FallbackModelIds is honoured.</summary>
+    public InferenceSupport SupportsFallbackModels { get; init; }
+
+    /// <summary>LlmAgentExecutionOptions.MaxModelIterations ends a turn that reaches it.</summary>
+    public InferenceSupport SupportsTurnCap { get; init; }
+
+    /// <summary>LlmAgentExecutionOptions.MaxSpendUsd ends a turn that reaches it.</summary>
+    public InferenceSupport SupportsSpendCap { get; init; }
+
     /// <summary>Whether the session reports the runtime's own background work through its resource members.</summary>
     public LlmOperationSupport ResourceObservation { get; init; } = LlmOperationSupport.Unsupported;
 
-    public LlmAgentToolExecutionOwnership ToolExecutionOwnership { get; init; }
-
     /// <summary>How host tool output reaches the model in this runtime's sessions.</summary>
-    public LlmRichContentSupported RichContentSupported { get; init; } = new();
+    internal LlmRichContentSupported RichContentSupported { get; init; } = new();
 
     /// <summary>
     /// The <see cref="LlmAgentNativeRuntimeOptions.Policy"/> variants a native runtime accepts. Managed
@@ -111,34 +84,20 @@ public sealed record LlmAgentCapabilities
         FrozenSet<LlmAgentRuntimePolicyKind>.Empty;
 
     /// <summary>True when no agent operation is declared.</summary>
-    internal bool IsNone => SupportedRuntimePolicies.Count == 0 && HostedTools.Count == 0 && SupportedCallerServices.Count == 0
+    internal bool IsNone => SupportedRuntimePolicies.Count == 0 && HostedTools.Count == 0
         && this with
         {
             SupportedRuntimePolicies = NoRuntimePolicies,
-            HostedTools = FrozenSet<LlmHostedToolKind>.Empty,
-            SupportedCallerServices = FrozenSet<LlmAgentCallerServiceKind>.Empty
+            HostedTools = FrozenSet<LlmHostedToolKind>.Empty
         } == new LlmAgentCapabilities();
 
     internal void Validate()
     {
-        if (!Enum.IsDefined(ContextOwnership) || !Enum.IsDefined(ContextImport) || !Enum.IsDefined(CompactionOwnership)
-            || !Enum.IsDefined(NativeFork) || !Enum.IsDefined(Steering)
-            || !Enum.IsDefined(ToolExecutionOwnership)
+        if (!Enum.IsDefined(ContextImport)
             || SupportedRuntimePolicies is null || SupportedRuntimePolicies.Any(kind => !Enum.IsDefined(kind))
             || HostedTools.Any(kind => !Enum.IsDefined(kind))
-            || SupportedCallerServices.Any(kind => !Enum.IsDefined(kind))
-            || (ContextOwnership == LlmAgentOwnership.None && !IsNone)
-            || (ContextOwnership == LlmAgentOwnership.Host && SupportedRuntimePolicies.Count > 0)
-            || ((SupportsCompactionHandoff == InferenceSupport.Supported) && (ContextOwnership != LlmAgentOwnership.Host
-                || CompactionOwnership != LlmAgentOwnership.Host
-                || (SupportsContextCapture == InferenceSupport.Unsupported) || (SupportsContextReplacement == InferenceSupport.Unsupported) || (SupportsContextStatus == InferenceSupport.Unsupported)))
-            || ((SupportsProviderCompaction == InferenceSupport.Supported) && (ContextOwnership != LlmAgentOwnership.Host
-                || (SupportsCompactionHandoff == InferenceSupport.Unsupported)))
-            || (NativeFork != LlmAgentNativeFork.None && (SupportsNativeResume == InferenceSupport.Unsupported))
-            || (ContextImport == LlmAgentContextImport.Structured && ContextOwnership != LlmAgentOwnership.Host)
-            || (ContextImport == LlmAgentContextImport.OpeningContext && ContextOwnership != LlmAgentOwnership.Provider)
-            || (ContextOwnership == LlmAgentOwnership.Host
-                && ((SupportsNativeResume == InferenceSupport.Supported) || NativeFork != LlmAgentNativeFork.None)))
+            || ((SupportsCompactionHandoff == InferenceSupport.Supported)
+                && ((SupportsContextCapture == InferenceSupport.Unsupported) || (SupportsContextReplacement == InferenceSupport.Unsupported) || (SupportsContextStatus == InferenceSupport.Unsupported))))
         {
             throw new ArgumentException("The agent capability combination cannot be implemented consistently.");
         }

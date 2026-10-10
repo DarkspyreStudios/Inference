@@ -104,8 +104,7 @@ public sealed class ResourcePreparationTests
                 new("user", string.Empty)
                 { ToolResults = [new LlmToolResult("create-1", new() { Parts = [new LlmToolOutputSessionResource(generated)] })] }];
         var logical = new LlmChatRequest { ModelId = InlineModel("claude-cli"), Messages = [.. messages, new("user", "Compare the files")] };
-        LlmChatRequest request = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(logical, ConnectLlmJson.ChatRequest),
-            ConnectLlmJson.ChatRequest)!;
+        LlmChatRequest request = logical;
         var handler = new Documents();
         using var http = new HttpClient(handler);
         var runner = new CliDocuments();
@@ -207,7 +206,7 @@ public sealed class ResourcePreparationTests
 
     [Theory]
     [InlineData("claude-cli")]
-    public async Task ResourceBoundAccountingDoesNotIgnoreSelectedFilesOrOpenThem(string destination)
+    public void ResourceBoundAccountingDoesNotIgnoreSelectedFilesOrOpenThem(string destination)
     {
         var reference = new InferenceResourceReference("workspace", "reference");
         var access = new Resources(new("workspace", "session", 1, [reference]),
@@ -227,13 +226,6 @@ public sealed class ResourcePreparationTests
         Assert.Null(estimator.EstimateInputTokens(connection, request));
         Assert.Null(estimator.EstimateInputTokens(connection, request with
         { Messages = [new("user", "Read the file") { Attachments = [new LlmResourceAttachment(reference)] }] }));
-        if (client is ILlmProviderTokenCounter counter)
-            await Assert.ThrowsAsync<NotSupportedException>(() => counter.CountInputTokensAsync(connection, request));
-        else
-        {
-            await using var providers = new LlmProviderService(new Source(connection), [client]);
-            await Assert.ThrowsAsync<NotSupportedException>(() => providers.CountInputTokensAsync("connection", request));
-        }
         Assert.Equal(0, handler.Requests);
         Assert.Empty(access.Reads);
         Assert.Equal(0, access.ReleaseAttempts);

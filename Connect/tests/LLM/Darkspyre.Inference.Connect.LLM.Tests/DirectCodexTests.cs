@@ -39,18 +39,21 @@ public sealed class DirectCodexTests
     }
 
     [Fact]
-    public async Task ExplicitUnsupportedSamplingStillRejectsBeforeSending()
+    public async Task UnsupportedSamplingIsNotSent()
     {
         using var handler = new Handler(_ => Sse(Completed));
         using var http = new HttpClient(handler);
         var client = new OpenAiCodexLlmClient(http);
         LlmConnection connection = Connection() with
         { CapabilityOverrides = new() { SupportsTemperature = InferenceSupport.Unsupported } };
-        NotSupportedException error = await Assert.ThrowsAsync<NotSupportedException>(() =>
-            Complete(client, connection, Request() with { Temperature = 0.7 }));
+        LlmChatRequest request = Request() with { Temperature = 0.7 };
 
-        Assert.Contains("temperature", error.Message, StringComparison.Ordinal);
-        Assert.Equal(0, handler.Calls);
+        await Complete(client, connection,
+            LlmRequestNormalizer.Normalize(connection, request, client.GetCapabilities(connection, request.ModelId)));
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        Assert.False(sent.RootElement.TryGetProperty("temperature", out _));
+        Assert.Equal(1, handler.Calls);
     }
 
     [Fact]
@@ -158,7 +161,9 @@ public sealed class DirectCodexTests
         if (nativeLevels.Length == 0)
             Assert.Equal(InferenceSupport.Unknown, client.GetCapabilities(connection, "model").SupportsReasoning);
 
-        LlmChatResult result = await Complete(client, connection, request);
+        // The facade normalizes every request before its client runs; the client sends the normalized level.
+        LlmChatResult result = await Complete(client, connection,
+            LlmRequestNormalizer.Normalize(connection, request, client.GetCapabilities(connection, request.ModelId)));
 
         Assert.Equal("Hello", result.Text);
         Assert.Equal(requested, request.ReasoningLevel);
@@ -195,13 +200,9 @@ public sealed class DirectCodexTests
         };
 
         ContextEstimate estimate = client.EstimateInputTokens(Connection(), followup)!.Value;
-        LlmRequestAccounting accounting = await new LlmProviderService(new Source(Connection()), [client], [new RefreshAuthenticator()])
-            .MeasureRequestAsync("codex", followup);
 
         Assert.True(estimate.IncludesProviderReport);
         Assert.InRange(estimate.Tokens, 1281, 1400); // The report, plus the tokenized tool result after it.
-        Assert.Equal(estimate.Tokens, accounting.UsedContextTokens);
-        Assert.Equal(LlmContextMeasurementSource.Mixed, accounting.Source);
     }
 
     private const string ReasonedToolCall = """
@@ -247,17 +248,6 @@ public sealed class DirectCodexTests
         LlmContextMeasurementSource source = reported && !compacted
             ? LlmContextMeasurementSource.Mixed : LlmContextMeasurementSource.Estimated;
         ContextEstimate expected = client.EstimateInputTokens(connection, request)!.Value;
-        await using var providers = new LlmProviderService(new Source(connection), [client]);
-
-        LlmRequestAccounting full = await providers.MeasureRequestAsync("codex", request, policy);
-        LlmRequestAccounting material = await providers.MeasureRequestAsync("codex", request with { Instructions = null }, policy);
-
-        Assert.Equal(expected.Tokens, full.UsedContextTokens);
-        Assert.Equal(source, full.Source);
-        Assert.NotNull(material.UsedContextTokens);
-        Assert.Equal(full.InputBudgetTokens, material.InputBudgetTokens);
-        Assert.True(full.InputBudgetTokens - Math.Max(0, full.UsedContextTokens!.Value - material.UsedContextTokens!.Value) > 0);
-
         var context = new LlmAgentContext
         {
             Revision = 7,
@@ -283,7 +273,7 @@ public sealed class DirectCodexTests
         Assert.False(measured.NeedsCompaction);
         Assert.Single((await session.CaptureContextAsync()).Entries[0].Message.OmittedAttachments);
         Assert.Single(messages[0].OmittedAttachments);
-        Assert.Equal(1, handler.Calls);
+        Assert.Equal(0, handler.Calls);
     }
 
     [Fact]

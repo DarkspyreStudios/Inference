@@ -19,7 +19,7 @@ public sealed class CollectibleSerializationTests
     private static readonly (Type Owner, int Roots)[] MetadataOwners =
     [
         (typeof(InferenceJson), 183),
-        (typeof(ConnectLlmJson), 126),
+        (typeof(ConnectLlmJson), 124),
         (typeof(ConnectImageJson), 21),
         (typeof(ConnectTtsJson), 20),
         (typeof(ConnectAudioJson), 9),

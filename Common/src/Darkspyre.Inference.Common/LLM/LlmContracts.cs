@@ -41,13 +41,6 @@ public sealed record LlmToolDefinition : LlmClientToolDefinition
     public string? Description { get; init; }
 
     public required JsonElement InputSchema { get; init; }
-
-    /// <summary>
-    /// Requests provider-enforced schema adherence. The schema must then meet the provider's strict
-    /// rules; for OpenAI that means every object closes <c>additionalProperties</c> and lists every
-    /// property as required. A host schema describes what the tool accepts, so the default is false.
-    /// </summary>
-    public bool Strict { get; init; }
 }
 
 public enum LlmToolChoiceMode
@@ -70,13 +63,6 @@ public sealed record LlmToolCall(string Id, string Name, string ArgumentsJson) :
 /// <summary>The output of a tool invocation executed by the host application.</summary>
 public sealed record LlmToolResult(string ToolCallId, LlmToolOutput Output) : LlmClientToolResult(ToolCallId);
 
-public enum LlmStructuredOutputFallback
-{
-    None,
-    JsonObject,
-    LocalValidation
-}
-
 public enum LlmStructuredOutputEnforcement
 {
     ProviderJsonSchema,
@@ -91,10 +77,6 @@ public sealed record LlmStructuredOutputRequest
     public string? Description { get; init; }
 
     public required JsonElement Schema { get; init; }
-
-    public bool Strict { get; init; } = true;
-
-    public LlmStructuredOutputFallback Fallback { get; init; }
 }
 
 /// <summary>Which part of the prompt a cache hint asks the provider to keep.</summary>

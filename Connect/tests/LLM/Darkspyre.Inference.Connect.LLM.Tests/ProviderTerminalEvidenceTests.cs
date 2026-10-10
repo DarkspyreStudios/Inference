@@ -191,8 +191,7 @@ public sealed class ProviderTerminalEvidenceTests
         await foreach (LlmStreamEvent item in source) events.Add(item);
         LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
         Assert.IsType<LlmChatCompletionEvent>(events[^1]);
-        LlmChatResult restored = JsonSerializer.Deserialize(
-            JsonSerializer.Serialize(result, ConnectLlmJson.ChatResult), ConnectLlmJson.ChatResult)!;
+        LlmChatResult restored = result;
 
         Assert.Equal(LlmCompletionStatus.Unknown, restored.Status);
         Assert.Equal("UNKNOWN_STOP", restored.FinishReason);

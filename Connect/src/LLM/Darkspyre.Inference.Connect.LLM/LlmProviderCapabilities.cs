@@ -5,7 +5,7 @@ using Darkspyre.Inference.Common.LLM;
 namespace Darkspyre.Inference.Connect.LLM;
 
 /// <summary>How a transport carries tool calls and tool results that are already in the history.</summary>
-public enum LlmToolHistory
+internal enum LlmToolHistory
 {
     /// <summary>As the provider's own tool-call and tool-result items.</summary>
     Structured,
@@ -85,9 +85,9 @@ public sealed record LlmProviderCapabilities
     public IReadOnlySet<LlmHostedToolKind> HostedTools { get; init => field = value.ToFrozenSet(); } = FrozenSet<LlmHostedToolKind>.Empty;
 
     /// <summary>How tool calls and results already in the history reach the provider.</summary>
-    public LlmToolHistory ToolHistory { get; init; }
+    internal LlmToolHistory ToolHistory { get; init; }
 
-    /// <summary>Supports the session-oriented <see cref="ILlmAgentClient"/> contract.</summary>
+    /// <summary>Supports the session-oriented <see cref="LlmAgentProviderService"/> contract.</summary>
     public InferenceSupport SupportsAgentSessions { get; init; }
 
     /// <summary>Agent sessions can invoke host-defined tools through an in-turn callback.</summary>
@@ -110,7 +110,7 @@ public sealed record LlmProviderCapabilities
     public LlmFileCapabilities Files { get; init; } = new();
 
     /// <summary>How the route carries each kind of tool-output content.</summary>
-    public LlmRichContentSupported RichContentSupported { get; init; } = new();
+    internal LlmRichContentSupported RichContentSupported { get; init; } = new();
 
     public LlmProviderCapabilities Apply(LlmCapabilityOverrides? overrides)
     {

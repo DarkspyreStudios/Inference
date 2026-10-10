@@ -227,7 +227,7 @@ internal static class OpenAiResponsesTools
                 ["type"] = "function",
                 ["name"] = function.Name,
                 ["parameters"] = JsonNode.Parse(function.InputSchema.GetRawText()),
-                ["strict"] = function.Strict
+                ["strict"] = false
             };
             if (!string.IsNullOrWhiteSpace(function.Description))
             {

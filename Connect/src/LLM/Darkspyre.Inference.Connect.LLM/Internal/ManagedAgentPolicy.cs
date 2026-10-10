@@ -7,16 +7,14 @@ internal static class ManagedAgentPolicy
 {
     public static LlmAgentCapabilities Capabilities { get; } = new()
     {
-        ContextOwnership = LlmAgentOwnership.Host,
         ContextImport = LlmAgentContextImport.Structured,
         SupportsContextCapture = InferenceSupport.Supported,
         SupportsContextReplacement = InferenceSupport.Supported,
         SupportsContextStatus = InferenceSupport.Supported,
         SupportsCompactionHandoff = InferenceSupport.Supported,
-        CompactionOwnership = LlmAgentOwnership.Host,
-        Steering = LlmAgentSteering.SafeBoundary,
+        SupportsCompactNow = InferenceSupport.Unsupported,
+        SupportsSteering = InferenceSupport.Supported,
         SupportsInterrupt = InferenceSupport.Supported,
-        ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Host,
         // The managed runtime sends tool output through Direct Codex Responses.
         RichContentSupported = RichContentRoutes.Responses
     };

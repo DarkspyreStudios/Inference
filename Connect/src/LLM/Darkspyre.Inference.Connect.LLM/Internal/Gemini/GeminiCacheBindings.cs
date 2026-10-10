@@ -55,20 +55,6 @@ internal sealed class GeminiCacheBindings
         }
     }
 
-    internal void ValidateEstimate(string connectionId, LlmConnection connection, LlmExplicitCacheReference reference, long sequence)
-    {
-        lock (_gate)
-        {
-            ObjectDisposedException.ThrowIf(_stopped, this);
-            if (!_bindings.TryGetValue(connectionId, out Binding? binding))
-                return;
-            // Advisory measurement must not resolve credentials or invalidate admitted evidence.
-            var snapshot = connection with { CacheCredentialEvidence = binding.Connection.CacheCredentialEvidence };
-            if (!SameSelection(binding.Connection, snapshot)) return;
-            _ = SelectReference(Capture(binding, snapshot, sequence), reference, false);
-        }
-    }
-
     internal Admission SelectReference(Admission operation, LlmExplicitCacheReference reference, bool allowDeleted)
     {
         lock (_gate)

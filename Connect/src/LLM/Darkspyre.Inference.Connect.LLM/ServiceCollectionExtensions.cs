@@ -64,9 +64,18 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<OpenAiEmbeddingClient>());
         services.AddSingleton<LlmModelListCache>();
         services.AddSingleton<LlmAccountUsageObservations>();
-        services.AddScoped<LlmConnectionAccess>();
-        services.AddScoped<LlmProviderService>();
-        services.AddScoped<LlmAgentProviderService>();
+        // Reflection-based activation sees only public constructors, and these take internal adapter interfaces.
+        services.AddScoped(provider => new LlmConnectionAccess(
+            provider.GetRequiredService<ILlmConnectionSource>(), provider.GetServices<ILlmAuthenticator>(),
+            provider.GetServices<ILlmClient>()));
+        services.AddScoped(provider => new LlmProviderService(
+            provider.GetRequiredService<ILlmConnectionSource>(), provider.GetServices<ILlmClient>(),
+            provider.GetServices<ILlmAuthenticator>(), provider.GetServices<ILlmSetupEnvironment>(),
+            provider.GetRequiredService<LlmModelListCache>(), provider.GetRequiredService<LlmAccountUsageObservations>(),
+            provider.GetRequiredService<LlmConnectionAccess>()));
+        services.AddScoped(provider => new LlmAgentProviderService(
+            provider.GetRequiredService<ILlmConnectionSource>(), provider.GetServices<ILlmAgentClient>(),
+            provider.GetRequiredService<LlmAccountUsageObservations>()));
         services.AddScoped(provider => new LlmEmbeddingProviderService(
             provider.GetRequiredService<ILlmConnectionSource>(), provider.GetServices<ILlmEmbeddingClient>(),
             provider.GetServices<ILlmAuthenticator>(), provider.GetRequiredService<LlmConnectionAccess>()));

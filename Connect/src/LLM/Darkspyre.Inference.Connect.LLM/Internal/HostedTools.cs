@@ -11,7 +11,6 @@ internal static class HostedTools
     internal static void Validate(IReadOnlyList<LlmHostedTool> tools, int? maxTurns, IReadOnlySet<LlmHostedToolKind> supported)
     {
         ArgumentNullException.ThrowIfNull(tools);
-        if (maxTurns is <= 0) { throw new ArgumentOutOfRangeException(nameof(maxTurns), "Hosted turn limits must be positive."); }
         foreach (var tool in tools)
         {
             ArgumentNullException.ThrowIfNull(tool);
@@ -40,7 +39,6 @@ internal static class HostedTools
             }
             if (!supported.Contains(tool.Kind)) { throw new NotSupportedException("This route does not implement the requested hosted tool."); }
         }
-        if (maxTurns is not null && supported.Count == 0) { throw new NotSupportedException("This route does not implement hosted turn limits."); }
     }
 
     internal static IReadOnlyList<LlmHostedTool> Snapshot(IReadOnlyList<LlmHostedTool> tools) =>

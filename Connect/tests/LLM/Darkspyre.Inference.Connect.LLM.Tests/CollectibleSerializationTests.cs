@@ -71,15 +71,10 @@ public sealed class CollectibleSerializationTests
     [Fact]
     public void OwnedResultMetadataDoesNotKeepItsCollectibleGenerationAlive()
     {
-        string json = JsonSerializer.Serialize(new LlmChatResult
+        string json = JsonSerializer.Serialize(new LlmChatMessage("assistant", "done")
         {
-            Text = "done",
-            Status = LlmCompletionStatus.Completed,
-            ModelId = "reported-model",
-            Usage = new(7, 3, 10),
-            ToolCalls = [new LlmShellCall("call-1", ["pwd"], null, null)],
-            Diagnostics = new(200, null, null)
-        }, ConnectLlmJson.ChatResult);
+            ToolCalls = [new LlmShellCall("call-1", ["pwd"], null, null)]
+        }, ConnectLlmJson.ChatMessage);
         WeakReference[] generation = RoundTripInCollectibleGeneration(json);
 
         AssertCollected(generation);
@@ -178,27 +173,22 @@ public sealed class CollectibleSerializationTests
             Type metadataOwner = assembly.GetType(owner.FullName!, throwOnError: true)!;
             var references = new List<WeakReference> { new(context), new(assembly) };
             ExerciseMetadata(metadataOwner, context, references);
-            string rootName = nameof(ConnectLlmJson.ChatResult);
+            string rootName = nameof(ConnectLlmJson.ChatMessage);
             var metadata = (JsonTypeInfo)metadataOwner.GetProperty(rootName)!.GetValue(null)!;
             Assert.Same(assembly, metadata.Type.Assembly);
 
             object value = JsonSerializer.Deserialize(json, metadata)!;
             Assert.Same(assembly, value.GetType().Assembly);
             Assert.Equal(json, JsonSerializer.Serialize(value, metadata));
-            object result = value;
-            object usage = result.GetType().GetProperty(nameof(LlmChatResult.Usage))!.GetValue(result)!;
-            Assembly common = usage.GetType().Assembly;
+            var tools = (System.Collections.IEnumerable)value.GetType().GetProperty(nameof(LlmChatMessage.ToolCalls))!.GetValue(value)!;
+            object tool = Assert.Single(tools.Cast<object>());
+            Assembly common = tool.GetType().Assembly;
             Assert.Same(context, AssemblyLoadContext.GetLoadContext(common));
             Assert.Equal("Darkspyre.Inference.Common", common.GetName().Name);
-            var tools = (System.Collections.IEnumerable)result.GetType().GetProperty(nameof(LlmChatResult.ToolCalls))!.GetValue(result)!;
-            object tool = Assert.Single(tools.Cast<object>());
-            Assert.Same(common, tool.GetType().Assembly);
 
             references.Add(new(metadata));
             references.Add(new(value));
-            references.Add(new(result));
             references.Add(new(common));
-            references.Add(new(usage));
             references.Add(new(tool));
             foreach (Assembly loaded in context.Assemblies) references.Add(new(loaded));
             return references.ToArray();
@@ -247,7 +237,7 @@ public sealed class CollectibleSerializationTests
         Type type = builder.CreateType()!;
         object value = Activator.CreateInstance(type)!;
 
-        JsonSerializerOptions options = credential ? ConnectLlmJson.Credential.Options : ConnectLlmJson.ChatRequest.Options;
+        JsonSerializerOptions options = credential ? ConnectLlmJson.Credential.Options : ConnectLlmJson.ChatMessage.Options;
         Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(value, type, options));
 
         return new WeakReference(type);

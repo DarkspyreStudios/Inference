@@ -33,14 +33,14 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
     private readonly GeminiCacheBindings _cacheBindings = new();
     private readonly LlmCleanupOutcomes _cleanupOutcomes = new();
 
-    public LlmProviderService(
+    internal LlmProviderService(
         ILlmConnectionSource connections,
         IEnumerable<ILlmClient> clients)
         : this(connections, clients, [])
     {
     }
 
-    public LlmProviderService(
+    internal LlmProviderService(
         ILlmConnectionSource connections,
         IEnumerable<ILlmClient> clients,
         IEnumerable<ILlmAuthenticator> authenticators,
@@ -144,7 +144,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
     /// Binds the portable inference contract to one explicitly selected Connect connection. The
     /// returned adapter carries opaque continuation state unchanged and omits provider diagnostics.
     /// </summary>
-    public ILlmInference Bind(string connectionId)
+    internal ILlmInference Bind(string connectionId)
     {
         _lifetime.ThrowIfStopping();
         ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
@@ -398,7 +398,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         }
     }
 
-    public IAsyncEnumerable<LlmStreamEvent> StreamAsync(
+    internal IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         string connectionId,
         LlmChatRequest request,
         CancellationToken cancellationToken = default) =>
@@ -443,7 +443,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             connectionId,
             cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
-        RequestJson.ValidateSamplingOptions(connection, request);
         ILlmClient client = ClientFor(connection.Transport);
         if (publishCompaction is not null && client is not OpenAiCodexLlmClient)
             throw new NotSupportedException("The selected route has no provider compactor.");
@@ -451,10 +450,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         connection = WithContextCache(EmbeddingRequestData.Snapshot(connection), client);
         if (request.ExplicitCache is not null)
             ExplicitCaches.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache != InferenceSupport.Unsupported));
-        LlmAttachments.ValidateReferences(request, () => (client.GetCapabilities(connection, request.ModelId).SupportsFileReferences != InferenceSupport.Unsupported),
-            client is ILlmResourcePreparationClient { CanPrepareResources: true });
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
-        ClientTools.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsShellTools != InferenceSupport.Unsupported));
         ThrowIfOperationCanceled(cancellationToken);
         (connection, request) = await AdmitContextCacheAsync(connectionId, connection, client, request, cacheSequence, cancellationToken).ConfigureAwait(false);
         if (client is not IStreamingCredentialRefreshPolicy refreshPolicy
@@ -509,6 +505,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
         connection = await AttachCatalogCoreAsync(connectionId, connection, client, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
+        // The catalog is attached first: it can narrow what the model accepts, such as its reasoning levels.
+        request = LlmRequestNormalizer.Normalize(connection, request, client.GetCapabilities(connection, request.ModelId));
         IAsyncEnumerable<LlmStreamEvent> stream = publishCompaction is not null && client is OpenAiCodexLlmClient codex
             ? codex.StreamCompactionAsync(connection, request, cancellationToken)
             : client.StreamAsync(connection, request, cancellationToken);
@@ -596,156 +594,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         return result;
     }
 
-    /// <summary>
-    /// Explicitly calls the provider's input-count API using generation's resolved connection and projection.
-    /// Unsupported adapters throw; this operation never substitutes an estimate or creates a completion.
-    /// </summary>
-    public async Task<LlmProviderInputTokenCount> CountInputTokensAsync(string connectionId, LlmChatRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        using var operation = _lifetime.Enter(cancellationToken);
-        cancellationToken = operation.Token;
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
-        request = ClientTools.Snapshot(request with { HostedTools = HostedTools.Snapshot(request.HostedTools) });
-        long cacheSequence = _cacheBindings.BeginOperation();
-        LlmConnection connection = await ResolveConnectionAsync(connectionId, cancellationToken);
-        ThrowIfOperationCanceled(cancellationToken);
-        RequestJson.ValidateSamplingOptions(connection, request);
-        ExplicitCaches.ValidateProviderTokenCount(connection, request);
-        ILlmClient client = ClientFor(connection.Transport);
-        if (client is not ILlmProviderTokenCounter counter)
-            throw new NotSupportedException("This route does not implement provider input-token counting.");
-        connection = WithContextCache(EmbeddingRequestData.Snapshot(connection), client);
-        if (request.ExplicitCache is not null)
-            ExplicitCaches.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache != InferenceSupport.Unsupported));
-        LlmAttachments.ValidateReferences(request, () => (client.GetCapabilities(connection, request.ModelId).SupportsFileReferences != InferenceSupport.Unsupported));
-        HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
-        ClientTools.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsShellTools != InferenceSupport.Unsupported));
-        (connection, request) = await AdmitContextCacheAsync(connectionId, connection, client, request, cacheSequence, cancellationToken).ConfigureAwait(false);
-        connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken);
-        if (client is ILlmConnectionPreparation preparation)
-            connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
-        (request, int omitted) = ContinuationStateProjection.Project(request, connection);
-        connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
-        LlmProviderInputTokenCount result;
-        try { result = await counter.CountInputTokensAsync(connection, request, cancellationToken).ConfigureAwait(false); }
-        catch (Exception error) when (cancellationToken.IsCancellationRequested)
-        { throw new OperationCanceledException("The operation was canceled.", error, cancellationToken); }
-        ThrowIfOperationCanceled(cancellationToken);
-        connection.CacheAdmission?.Check(connection, request.ExplicitCache);
-        return result with { OmittedContinuationStateCount = checked(omitted + result.OmittedContinuationStateCount) };
-    }
-
-    /// <summary>
-    /// Accounts a standalone request without generation, credential refresh, persistence or a session.
-    /// May read model discovery metadata; unavailable limits remain unknown. The host source is read only.
-    /// </summary>
-    public async Task<LlmRequestAccounting> MeasureRequestAsync(
-        string connectionId,
-        LlmChatRequest request,
-        LlmAgentContextPolicy? policy = null,
-        CancellationToken cancellationToken = default)
-    {
-        using var operation = _lifetime.Enter(cancellationToken);
-        cancellationToken = operation.Token;
-        cancellationToken.ThrowIfCancellationRequested();
-        ArgumentNullException.ThrowIfNull(request);
-        ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId);
-        if (request.MaxOutputTokens is <= 0) { throw new ArgumentOutOfRangeException(nameof(request)); }
-        policy ??= new();
-        ManagedAgentPolicy.Validate(new() { ContextPolicy = policy }, null);
-        request = ClientTools.Snapshot(request with { HostedTools = HostedTools.Snapshot(request.HostedTools) });
-        long cacheSequence = _cacheBindings.BeginOperation();
-        var connection = await ResolveConnectionAsync(connectionId, cancellationToken);
-        ThrowIfOperationCanceled(cancellationToken);
-        RequestJson.ValidateSamplingOptions(connection, request);
-        var client = ClientFor(connection.Transport);
-        connection = WithContextCache(connection, client);
-        ValidateCacheEstimate(connectionId, connection, client, request, cacheSequence);
-        // Measure what would be sent: the same projection as the request path.
-        if (request.ExplicitCache is not null)
-            ExplicitCaches.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache != InferenceSupport.Unsupported));
-        LlmAttachments.ValidateReferences(request, () => (client.GetCapabilities(connection, request.ModelId).SupportsFileReferences != InferenceSupport.Unsupported));
-        HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
-        ClientTools.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsShellTools != InferenceSupport.Unsupported));
-        // Ambient-credential adapters cannot decide state binding without resolving identity.
-        // Their nonmutating estimator reports unknown for opaque state instead of dropping it.
-        if (client is not ILlmConnectionPreparation)
-        { request = ContinuationStateProjection.Project(request, connection).Request; }
-        connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
-        var capabilities = client.GetCapabilities(connection, request.ModelId);
-        LlmRequestAccounting Unsupported(string diagnostic) => new()
-        {
-            ModelId = request.ModelId,
-            Diagnostic = diagnostic,
-            OutputLimitEnforcement = capabilities.OutputLimitEnforcement
-        };
-        if (request.MaxOutputTokens is not null
-            && capabilities.OutputLimitEnforcement == LlmOutputLimitEnforcement.Unsupported)
-        {
-            return Unsupported("This route cannot enforce MaxOutputTokens; a context reserve is not an output cap.");
-        }
-        if (client is not ILlmContextEstimator estimator)
-        {
-            return Unsupported("This route does not implement nonmutating request accounting.");
-        }
-        ContextEstimate? used;
-        try
-        {
-            used = ManagedAgentPolicy.Estimate(estimator, connection, request,
-                request.Messages.Any(message => message.OmittedAttachments.Count > 0));
-        }
-        catch (NotSupportedException error)
-        {
-            return Unsupported("This route cannot project the requested features for accounting: " + error.Message);
-        }
-        LlmModel? model = null;
-        string? metadataDiagnostic = null;
-        if ((capabilities.SupportsModelListing != InferenceSupport.Unsupported))
-        {
-            // A catalog-capability adapter already had its listing attached above; a failed one is not repeated.
-            IReadOnlyList<LlmModel>? models = connection.Catalog;
-            if (models is null && client is not ILlmCatalogCapabilities)
-            {
-                try
-                {
-                    models = await _modelLists.GetAsync(connectionId, new(connection.Version, connection.ResolvedContinuationScope),
-                        client, connection, ModelCatalogFamily.Chat, cancellationToken);
-                }
-                catch (Exception error) when (error is HttpRequestException or LlmProviderException or NotSupportedException)
-                {
-                    models = null;
-                }
-            }
-            model = models?.FirstOrDefault(candidate => candidate.Id == request.ModelId);
-            if (models is null)
-            {
-                metadataDiagnostic = "Model metadata is unavailable; provider limits remain unknown.";
-            }
-        }
-        cancellationToken.ThrowIfCancellationRequested();
-        // An explicit enforced cap budgets at least that much output, even if a smaller reserve was supplied.
-        if (request.MaxOutputTokens is int cap
-            && capabilities.OutputLimitEnforcement is LlmOutputLimitEnforcement.ProviderEnforced or LlmOutputLimitEnforcement.EngineEnforced)
-        {
-            if (model?.MaxOutputTokens is long maximum && cap > maximum)
-            {
-                throw new ArgumentException("Requested output cap exceeds the known model output limit.", nameof(request));
-            }
-            policy = policy with { ReservedOutputTokens = Math.Max(policy.ReservedOutputTokens ?? 0, cap) };
-        }
-        var accounting = ManagedAgentPolicy.Account(request.ModelId, used, policy, model);
-        string[] diagnostics = [.. new[] { accounting.Diagnostic, used is null ? null : estimator.EstimateDiagnostic, metadataDiagnostic }
-            .OfType<string>()];
-        return accounting with
-        {
-            Diagnostic = diagnostics.Length == 0 ? null : string.Join(" ", diagnostics),
-            OutputLimitEnforcement = capabilities.OutputLimitEnforcement
-        };
-    }
-
-    public async Task<LlmChatResult> CompleteAsync(
+    internal async Task<LlmChatResult> CompleteAsync(
         string connectionId,
         LlmChatRequest request,
         CancellationToken cancellationToken = default)
@@ -875,40 +724,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         LlmProviderCapabilities capabilities = FileCapabilities(client.GetCapabilities(connection));
         ThrowIfOperationCanceled(cancellationToken);
         return capabilities;
-    }
-
-    /// <summary>
-    /// What one tool output sends on this connection, model and lane: one entry per part, in order. Reads the
-    /// connection and its capabilities only and refreshes no credential. An adapter whose capabilities depend on
-    /// its provider catalog may list the connection's models once, as generation does.
-    /// </summary>
-    public async Task<LlmToolOutputProjection> ProjectToolOutputAsync(
-        string connectionId,
-        string modelId,
-        LlmToolOutput output,
-        LlmToolOutputLane lane = LlmToolOutputLane.Chat,
-        CancellationToken cancellationToken = default)
-    {
-        using var operation = _lifetime.Enter(cancellationToken);
-        cancellationToken = operation.Token;
-        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
-        ArgumentNullException.ThrowIfNull(output);
-        if (!Enum.IsDefined(lane))
-        {
-            throw new ArgumentOutOfRangeException(nameof(lane));
-        }
-        LlmConnection connection = await ResolveConnectionAsync(connectionId, cancellationToken);
-        ILlmClient client = ClientFor(connection.Transport);
-        connection = await AttachCatalogAsync(connectionId, connection, client, cancellationToken);
-        LlmProviderCapabilities route = client.GetCapabilities(connection);
-        ThrowIfOperationCanceled(cancellationToken);
-        LlmProviderCapabilities model = client.GetCapabilities(connection, modelId);
-        ThrowIfOperationCanceled(cancellationToken);
-        LlmToolOutputProjection projection = lane == LlmToolOutputLane.Chat
-            ? ToolOutputProjector.Project(output, route.RichContentSupported, model.RichContentSupported).Report
-            : ToolOutputProjector.Project(output, route.Agent.RichContentSupported, model.Agent.RichContentSupported).Report;
-        ThrowIfOperationCanceled(cancellationToken);
-        return projection;
     }
 
     public async Task<LlmProviderCapabilities> GetModelCapabilitiesAsync(

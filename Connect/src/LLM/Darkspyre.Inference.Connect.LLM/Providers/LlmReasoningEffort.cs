@@ -1,5 +1,4 @@
 using System.Collections.Frozen;
-using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
@@ -27,21 +26,14 @@ internal static class LlmReasoningEffort
     /// <summary>The OpenAI <c>reasoning.effort</c> spelling. Unlike <see cref="Word"/>, it spells None as <c>none</c>.</summary>
     public static string OpenAiWord(LlmReasoningLevel level) => level == LlmReasoningLevel.None ? "none" : Word(level);
 
-    /// <summary>Rejects a level the resolved model does not offer, before any provider call.</summary>
-    public static void Validate(LlmReasoningLevel? level, LlmProviderCapabilities capabilities) =>
-        Validate(level, capabilities.ReasoningLevels);
-
-    /// <summary>Rejects a level outside <paramref name="offered"/>, before any provider call.</summary>
-    public static void Validate(LlmReasoningLevel? level, IReadOnlySet<LlmReasoningLevel> offered)
+    /// <summary>
+    /// The offered level closest to requested: the highest offered level at or below it, else the lowest
+    /// offered level above it. Returns requested when offered is empty.
+    /// </summary>
+    public static LlmReasoningLevel? Nearest(LlmReasoningLevel? requested, IReadOnlySet<LlmReasoningLevel> offered)
     {
-        if (level is { } requested && !offered.Contains(requested))
-        {
-            throw new InferenceException(
-                InferenceFailureCode.InvalidRequest,
-                offered.Count == 0
-                    ? $"The selected model accepts no reasoning level; '{requested}' was requested."
-                    : $"The selected model does not accept reasoning level '{requested}'. It accepts: "
-                      + string.Join(", ", offered.Order()) + ".");
-        }
+        if (requested is not { } level || offered.Count == 0) return requested;
+        LlmReasoningLevel[] below = [.. offered.Where(candidate => candidate <= level)];
+        return below.Length > 0 ? below.Max() : offered.Where(candidate => candidate > level).Min();
     }
 }

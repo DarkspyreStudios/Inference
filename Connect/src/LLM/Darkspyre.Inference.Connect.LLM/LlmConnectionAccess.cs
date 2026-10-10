@@ -11,7 +11,7 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
     private readonly HashSet<LlmTransport> _ignoresStoredCredential;
     private readonly LlmOperationLifetime _lifetime = new();
 
-    public LlmConnectionAccess(ILlmConnectionSource connections, IEnumerable<ILlmAuthenticator> authenticators,
+    internal LlmConnectionAccess(ILlmConnectionSource connections, IEnumerable<ILlmAuthenticator> authenticators,
         IEnumerable<ILlmClient>? clients = null)
         : this(connections, authenticators, clients, null)
     {

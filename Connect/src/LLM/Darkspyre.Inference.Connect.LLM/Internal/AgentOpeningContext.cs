@@ -24,12 +24,6 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
         {
             return (null, 0);
         }
-        if (options.UnboundContinuationState != LlmUnboundContinuationState.Omit)
-        {
-            throw new NotSupportedException(
-                "This runtime starts a new provider conversation that carries no continuation state. "
-                + "Start with UnboundContinuationState.Omit to carry the context as opening context.");
-        }
         return ManagedAgentContext.WithoutContinuationState(options.Context, supportsResources);
     }
 

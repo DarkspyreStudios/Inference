@@ -13,13 +13,21 @@ internal static class NativeAgentContract
 
     public static LlmAgentCapabilities Claude { get; } = new()
     {
-        ContextOwnership = LlmAgentOwnership.Provider,
         ContextImport = LlmAgentContextImport.OpeningContext,
-        SupportsNativeResume = InferenceSupport.Supported,
-        NativeFork = LlmAgentNativeFork.CurrentPosition,
-        CompactionOwnership = LlmAgentOwnership.Provider,
+        SupportsShellTools = InferenceSupport.Unsupported,
+        SupportsContextCapture = InferenceSupport.Unsupported,
+        SupportsContextReplacement = InferenceSupport.Unsupported,
+        // Claude answers context status once ClaudeConversation measures its own history.
+        SupportsContextStatus = InferenceSupport.Unsupported,
+        SupportsCompactionHandoff = InferenceSupport.Unsupported,
+        SupportsNativeResume = InferenceSupport.Unsupported,
+        SupportsSteering = InferenceSupport.Unsupported,
         SupportsInterrupt = InferenceSupport.Supported,
-        ToolExecutionOwnership = LlmAgentToolExecutionOwnership.Mixed,
+        SupportsExternalToolHandoff = InferenceSupport.Unknown,
+        SupportsCompactNow = InferenceSupport.Unsupported,
+        SupportsFallbackModels = InferenceSupport.Unknown,
+        SupportsTurnCap = InferenceSupport.Unknown,
+        SupportsSpendCap = InferenceSupport.Unknown,
         RichContentSupported = RichContentRoutes.ClaudeMcp,
         SupportedRuntimePolicies = HostControlled,
         ResourceObservation = LlmOperationSupport.Supported
@@ -30,7 +38,7 @@ internal static class NativeAgentContract
         bool supportsResources = false)
     {
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, agent.HostedTools);
-        ClientTools.ValidateCallerServices(options.CallerServices, agent, supportsResources);
+        ClientTools.ValidateCallerServices(options.CallerServices, supportsResources);
         // A supplied context becomes opening context; see AgentOpeningContext.
         if (options.ThreadId is not null || options.SessionId is not null || options.ExecutionOptions is not null)
         {
@@ -46,42 +54,16 @@ internal static class NativeAgentContract
         return runtime;
     }
 
-    /// <summary>
-    /// The validated resume settings: the supplied runtime whole, or the documented host-controlled resume
-    /// defaults. A runtime that does not accept host-controlled policy therefore rejects a null runtime.
-    /// </summary>
-    public static LlmAgentNativeRuntimeOptions ResumeRuntime(LlmAgentResumeOptions options, LlmAgentCapabilities agent,
-        bool supportsResources = false)
-    {
-        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, agent.HostedTools);
-        ClientTools.ValidateCallerServices(options.CallerServices, agent, supportsResources);
-        ValidateTools(options.Tools);
-        LlmAgentNativeRuntimeOptions runtime = options.Runtime ?? new()
-        {
-            WorkingDirectory = Environment.CurrentDirectory,
-            Policy = new LlmAgentHostRuntimePolicy { WritableRoots = [Environment.CurrentDirectory] }
-        };
-        ValidateRuntime(agent, runtime, options.ResourceOutputRetentionBytes);
-        return runtime;
-    }
-
-    /// <summary>The host-controlled policy of settings that <see cref="ValidateRuntime"/> accepted for a host-only runtime.</summary>
+    /// <summary>The host-controlled policy of the settings, or the default host-controlled policy for any other variant.</summary>
     public static LlmAgentHostRuntimePolicy HostPolicy(LlmAgentNativeRuntimeOptions runtime) =>
-        runtime.Policy as LlmAgentHostRuntimePolicy
-        ?? throw new NotSupportedException("This native runtime accepts only a host-controlled runtime policy.");
+        runtime.Policy as LlmAgentHostRuntimePolicy ?? new LlmAgentHostRuntimePolicy();
 
     private static void ValidateRuntime(
         LlmAgentCapabilities agent,
         LlmAgentNativeRuntimeOptions runtime,
         long retentionBytes)
     {
-        LlmAgentRuntimePolicy policy = runtime.Policy
-            ?? throw new ArgumentException("Native runtime options require a runtime policy.", nameof(runtime));
-        if (!agent.SupportedRuntimePolicies.Contains(policy.Kind))
-        {
-            throw new NotSupportedException(
-                $"This native runtime does not accept a {policy.Kind} runtime policy; check SupportedRuntimePolicies.");
-        }
+        LlmAgentRuntimePolicy? policy = runtime.Policy;
         AgentResourceOptions.Validate(
             agent,
             policy is LlmAgentHostRuntimePolicy { AllowRuntimeBackgroundWork: true },
@@ -111,11 +93,10 @@ internal static class NativeAgentContract
         {
             effective = effective.Apply(modelOverrides);
         }
-        if ((effective.SupportsAgentSessions == InferenceSupport.Unsupported) || ((effective.SupportsAgentToolUse == InferenceSupport.Unsupported)
-            && (tools.Count > 0 || toolHandler is not null)))
-        {
-            throw new NotSupportedException("The connection/model configuration disables the requested agent operation.");
-        }
+        if (effective.SupportsAgentSessions == InferenceSupport.Unsupported)
+            throw new NotSupportedException(AgentSessionsUnsupported);
+        if ((effective.SupportsAgentToolUse == InferenceSupport.Unsupported) && (tools.Count > 0 || toolHandler is not null))
+            throw new NotSupportedException(AgentToolUseUnsupported);
     }
 
     public static void ValidateTools(IReadOnlyList<LlmAgentClientToolDefinition> tools)
@@ -127,10 +108,14 @@ internal static class NativeAgentContract
         }
     }
 
+    /// <summary>The refusal of an opening on a model that marks agent sessions Unsupported.</summary>
+    public const string AgentSessionsUnsupported = "The selected model does not support agent sessions.";
+
+    /// <summary>The refusal of an opening with tools on a model that marks agent tool use Unsupported.</summary>
+    public const string AgentToolUseUnsupported = "The selected model does not support agent tool use.";
+
     public static void ValidateTurn(LlmAgentTurnRequest request)
     {
-        if (request.ProviderControls is not null)
-            throw new NotSupportedException("This native runtime does not implement supplied provider controls.");
         if (request.Instructions is not null)
         {
             throw new NotSupportedException(
