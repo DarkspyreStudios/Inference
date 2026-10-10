@@ -768,7 +768,7 @@ public sealed class ManagedAgentTests
         public LlmConnection SessionConnection { get; init; } = Connection;
         public ManagedAgentSession Create(LlmAgentSessionOptions? options = null) => ManagedAgentSession.CreateAsync(
             SessionConnection,
-            options ?? Options(), [new("test", "Test") { MaxContextTokens = 1000 }, new("other", "Other") { MaxContextTokens = 2000 }], this, Stream,
+            options ?? Options(), [new("test", "Test") { MaxContextTokens = 1000, MaxOutputTokens = 100 }, new("other", "Other") { MaxContextTokens = 2000, MaxOutputTokens = 100 }], this, Stream,
             _ => Capabilities ?? new()
             {
                 SupportsAgentSessions = InferenceSupport.Supported,

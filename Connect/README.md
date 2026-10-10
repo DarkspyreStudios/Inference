@@ -183,6 +183,15 @@ Claude sessions `Provider`) and `CompactNowAsync` (refused while `SupportsCompac
 streamed usage, and the reported model on the step's final usage. On Claude it is the `model` the CLI reports on
 the turn's latest assistant message or message start.
 
+**Context limits.** One rule sets every request's limits (`CompactionLimits.For`). The window is the smallest
+known value of the listed model window, a learned limit when one is known and `LlmAgentContextPolicy.MaxContextTokens`.
+The reserve is `ReservedOutputTokens`, else the model's output limit, else 8,000. The usable window is the window
+minus the reserve. `NeedsCompaction` is true when the request measures at or above 85% of the usable window, and the
+compaction target is `CompactionTargetRatio` (clamped to 0.05-0.80) of it. `LlmRequestAccounting.MaxContextTokens`,
+`ReservedOutputTokens` and `InputBudgetTokens` report the window, the reserve and the usable window. Execution
+options never refuse: a non-positive iteration or tool-concurrency limit uses the record default, a non-positive
+reserve or cap is ignored, and a cap above the model limit uses the model limit.
+
 An unclassified managed failure ends the turn with `{exception type}: {message}`, the message with credentials
 removed. Provider errors keep `LlmProviderException.Message`.
 
@@ -3111,7 +3120,7 @@ while idle and the frozen executing model/instructions/tools while paused, inclu
 without consuming it. Active execution is rejected. It never replaces context or consumes a pause.
 
 The result distinguishes `IsSupported = false` from supported-but-unknown measurement, exposes raw
-nullable model limits separately from the effective host ceiling, reserve, safety margin and usable
+nullable model limits separately from the effective host ceiling, reserve and usable
 input budget, and preserves `LlmContextMeasurementSource`. Neither `IsSupported`, an estimate, nor
 `NeedsCompaction = false` proves fit. Native-owned context accounting is unsupported. See the
 [accounting design](docs/enhancements.md#public-nonmutating-accounting) for failure and concurrency semantics.

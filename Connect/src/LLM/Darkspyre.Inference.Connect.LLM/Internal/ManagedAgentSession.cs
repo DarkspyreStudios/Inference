@@ -101,7 +101,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         if (automaticProviderCompaction && compactor is null)
             throw new ArgumentException("Automatic provider compaction requires a compactor.");
         _connection = connection;
-        _execution = options.ExecutionOptions ?? new();
         _models = Array.AsReadOnly(models.ToArray());
         _estimator = estimator;
         _stream = stream;
@@ -109,7 +108,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities(options.ModelId).HostedTools);
         ClientTools.ValidateManagedOpening(options, capabilities(options.ModelId), supportsResources);
         _hostedTools = options.HostedTools;
-        ManagedAgentPolicy.Validate(_execution, Model(options.ModelId));
+        _execution = ManagedAgentPolicy.Normalize(options.ExecutionOptions ?? new(), Model(options.ModelId));
         _toolHandler = options.ToolHandler;
         _callerServices = options.CallerServices;
         _options = options with
@@ -187,7 +186,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             ContextEstimate? used = EstimateInputTokens(proposal, turn);
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(ManagedAgentPolicy.Account(turn.ModelId!, used,
-                _execution.ContextPolicy, Model(turn.ModelId!)) with
+                _execution.ContextPolicy, Model(turn.ModelId!), learnedLimit: null) with
             {
                 ContextRevision = _context.Revision,
                 OutputLimitEnforcement = _capabilities(turn.ModelId!).OutputLimitEnforcement
@@ -1260,9 +1259,9 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
 
     private LlmAgentContextStatus Measure(LlmAgentContext context, LlmAgentTurnRequest turn)
     {
-        ManagedAgentPolicy.Validate(_execution, Model(turn.ModelId!));
+        LlmAgentContextPolicy policy = ManagedAgentPolicy.Normalize(_execution, Model(turn.ModelId!)).ContextPolicy;
         ContextEstimate? used = EstimateInputTokens(context, turn);
-        return ManagedAgentPolicy.Status(turn.ModelId!, context.Revision, used, _execution.ContextPolicy, Model(turn.ModelId!));
+        return ManagedAgentPolicy.Status(turn.ModelId!, context.Revision, used, policy, Model(turn.ModelId!), learnedLimit: null);
     }
 
     private bool ExceedsHardWindow(LlmAgentContextStatus status, LlmAgentTurnRequest turn) =>

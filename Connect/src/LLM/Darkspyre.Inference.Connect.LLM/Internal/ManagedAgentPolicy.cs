@@ -19,18 +19,26 @@ internal static class ManagedAgentPolicy
         RichContentSupported = RichContentRoutes.Responses
     };
 
-    public static void Validate(LlmAgentExecutionOptions options, LlmModel? model)
+    /// <summary>
+    /// MaxModelIterations ≤ 0 becomes 32 and MaxConcurrentTools ≤ 0 becomes 4 (the record defaults);
+    /// ReservedOutputTokens ≤ 0 and MaxContextTokens ≤ 0 become null; a MaxContextTokens above the model limit
+    /// becomes the model limit.
+    /// </summary>
+    internal static LlmAgentExecutionOptions Normalize(LlmAgentExecutionOptions options, LlmModel? model)
     {
-        var policy = options.ContextPolicy;
-        if (options.MaxModelIterations <= 0 || options.MaxConcurrentTools <= 0
-            || !Enum.IsDefined(options.ToolExecutionMode) || !double.IsFinite(policy.CompactionThresholdRatio)
-            || policy.CompactionThresholdRatio <= 0 || policy.CompactionThresholdRatio > 1
-            || policy.SafetyMarginTokens < 0 || policy.ReservedOutputTokens is <= 0
-            || policy.MaxContextTokens is <= 0
-            || (policy.MaxContextTokens is long cap && model?.MaxContextTokens is long hard && cap > hard))
+        LlmAgentContextPolicy policy = options.ContextPolicy;
+        long? cap = policy.MaxContextTokens is > 0 ? policy.MaxContextTokens : null;
+        if (cap is long requested && model?.MaxContextTokens is long hard && requested > hard) cap = hard;
+        return options with
         {
-            throw new ArgumentException("Invalid managed execution policy or context cap above the provider limit.");
-        }
+            MaxModelIterations = options.MaxModelIterations > 0 ? options.MaxModelIterations : 32,
+            MaxConcurrentTools = options.MaxConcurrentTools > 0 ? options.MaxConcurrentTools : 4,
+            ContextPolicy = policy with
+            {
+                ReservedOutputTokens = policy.ReservedOutputTokens is > 0 ? policy.ReservedOutputTokens : null,
+                MaxContextTokens = cap
+            }
+        };
     }
 
     /// <summary>
@@ -45,10 +53,10 @@ internal static class ManagedAgentPolicy
             ? null : used;
     }
 
-    public static LlmAgentContextStatus Status(
-        string modelId, long revision, ContextEstimate? used, LlmAgentContextPolicy policy, LlmModel? model)
+    public static LlmAgentContextStatus Status(string modelId, long revision, ContextEstimate? used,
+        LlmAgentContextPolicy policy, LlmModel? model, long? learnedLimit)
     {
-        var accounting = Account(modelId, used, policy, model);
+        var accounting = Account(modelId, used, policy, model, learnedLimit);
         return new()
         {
             ModelId = modelId,
@@ -62,15 +70,12 @@ internal static class ManagedAgentPolicy
         };
     }
 
-    public static LlmRequestAccounting Account(
-        string modelId, ContextEstimate? estimate, LlmAgentContextPolicy policy, LlmModel? model)
+    /// <summary>The request's accounting under the one limit rule, <see cref="CompactionLimits.For"/>.</summary>
+    public static LlmRequestAccounting Account(string modelId, ContextEstimate? estimate, LlmAgentContextPolicy policy,
+        LlmModel? model, long? learnedLimit)
     {
         long? used = estimate?.Tokens;
-        Validate(new() { ContextPolicy = policy }, model);
-        long? maximum = policy.MaxContextTokens ?? model?.MaxContextTokens;
-        long? reserve = policy.ReservedOutputTokens ?? model?.MaxOutputTokens;
-        long? budget = maximum is long limit && reserve is long output
-            ? Math.Max(0, limit - Math.Min(limit, output) - Math.Min(limit, policy.SafetyMarginTokens)) : null;
+        CompactionLimits? limits = CompactionLimits.For(model?.MaxContextTokens, learnedLimit, model?.MaxOutputTokens, policy);
         return new()
         {
             ModelId = modelId,
@@ -78,16 +83,14 @@ internal static class ManagedAgentPolicy
             Diagnostic = used is null ? "Input occupancy is unknown for this projection." : null,
             ModelMaxContextTokens = model?.MaxContextTokens,
             ModelMaxOutputTokens = model?.MaxOutputTokens,
-            SafetyMarginTokens = policy.SafetyMarginTokens,
-            InputBudgetTokens = budget,
-            MaxContextTokens = maximum,
+            InputBudgetTokens = limits?.UsableWindow,
+            MaxContextTokens = limits?.Window,
             UsedContextTokens = used,
-            ReservedOutputTokens = reserve,
-            AvailableInputTokens = budget is long available && used is long occupied ? Math.Max(0, available - occupied) : null,
-            NeedsCompaction = budget is long input && used is long count
-                ? count >= Math.Floor(input * policy.CompactionThresholdRatio) : null,
-            Source = estimate is not { } known ? LlmContextMeasurementSource.Unknown
-                : known.IncludesProviderReport ? LlmContextMeasurementSource.Mixed : LlmContextMeasurementSource.Estimated
+            ReservedOutputTokens = limits?.Reserve,
+            AvailableInputTokens = limits is { } known && used is long occupied ? Math.Max(0, known.UsableWindow - occupied) : null,
+            NeedsCompaction = limits is { } window && used is long count ? count >= window.TriggerTokens : null,
+            Source = estimate is not { } measured ? LlmContextMeasurementSource.Unknown
+                : measured.IncludesProviderReport ? LlmContextMeasurementSource.Mixed : LlmContextMeasurementSource.Estimated
         };
     }
 }

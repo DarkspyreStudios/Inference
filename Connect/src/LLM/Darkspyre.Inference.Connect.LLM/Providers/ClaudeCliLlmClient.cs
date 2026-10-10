@@ -411,7 +411,10 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 "Claude CLI reported a provider error. Run claude in a terminal to verify sign-in and model access."
                     + terminal.ErrorDetail,
                 Transport,
-                providerCode: "claude_cli_error");
+                providerCode: "claude_cli_error")
+            {
+                Usage = terminal.Usage
+            };
         }
 
         bool refused = string.Equals(terminal.StopReason, "refusal", StringComparison.OrdinalIgnoreCase)
@@ -972,7 +975,10 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             $"Claude CLI exited with code {result.ExitCode}.{inputFailure}{guidance}"
                 + detail,
             LlmTransport.AnthropicClaudeCli,
-            providerCode: providerCode);
+            providerCode: providerCode)
+        {
+            Usage = terminal?.Usage
+        };
     }
 
     private sealed record ClaudeTerminalResult(

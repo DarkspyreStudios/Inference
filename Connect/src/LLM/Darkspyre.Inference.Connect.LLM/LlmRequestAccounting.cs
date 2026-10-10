@@ -21,7 +21,6 @@ public sealed record LlmRequestAccounting
     public long? MaxContextTokens { get; init; }
     public long? UsedContextTokens { get; init; }
     public long? ReservedOutputTokens { get; init; }
-    public long? SafetyMarginTokens { get; init; }
     public long? InputBudgetTokens { get; init; }
     public long? AvailableInputTokens { get; init; }
     public bool? NeedsCompaction { get; init; }

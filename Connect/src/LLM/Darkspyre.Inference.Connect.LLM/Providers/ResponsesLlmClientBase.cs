@@ -934,6 +934,9 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             code,
             ProviderHttp.ReadRequestId(response, credential, extraSecrets),
             sanitizedResponseBody: safe,
-            isContextOverflow: LlmContextOverflow.Responses(root));
+            isContextOverflow: LlmContextOverflow.Responses(root))
+        {
+            Usage = ReadUsage(root)
+        };
     }
 }

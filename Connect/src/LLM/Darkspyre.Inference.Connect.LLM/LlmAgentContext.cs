@@ -125,10 +125,6 @@ public sealed record LlmAgentContextStatus
 
 public sealed record LlmAgentContextPolicy
 {
-    public double CompactionThresholdRatio { get; init; } = 0.85;
-
-    public long SafetyMarginTokens { get; init; } = 4096;
-
     public long? ReservedOutputTokens { get; init; }
 
     /// <summary>Optional host cap; cannot increase a known provider limit.</summary>
