@@ -461,6 +461,52 @@ public sealed class DirectCodexTests
         Assert.Contains(record.StructuredOutput.Errors, error => error.StartsWith("/count:", StringComparison.Ordinal));
     }
 
+    /// <summary>An image_generation_call item is saved as a session resource and reported as an image output.</summary>
+    [Fact]
+    public async Task ImageGenerationCommitsAResource()
+    {
+        using var handler = new Handler(request => request.Method == HttpMethod.Get
+            ? Json("{\"models\":[{\"slug\":\"model\",\"context_window\":272000}]}")
+            : Sse("""
+                data: {"type":"response.output_item.added","output_index":0,"item":{"type":"image_generation_call","id":"ig","status":"in_progress"}}
+
+                data: {"type":"response.output_item.done","output_index":0,"item":{"type":"image_generation_call","id":"ig","status":"completed","result":"AQID","output_format":"webp"}}
+
+                data: {"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"m","role":"assistant","content":[{"type":"output_text","text":"Here it is."}]}}
+
+                data: {"type":"response.completed","response":{"status":"completed","output":[],"id":"r"}}
+
+                """));
+        using var http = new HttpClient(handler);
+        var client = new OpenAiCodexLlmClient(http);
+        LlmConnection connection = Connection();
+        ResourcePreparationTests.GeneratedWrite? written = null;
+        var access = new ResourcePreparationTests.Resources(new("workspace", "session", 0, []), [])
+        {
+            WriteFactory = create => written = new("workspace", create, () => { })
+        };
+        await using var session = await ManagedAgentSession.CreateAsync(connection, new()
+        {
+            ModelId = "model",
+            HostedTools = [new LlmImageGenerationTool()],
+            CallerServices = new() { Resources = access }
+        }, [new("model", "Model") { MaxContextTokens = 272000 }], client,
+            (request, token) => client.StreamAsync(connection, request, token),
+            model => client.GetCapabilities(connection, model), new LearnedModelContext());
+
+        var events = new List<LlmAgentEvent>();
+        await foreach (LlmAgentEvent item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("Draw a cat")] }))
+            events.Add(item);
+
+        Assert.Contains(JsonNode.Parse(handler.Body!)!["tools"]!.AsArray(), tool => tool!["type"]!.GetValue<string>() == "image_generation");
+        Assert.Equal([1, 2, 3], written!.CommittedBytes);
+        LlmAgentImageOutputEvent image = Assert.Single(events.OfType<LlmAgentImageOutputEvent>());
+        Assert.Equal(written.Reference, image.Image.Resource);
+        Assert.Equal("image/webp", image.MediaType);
+        Assert.Null(Assert.Single(events.OfType<LlmAgentHostedToolCallCompletedEvent>()).Call.Output);
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+    }
+
     /// <summary>A model reply with reasoning state and a tool call, then a follow-up history for another model.</summary>
     private static async Task<(Handler Handler, LlmProviderService Providers, LlmChatRequest Followup)> OtherModelFollowupAsync()
     {

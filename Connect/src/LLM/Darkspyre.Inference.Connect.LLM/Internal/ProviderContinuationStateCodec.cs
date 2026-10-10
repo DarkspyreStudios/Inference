@@ -234,6 +234,7 @@ internal static class ProviderContinuationStateCodec
                     ["type", "id", "status", "summary", "content", "encrypted_content"],
                 (LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses, "function_call") =>
                     ["type", "id", "status", "call_id", "name", "arguments"],
+                (LlmTransport.OpenAiCodex, "image_generation_call") => ["type", "id", "status", "result"],
                 (LlmTransport.AnthropicMessages, "text") => ["type", "text", "citations"],
                 (LlmTransport.AnthropicMessages, "thinking") => ["type", "thinking", "signature"],
                 (LlmTransport.AnthropicMessages, "redacted_thinking") => ["type", "data"],

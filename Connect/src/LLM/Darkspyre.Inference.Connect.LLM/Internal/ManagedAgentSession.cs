@@ -102,7 +102,9 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         _capabilities = capabilities;
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities(options.ModelId).HostedTools);
         ClientTools.ValidateManagedOpening(options, capabilities(options.ModelId), supportsResources);
-        _hostedTools = options.HostedTools;
+        // A generated image is saved as a session resource, so without resource access the image tool is dropped (B4).
+        _hostedTools = options.CallerServices?.Resources is null
+            ? [.. options.HostedTools.Where(tool => tool is not LlmImageGenerationTool)] : options.HostedTools;
         _execution = ManagedAgentPolicy.Normalize(options.ExecutionOptions ?? new(), Model(options.ModelId));
         _toolHandler = options.ToolHandler;
         _callerServices = options.CallerServices;
@@ -619,6 +621,9 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                                         await writer.WriteAsync(new LlmAgentHostedToolCallProgressEvent(
                                             ThreadId, run.Id, stepId, hosted.CallId, hosted.Phase), token);
                                         break;
+                                    case LlmHostedToolCallCompletedEvent { Call.Output: LlmHostedImageOutput image } hosted:
+                                        await WriteImageOutputAsync(run, stepId, hosted.Call, image, writer, token);
+                                        break;
                                     case LlmHostedToolCallCompletedEvent hosted:
                                         await writer.WriteAsync(new LlmAgentHostedToolCallCompletedEvent(
                                             ThreadId, run.Id, stepId, HostedTools.Snapshot(hosted.Call)), token);
@@ -959,6 +964,35 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         }
         return mapped;
+    }
+
+    /// <summary>
+    /// Saves an image the model produced as a session resource, then reports the completed call without its bytes and
+    /// the image as a resource attachment. A failed save ends the turn as other resource failures do.
+    /// </summary>
+    private async Task WriteImageOutputAsync(LiveRun run, string stepId, LlmHostedToolCall call, LlmHostedImageOutput image,
+        ChannelWriter<LlmAgentEvent> writer, CancellationToken token)
+    {
+        string mediaType = image.MediaType;
+        InferenceResourceCommitResult committed;
+        try
+        {
+            using var callback = _resourceCallbacks.Enter(token);
+            IInferenceResourceAccess access;
+            lock (_sync)
+            {
+                FenceResourceCallback(callback.Token);
+                access = _callerServices?.Resources ?? throw new NotSupportedException("Generated images require caller-owned access.");
+            }
+            string extension = mediaType[(mediaType.IndexOf('/', StringComparison.Ordinal) + 1)..];
+            committed = await ImageResourceOperations.CommitAsync(access, $"image-{call.CallId}.{extension}", mediaType,
+                image.Data, token: token).ConfigureAwait(false);
+        }
+        catch (Exception error) { ExceptionDispatchInfo.Capture(LlmResourcePreparation.AsResourceFailure(error, token)).Throw(); throw; }
+        await writer.WriteAsync(new LlmAgentHostedToolCallCompletedEvent(ThreadId, run.Id, stepId,
+            HostedTools.Snapshot(call with { Output = null })), token);
+        await writer.WriteAsync(new LlmAgentImageOutputEvent(ThreadId, run.Id, stepId,
+            new LlmResourceAttachment(committed.Resource.Reference), mediaType), token);
     }
 
     /// <summary>A handler failure as the model sees it, with the connection's credential and header values removed.</summary>

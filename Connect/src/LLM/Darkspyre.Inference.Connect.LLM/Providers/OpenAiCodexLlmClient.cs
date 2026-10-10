@@ -209,8 +209,20 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         {
             call["name"] = names.Native(call["name"]!.GetValue<string>());
         }
+        foreach (LlmImageGenerationTool image in request.HostedTools.OfType<LlmImageGenerationTool>())
+        {
+            var tool = new JsonObject { ["type"] = "image_generation" };
+            if (image.Action != LlmImageGenerationAction.Auto)
+                tool["action"] = image.Action == LlmImageGenerationAction.Edit ? "edit" : "generate";
+            if (payload["tools"] is not JsonArray tools) payload["tools"] = tools = [];
+            tools.Add(tool);
+        }
         return payload;
     }
+
+    /// <summary>Reports image_generation_call items; the payload carries the image tool only when the request asks for it.</summary>
+    protected override ResponsesHostedToolObserver CreateHostedToolObserver(Func<Exception> malformed) =>
+        new CodexImageGenerationObserver(malformed);
 
     /// <summary>Sends the request under native tool names and reports the calls under their logical names.</summary>
     public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,

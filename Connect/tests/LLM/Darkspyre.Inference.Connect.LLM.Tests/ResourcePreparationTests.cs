@@ -670,7 +670,7 @@ public sealed class ResourcePreparationTests
         internal TaskCompletionSource ReadEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
-    private sealed class GeneratedWrite(string workspace, InferenceResourceCreate create, Action afterCommit) : IInferenceResourceWriteHandle
+    internal sealed class GeneratedWrite(string workspace, InferenceResourceCreate create, Action afterCommit) : IInferenceResourceWriteHandle
     {
         private readonly MemoryStream _content = new();
         public InferenceResourceReference Reference { get; } = new(workspace, "generated");
