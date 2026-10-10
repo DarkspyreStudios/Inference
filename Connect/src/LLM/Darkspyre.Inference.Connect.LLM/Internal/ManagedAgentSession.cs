@@ -568,6 +568,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                         estimate = EstimateInputTokens(_context, run.Turn, resources);
                         status = _latestStatus = Status(_context, run.Turn, estimate);
                     }
+                    await writer.WriteAsync(new LlmAgentContextStatusEvent(ThreadId, run.Id, status), token);
                 }
                 string stepId = NewId();
                 LlmChatResult? result = null;

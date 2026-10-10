@@ -745,6 +745,8 @@ public sealed class ManagedAgentTests
         LlmAgentCompactedEvent compacted = Assert.Single(events.OfType<LlmAgentCompactedEvent>());
         Assert.Null(compacted.DroppedMessageCount);
         Assert.Equal(1, compacted.ShortenedToolOutputCount);
+        // Each decision point reports its measure: step one, step two before and after compaction.
+        Assert.Equal(new bool?[] { false, true, false }, events.OfType<LlmAgentContextStatusEvent>().Select(status => status.Status.NeedsCompaction));
         Assert.Empty(harness.Summaries);
         Assert.Equal(2, harness.Requests.Count);
         LlmToolResult sent = Assert.IsType<LlmToolResult>(
