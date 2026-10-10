@@ -110,11 +110,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         ClientTools.ValidateManagedOpening(options, capabilities(options.ModelId), supportsResources);
         _hostedTools = options.HostedTools;
         ManagedAgentPolicy.Validate(_execution, Model(options.ModelId));
-        if (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && options.ToolHandler is null
-            && options.ToolHandling == LlmAgentToolHandling.Execute)
-        {
-            throw new ArgumentException("Managed tools require a host tool handler.");
-        }
         _toolHandler = options.ToolHandler;
         _callerServices = options.CallerServices;
         _options = options with
@@ -1064,12 +1059,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         if (!_tools.TryGetValue(call.Name, out var definition)) return await failed(UnknownToolResult);
         if (ArgumentRejection(definition, call.ArgumentsJson, out JsonElement arguments) is { } rejection)
             return await failed(rejection);
+        if (_toolHandler is not { } handler) return await failed($"No handler is available for tool '{call.Name}'.");
         JsonElement recorded = RecordedArguments(call.ArgumentsJson);
         await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null, call.Name,
             recorded, null, "started"), token);
         FenceResourceCallback(token);
         started();
-        var returned = await _toolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name, arguments), token);
+        var returned = await handler(new(ThreadId, run.Id, call.Id, null, call.Name, arguments), token);
         observeCompleted();
         var output = ManagedAgentContext.CopyOutput(returned);
         if (output.Parts.OfType<LlmToolOutputSessionResource>().Any())
@@ -1209,11 +1205,12 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
 
     /// <summary>
     /// The 6.3 rejection text when the arguments fail the tool's schema, otherwise null. <paramref name="instance"/>
-    /// receives the arguments as the model sent them; a schema that cannot be checked lets the call run.
+    /// receives the arguments as the model sent them, with a wrapped schema's <c>value</c> unwrapped; a schema that cannot
+    /// be checked lets the call run.
     /// </summary>
     private static string? ArgumentRejection(LlmAgentToolDefinition definition, string arguments, out JsonElement instance)
     {
-        StructuredOutput.Evaluation evaluation = StructuredOutput.Evaluate(definition.InputSchema, arguments);
+        StructuredOutput.Evaluation evaluation = ToolSchemas.EvaluateArguments(definition.InputSchema, arguments);
         instance = evaluation.Instance;
         return evaluation is { Checked: true, Errors.Count: > 0 }
             ? $"Tool '{definition.Name}' arguments were rejected:\n{string.Join('\n', evaluation.Errors)}"
@@ -1251,7 +1248,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 {
                     Name = function.Name,
                     Description = function.Description,
-                    InputSchema = function.InputSchema
+                    InputSchema = ToolSchemas.Wire(function.InputSchema)
                 },
                 LlmAgentShellTool shell => shell.Tool,
                 _ => throw new NotSupportedException("Unknown agent tool definition.")

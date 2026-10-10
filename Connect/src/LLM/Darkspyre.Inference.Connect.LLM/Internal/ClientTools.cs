@@ -31,9 +31,6 @@ internal static class ClientTools
             if (options.CallerServices?.ShellExecutor is null)
                 throw new ArgumentException("Managed shell tools require a borrowed caller shell executor.");
         }
-        if (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && options.ToolHandler is null
-            && options.ToolHandling == LlmAgentToolHandling.Execute)
-            throw new ArgumentException("Managed function tools require a host tool handler.");
     }
 
     internal static LlmClientToolCall Snapshot(LlmClientToolCall call) => call switch

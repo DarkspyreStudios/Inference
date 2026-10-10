@@ -299,23 +299,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
     private static string McpToolName(string toolName) => $"mcp__{McpServerName}__{toolName}";
 
-    /// <summary>
-    /// The schema the bridge lists for a tool. A schema whose root is not an object is wrapped in an object with one
-    /// required member, <c>value</c>, because MCP tool arguments are an object.
-    /// </summary>
-    private static JsonElement WireSchema(JsonElement schema) => IsObjectSchema(schema) ? schema
-        : JsonElement.Parse(new JsonObject
-        {
-            ["type"] = "object",
-            ["properties"] = new JsonObject { ["value"] = JsonNode.Parse(schema.GetRawText()) },
-            ["required"] = new JsonArray("value")
-        }.ToJsonString());
-
-    private static bool IsObjectSchema(JsonElement schema) =>
-        schema.ValueKind == JsonValueKind.Object
-        && (!schema.TryGetProperty("type", out JsonElement type)
-            || (type.ValueKind == JsonValueKind.String && type.GetString() == "object"));
-
     private sealed record PendingToolCall(string Id, string Name, JsonElement Arguments);
 
     private sealed record McpResponse(JsonElement Message, LlmAgentToolEvent? ToolEvent);
@@ -993,11 +976,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             PendingToolCall? pending = TakePendingToolCall(name, arguments);
             string callId = pending?.Id ?? ReadJsonRpcId(id) ?? controlRequestId;
             // A wrapped schema's value is checked against the tool's own schema and is what the handler receives.
-            bool wrapped = !IsObjectSchema(definition.InputSchema);
-            StructuredOutput.Evaluation evaluation = wrapped && arguments.ValueKind == JsonValueKind.Object
-                && arguments.TryGetProperty("value", out JsonElement value)
-                    ? StructuredOutput.Evaluate(definition.InputSchema, value.GetRawText())
-                    : StructuredOutput.Evaluate(WireSchema(definition.InputSchema), arguments.GetRawText());
+            StructuredOutput.Evaluation evaluation = ToolSchemas.EvaluateArguments(definition.InputSchema, arguments.GetRawText());
             if (evaluation is { Checked: true, Errors.Count: > 0 })
             {
                 // The handler does not run; the model receives the errors and the turn continues.
@@ -1892,7 +1871,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             {
                 ["name"] = names.Native(tool.Name),
                 ["description"] = tool.Description ?? string.Empty,
-                ["inputSchema"] = JsonNode.Parse(WireSchema(tool.InputSchema).GetRawText()),
+                ["inputSchema"] = JsonNode.Parse(ToolSchemas.Wire(tool.InputSchema).GetRawText()),
                 ["_meta"] = new JsonObject
                 {
                     ["anthropic/alwaysLoad"] = !tool.DeferLoading
