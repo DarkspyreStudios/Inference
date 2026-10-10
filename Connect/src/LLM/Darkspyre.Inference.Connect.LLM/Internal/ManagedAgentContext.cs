@@ -21,9 +21,8 @@ internal static class ManagedAgentContext
         int omitted = 0;
         LlmAgentContext imported = Validate(context, message =>
         {
-            if (ProviderContinuationStateCodec.IsBound(message.ContinuationState!, connection, modelId))
+            if (ProviderContinuationStateCodec.IsReplayable(message, connection, modelId))
             {
-                _ = ProviderContinuationStateCodec.DecodeMessage(message, connection, modelId);
                 return message;
             }
             omitted++;
@@ -94,10 +93,9 @@ internal static class ManagedAgentContext
                 ArgumentNullException.ThrowIfNull(call);
                 if (call is LlmToolCall function)
                 {
+                    // Stored arguments may be any string: they are what the model sent.
                     ArgumentException.ThrowIfNullOrWhiteSpace(function.Name);
-                    using var arguments = JsonDocument.Parse(function.ArgumentsJson);
-                    if (arguments.RootElement.ValueKind != JsonValueKind.Object)
-                        throw new ArgumentException("Context tool arguments must be JSON objects.");
+                    ArgumentNullException.ThrowIfNull(function.ArgumentsJson);
                 }
                 else if (call is not LlmShellCall) throw new NotSupportedException("Unknown context tool call.");
             }

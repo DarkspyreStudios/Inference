@@ -13,7 +13,7 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ManagedAgentTests
 {
     [Fact]
-    public async Task UnevaluableToolSchemaReturnsAnErrorWithoutInvokingTheHostHandler()
+    public async Task UnevaluableToolSchemaRunsTheHostHandler()
     {
         var harness = new Harness();
         harness.Results.Enqueue(new()
@@ -22,7 +22,7 @@ public sealed class ManagedAgentTests
             ToolCalls = [new LlmToolCall("call-1", "echo", "{}")]
         });
         harness.Results.Enqueue(new()
-        { Diagnostics = new(200, null, null), Text = "tool rejected", Status = LlmCompletionStatus.Completed });
+        { Diagnostics = new(200, null, null), Text = "tool ran", Status = LlmCompletionStatus.Completed });
         int toolsRun = 0;
         await using var session = harness.Create(Options() with
         {
@@ -31,18 +31,19 @@ public sealed class ManagedAgentTests
             ToolHandler = (_, _) =>
             {
                 toolsRun++;
-                return Task.FromResult(LlmToolOutput.FromText("unexpected"));
+                return Task.FromResult(LlmToolOutput.FromText("ran"));
             }
         });
 
         List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
 
-        Assert.Equal(0, toolsRun);
-        Assert.Equal("tool rejected", events.OfType<LlmAgentMessageCompletedEvent>().Last().Text);
+        // A schema that cannot be checked does not stop the call.
+        Assert.Equal(1, toolsRun);
+        Assert.Equal("tool ran", events.OfType<LlmAgentMessageCompletedEvent>().Last().Text);
         Assert.Equal(2, harness.Requests.Count);
-        LlmToolResult failure = Assert.IsType<LlmToolResult>(
+        LlmToolResult result = Assert.IsType<LlmToolResult>(
             Assert.Single(harness.Requests[1].Messages.SelectMany(message => message.ToolResults)));
-        Assert.True(failure.Output.IsError);
+        Assert.False(result.Output.IsError);
     }
 
     [Fact]
@@ -547,6 +548,140 @@ public sealed class ManagedAgentTests
         Assert.Equal(["test", "answering-model"], usage.Select(item => item.ModelId));
     }
 
+    private static LlmChatResult Calls(params LlmToolCall[] calls) => new()
+    {
+        Diagnostics = new(200, null, null), Text = string.Empty, Status = LlmCompletionStatus.RequiresAction, ToolCalls = calls
+    };
+
+    private static LlmAgentToolDefinition Lookup() => new()
+    {
+        Name = "lookup",
+        InputSchema = JsonElement.Parse(
+            """{"type":"object","properties":{"city":{"type":"string"}},"required":["city"],"additionalProperties":false}""")
+    };
+
+    [Fact]
+    public async Task InvalidArgumentsReturnToTheModel()
+    {
+        var harness = new Harness();
+        harness.Results.Enqueue(Calls(new LlmToolCall("missing", "lookup", """{"town":"Paris"}"""),
+            new LlmToolCall("broken", "lookup", "not json")));
+        harness.Results.Enqueue(Done());
+        int toolsRun = 0;
+        await using var session = harness.Create(Options() with
+        {
+            Tools = [Lookup()],
+            ToolHandler = (_, _) => { toolsRun++; return Task.FromResult(LlmToolOutput.FromText("unexpected")); }
+        });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        Assert.Equal(0, toolsRun);
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Equal(2, harness.Requests.Count);
+        LlmToolResult[] results = [.. harness.Requests[1].Messages.SelectMany(message => message.ToolResults).OfType<LlmToolResult>()];
+        string missing = Assert.IsType<LlmToolOutputText>(Assert.Single(results.Single(result => result.ToolCallId == "missing").Output.Parts)).Text;
+        Assert.StartsWith("Tool 'lookup' arguments were rejected:\n", missing, StringComparison.Ordinal);
+        Assert.Contains("city", missing, StringComparison.Ordinal);
+        Assert.All(results, result => Assert.True(result.Output.IsError));
+        LlmAgentToolEvent[] failed = [.. events.OfType<LlmAgentToolEvent>()];
+        Assert.All(failed, item => Assert.Equal("failed", item.Status));
+        Assert.Equal("Paris", failed.Single(item => item.ItemId == "missing").Arguments.GetProperty("town").GetString());
+        Assert.Equal("not json", failed.Single(item => item.ItemId == "broken").Arguments.GetString());
+    }
+
+    [Fact]
+    public async Task SuperfluousArgumentsAreIgnored()
+    {
+        const string sent = """{"city":"Paris","units":"metric"}""";
+        var harness = new Harness();
+        harness.Results.Enqueue(Calls(new LlmToolCall("call-1", "lookup", sent)));
+        harness.Results.Enqueue(Done());
+        JsonElement? received = null;
+        await using var session = harness.Create(Options() with
+        {
+            Tools = [Lookup()],
+            ToolHandler = (call, _) => { received = call.Arguments.Clone(); return Task.FromResult(LlmToolOutput.FromText("sunny")); }
+        });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        Assert.Equal(sent, received!.Value.GetRawText());
+        Assert.Equal("completed", events.OfType<LlmAgentToolEvent>().Last().Status);
+        LlmToolResult result = Assert.IsType<LlmToolResult>(Assert.Single(harness.Requests[1].Messages.SelectMany(message => message.ToolResults)));
+        Assert.False(result.Output.IsError);
+    }
+
+    [Fact]
+    public async Task ReturnRequestsEndsTurnAtSettledBoundary()
+    {
+        var harness = new Harness();
+        harness.Results.Enqueue(Calls(new LlmToolCall("good", "lookup", """{"city":"Paris"}"""),
+            new LlmToolCall("bad", "lookup", "{}")) with { Text = "checking" });
+        harness.Results.Enqueue(Done());
+        // No handler: the calls are returned, not run.
+        await using var session = harness.Create(Options() with
+        {
+            Tools = [Lookup()],
+            ToolHandling = LlmAgentToolHandling.ReturnRequests
+        });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        Assert.Single(harness.Requests);
+        LlmAgentTurnCompletedEvent completed = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal(LlmAgentCompletionReason.ToolRequests, completed.Reason);
+        Assert.Null(completed.Error);
+        LlmAgentToolEvent good = events.OfType<LlmAgentToolEvent>().Single(item => item.ItemId == "good");
+        Assert.Equal(("returned", (bool?)null, (LlmToolOutput?)null), (good.Status, good.Success, good.Output));
+        Assert.Equal("Paris", good.Arguments.GetProperty("city").GetString());
+        LlmAgentToolEvent bad = events.OfType<LlmAgentToolEvent>().Single(item => item.ItemId == "bad");
+        Assert.Equal(("failed", (bool?)false), (bad.Status, bad.Success));
+        Assert.StartsWith("Tool 'lookup' arguments were rejected:", Assert.IsType<LlmToolOutputText>(Assert.Single(bad.Output!.Parts)).Text,
+            StringComparison.Ordinal);
+        LlmChatMessage assistant = (await session.CaptureContextAsync()).Entries[^1].Message;
+        Assert.Equal(("assistant", "checking", 0), (assistant.Role, assistant.Content, assistant.ToolCalls.Count));
+        Assert.Null(assistant.ContinuationState);
+
+        await Read(session.RunTurnAsync(Turn("next")));
+
+        Assert.All(harness.Requests[1].Messages, message =>
+            Assert.Equal((0, 0), (message.ToolCalls.Count, message.ToolResults.Count)));
+    }
+
+    [Fact]
+    public async Task HandlerFailureIsRedacted()
+    {
+        const string secret = "sk-test-redaction-value";
+        const string header = "header-redaction-value";
+        var harness = new Harness
+        {
+            SessionConnection = Harness.Connection with
+            {
+                Credential = new LlmCredential { ApiKey = secret }.Serialize(),
+                AdditionalHeaders = new Dictionary<string, string> { ["x-tenant"] = header }
+            }
+        };
+        harness.Results.Enqueue(Calls(new LlmToolCall("call-1", "lookup", """{"city":"Paris"}""")));
+        harness.Results.Enqueue(Done());
+        await using var session = harness.Create(Options() with
+        {
+            Tools = [Lookup()],
+            ToolHandler = (_, _) => throw new InvalidOperationException($"Upstream refused {secret} for {header}.")
+        });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        LlmToolResult result = Assert.IsType<LlmToolResult>(Assert.Single(harness.Requests[1].Messages.SelectMany(message => message.ToolResults)));
+        string sent = Assert.IsType<LlmToolOutputText>(Assert.Single(result.Output.Parts)).Text;
+        string reported = Assert.IsType<LlmToolOutputText>(Assert.Single(events.OfType<LlmAgentToolEvent>().Last().Output!.Parts)).Text;
+        Assert.Equal(sent, reported);
+        Assert.StartsWith("InvalidOperationException: Upstream refused ", sent, StringComparison.Ordinal);
+        Assert.EndsWith(" External outcome is unknown. Do not automatically replay.", sent, StringComparison.Ordinal);
+        Assert.DoesNotContain(secret, sent, StringComparison.Ordinal);
+        Assert.DoesNotContain(header, sent, StringComparison.Ordinal);
+    }
+
     private sealed class CodexClient : ILlmAgentClient
     {
         public LlmTransport Transport => LlmTransport.OpenAiCodex;
@@ -588,8 +723,10 @@ public sealed class ManagedAgentTests
         public LlmProviderCapabilities? Capabilities { get; init; }
         public static LlmConnection Connection { get; } =
             new() { Version = "1", Transport = LlmTransport.OpenAiCodex, Endpoint = "https://provider.test/codex" };
+        /// <summary>The connection the session uses; <see cref="Connection"/> unless a test sets one.</summary>
+        public LlmConnection SessionConnection { get; init; } = Connection;
         public ManagedAgentSession Create(LlmAgentSessionOptions? options = null) => ManagedAgentSession.CreateAsync(
-            Connection,
+            SessionConnection,
             options ?? Options(), [new("test", "Test") { MaxContextTokens = 1000 }, new("other", "Other") { MaxContextTokens = 2000 }], this, Stream,
             _ => Capabilities ?? new()
             {

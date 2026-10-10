@@ -97,6 +97,39 @@ not implement; context capture, replacement or compaction handoff where unsuppor
 it; and an opening on a model that marks agent sessions or agent tool use Unsupported
 (`The selected model does not support agent sessions.` or `... agent tool use.`).
 
+**Tools.** A session's tool names are logical names, unique within the session. Codex sends a name that matches
+`^[a-zA-Z0-9_-]{1,64}$` unchanged and any other name as its alias: `t_` followed by the first 40 lowercase hex
+characters of SHA-256 over the UTF-8 name. The alias applies to the tool list, a Specific tool choice and the calls in
+history, and returned calls carry the logical name again. Continuation state that stored a call under its alias still
+matches the logical call. A tool goes out as `{"type":"function","name","description","parameters","strict":false}`
+with its schema unchanged.
+
+Before a handler runs, the arguments are checked against the tool's schema without downloading anything. Members the
+schema does not declare are ignored, and the handler receives the arguments as the model sent them. Arguments that
+fail the check go back to the model as the error result `Tool '{name}' arguments were rejected:` followed by one
+`{location}: {message}` line per error, the handler does not run and the turn continues. A schema that cannot be
+checked lets the handler run. The tool event records the model's arguments as JSON when they parse, otherwise as a
+JSON string. Stored arguments may be any string; continuation state whose calls do not match the message, or whose
+arguments do not parse, is left out and counted. A handler failure reaches the model and the tool event as
+`{exception type}: {message} External outcome is unknown. Do not automatically replay.`, the message with the
+connection's credential and header values removed.
+
+With `ToolHandling = ReturnRequests` a Codex session opens without a handler. When a step returns calls, the context
+keeps the assistant text only, each call is reported as an `LlmAgentToolEvent` with status `returned` (no success
+value, no output) or, when its arguments fail the check, status `failed` with the rejection text, and the turn ends
+with `ToolRequests`. No handler runs and no further step is sent. A caller with results starts a new session with
+them in its context.
+
+Codex prepares caller-owned resources inline, so a context with resources opens when the caller supplies resource
+access.
+
+**Structured answers.** On Codex a schema with an object root goes out as the `json_schema` format named
+`agent_output` with `"strict": false`. Any other root, or a route without a JSON-schema format, gets this line in the
+instructions, followed on the next line by the schema: `Return the final answer as exactly one JSON value that
+satisfies this JSON Schema, with no Markdown fence or other text.` The final answer is checked locally and the result
+is `LlmAgentTurnCompletedEvent.StructuredOutput`; the completion reason does not change. A refusal or truncation keeps
+its reason and reports `IsValid = false` with `The answer was not evaluated: {reason}.` No second request is sent.
+
 **Continuing, forking and rewinding.** Codex and the Claude CLI continue a conversation by starting a new session
 with its history through `StartSessionAsync`. Neither keeps provider-side state the host must resume. Continuation
 state the selected model, provider and account cannot replay is left out and counted, so a history from any
@@ -123,13 +156,13 @@ signature and refuses on both transports.
 | SupportsCompactNow | Unsupported | Unsupported |
 
 **Declared for later behaviour.** These public members exist; the behaviour behind each arrives with its own
-change: `LlmAgentSessionOptions.ToolHandling` (`LlmAgentToolHandling`), `SkillFolders` and `FallbackModelIds`;
+change: `ToolHandling = ReturnRequests` on Claude; `LlmAgentSessionOptions.SkillFolders` and `FallbackModelIds`;
 `ILlmAgentSession.CompactionResponsibility` (`LlmCompactionResponsibility`; managed sessions report `Host` and
 Claude sessions `Provider`) and `CompactNowAsync` (refused while `SupportsCompactNow` is Unsupported);
 `LlmAgentContextPolicy.CompactionTargetRatio` and `PreserveSuppliedContext`; `LlmAgentToolDefinition.ProtectedResults`;
 `ILlmConversationTranscript`, `LlmTranscriptPage` and `LlmAgentCallerServices.Transcript`;
-`LlmProviderException.Usage`; `LlmAgentExecutionOptions.MaxSpendUsd`; `LlmAgentCompletionReason.ToolRequests` and
-`SpendLimit`; `LlmAgentTurnCompletedEvent.StructuredOutput`; `LlmAgentImageOutputEvent`;
+`LlmProviderException.Usage`; `LlmAgentExecutionOptions.MaxSpendUsd`; `LlmAgentCompletionReason.SpendLimit`;
+`LlmAgentImageOutputEvent`;
 `LlmAgentResponseRecoveryEvent.Delay` and `Error`; and `LlmAgentCompactedEvent.ShortenedToolOutputCount` and
 `RemovedImageCount`. `LlmAgentUsageEvent.ModelId` names the model a Codex step used: the step request's model on
 streamed usage, and the reported model on the step's final usage.
@@ -1618,7 +1651,7 @@ OpenAI Responses carries committed bytes and filenames in its existing native in
 projection ([official file inputs](https://developers.openai.com/api/docs/guides/file-inputs)).
 The Responses operation owns inline preparation, terminal publication and reader release. Its SDK
 generation fence covers resource callbacks. Materialized attachments retain model capability validation.
-Both native streaming and nonstreaming use this same path. This does not enable Codex resource handoff.
+Both native streaming and nonstreaming use this same path. Codex uses the same inline preparation.
 Bedrock's existing factory lifetime covers inline preparation and native Converse execution. The shared
 materializer retains logical context and ordered selected references; both Converse response modes
 use the existing binary document and tool-output builders. Bedrock carries UTF-8 text, JSON and XML
@@ -4189,7 +4222,8 @@ and host context operations. Codex and Claude continue, fork and rewind by start
 history; `ResumeSessionAsync` refuses on both. Claude supports interrupt; its steering method is unsupported. Tools return
 text plus provider-neutral image/document attachments. Managed tools reject URL-based image/audio
 content; use `Attachments`. Claude materializes MCP document resources through its read-only
-`Read` tool. Every tool-capable session must receive a host tool handler.
+`Read` tool. A tool-capable session receives a host tool handler unless Codex returns its calls
+(`ToolHandling = ReturnRequests`).
 
 ## AWS Bedrock AgentCore Harness transport
 
@@ -4753,8 +4787,8 @@ of an unfamiliar keyword does not establish that the local evaluator can evaluat
 When the schema evaluator throws `JsonSchemaException`, the result retains the provider's answer
 and reports `WasEvaluated = false`, `IsValid = false`, and the evaluator diagnostic in `Errors`.
 This result does not assert that the answer violates the schema. It does not change the dialect,
-remove constraints, or retry the provider request. Host tool arguments still require `IsValid = true`
-before the tool handler runs.
+remove constraints, or retry the provider request. Host tool arguments that cannot be evaluated let the tool
+handler run; arguments evaluated as invalid return to the model.
 
 Strict tools use the same subset check and a maximum of 20 strict tools per request. Ordinary tools
 do not count toward that limit and retain their original schemas. Unsupported strict schemas are

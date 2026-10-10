@@ -110,7 +110,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         ClientTools.ValidateManagedOpening(options, capabilities(options.ModelId), supportsResources);
         _hostedTools = options.HostedTools;
         ManagedAgentPolicy.Validate(_execution, Model(options.ModelId));
-        if (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && options.ToolHandler is null)
+        if (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && options.ToolHandler is null
+            && options.ToolHandling == LlmAgentToolHandling.Execute)
         {
             throw new ArgumentException("Managed tools require a host tool handler.");
         }
@@ -842,12 +843,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                         AppendAssistant(stepId, run, result);
                         await writer.WriteAsync(new LlmAgentMessageCompletedEvent(ThreadId, run.Id, stepId, result.Text), token);
                     }
-                    await CompleteAsync(run, writer, result.Status switch
+                    LlmAgentCompletionReason ended = result.Status switch
                     {
                         LlmCompletionStatus.Refused => LlmAgentCompletionReason.Refusal,
                         LlmCompletionStatus.Incomplete => LlmAgentCompletionReason.Truncation,
                         _ => LlmAgentCompletionReason.ProviderFailure
-                    }, token);
+                    };
+                    await CompleteAsync(run, writer, ended, token, structuredOutput: AnswerCheck(run, result, ended));
                     return;
                 }
                 if (result.Status == LlmCompletionStatus.Unknown && result.ToolCalls.Count > 0)
@@ -857,9 +859,9 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     await CompleteAsync(run, writer, LlmAgentCompletionReason.Unknown, token);
                     return;
                 }
-                if (result.StructuredOutput is { WasEvaluated: true, IsValid: false })
+                if (result.ToolCalls.Count > 0 && _options.ToolHandling == LlmAgentToolHandling.ReturnRequests)
                 {
-                    await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token);
+                    await ReturnRequestsAsync(run, stepId, result, writer, token);
                     return;
                 }
                 LlmAgentContextEntry assistant = AppendAssistant(stepId, run, result);
@@ -886,7 +888,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                         run.Terminal = true;
                     }
                     await CompleteAsync(run, writer, result.Status == LlmCompletionStatus.Unknown
-                        ? LlmAgentCompletionReason.Unknown : LlmAgentCompletionReason.Completed, token);
+                        ? LlmAgentCompletionReason.Unknown : LlmAgentCompletionReason.Completed, token,
+                        structuredOutput: AnswerCheck(run, result, null));
                     return;
                 }
             }
@@ -1000,7 +1003,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     try
                     {
                         await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null,
-                        call.Name, JsonElement.Parse("{}"), false, "failed",
+                        call.Name, RecordedArguments(call.ArgumentsJson), false, "failed",
                         LlmToolOutput.FromText(message, isError: true)), token);
                     }
                     catch (OperationCanceledException) when (token.IsCancellationRequested) { }
@@ -1019,9 +1022,9 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 return new(call.Id, LlmToolOutput.FromText(started ? "Tool interrupted; external outcome is unknown. Do not automatically replay."
                     : "Tool was not executed because the run was cancelled.", isError: true));
             }
-            catch (Exception)
+            catch (Exception error)
             {
-                return await FailedAsync("Tool handler failed; do not automatically replay.");
+                return await FailedAsync(HandlerFailure(error));
             }
             finally { if (entered) { concurrency.Release(); } }
         }
@@ -1058,17 +1061,15 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         ChannelWriter<LlmAgentEvent> writer, Func<string, Task<LlmToolResult>> failed,
         Action started, Action observeCompleted, CancellationToken token)
     {
-        if (!_tools.TryGetValue(call.Name, out var definition)) return await failed("Unknown tool.");
-        var validation = StructuredOutput.Validate(call.ArgumentsJson,
-            new() { Name = definition.Name, Schema = definition.InputSchema }, LlmStructuredOutputEnforcement.LocalValidationOnly);
-        if (!validation.IsValid) return await failed("Tool arguments do not satisfy the declared schema.");
-        using var arguments = JsonDocument.Parse(call.ArgumentsJson);
+        if (!_tools.TryGetValue(call.Name, out var definition)) return await failed(UnknownToolResult);
+        if (ArgumentRejection(definition, call.ArgumentsJson, out JsonElement arguments) is { } rejection)
+            return await failed(rejection);
+        JsonElement recorded = RecordedArguments(call.ArgumentsJson);
         await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null, call.Name,
-            arguments.RootElement.Clone(), null, "started"), token);
+            recorded, null, "started"), token);
         FenceResourceCallback(token);
         started();
-        var returned = await _toolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name,
-            arguments.RootElement.Clone()), token);
+        var returned = await _toolHandler!(new(ThreadId, run.Id, call.Id, null, call.Name, arguments), token);
         observeCompleted();
         var output = ManagedAgentContext.CopyOutput(returned);
         if (output.Parts.OfType<LlmToolOutputSessionResource>().Any())
@@ -1096,12 +1097,16 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             try
             {
                 await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null, call.Name,
-                    arguments.RootElement.Clone(), !output.IsError, "completed", mapped.Output), token);
+                    recorded, !output.IsError, "completed", mapped.Output), token);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
         }
         return mapped;
     }
+
+    /// <summary>A handler failure as the model sees it, with the connection's credential and header values removed.</summary>
+    private string HandlerFailure(Exception error) =>
+        $"{error.GetType().Name}: {SecretRedactor.Sanitize(error.Message, LlmCredential.Parse(_connection.Credential), _connection.AdditionalHeaders.Values)} External outcome is unknown. Do not automatically replay.";
 
     private async Task<LlmShellCallResult> InvokeShellAsync(LiveRun run, LlmShellCall call, CancellationToken token)
     {
@@ -1148,11 +1153,78 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     }
 
     private async Task CompleteAsync(LiveRun run, ChannelWriter<LlmAgentEvent> writer, LlmAgentCompletionReason reason,
-        CancellationToken token, string? error = null)
+        CancellationToken token, string? error = null, LlmStructuredOutputValidation? structuredOutput = null)
     {
         lock (_sync) { run.Terminal = true; }
         await writer.WriteAsync(new LlmAgentTurnCompletedEvent(ThreadId, run.Id, reason,
-            reason == LlmAgentCompletionReason.Completed ? null : error ?? reason.ToString()), token);
+            reason is LlmAgentCompletionReason.Completed or LlmAgentCompletionReason.ToolRequests ? null : error ?? reason.ToString())
+        {
+            StructuredOutput = structuredOutput
+        }, token);
+    }
+
+    /// <summary>
+    /// The final answer's check against the turn's schema, or null when the turn requested none. An answer that ended
+    /// with <paramref name="unevaluated"/> is reported as not evaluated.
+    /// </summary>
+    private static LlmStructuredOutputValidation? AnswerCheck(LiveRun run, LlmChatResult result,
+        LlmAgentCompletionReason? unevaluated)
+    {
+        if (run.Turn.OutputSchema is not { } schema) return null;
+        LlmStructuredOutputEnforcement enforcement = result.StructuredOutput?.Enforcement
+            ?? LlmStructuredOutputEnforcement.LocalValidationOnly;
+        return unevaluated is { } reason
+            ? new(enforcement, false, false, [$"The answer was not evaluated: {reason}."])
+            : StructuredOutput.Validate(result.Text, new() { Name = "agent_output", Schema = schema }, enforcement);
+    }
+
+    /// <summary>
+    /// Ends the turn with the step's calls unrun (B7). The context keeps the assistant text only, so it stays at a
+    /// settled boundary; each call is reported with its validation result.
+    /// </summary>
+    private async Task ReturnRequestsAsync(LiveRun run, string stepId, LlmChatResult result,
+        ChannelWriter<LlmAgentEvent> writer, CancellationToken token)
+    {
+        ValidateCalls(result.ToolCalls);
+        lock (_sync)
+        {
+            _context = Append(_context, new LlmAgentContextEntry(stepId, run.Id,
+                ManagedAgentContext.CopyMessage(new("assistant", result.Text))));
+        }
+        await writer.WriteAsync(new LlmAgentMessageCompletedEvent(ThreadId, run.Id, stepId, result.Text), token);
+        foreach (LlmToolCall call in result.ToolCalls.OfType<LlmToolCall>())
+        {
+            string? rejection = _tools.TryGetValue(call.Name, out var definition)
+                ? ArgumentRejection(definition, call.ArgumentsJson, out _) : UnknownToolResult;
+            await writer.WriteAsync(rejection is null
+                ? new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null, call.Name, RecordedArguments(call.ArgumentsJson),
+                    null, "returned")
+                : new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null, call.Name, RecordedArguments(call.ArgumentsJson),
+                    false, "failed", LlmToolOutput.FromText(rejection, isError: true)), token);
+        }
+        await CompleteAsync(run, writer, LlmAgentCompletionReason.ToolRequests, token);
+    }
+
+    private const string UnknownToolResult = "Unknown tool.";
+
+    /// <summary>
+    /// The 6.3 rejection text when the arguments fail the tool's schema, otherwise null. <paramref name="instance"/>
+    /// receives the arguments as the model sent them; a schema that cannot be checked lets the call run.
+    /// </summary>
+    private static string? ArgumentRejection(LlmAgentToolDefinition definition, string arguments, out JsonElement instance)
+    {
+        StructuredOutput.Evaluation evaluation = StructuredOutput.Evaluate(definition.InputSchema, arguments);
+        instance = evaluation.Instance;
+        return evaluation is { Checked: true, Errors.Count: > 0 }
+            ? $"Tool '{definition.Name}' arguments were rejected:\n{string.Join('\n', evaluation.Errors)}"
+            : null;
+    }
+
+    /// <summary>The model's arguments as JSON when they parse, otherwise a JSON string holding the raw text.</summary>
+    private static JsonElement RecordedArguments(string arguments)
+    {
+        try { return JsonElement.Parse(arguments); }
+        catch (JsonException) { return JsonSerializer.SerializeToElement(arguments, ConnectLlmJsonContext.Default.String); }
     }
 
     /// <summary>
@@ -1360,10 +1432,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             }
             else if (call is LlmToolCall function)
             {
+                // Arguments may be any string; the tool's schema check returns a bad one to the model.
                 if (string.IsNullOrWhiteSpace(function.Name)) throw new InvalidOperationException("Model returned an invalid tool name.");
-                using var arguments = JsonDocument.Parse(function.ArgumentsJson);
-                if (arguments.RootElement.ValueKind != JsonValueKind.Object)
-                    throw new InvalidOperationException("Model returned incomplete tool arguments.");
             }
             else throw new NotSupportedException("Unknown client tool call.");
         }

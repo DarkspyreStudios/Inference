@@ -1,6 +1,7 @@
 using Darkspyre.Inference.Common;
 using System.Collections.Frozen;
 using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
@@ -18,6 +19,8 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
     private const string CodexCompatibilityVersion = "0.159.3";
 
     public override LlmTransport Transport => LlmTransport.OpenAiCodex;
+
+    protected override bool SupportsResourcePreparation => true;
 
     internal IAsyncEnumerable<LlmStreamEvent> StreamCompactionAsync(LlmConnection connection, LlmChatRequest request,
         CancellationToken cancellationToken = default) => StreamCompactionCoreAsync(connection, request, cancellationToken);
@@ -188,10 +191,61 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         {
             Messages = [.. request.Messages.Where(message => message.Role is not ("system" or "developer"))]
         };
+        if (request.StructuredOutput is { } structured && enforcement != LlmStructuredOutputEnforcement.ProviderJsonSchema)
+        {
+            // Without a JSON-schema format the model learns the answer's shape from the instructions.
+            instructions.Add(StructuredOutput.Guidance(structured.Schema));
+        }
         JsonObject payload = base.BuildPayload(connection, projected, enforcement, stream, resources);
         payload["instructions"] = string.Join("\n\n", instructions);
+        LlmToolNames names = ToolNames(request);
+        foreach (JsonObject tool in (payload["tools"] as JsonArray ?? []).OfType<JsonObject>()
+            .Where(tool => tool["type"]?.GetValue<string>() == "function"))
+        {
+            tool["name"] = names.Native(tool["name"]!.GetValue<string>());
+        }
+        if (payload["tool_choice"] is JsonObject { } choice && choice["name"] is { } chosen)
+        {
+            choice["name"] = names.Native(chosen.GetValue<string>());
+        }
+        foreach (JsonObject call in ((JsonArray)payload["input"]!).OfType<JsonObject>()
+            .Where(item => item["type"]?.GetValue<string>() == "function_call"))
+        {
+            call["name"] = names.Native(call["name"]!.GetValue<string>());
+        }
         return payload;
     }
+
+    /// <summary>Sends the request under native tool names and reports the calls under their logical names.</summary>
+    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        LlmToolNames names = ToolNames(request);
+        LlmToolCall Logical(LlmToolCall call) => call with { Name = names.Logical(call.Name) ?? call.Name };
+        await foreach (LlmStreamEvent item in base.StreamAsync(connection, request, cancellationToken).ConfigureAwait(false))
+        {
+            yield return item switch
+            {
+                LlmToolCallStartedEvent started => started with { Name = names.Logical(started.Name) ?? started.Name },
+                LlmToolCallCompletedEvent completed => completed with { ToolCall = Logical(completed.ToolCall) },
+                LlmChatCompletionEvent completion => completion with
+                {
+                    Result = completion.Result with
+                    {
+                        ToolCalls = [.. completion.Result.ToolCalls.Select(call => call is LlmToolCall function ? Logical(function) : call)]
+                    }
+                },
+                _ => item
+            };
+        }
+    }
+
+    /// <summary>The request's tool names under the OpenAI function-name rule.</summary>
+    private static LlmToolNames ToolNames(LlmChatRequest request) =>
+        LlmToolNames.Create(request.Tools.OfType<LlmToolDefinition>().Select(tool => tool.Name), IsValidFunctionName);
+
+    private static bool IsValidFunctionName(string name) =>
+        name.Length is > 0 and <= 64 && name.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
 
     protected override bool ReasonsByDefault(LlmConnection connection, string modelId) =>
         GetCapabilities(connection, modelId).SupportsReasoning != InferenceSupport.Unsupported;

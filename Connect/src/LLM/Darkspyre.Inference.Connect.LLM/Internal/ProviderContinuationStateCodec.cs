@@ -102,6 +102,24 @@ internal static class ProviderContinuationStateCodec
         }
     }
 
+    /// <summary>
+    /// Whether a message's state is bound to the connection and model and matches the message. State whose calls do not
+    /// match the visible calls, or whose arguments do not parse, is unbound.
+    /// </summary>
+    public static bool IsReplayable(LlmChatMessage message, LlmConnection connection, string modelId)
+    {
+        if (!IsBound(message.ContinuationState!, connection, modelId)) return false;
+        try
+        {
+            _ = DecodeMessage(message, connection, modelId);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
     public static JsonArray DecodeMessage(LlmChatMessage message, LlmConnection connection, string modelId)
     {
         ValidateMessage(message);
@@ -152,8 +170,10 @@ internal static class ProviderContinuationStateCodec
                 ?? throw new ArgumentException("Assistant tool-call kinds must match their opaque continuation state.");
             try
             {
+                // A provider that refuses the logical name stored the call under its alias.
                 if (call[anthropic ? "id" : "call_id"]?.GetValue<string>() != visible.Id
-                    || call["name"]?.GetValue<string>() != visible.Name
+                    || call["name"]?.GetValue<string>() is not { } stored
+                    || (stored != visible.Name && stored != LlmToolNames.Alias(visible.Name))
                     || !JsonNode.DeepEquals(anthropic ? call["input"]
                             : JsonNode.Parse(call["arguments"]!.GetValue<string>()),
                         JsonNode.Parse(visible.ArgumentsJson)))

@@ -24,7 +24,7 @@ internal static class ContinuationStateProjection
         for (int index = 0; index < messages.Length; index++)
         {
             LlmChatMessage message = request.Messages[index];
-            if (message.ContinuationState is { } state && !ProviderContinuationStateCodec.IsBound(state, connection, request.ModelId))
+            if (message.ContinuationState is not null && !ProviderContinuationStateCodec.IsReplayable(message, connection, request.ModelId))
             {
                 message = message with { ContinuationState = null };
                 omitted++;

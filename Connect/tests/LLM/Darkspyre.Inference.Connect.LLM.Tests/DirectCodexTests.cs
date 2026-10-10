@@ -296,6 +296,142 @@ public sealed class DirectCodexTests
         }
     }
 
+    private const string LongName = "mcp.server/look up";
+
+    /// <summary>A reply with reasoning state and one call under the alias of <see cref="LongName"/>.</summary>
+    private static string AliasedToolCall() => ReasonedToolCall.Replace("\"name\":\"echo\"",
+        $"\"name\":\"{LlmToolNames.Alias(LongName)}\"", StringComparison.Ordinal);
+
+    private static LlmToolDefinition LongNameTool() =>
+        new() { Name = LongName, InputSchema = JsonElement.Parse("""{"type":"object"}""") };
+
+    [Fact]
+    public async Task InvalidToolNameIsAliasedAndMappedBack()
+    {
+        string alias = LlmToolNames.Alias(LongName);
+        using var handler = new Handler(_ => Sse(AliasedToolCall()));
+        var client = new OpenAiCodexLlmClient(new HttpClient(handler));
+        LlmChatRequest request = Request() with
+        {
+            Tools = [LongNameTool()],
+            ToolChoice = new LlmToolChoice { Mode = LlmToolChoiceMode.Specific, Name = LongName },
+            Messages = [new("user", "first"),
+                new("assistant", "") { ToolCalls = [new LlmToolCall("earlier", LongName, "{}")] },
+                new("user", "") { ToolResults = [new LlmToolResult("earlier", LlmToolOutput.FromText("answer"))] }]
+        };
+
+        List<LlmStreamEvent> events = await Read(client.StreamAsync(Connection(), request));
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        Assert.Equal(alias, sent.RootElement.GetProperty("tools")[0].GetProperty("name").GetString());
+        Assert.Equal(alias, sent.RootElement.GetProperty("tool_choice").GetProperty("name").GetString());
+        Assert.Equal(alias, sent.RootElement.GetProperty("input").EnumerateArray()
+            .Single(item => item.TryGetProperty("type", out JsonElement type) && type.GetString() == "function_call")
+            .GetProperty("name").GetString());
+        Assert.DoesNotContain(LongName, handler.Body!, StringComparison.Ordinal);
+        Assert.Equal(LongName, Assert.Single(events.OfType<LlmToolCallStartedEvent>()).Name);
+        Assert.Equal(LongName, Assert.Single(events.OfType<LlmToolCallCompletedEvent>()).ToolCall.Name);
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal(LongName, Assert.IsType<LlmToolCall>(Assert.Single(result.ToolCalls)).Name);
+    }
+
+    [Fact]
+    public async Task AliasedCallsSurviveTheContinuationCheck()
+    {
+        using var handler = new Handler(_ => Sse(AliasedToolCall()));
+        var client = new OpenAiCodexLlmClient(new HttpClient(handler));
+        LlmChatRequest request = Request() with { Tools = [LongNameTool()] };
+        LlmChatResult first = await Complete(client, Connection(), request);
+        LlmChatMessage assistant = new("assistant", first.Text) { ToolCalls = first.ToolCalls, ContinuationState = first.ContinuationState };
+
+        (LlmAgentContext imported, int omitted) = ManagedAgentContext.Import(new()
+        {
+            Entries = [new("u", "t", new("user", "hello")), new("a", "t", assistant)]
+        }, Connection(), "model");
+
+        Assert.Equal(0, omitted);
+        Assert.NotNull(imported.Entries[1].Message.ContinuationState);
+        handler.Response = _ => Sse(Completed);
+        LlmChatResult next = await Complete(client, Connection(), request with
+        {
+            Messages = [new("user", "hello"), assistant,
+                new("user", "") { ToolResults = [new LlmToolResult("call", LlmToolOutput.FromText("answer"))] }]
+        });
+        Assert.Equal("Hello", next.Text);
+        Assert.Contains("opaque", handler.Body!, StringComparison.Ordinal); // The state was replayed, not dropped.
+    }
+
+    [Fact]
+    public async Task ToolSchemaIsSentUnchangedWithStrictFalse()
+    {
+        const string schema = """{"type":"object","properties":{"path":{"type":"string"}}}""";
+        using var handler = new Handler(_ => Sse(Completed));
+        var client = new OpenAiCodexLlmClient(new HttpClient(handler));
+
+        await Complete(client, Connection(), Request() with
+        {
+            Tools = [new LlmToolDefinition { Name = "read", Description = "Reads a file.", InputSchema = JsonElement.Parse(schema) }]
+        });
+
+        using var sent = JsonDocument.Parse(handler.Body!);
+        JsonElement tool = Assert.Single(sent.RootElement.GetProperty("tools").EnumerateArray());
+        Assert.Equal("function", tool.GetProperty("type").GetString());
+        Assert.Equal("read", tool.GetProperty("name").GetString());
+        Assert.Equal("Reads a file.", tool.GetProperty("description").GetString());
+        Assert.Equal(schema, tool.GetProperty("parameters").GetRawText());
+        Assert.Equal(JsonValueKind.False, tool.GetProperty("strict").ValueKind);
+    }
+
+    private static string Answer(string text)
+    {
+        string encoded = JsonSerializer.Serialize(text);
+        return "data: {\"type\":\"response.output_text.delta\",\"delta\":" + encoded + "}\n\n"
+            + "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"response\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"msg\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":"
+            + encoded + "}]}],\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"total_tokens\":7}}}\n\n";
+    }
+
+    [Fact]
+    public async Task StructuredAnswerIsValidatedLocally()
+    {
+        using var handler = new Handler(_ => Sse(Answer("[1]")));
+        var client = new OpenAiCodexLlmClient(new HttpClient(handler));
+        JsonElement strings = JsonElement.Parse("""{"type":"array","items":{"type":"string"}}""");
+
+        LlmChatResult list = await Complete(client, Connection(), Request() with
+        { StructuredOutput = new() { Name = "agent_output", Schema = strings } });
+
+        // A non-object root is not refused: the shape goes in the instructions and the answer is checked locally.
+        using (var sent = JsonDocument.Parse(handler.Body!))
+        {
+            Assert.False(sent.RootElement.TryGetProperty("text", out _));
+            Assert.Contains("Return the final answer as exactly one JSON value", sent.RootElement.GetProperty("instructions").GetString(),
+                StringComparison.Ordinal);
+        }
+        Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, list.StructuredOutput!.Enforcement);
+        Assert.True(list.StructuredOutput.WasEvaluated);
+        Assert.False(list.StructuredOutput.IsValid);
+        Assert.NotEmpty(list.StructuredOutput.Errors);
+
+        handler.Response = _ => Sse(Answer("""{"count":"many"}"""));
+        LlmChatResult record = await Complete(client, Connection(), Request() with
+        {
+            StructuredOutput = new()
+            {
+                Name = "agent_output",
+                Schema = JsonElement.Parse("""{"type":"object","properties":{"count":{"type":"integer"}},"required":["count"]}""")
+            }
+        });
+
+        using (var sent = JsonDocument.Parse(handler.Body!))
+        {
+            JsonElement format = sent.RootElement.GetProperty("text").GetProperty("format");
+            Assert.Equal("json_schema", format.GetProperty("type").GetString());
+            Assert.Equal(JsonValueKind.False, format.GetProperty("strict").ValueKind);
+        }
+        Assert.False(record.StructuredOutput!.IsValid);
+        Assert.Contains(record.StructuredOutput.Errors, error => error.StartsWith("/count:", StringComparison.Ordinal));
+    }
+
     /// <summary>A model reply with reasoning state and a tool call, then a follow-up history for another model.</summary>
     private static async Task<(Handler Handler, LlmProviderService Providers, LlmChatRequest Followup)> OtherModelFollowupAsync()
     {

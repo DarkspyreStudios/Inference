@@ -20,10 +20,11 @@ internal sealed class ManagedCodexAgentClient(OpenAiCodexLlmClient client, LlmPr
         Fence();
         void Preflight(LlmConnection selected)
         {
-            if (options.Context is not null) { ManagedAgentContext.ValidateRuntimeResources(options.Context); }
+            if (options.Context is not null && options.CallerServices?.Resources is null)
+                ManagedAgentContext.ValidateRuntimeResources(options.Context);
             var capabilities = client.GetCapabilities(selected, options.ModelId);
             HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities.HostedTools);
-            ClientTools.ValidateManagedOpening(options, capabilities);
+            ClientTools.ValidateManagedOpening(options, capabilities, supportsResources: true);
             if (capabilities.SupportsAgentSessions == InferenceSupport.Unsupported)
                 throw new NotSupportedException(NativeAgentContract.AgentSessionsUnsupported);
             if (options.Tools.Any(tool => tool is LlmAgentToolDefinition) && (capabilities.SupportsAgentToolUse == InferenceSupport.Unsupported))
