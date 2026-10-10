@@ -11,6 +11,9 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
 {
     public const string Header = "CONVERSATION SO FAR";
 
+    /// <summary>The start of every opening notice.</summary>
+    internal const string NoticeStart = "History was carried as opening context in a new provider conversation; ";
+
     /// <summary>The opening context for a session start, or null when the start supplies no entries.</summary>
     public static AgentOpeningContext? For(LlmAgentSessionOptions options, bool carriesAttachments)
     {
@@ -58,8 +61,7 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
         {
             LlmAttachments.Validate(attachments, supportsImages: true, supportsDocuments: true, parameterName: nameof(context));
         }
-        string notice = "History was carried as opening context in a new provider conversation; "
-            + $"continuation state from {omitted} earlier messages was not carried.";
+        string notice = NoticeStart + $"continuation state from {omitted} earlier messages was not carried.";
         int notCarried = uncarried + (carriesAttachments ? 0 : attachments.Length);
         if (notCarried > 0)
         {

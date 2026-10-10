@@ -48,6 +48,8 @@ internal sealed partial class ClaudeAgentClient
         // The open inner session's number; events of any other session are not recorded.
         private int _generation = -1;
         private int _nextGeneration;
+        // The inner session opened with the Host's history. Only its opening notice reaches the Host.
+        private int _hostOpening;
         private ActiveTurn? _turn;
         // The last step's reported input and output, and the record sequence at that report.
         private long? _reportedTokens;
@@ -94,6 +96,7 @@ internal sealed partial class ClaudeAgentClient
         internal async Task OpenAsync(CancellationToken cancellationToken)
         {
             await EnsureOpenAsync(cancellationToken);
+            lock (_sync) { _hostOpening = _generation; }
             ThreadId = _inner!.ThreadId;
             SessionId = _options.SessionId ?? ThreadId;
         }
@@ -303,6 +306,8 @@ internal sealed partial class ClaudeAgentClient
         private async Task<LlmAgentTurnCompletedEvent?> ForwardAsync(ActiveTurn turn, LlmAgentTurnRequest request)
         {
             ClaudeAgentSession inner = _inner ?? throw new ObjectDisposedException(nameof(ClaudeConversation));
+            bool reopened;
+            lock (_sync) { reopened = _generation != _hostOpening; }
             LlmAgentTurnCompletedEvent? completion = null;
             try
             {
@@ -310,8 +315,13 @@ internal sealed partial class ClaudeAgentClient
                 {
                     switch (item)
                     {
-                        case LlmAgentTurnStartedEvent started:
-                            lock (_sync) { turn.InnerTurnId = started.TurnId; }
+                        case LlmAgentTurnStartedEvent innerStart:
+                            lock (_sync) { turn.InnerTurnId = innerStart.TurnId; }
+                            break;
+                        case LlmAgentWarningEvent warning when reopened
+                            && warning.Message.StartsWith(AgentOpeningContext.NoticeStart, StringComparison.Ordinal):
+                            // This conversation opened the session with its own saved history, so the Host is not told
+                            // that history was carried.
                             break;
                         case LlmAgentTurnCompletedEvent completed:
                             completion = completed;
