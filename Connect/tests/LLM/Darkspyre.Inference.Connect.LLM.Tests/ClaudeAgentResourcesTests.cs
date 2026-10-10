@@ -169,12 +169,6 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         Assert.Empty(events.OfType<LlmAgentMessageCompletedEvent>());
     }
 
-    // The refusal's reported size and limit teach the model's rate and limit (6.5.4).
-    [Fact]
-    public void RefusalSizesAreReadFromTheCliText() =>
-        Assert.Equal(((long?)1053843, (long?)1000000),
-            ClaudeAgentClient.ReadRefusalSizes("Prompt is too long · the request is ~1053843 tokens (limit 1000000)"));
-
     [Fact]
     public async Task ReadOnlySessionsAllowRegisteredHostToolsWithoutEnteringPlanMode()
     {

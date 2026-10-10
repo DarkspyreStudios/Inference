@@ -830,7 +830,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                 if (_returnRequests && CurrentTarget() is HostTurn host)
                 {
                     // The call is not answered: the turn ends with the step's calls, and the CLI is interrupted.
-                    await ReturnRequestsAsync(host, message);
+                    await ReturnRequestsAsync(host);
                     return null;
                 }
                 if (PrepareToolCall(message, callId, requestId, out LlmAgentToolCall? call) is { } refusal)
@@ -949,21 +949,13 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         /// Ends the host turn with every tool use of the model's step returned unrun, each with its argument check, and
         /// interrupts the CLI. No result reaches the CLI or the host.
         /// </summary>
-        private async Task ReturnRequestsAsync(HostTurn host, JsonElement message)
+        private async Task ReturnRequestsAsync(HostTurn host)
         {
             PendingToolCall[] calls;
             lock (_route)
             {
                 calls = [.. _pendingToolCalls];
                 _pendingToolCalls.Clear();
-            }
-            if (calls.Length == 0 && message.TryGetProperty("params", out JsonElement parameters)
-                && parameters.ValueKind == JsonValueKind.Object && OptionalString(parameters, "name") is { } native)
-            {
-                // The step's tool use was not seen before its call: the call itself is returned.
-                string name = _names.Logical(native) ?? native;
-                calls = [new(ReadJsonRpcId(message.TryGetProperty("id", out JsonElement id) ? id : default) ?? Guid.NewGuid().ToString("N"),
-                    name, parameters.TryGetProperty("arguments", out JsonElement arguments) ? arguments.Clone() : JsonElement.Parse("{}"))];
             }
             foreach (PendingToolCall call in calls)
             {
