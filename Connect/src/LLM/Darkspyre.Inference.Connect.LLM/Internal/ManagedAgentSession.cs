@@ -1168,20 +1168,24 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
 
     /// <summary>
     /// Replaces the entries an opening left empty by omitting native compaction state with a summary of the transcript
-    /// turns the context no longer holds. Returns false when the turn ended because the summary failed.
+    /// turns the context no longer holds. Without a transcript the entries are dropped; with a transcript and no known
+    /// limits they stay. Returns false when the turn ended because the summary failed.
     /// </summary>
     private async Task<bool> SummarizeOmittedAsync(LiveRun run, HashSet<string> emptied, ChannelWriter<LlmAgentEvent> writer,
         CancellationToken token)
     {
         LlmAgentContext source;
         CompactionLimits? limits;
+        bool hasTranscript;
         lock (_sync)
         {
             source = _context;
             limits = Limits(run.Turn.ModelId!);
+            hasTranscript = _callerServices?.Transcript is not null;
         }
         if (limits is null)
         {
+            if (hasTranscript) return true;
             lock (_sync)
             {
                 _context = source with

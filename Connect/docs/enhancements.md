@@ -109,7 +109,7 @@ Add `LlmAgentCapabilities Agent` to `LlmProviderCapabilities`. Its fields are:
 | `ContextOwnership` | `None`, `Host`, `Provider` |
 | `SupportsContextCapture`, `SupportsContextReplacement` | Complete neutral context can be exported/imported |
 | `SupportsContextStatus` | Status operation supported; individual measurements may remain unknown |
-| `SupportsCompactionHandoff` | Same-run pause/continue around host compaction |
+| `SupportsCompactionHandoff` | Same-run pause/continue around host compaction (`CompactionResponsibility = Host`) |
 | `SupportsNativeResume` | Persisted provider thread can be reopened by ID |
 | `NativeFork` | `None`, `CurrentPosition` |
 | `CompactionOwnership` | `None`, `Host`, `Provider` |
@@ -453,6 +453,10 @@ Agent DS can display that condition; continue unless the provider reports overfl
 limit is exceeded. Do not request compaction solely because telemetry is unavailable.
 
 ## 8. Compaction pause and continuation
+
+This section is the contract for a conversation that reports `CompactionResponsibility = Host`; no
+phase-1 conversation does. Codex and Claude compact inside Inference with `ConversationCompactor` and
+never pause for the host.
 
 Before every model request, including tool follow-ups, the engine builds the projected status.
 It emits `LlmAgentContextStatusEvent`. If compaction is required, it sends no model request,

@@ -242,7 +242,7 @@ managed-session subtype or host storage interface is required.
 | Inspect current or prospective input occupancy | `await session.GetContextStatusAsync(prospectiveTurn, ct)` |
 | Capture settled context | `await session.CaptureContextAsync(options, ct)` |
 | Compact between runs | `await session.ReplaceContextAsync(replacement, expectedRevision, ct)` |
-| Compact within a run | `LlmAgentCompactionRequiredEvent` → `ContinueTurnAsync(continuation, ct)` |
+| Compact within a run | Codex and Claude: inside Inference (`ConversationCompactor`). `CompactionResponsibility = Host`: `LlmAgentCompactionRequiredEvent` → `ContinueTurnAsync(continuation, ct)` |
 | Preserve reasoning and ordered tool outputs | `LlmChatMessage.ContinuationState`, copied from `LlmChatResult.ContinuationState` |
 
 On the unpublished 11.10 development branch, session I/O/control operations use `Task`, streams
@@ -362,6 +362,9 @@ needsCompaction = UsedContextTokens >= floor(inputBudget * 0.85)
 ```
 
 ### Same-run pause protocol
+
+This protocol applies to a conversation that reports `CompactionResponsibility = Host`; no phase-1
+conversation does. Codex and Claude compact inside Inference with `ConversationCompactor` and never pause.
 
 1. Consume `RunTurnAsync` until its enumeration finishes. A `LlmAgentCompactionRequiredEvent`
    carries thread/turn/pause IDs, status, reason (`Threshold` or `ProviderOverflow`),

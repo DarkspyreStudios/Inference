@@ -3234,7 +3234,7 @@ managed stack frames before the generic failure completion. The diagnostic omits
 source-file paths and provider payloads. Agent DS records this warning in the application log,
 not in the conversation.
 
-Grok uses the separate provider-owned automatic mode, not this proposal API. A known threshold triggers
+Grok uses the separate provider-owned automatic mode. A known threshold triggers
 one `/responses/compact` call before the model step. Known hard-window excess or provider overflow ends
 `ProviderFailure` without a host handoff or over-window retry. The complete returned opaque context
 replaces transcript state once after resource/revision admission; steering queued during compaction
@@ -3280,7 +3280,8 @@ resources by their descriptors (an image 1,600, text and JSON bytes/4, a PDF one
 which the caller resolves through `IInferenceResourceAccess.GetAsync` before each measure. Accounting never opens
 resource content. The Claude CLI estimate is the local count, uncorrected. Hosts that keep continuation state keep the counts with it. Each
 Bedrock model has its own tokenizer, so a Bedrock estimate of the unreported tail is approximate and its
-diagnostic says so. Provider context-overflow errors trigger a handoff only in host-compaction mode. Catalog limits
+diagnostic says so. Provider context-overflow errors trigger a handoff only for a conversation that reports
+`CompactionResponsibility = Host`. Catalog limits
 are optional. Limits follow `CompactionLimits.For`: the reserve is the policy's, else the model's output
 limit, else 8,000; without a known window or occupancy, `NeedsCompaction` stays null.
 
@@ -4149,7 +4150,7 @@ and never consumes credits. The upstream route is evidenced in
 | --- | --- |
 | App Server dynamic tools | Host-defined tools and the Darkspyre.Inference.Connect.LLM loop |
 | Provider resume/fork | Capture complete context; start with saved/new thread identity |
-| Native compaction | Host compaction or a Codex provider-created proposal, committed through idle replacement or same-run pause/continue |
+| Native compaction | Compaction inside Inference by `ConversationCompactor`; Codex's own compaction is never requested |
 | Immediate steering | Queued safe-boundary steering |
 | CLI commands, file edits, web/MCP/subagents | Only tools the host explicitly registers and authorizes |
 | Native approval/sandbox enforcement | Host handler policy; no built-in command executor or host sandbox |
