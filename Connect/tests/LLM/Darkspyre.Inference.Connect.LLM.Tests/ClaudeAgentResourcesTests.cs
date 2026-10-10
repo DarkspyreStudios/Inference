@@ -93,7 +93,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     public async Task FailedNativeTerminalKeepsSafeErrorsWithoutPublishingDiagnosticTextAsAnAnswer()
     {
         var process = new ManualProcess();
-        await using ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        await using ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
             Runtime = new() { WorkingDirectory = _directory }
@@ -128,15 +128,16 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     }
 
     // The CLI reports the refusal twice: as an assistant message marked with an error, then as the error result. Only the
-    // result reaches the host, so the refusal is never shown as the model's reply.
+    // result reaches the host, so the refusal is never shown as the model's reply. Preserved context forwards it unchanged.
     [Fact]
     public async Task APromptTooLongForTheWindowEndsTheTurnAsAContextOverflow()
     {
         var process = new ManualProcess();
-        await using ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        await using ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
-            Runtime = new() { WorkingDirectory = _directory }
+            Runtime = new() { WorkingDirectory = _directory },
+            ExecutionOptions = new() { ContextPolicy = new() { PreserveSuppliedContext = true } }
         });
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(
@@ -172,7 +173,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     public async Task ReadOnlySessionsAllowRegisteredHostToolsWithoutEnteringPlanMode()
     {
         var factory = new Factory(new ManualProcess());
-        await using ILlmAgentSession session = await new ClaudeAgentClient(factory).StartSessionAsync("connection", Connection(), new()
+        await using ILlmAgentSession session = await Client(factory).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
             Runtime = new()
@@ -196,7 +197,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     {
         var factory = new Factory(new ManualProcess());
         string other = Directory.CreateDirectory(Path.Combine(_directory, "other")).FullName;
-        await using ILlmAgentSession session = await new ClaudeAgentClient(factory).StartSessionAsync("connection", Connection(), new()
+        await using ILlmAgentSession session = await Client(factory).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
             Runtime = new()
@@ -258,7 +259,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         LlmAgentContext restored = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(context, ConnectLlmJson.AgentContext),
             ConnectLlmJson.AgentContext)!;
         var process = new ManualProcess();
-        await using var providers = new LlmAgentProviderService(new ResourcePreparationTests.Source(Connection()), [new ClaudeAgentClient(new Factory(process))]);
+        await using var providers = new LlmAgentProviderService(new ResourcePreparationTests.Source(Connection()), [Client(new Factory(process))]);
         await using ILlmAgentSession session = await providers.StartSessionAsync("connection", new()
         {
             ModelId = "claude-test",
@@ -300,7 +301,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         var access = new ResourcePreparationTests.Resources(new("workspace", "session", 4, [reference]),
             [(reference, "reference.txt", "reference text"u8.ToArray())]);
         var factory = new Factory(new ManualProcess());
-        var client = new ClaudeAgentClient(factory);
+        var client = Client(factory);
         await Assert.ThrowsAsync<ArgumentException>(() => client.StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
@@ -322,7 +323,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         var access = new ResourcePreparationTests.Resources(new("workspace", "session", 1, [reference]),
             [(reference, "reference.txt", invalidContent ? new byte[] { 0xff } : "reference text"u8.ToArray())], cleanup);
         var process = new ManualProcess();
-        ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
         { ModelId = "claude-test", CallerServices = new() { Resources = access }, Runtime = new() { WorkingDirectory = _directory } });
         Exception failure = (await Record.ExceptionAsync(async () =>
         {
@@ -364,9 +365,12 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         var access = new ResourcePreparationTests.Resources(new("workspace", "session", 1, [reference]),
             [(reference, "reference.txt", "reference text"u8.ToArray())], readRelease: release.Task);
         var process = new ManualProcess();
-        ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
         { ModelId = "claude-test", CallerServices = new() { Resources = access }, Runtime = new() { WorkingDirectory = _directory } });
         await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("Read the file")] }).GetAsyncEnumerator();
+        // The conversation's turn start and its context status precede the inner turn.
+        Assert.True(await feed.MoveNextAsync());
+        Assert.True(await feed.MoveNextAsync());
         Task<bool> read = feed.MoveNextAsync().AsTask();
         try
         {
@@ -398,7 +402,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         var access = new ResourcePreparationTests.Resources(new("workspace", "session", 4, [generated, reference]),
             [(reference, "reference.txt", "reference text"u8.ToArray()), (generated, "result.json", "{\"answer\":42}"u8.ToArray())]);
         var process = new ManualProcess();
-        await using ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        await using ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
             Runtime = new() { WorkingDirectory = _directory },
@@ -407,16 +411,19 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
             ToolHandler = (_, _) => Task.FromResult(new LlmToolOutput { Parts = [new LlmToolOutputSessionResource(generated)] })
         });
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await using IAsyncEnumerator<LlmAgentEvent> feed = session.ObserveAsync(limit.Token).GetAsyncEnumerator(limit.Token);
+        await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, process, limit.Token);
+        // The turn's input carried the selection; the tool's result reads only the resource it names.
+        int reads = access.Reads.Count;
+        int releases = access.ReleaseAttempts;
         process.Push(ToolUse("tu1"));
         process.Push(ToolCall("c1", 7));
         JsonElement answer = await AnswerFor(process, "c1");
         JsonElement resource = Assert.Single(answer.GetProperty("result").GetProperty("content").EnumerateArray()).GetProperty("resource");
         Assert.Equal("application/json", resource.GetProperty("mimeType").GetString());
         Assert.Equal("{\"answer\":42}", resource.GetProperty("text").GetString());
-        Assert.Single(access.Reads);
-        Assert.False(access.Reads[0].CanRead);
-        Assert.Equal(1, access.ReleaseAttempts);
+        Assert.Equal(reads + 1, access.Reads.Count);
+        Assert.False(access.Reads[^1].CanRead);
+        Assert.Equal(releases + 1, access.ReleaseAttempts);
         process.Push(new { type = "result", subtype = "success", is_error = false, result = "answer", stop_reason = "end_turn" });
         List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
         LlmAgentToolEvent tool = Assert.Single(events.OfType<LlmAgentToolEvent>(), item => item.Output is not null);
@@ -431,7 +438,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         var access = new ResourcePreparationTests.Resources(new("workspace", "session", 4, [generated]),
             [(generated, "result.pdf", "%PDF-1.7\nactual generated content"u8.ToArray())]);
         var process = new ManualProcess();
-        await using ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        await using ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
             Runtime = new() { WorkingDirectory = _directory },
@@ -457,7 +464,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         var process = new ManualProcess();
         var factory = new Factory(process);
         var seen = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using ILlmAgentSession session = await new ClaudeAgentClient(factory).StartSessionAsync("connection", Connection(), new()
+        await using ILlmAgentSession session = await Client(factory).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
             Runtime = new() { WorkingDirectory = _directory },
@@ -465,7 +472,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
             ToolHandler = (call, _) => { seen.TrySetResult(call.Name); return Task.FromResult(LlmToolOutput.FromText("done")); }
         });
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await using IAsyncEnumerator<LlmAgentEvent> feed = session.ObserveAsync(limit.Token).GetAsyncEnumerator(limit.Token);
+        await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, process, limit.Token);
 
         IReadOnlyList<string> arguments = factory.Invocation!.Arguments;
         Assert.Contains($"mcp__darkspyre-inference-connect__{alias}", arguments[arguments.ToList().IndexOf("--allowedTools") + 1].Split(','));
@@ -488,7 +495,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     {
         var process = new ManualProcess();
         var received = new List<JsonElement>();
-        await using ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        await using ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
             Runtime = new() { WorkingDirectory = _directory },
@@ -525,7 +532,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         var first = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         int calls = 0;
-        await using ILlmAgentSession session = await new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        await using ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
             Runtime = new() { WorkingDirectory = _directory },
@@ -609,28 +616,6 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     }
 
     [Fact]
-    public async Task ARuntimeStartedTurnArrivesOnTheSessionFeed()
-    {
-        var process = new ManualProcess();
-        await using ILlmAgentSession session = await Start(process);
-        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await using IAsyncEnumerator<LlmAgentEvent> feed = session.ObserveAsync(limit.Token).GetAsyncEnumerator(limit.Token);
-
-        process.Push(new { type = "assistant", message = new { id = "m1", content = new object[] { new { type = "text", text = "It finished." } } } });
-        process.Push(new { type = "result", subtype = "success", is_error = false, result = "It finished." });
-        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
-
-        LlmAgentProviderTurnStartedEvent started = Assert.Single(events.OfType<LlmAgentProviderTurnStartedEvent>());
-        Assert.Null(started.ResourceId);
-        Assert.Equal("It finished.", Assert.Single(events.OfType<LlmAgentMessageCompletedEvent>()).Text);
-        Assert.Equal(started.TurnId, Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]).TurnId);
-        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-        {
-            await foreach (LlmAgentEvent _ in session.ObserveAsync()) { }
-        });
-    }
-
-    [Fact]
     public async Task AHostToolCallRunsOffTheReaderAndTheCliCanCancelIt()
     {
         var process = new ManualProcess();
@@ -642,7 +627,6 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
             return LlmToolOutput.FromText("unreachable");
         });
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await using IAsyncEnumerator<LlmAgentEvent> feed = session.ObserveAsync(limit.Token).GetAsyncEnumerator(limit.Token);
         process.Push(ToolUse("tu1"));
         process.Push(ToolCall("c1", 7));
         CancellationToken token = await entered.Task.WaitAsync(limit.Token);
@@ -658,17 +642,323 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         Assert.Equal(JsonValueKind.Object, (await AnswerFor(process, "c2")).GetProperty("result").ValueKind);
         AssertMcpWire(process, "c1", "{\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{\"content\":[{\"type\":\"text\",\"text\":\"The tool call was cancelled.\"}],\"isError\":true}}");
         AssertMcpWire(process, "c2", "{\"jsonrpc\":\"2.0\",\"id\":0,\"result\":{}}");
+    }
 
-        process.Push(new { type = "result", subtype = "success", is_error = false, result = "" });
-        List<LlmAgentEvent> turn = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
-        Assert.DoesNotContain(turn, item => item is LlmAgentToolEvent { ItemId: "tu1", Status: not "inProgress" });
+    [Fact]
+    public async Task ReturnRequestsInterruptsAndReturnsCalls()
+    {
+        var process = new ManualProcess();
+        var factory = new Factory(process);
+        int handled = 0;
+        await using ILlmAgentSession session = await Client(factory).StartSessionAsync("connection", Connection(), new()
+        {
+            ModelId = "claude-test",
+            Runtime = new() { WorkingDirectory = _directory },
+            Tools = [new LlmAgentToolDefinition
+            {
+                Name = "count",
+                InputSchema = JsonElement.Parse("""{"type":"object","properties":{"n":{"type":"integer"}},"required":["n"]}""")
+            }],
+            ToolHandling = LlmAgentToolHandling.ReturnRequests,
+            ToolHandler = (_, _) => { Interlocked.Increment(ref handled); return Task.FromResult(LlmToolOutput.FromText("counted")); }
+        });
+        Assert.Contains("--no-session-persistence", factory.Invocation!.Arguments);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, process, limit.Token);
+
+        process.Push(new
+        {
+            type = "assistant",
+            message = new
+            {
+                id = "m1",
+                content = new object[]
+                {
+                    new { type = "text", text = "Counting." },
+                    new { type = "tool_use", id = "tu1", name = "mcp__darkspyre-inference-connect__count", input = new { n = 1 } },
+                    new { type = "tool_use", id = "tu2", name = "mcp__darkspyre-inference-connect__count", input = new { n = "many" } }
+                }
+            }
+        });
+        process.Push(ToolCall("c1", 1, "count", new { n = 1 }));
+        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+
+        Assert.Equal(LlmAgentCompletionReason.ToolRequests, Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]).Reason);
+        LlmAgentToolEvent[] returned = [.. events.OfType<LlmAgentToolEvent>().Where(item => item.Status != "inProgress")];
+        Assert.Equal(["tu1", "tu2"], returned.Select(item => item.ItemId));
+        Assert.Equal(("returned", (bool?)null), (returned[0].Status, returned[0].Success));
+        Assert.Equal(("failed", (bool?)false), (returned[1].Status, returned[1].Success));
+        Assert.StartsWith("Tool 'count' arguments were rejected:", Assert.IsType<LlmToolOutputText>(Assert.Single(returned[1].Output!.Parts)).Text,
+            StringComparison.Ordinal);
+        Assert.All(events, item => Assert.Equal(events[0].TurnId, item.TurnId));
+        Assert.Equal(0, handled);
+        Assert.DoesNotContain(process.Writes(), root => root.GetProperty("type").GetString() == "control_response"
+            && root.GetProperty("response").GetProperty("request_id").GetString() == "c1");
+        Assert.Contains(process.Requests(), request => request.GetProperty("subtype").GetString() == "interrupt");
+        Assert.Equal(1, process.Disposals);
+    }
+
+    [Fact]
+    public async Task OpeningOverTriggerIsCompactedBeforeWrite()
+    {
+        // A history that fits is sent whole.
+        var fits = new ManualProcess();
+        await using (ILlmAgentSession session = await Client(new Factory(fits)).StartSessionAsync("connection", Connection(),
+            Options(History(("t1", "first question", "first answer")), Window(4000))))
+        {
+            List<LlmAgentEvent> events = await CompleteTurnAsync(session, fits);
+            Assert.Empty(events.OfType<LlmAgentCompactedEvent>());
+            Assert.Contains("first question", UserText(fits), StringComparison.Ordinal);
+        }
+
+        // A switched history over the trigger is compacted before the first write, and the unused CLI is closed.
+        var first = new ManualProcess();
+        var second = new ManualProcess();
+        var summaries = new Summaries();
+        await using ILlmAgentSession compacted = await Client(new Factory(first, second), summaries).StartSessionAsync("connection",
+            Connection(), Options(History(("t1", Words("alpha", 4000), "first answer"), ("t2", "second question", "second answer")), Window(4000)));
+        List<LlmAgentEvent> turn = await CompleteTurnAsync(compacted, second);
+
+        Assert.Equal(2, Assert.Single(turn.OfType<LlmAgentCompactedEvent>()).DroppedMessageCount);
+        Assert.NotEmpty(summaries.Invocations);
+        Assert.DoesNotContain(first.Writes(), item => item.GetProperty("type").GetString() == "user");
+        Assert.Equal(1, first.Disposals);
+        string sent = UserText(second);
+        Assert.Contains("summary of the earlier work", sent, StringComparison.Ordinal);
+        Assert.Contains("second question", sent, StringComparison.Ordinal);
+        Assert.DoesNotContain("alpha alpha", sent, StringComparison.Ordinal);
+        Assert.All(turn, item => Assert.Equal(turn[0].TurnId, item.TurnId));
+    }
+
+    [Fact]
+    public async Task MidTurnTriggerReopensWithoutRepeatingTools()
+    {
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        int calls = 0;
+        async Task<(ILlmAgentSession Session, IAsyncEnumerator<LlmAgentEvent> Feed, List<LlmAgentEvent> Events)> RunToTriggerAsync(
+            ManualProcess first, Factory factory)
+        {
+            ILlmAgentSession session = await Client(factory).StartSessionAsync("connection", Connection(), Options(null, Window(4000)) with
+            {
+                Tools = [new LlmAgentToolDefinition { Name = "fetch", InputSchema = Json(new { type = "object" }) }],
+                ToolHandler = (_, _) => { Interlocked.Increment(ref calls); return Task.FromResult(LlmToolOutput.FromText(Words("beta", 4000))); }
+            });
+            IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, first, limit.Token);
+            List<LlmAgentEvent> events = [feed.Current];
+            first.Push(ToolUse("tu1", "fetch"));
+            first.Push(new { type = "stream_event", @event = new { type = "message_stop" } });
+            first.Push(ToolCall("c1", 1, "fetch"));
+            return (session, feed, events);
+        }
+
+        // The settled step measures over the trigger: the result stays unwritten and a new CLI continues from the
+        // compacted history, which holds the call and its shortened result.
+        var first = new ManualProcess();
+        var second = new ManualProcess();
+        var (session, feed, events) = await RunToTriggerAsync(first, new Factory(first, second));
+        await using (session)
+        await using (feed)
+        {
+            string continued = await second.WaitForUserMessage(limit.Token);
+            string sent = UserText(second);
+            Assert.Contains("Continue from where you stopped.", sent, StringComparison.Ordinal);
+            Assert.Contains("removed by compaction.]", sent, StringComparison.Ordinal);
+            second.Push(new { type = "user", uuid = continued, isReplay = true });
+            second.Push(new { type = "assistant", message = new { id = "m2", content = new[] { new { type = "text", text = "done" } } } });
+            second.Push(new { type = "result", subtype = "success", is_error = false, result = "done", stop_reason = "end_turn" });
+            events.AddRange(await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent));
+
+            Assert.Equal(LlmAgentCompletionReason.Completed, Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]).Reason);
+            LlmAgentCompactedEvent compacted = Assert.Single(events.OfType<LlmAgentCompactedEvent>());
+            Assert.Equal(1, compacted.ShortenedToolOutputCount);
+            Assert.Equal(1, calls);
+            Assert.DoesNotContain(first.Writes(), root => root.GetProperty("type").GetString() == "control_response"
+                && root.GetProperty("response").GetProperty("request_id").GetString() == "c1");
+            Assert.Equal(1, first.Disposals);
+            Assert.All(events, item => Assert.Equal(events[0].TurnId, item.TurnId));
+        }
+
+        // An interrupt during the reopen ends the turn as interrupted and leaves the saved history unchanged.
+        var gate = new TaskCompletionSource();
+        var held = new ManualProcess();
+        var factory = new Factory(held, new ManualProcess()) { ReopenGate = gate.Task };
+        (session, feed, events) = await RunToTriggerAsync(held, factory);
+        await using (session)
+        await using (feed)
+        {
+            await factory.ReopenEntered.Task.WaitAsync(limit.Token);
+            await session.InterruptAsync(events[0].TurnId!, limit.Token);
+            events.AddRange(await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent));
+
+            Assert.Equal(LlmAgentCompletionReason.Interruption, Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]).Reason);
+            Assert.Empty(events.OfType<LlmAgentCompactedEvent>());
+            LlmAgentContextStatus atTrigger = events.OfType<LlmAgentContextStatusEvent>().Last().Status;
+            Assert.True(atTrigger.NeedsCompaction);
+            LlmAgentContextStatus after = await session.GetContextStatusAsync(cancellationToken: limit.Token);
+            Assert.Equal((atTrigger.ContextRevision, atTrigger.UsedContextTokens), (after.ContextRevision, after.UsedContextTokens));
+        }
+        Assert.Equal(2, calls);
+    }
+
+    [Fact]
+    public async Task RefusalReopensFromSavedHistoryOnce()
+    {
+        const string TooLong = "Prompt is too long: 1200 tokens > 1000 maximum";
+        LlmAgentSessionOptions options = Options(History(("t1", Words("alpha", 1000), "first answer")),
+            new() { ContextPolicy = new() { ReservedOutputTokens = 100 } });
+
+        // The first refusal is compacted and sent once more from the saved history in a new CLI session.
+        var first = new ManualProcess();
+        var second = new ManualProcess();
+        var factory = new Factory(first, second);
+        await using (ILlmAgentSession session = await Client(factory).StartSessionAsync("connection", Connection(), options))
+        {
+            List<LlmAgentEvent> events = await RefuseThenAnswerAsync(session, first, second, refuseAgain: false);
+
+            LlmAgentTurnCompletedEvent completed = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+            Assert.Equal(LlmAgentCompletionReason.Completed, completed.Reason);
+            Assert.False(completed.IsContextOverflow);
+            Assert.Equal(2, Assert.Single(events.OfType<LlmAgentCompactedEvent>()).DroppedMessageCount);
+            Assert.Equal(1, first.Disposals);
+            string sent = UserText(second);
+            Assert.Contains("hello", sent, StringComparison.Ordinal);
+            Assert.Contains("summary of the earlier work", sent, StringComparison.Ordinal);
+            Assert.DoesNotContain("alpha alpha", sent, StringComparison.Ordinal);
+            IReadOnlyList<ClaudeCliSessionInvocation> started = factory.Invocations;
+            Assert.Equal(2, started.Count);
+            Assert.All(started, invocation => Assert.DoesNotContain("--resume", invocation.Arguments));
+            Assert.NotEqual(started[0].Arguments.Single(item => item.StartsWith("--session-id=", StringComparison.Ordinal)),
+                started[1].Arguments.Single(item => item.StartsWith("--session-id=", StringComparison.Ordinal)));
+        }
+
+        // A second refusal in the turn ends it with the provider's reason, and nothing is retried.
+        first = new ManualProcess();
+        second = new ManualProcess();
+        factory = new Factory(first, second);
+        await using (ILlmAgentSession session = await Client(factory).StartSessionAsync("connection", Connection(), options))
+        {
+            List<LlmAgentEvent> events = await RefuseThenAnswerAsync(session, first, second, refuseAgain: true);
+
+            LlmAgentTurnCompletedEvent completed = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+            Assert.Equal(LlmAgentCompletionReason.ProviderFailure, completed.Reason);
+            Assert.True(completed.IsContextOverflow);
+            Assert.Equal(2, factory.Invocations.Count);
+        }
+
+        async Task<List<LlmAgentEvent>> RefuseThenAnswerAsync(ILlmAgentSession session, ManualProcess refused, ManualProcess next,
+            bool refuseAgain)
+        {
+            using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, refused, limit.Token, "hello");
+            List<LlmAgentEvent> events = [feed.Current];
+            refused.Push(new { type = "result", subtype = "success", is_error = true, result = TooLong });
+            string resent = await next.WaitForUserMessage(limit.Token);
+            next.Push(new { type = "user", uuid = resent, isReplay = true });
+            next.Push(refuseAgain
+                ? new { type = "result", subtype = "success", is_error = true, result = TooLong }
+                : new { type = "result", subtype = "success", is_error = false, result = "answer" });
+            events.AddRange(await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent));
+            return events;
+        }
+    }
+
+    [Fact]
+    public async Task CompactNowReopensFromTheCompactedHistory()
+    {
+        var first = new ManualProcess();
+        var second = new ManualProcess();
+        var factory = new Factory(first, second);
+        await using ILlmAgentSession session = await Client(factory).StartSessionAsync("connection", Connection(),
+            Options(History(("t1", Words("alpha", 2000), "first answer"), ("t2", "second question", "second answer")), Window(4000)));
+
+        LlmAgentCompactedEvent? compacted = await session.CompactNowAsync();
+
+        Assert.NotNull(compacted);
+        Assert.Equal(2, compacted.DroppedMessageCount);
+        Assert.Equal("t2", compacted.TurnId);
+        Assert.Equal(1, first.Disposals);
+        Assert.Equal(2, factory.Invocations.Count);
+        await CompleteTurnAsync(session, second);
+        string sent = UserText(second);
+        Assert.Contains("summary of the earlier work", sent, StringComparison.Ordinal);
+        Assert.Contains("second question", sent, StringComparison.Ordinal);
+        Assert.DoesNotContain("alpha alpha", sent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ContextStatusReportsUsedAndTotal()
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(),
+            Options(History(("t1", "first question", "first answer")), null) with { ModelId = "claude-sonnet-4-5" });
+
+        LlmAgentContextStatus status = await session.GetContextStatusAsync();
+        LlmAgentContextStatus prospective = await session.GetContextStatusAsync(new() { Input = [new LlmAgentTextContent(Words("gamma", 100))] });
+
+        Assert.Equal(200_000, status.MaxContextTokens);
+        Assert.True(status.UsedContextTokens > 0);
+        Assert.False(status.NeedsCompaction);
+        Assert.Equal(LlmContextMeasurementSource.Estimated, status.Source);
+        Assert.True(prospective.UsedContextTokens >= status.UsedContextTokens + 100);
+    }
+
+    private LlmAgentSessionOptions Options(LlmAgentContext? context, LlmAgentExecutionOptions? execution) => new()
+    {
+        ModelId = "claude-test",
+        Runtime = new() { WorkingDirectory = _directory },
+        Context = context,
+        ExecutionOptions = execution
+    };
+
+    /// <summary>A window of <paramref name="tokens"/> with a 100-token output reserve.</summary>
+    private static LlmAgentExecutionOptions Window(long tokens) =>
+        new() { ContextPolicy = new() { MaxContextTokens = tokens, ReservedOutputTokens = 100 } };
+
+    private static LlmAgentContext History(params (string TurnId, string User, string Assistant)[] turns) => new()
+    {
+        Entries = [.. turns.SelectMany(turn => new LlmAgentContextEntry[]
+        {
+            new($"{turn.TurnId}-user", turn.TurnId, new("user", turn.User)),
+            new($"{turn.TurnId}-assistant", turn.TurnId, new("assistant", turn.Assistant))
+        })]
+    };
+
+    private static string Words(string word, int count) => string.Concat(Enumerable.Repeat(word + " ", count));
+
+    /// <summary>The text the CLI received in its first user message.</summary>
+    private static string UserText(ManualProcess process) => string.Join("\n", process.Writes()
+        .First(item => item.GetProperty("type").GetString() == "user").GetProperty("message").GetProperty("content")
+        .EnumerateArray().Where(part => part.GetProperty("type").GetString() == "text").Select(part => part.GetProperty("text").GetString()));
+
+    /// <summary>Runs one turn the CLI answers with "done".</summary>
+    private static async Task<List<LlmAgentEvent>> CompleteTurnAsync(ILlmAgentSession session, ManualProcess process)
+    {
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, process, limit.Token);
+        List<LlmAgentEvent> events = [feed.Current];
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "done", stop_reason = "end_turn" });
+        events.AddRange(await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent));
+        return events;
+    }
+
+    /// <summary>Starts a host turn and echoes its input, so the CLI output that follows belongs to it.</summary>
+    private static async Task<IAsyncEnumerator<LlmAgentEvent>> HostTurnAsync(ILlmAgentSession session, ManualProcess process,
+        CancellationToken token, string input = "go", int index = 0)
+    {
+        IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(new() { Input = [new LlmAgentTextContent(input)] }, token)
+            .GetAsyncEnumerator(token);
+        Assert.True(await feed.MoveNextAsync());
+        Assert.IsType<LlmAgentTurnStartedEvent>(feed.Current);
+        string turnId = await process.WaitForUserMessage(token, index);
+        process.Push(new { type = "user", uuid = turnId, isReplay = true });
+        return feed;
     }
 
     private Task<ILlmAgentSession> Start(ManualProcess process, LlmConnection? connection = null) =>
-        new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", connection ?? Connection(), new() { ModelId = "claude-test", Runtime = new() { WorkingDirectory = _directory } });
+        Client(new Factory(process)).StartSessionAsync("connection", connection ?? Connection(), new() { ModelId = "claude-test", Runtime = new() { WorkingDirectory = _directory } });
 
     private Task<ILlmAgentSession> StartWithTool(ManualProcess process, LlmAgentToolHandler handler) =>
-        new ClaudeAgentClient(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
             Runtime = new() { WorkingDirectory = _directory },
@@ -745,14 +1035,55 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         return events;
     }
 
-    private sealed class Factory(IClaudeCliSessionProcess process) : IClaudeCliSessionProcessFactory
-    {
-        public ClaudeCliSessionInvocation? Invocation { get; private set; }
+    private static readonly HttpClient Http = new();
 
-        public Task<IClaudeCliSessionProcess> StartAsync(ClaudeCliSessionInvocation invocation, CancellationToken cancellationToken = default)
+    private static ClaudeAgentClient Client(IClaudeCliSessionProcessFactory factory, Summaries? summaries = null) =>
+        new(factory, new ClaudeCliLlmClient(Http, summaries ?? new Summaries(), factory), new LearnedModelContext());
+
+    /// <summary>Starts the given processes in order; the last one serves every later start.</summary>
+    private sealed class Factory(params IClaudeCliSessionProcess[] processes) : IClaudeCliSessionProcessFactory
+    {
+        private readonly List<ClaudeCliSessionInvocation> _invocations = [];
+
+        /// <summary>When set, the second and later starts wait for it.</summary>
+        public Task? ReopenGate { get; init; }
+
+        public TaskCompletionSource ReopenEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ClaudeCliSessionInvocation? Invocation { get { lock (_invocations) return _invocations.Count == 0 ? null : _invocations[^1]; } }
+
+        public IReadOnlyList<ClaudeCliSessionInvocation> Invocations { get { lock (_invocations) return [.. _invocations]; } }
+
+        public async Task<IClaudeCliSessionProcess> StartAsync(ClaudeCliSessionInvocation invocation, CancellationToken cancellationToken = default)
         {
-            Invocation = invocation;
-            return Task.FromResult(process);
+            int index;
+            lock (_invocations)
+            {
+                index = _invocations.Count;
+                _invocations.Add(invocation);
+            }
+            if (index > 0 && ReopenGate is { } gate)
+            {
+                ReopenEntered.TrySetResult();
+                await gate.WaitAsync(cancellationToken);
+            }
+            return processes[Math.Min(index, processes.Length - 1)];
+        }
+    }
+
+    /// <summary>The print-mode CLI behind summary side requests: every request returns the same summary.</summary>
+    private sealed class Summaries(string text = "summary of the earlier work") : IClaudeCliRunner
+    {
+        public ConcurrentQueue<ClaudeCliInvocation> Invocations { get; } = new();
+
+        public Task<ClaudeCliProcessResult> RunAsync(ClaudeCliInvocation invocation, CancellationToken cancellationToken = default)
+        {
+            Invocations.Enqueue(invocation);
+            return Task.FromResult(new ClaudeCliProcessResult(0, JsonSerializer.Serialize(new
+            {
+                type = "result", subtype = "success", is_error = false, result = text, stop_reason = "end_turn",
+                usage = new { input_tokens = 7, output_tokens = 3 }
+            }), string.Empty));
         }
     }
 

@@ -17,14 +17,14 @@ internal static class NativeAgentContract
         SupportsShellTools = InferenceSupport.Unsupported,
         SupportsContextCapture = InferenceSupport.Unsupported,
         SupportsContextReplacement = InferenceSupport.Unsupported,
-        // Claude answers context status once ClaudeConversation measures its own history.
-        SupportsContextStatus = InferenceSupport.Unsupported,
+        // ClaudeConversation measures its own saved history.
+        SupportsContextStatus = InferenceSupport.Supported,
         SupportsCompactionHandoff = InferenceSupport.Unsupported,
         SupportsNativeResume = InferenceSupport.Unsupported,
         SupportsSteering = InferenceSupport.Unsupported,
         SupportsInterrupt = InferenceSupport.Supported,
         SupportsExternalToolHandoff = InferenceSupport.Unknown,
-        SupportsCompactNow = InferenceSupport.Unsupported,
+        SupportsCompactNow = InferenceSupport.Supported,
         SupportsFallbackModels = InferenceSupport.Unknown,
         SupportsTurnCap = InferenceSupport.Unknown,
         SupportsSpendCap = InferenceSupport.Unknown,

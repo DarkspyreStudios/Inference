@@ -20,6 +20,8 @@ internal sealed class ClaudeCliSessionProcessFactory(ClaudeCliExits exits) : ICl
         {
             StartInfo = CliProcessLauncher.CreateStartInfo(cliInvocation.Executable, cliInvocation.Arguments, cliInvocation.WorkingDirectory)
         };
+        // The conversation compacts its own history; the CLI never compacts on its own.
+        process.StartInfo.Environment["DISABLE_COMPACT"] = "1";
         try
         {
             if (!process.Start())

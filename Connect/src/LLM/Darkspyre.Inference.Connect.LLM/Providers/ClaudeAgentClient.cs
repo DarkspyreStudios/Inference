@@ -11,9 +11,12 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-/// <summary>Session-oriented agent adapter over the official Claude CLI SDK protocol.</summary>
-internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processFactory)
-    : ILlmAgentClient
+/// <summary>
+/// Session-oriented agent adapter over the official Claude CLI SDK protocol. The Host holds a
+/// <see cref="ClaudeConversation"/>, which owns the saved history and runs each CLI process as an inner session.
+/// </summary>
+internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory processFactory,
+    ClaudeCliLlmClient chat, LearnedModelContext learned) : ILlmAgentClient
 {
     private const string McpServerName = "darkspyre-inference-connect";
 
@@ -29,32 +32,17 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, NativeAgentContract.Claude.HostedTools);
         // The CLI owns its id, so ThreadId is ignored. The runtime policy is accepted and not read: no provider tool runs.
         string workingDirectory = options.Runtime?.WorkingDirectory ?? Environment.CurrentDirectory;
-        bool ephemeral = options.Runtime?.Ephemeral ?? false;
+        // Returned tool calls are never answered, so the CLI keeps no record of the interrupted session.
+        bool ephemeral = (options.Runtime?.Ephemeral ?? false) || options.ToolHandling == LlmAgentToolHandling.ReturnRequests;
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude, supportsAgentToolUse: true,
             options.ModelId, options.Tools, options.ToolHandler);
         ClaudeCliConfiguration.ValidateConnection(connection);
         ValidateOptions(options.ModelId, workingDirectory);
-        // The first definition of a duplicated name is the one used.
-        LlmAgentToolDefinition[] tools = [.. ClientTools.Functions(options.Tools).DistinctBy(tool => tool.Name, StringComparer.Ordinal)];
-        (LlmAgentContext? Context, int Omitted) opening = AgentOpeningContext.Validate(options, supportsResources: true);
-        if (options.CallerServices?.Resources is null && opening.Context is { } context)
-            _ = AgentOpeningContext.From(context, opening.Omitted, carriesAttachments: true);
-        string threadId = Guid.NewGuid().ToString();
-        return await CreateSessionAsync(
-            threadId,
-            threadId,
-            ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint),
-            options.ModelId,
-            workingDirectory,
-            options.Instructions,
-            tools,
-            options.ToolHandler,
-            ephemeral,
-            connection,
-            NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
-            opening,
-            options.CallerServices?.Resources,
-            cancellationToken);
+        LlmAgentContext history = options.Context is null ? new()
+            : ManagedAgentContext.WithoutContinuationState(options.Context, supportsResources: true).Context;
+        var conversation = new ClaudeConversation(this, connectionId, connection, options, workingDirectory, ephemeral, history);
+        await conversation.OpenAsync(cancellationToken);
+        return conversation;
     }
 
     private static async Task<InferenceResourceSelectionVersion?> ReadResourceScopeAsync(
@@ -79,23 +67,24 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         return new(selection.WorkspaceId, selection.SessionId, selection.Revision);
     }
 
+    /// <summary>Starts one CLI process and its session, with <paramref name="opening"/> sent before the first input.</summary>
     [SuppressMessage("Design", "CA1031", Justification = "Failed opening preserves both the original failure and a genuine retirement failure.")]
-    private async Task<ILlmAgentSession> CreateSessionAsync(
-        string threadId,
-        string sessionId,
-        string executable,
-        string? modelId,
-        string workingDirectory,
-        string? instructions,
-        IReadOnlyList<LlmAgentToolDefinition> tools,
-        LlmAgentToolHandler? toolHandler,
-        bool ephemeral,
-        LlmConnection connection,
-        LlmRichContentSupported richContent,
-        (LlmAgentContext? Context, int Omitted) opening,
-        IInferenceResourceAccess? resourceAccess,
+    private async Task<ClaudeAgentSession> OpenInnerAsync(string connectionId, LlmConnection connection,
+        LlmAgentSessionOptions options, string workingDirectory, bool ephemeral, LlmAgentContext opening,
+        Action<LlmAgentEvent> record, Func<CancellationToken, ValueTask<bool>> beforeResults,
         CancellationToken cancellationToken)
     {
+        string threadId = Guid.NewGuid().ToString();
+        string? modelId = options.ModelId;
+        // The first definition of a duplicated name is the one used.
+        IReadOnlyList<LlmAgentToolDefinition> tools = [.. ClientTools.Functions(options.Tools).DistinctBy(tool => tool.Name, StringComparer.Ordinal)];
+        // An empty history with no resource selection opens like a start without context.
+        bool empty = opening.Entries.Count == 0 && opening.ResourceSelectionVersion is null && opening.SelectedResources.Count == 0;
+        (LlmAgentContext? Context, int Omitted) openingContext = AgentOpeningContext.Validate(
+            options with { Context = empty ? null : opening }, supportsResources: true);
+        if (options.CallerServices?.Resources is null && openingContext.Context is { } context)
+            _ = AgentOpeningContext.From(context, openingContext.Omitted, carriesAttachments: true);
+        IInferenceResourceAccess? resourceAccess = options.CallerServices?.Resources;
         string normalizedDirectory = CliInfrastructure.NormalizeWorkingDirectory(workingDirectory);
         LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(connection, modelId);
         LlmToolNames names = LlmToolNames.Create(tools.Select(tool => tool.Name), IsValidMcpToolName);
@@ -106,13 +95,13 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             names,
             ephemeral,
             (capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
-        InferenceResourceSelectionVersion? resourceScope = await ReadResourceScopeAsync(resourceAccess, opening.Context, cancellationToken);
+        InferenceResourceSelectionVersion? resourceScope = await ReadResourceScopeAsync(resourceAccess, openingContext.Context, cancellationToken);
         IClaudeCliSessionProcess process;
         try
         {
             process = await processFactory.StartAsync(
                 new ClaudeCliSessionInvocation(
-                    executable,
+                    ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint),
                     arguments,
                     normalizedDirectory),
                 cancellationToken);
@@ -125,21 +114,24 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         var session = new ClaudeAgentSession(
             process,
             threadId,
-            sessionId,
+            threadId,
             modelId,
             tools,
             names,
-            toolHandler,
+            options.ToolHandler,
+            options.ToolHandling == LlmAgentToolHandling.ReturnRequests,
             NativeAgentContract.Claude.RichContentSupported.For(connection, null),
-            richContent,
-            opening,
+            NativeAgentContract.Claude.RichContentSupported.For(connection, modelId),
+            openingContext,
             resourceAccess,
             resourceScope,
-            connection);
+            connection,
+            record,
+            beforeResults);
         try
         {
             session.Start();
-            await session.InitializeAsync(instructions, (capabilities.SupportsReasoningText != InferenceSupport.Unsupported), cancellationToken);
+            await session.InitializeAsync(options.Instructions, (capabilities.SupportsReasoningText != InferenceSupport.Unsupported), cancellationToken);
             return session;
         }
         catch (Exception original)
@@ -264,6 +256,15 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private readonly InferenceResourceSelectionVersion? _resourceScope;
         private string? _activeTurnId;
         private bool _disposed;
+        // Called with every event of a host turn before it is queued, so the conversation records it in order.
+        private readonly Action<LlmAgentEvent> _record;
+        // Decision point (b): asked when a model step's last bridge call settles, before its response is written.
+        private readonly Func<CancellationToken, ValueTask<bool>> _beforeResults;
+        // LlmAgentToolHandling.ReturnRequests: the first bridge call ends the turn with the step's calls unrun.
+        private readonly bool _returnRequests;
+        // The running model message has ended (its message_stop was read); _route guards it.
+        private bool _messageStopped;
+        private LlmUsage? _lastStepUsage;
 
         public ClaudeAgentSession(
             IClaudeCliSessionProcess process,
@@ -273,14 +274,20 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             IReadOnlyList<LlmAgentToolDefinition> tools,
             LlmToolNames names,
             LlmAgentToolHandler? toolHandler,
+            bool returnRequests,
             LlmRichContentSupported richRoute,
             LlmRichContentSupported richContent,
             (LlmAgentContext? Context, int Omitted) opening,
             IInferenceResourceAccess? resourceAccess,
             InferenceResourceSelectionVersion? resourceScope,
-            LlmConnection connection)
+            LlmConnection connection,
+            Action<LlmAgentEvent> record,
+            Func<CancellationToken, ValueTask<bool>> beforeResults)
         {
             _process = process;
+            _record = record;
+            _beforeResults = beforeResults;
+            _returnRequests = returnRequests;
             _richRoute = richRoute;
             _richContent = richContent;
             (_openingContext, _openingOmitted) = opening;
@@ -299,6 +306,15 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         public string ThreadId { get; }
 
         public string SessionId { get; }
+
+        /// <summary>The connection with the catalog this session's <c>initialize</c> attached.</summary>
+        internal LlmConnection Connection => _connection;
+
+        /// <summary>The usage the CLI last reported for one model step; null until it reports one.</summary>
+        internal LlmUsage? LastStepUsage => Volatile.Read(ref _lastStepUsage);
+
+        /// <summary>The refusal of mid-turn steering.</summary>
+        internal const string SteeringUnsupported = "Claude CLI does not expose mid-turn steering through this adapter.";
 
         public Task<LlmAgentCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
         {
@@ -497,6 +513,12 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                         yield break;
                     }
                 }
+                if (turn.Suspended)
+                {
+                    // Decision point (b) ended the turn's stream; the conversation disposes this session.
+                    completed = true;
+                    yield break;
+                }
                 throw ProtocolFailure("Claude CLI ended the turn without a result.");
             }
             finally
@@ -572,8 +594,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             CancellationToken cancellationToken = default)
         {
             using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-            throw new NotSupportedException(
-                "Claude CLI does not expose mid-turn steering through this adapter.");
+            throw new NotSupportedException(SteeringUnsupported);
         }
 
         public async Task InterruptAsync(
@@ -766,6 +787,12 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 JsonElement callId = message.TryGetProperty("id", out JsonElement suppliedId)
                     ? suppliedId.Clone()
                     : JsonElement.Parse("0");
+                if (_returnRequests && CurrentTarget() is HostTurn host)
+                {
+                    // The call is not answered: the turn ends with the step's calls, and the CLI is interrupted.
+                    await ReturnRequestsAsync(host, message);
+                    return null;
+                }
                 if (PrepareToolCall(message, callId, requestId, out LlmAgentToolCall? call) is { } refusal)
                 {
                     await WriteMcpResponseAsync(requestId, refusal.Message, cancellationToken);
@@ -879,6 +906,47 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             return null;
         }
 
+        /// <summary>
+        /// Ends the host turn with every tool use of the model's step returned unrun, each with its argument check, and
+        /// interrupts the CLI. No result reaches the CLI or the host.
+        /// </summary>
+        private async Task ReturnRequestsAsync(HostTurn host, JsonElement message)
+        {
+            PendingToolCall[] calls;
+            lock (_route)
+            {
+                calls = [.. _pendingToolCalls];
+                _pendingToolCalls.Clear();
+            }
+            if (calls.Length == 0 && message.TryGetProperty("params", out JsonElement parameters)
+                && parameters.ValueKind == JsonValueKind.Object && OptionalString(parameters, "name") is { } native)
+            {
+                // The step's tool use was not seen before its call: the call itself is returned.
+                string name = _names.Logical(native) ?? native;
+                calls = [new(ReadJsonRpcId(message.TryGetProperty("id", out JsonElement id) ? id : default) ?? Guid.NewGuid().ToString("N"),
+                    name, parameters.TryGetProperty("arguments", out JsonElement arguments) ? arguments.Clone() : JsonElement.Parse("{}"))];
+            }
+            foreach (PendingToolCall call in calls)
+            {
+                string? rejection = _toolsByName.TryGetValue(call.Name, out LlmAgentToolDefinition? definition)
+                    ? ToolSchemas.EvaluateArguments(definition.InputSchema, call.Arguments.GetRawText()) is { Checked: true, Errors.Count: > 0 } evaluation
+                        ? $"Tool '{call.Name}' arguments were rejected:\n{string.Join('\n', evaluation.Errors)}" : null
+                    : "Unknown tool.";
+                Emit(rejection is null
+                    ? new LlmAgentToolEvent(ThreadId, host.Id, call.Id, McpServerName, call.Name, call.Arguments, null, "returned")
+                    : new LlmAgentToolEvent(ThreadId, host.Id, call.Id, McpServerName, call.Name, call.Arguments, false, "failed",
+                        LlmToolOutput.FromText(rejection, isError: true)));
+            }
+            await TryInterruptAsync();
+            Emit(new LlmAgentTurnCompletedEvent(ThreadId, host.Id, LlmAgentCompletionReason.ToolRequests, null));
+            lock (_route)
+            {
+                host.Events.Writer.TryComplete();
+                if (_host == host) _host = null;
+                _activeTurnId = null;
+            }
+        }
+
         /// <summary>Runs a checked call on its own task, so the reader keeps reading while the host tool works.</summary>
         private void StartToolCall(LlmAgentToolCall call, JsonElement id, string requestId, CancellationToken cancellationToken)
         {
@@ -931,6 +999,17 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     // Emitted before the answer: the CLI continues only after it, so the event precedes the turn's later output.
                     EmitFor(origin, toolEvent);
                 }
+                if (origin is HostTurn host && LastCallOfStep(running)
+                    && await _beforeResults(operation.Token))
+                {
+                    // The conversation compacts and reopens: this result stays unwritten and the turn's stream ends.
+                    lock (_route)
+                    {
+                        host.Suspended = true;
+                        host.Events.Writer.TryComplete();
+                    }
+                    return;
+                }
                 await WriteMcpResponseAsync(requestId, response.Message, operation.Token);
             }
             catch (OperationCanceledException error) when (operation.Token.IsCancellationRequested && !LlmResourcePreparation.IsCleanupFailure(error)) { }
@@ -954,6 +1033,18 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 lock (_route) { _toolCalls.Remove(running); }
                 running.Cancellation.Dispose();
                 operation.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// The running call settles the step: the model message has ended, every tool use of it has its call, and no
+        /// other bridge call is running.
+        /// </summary>
+        private bool LastCallOfStep(RunningToolCall running)
+        {
+            lock (_route)
+            {
+                return _messageStopped && _pendingToolCalls.Count == 0 && _toolCalls.Count == 1 && _toolCalls[0] == running;
             }
         }
 
@@ -1080,6 +1171,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                 }
                 if (_host is { } host)
                 {
+                    _record(item);
                     host.Events.Writer.TryWrite(item);
                 }
                 else
@@ -1344,7 +1436,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                             {
                                 target.ModelId = startedModel;
                             }
-                            if (target.Usage.Observe(root) is { } observation)
+                            if (root.TryGetProperty("event", out JsonElement messageEvent)
+                                && OptionalString(messageEvent, "type") is ("message_start" or "message_stop") and { } boundary)
+                            {
+                                lock (_route) { _messageStopped = boundary == "message_stop"; }
+                            }
+                            LlmUsageDeltaEvent? observation = target.Usage.Observe(root);
+                            if (target.Usage.Last is { } stepUsage) Volatile.Write(ref _lastStepUsage, stepUsage);
+                            if (observation is not null)
                             {
                                 Emit(new LlmAgentUsageEvent(ThreadId, target.Id, $"usage-{target.Id}",
                                     observation.Cumulative, observation.Cumulative) { ModelId = target.ModelId });
@@ -1440,6 +1539,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             {
                 if (_host is { } host)
                 {
+                    _record(item);
                     host.Events.Writer.TryWrite(item);
                 }
                 else
@@ -1592,6 +1692,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             public JsonElement? OutputSchema { get; init; }
 
             public bool Abandoned { get; set; }
+
+            /// <summary>Decision point (b) ended the stream with a result unwritten; no completion follows.</summary>
+            public bool Suspended { get; set; }
         }
 
         private sealed class ProviderTurn(string id, ClaudeStreamUsage usage, bool reasoningText) : TurnTarget(id, usage, reasoningText);

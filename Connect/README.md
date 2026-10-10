@@ -158,7 +158,7 @@ signature and refuses on both transports.
 | HostedTools | ImageGeneration | none |
 | SupportsShellTools | Unsupported | Unsupported |
 | SupportsContextCapture, SupportsContextReplacement | Supported | Unsupported |
-| SupportsContextStatus | Supported | Unsupported |
+| SupportsContextStatus | Supported | Supported |
 | SupportsCompactionHandoff | Unsupported | Unsupported |
 | SupportsNativeResume | Unsupported | Unsupported |
 | SupportsSteering | Supported | Unsupported |
@@ -168,12 +168,10 @@ signature and refuses on both transports.
 | SupportsFallbackModels | Unsupported | Unknown |
 | SupportsTurnCap | Supported | Unknown |
 | SupportsSpendCap | Unsupported | Unknown |
-| SupportsCompactNow | Supported | Unsupported |
+| SupportsCompactNow | Supported | Supported |
 
 **Declared for later behaviour.** These public members exist; the behaviour behind each arrives with its own
-change: `ToolHandling = ReturnRequests` on Claude; `LlmAgentSessionOptions.SkillFolders` and `FallbackModelIds`;
-compaction on Claude, whose `CompactNowAsync` is refused while its `SupportsCompactNow` is Unsupported;
-`LlmAgentExecutionOptions.MaxSpendUsd`; `LlmAgentCompletionReason.SpendLimit`; `LlmAgentImageOutputEvent`; and
+change: `LlmAgentSessionOptions.SkillFolders` and `FallbackModelIds`; `LlmAgentExecutionOptions.MaxSpendUsd`; `LlmAgentCompletionReason.SpendLimit`; `LlmAgentImageOutputEvent`; and
 `LlmAgentResponseRecoveryEvent.Delay` and `Error`. `LlmAgentUsageEvent.ModelId` names the model a Codex step used: the step request's model on
 streamed usage, and the reported model on the step's final usage. On Claude it is the `model` the CLI reports on
 the turn's latest assistant message or message start.
@@ -215,6 +213,22 @@ has that entry replaced at the first step with a summary of the transcript turns
 dropped when no transcript is supplied. `CompactNowAsync` runs the same compaction on an idle conversation, keeps its
 last turn whole, and returns the compacted event, or null when there is nothing to compact or no known window; it is
 refused while a turn runs.
+
+**Compaction on Claude.** A Claude start returns a conversation that owns the saved history and one CLI session at a
+time. Every CLI process starts with `DISABLE_COMPACT=1`, so the CLI never compacts on its own. The saved history is
+the opening history, then each turn as the host's native transcript records it: the input as one user message, each
+model step as one assistant message with its calls, and one user message with their results; entry ids are
+`{turnId}-{n}`. The conversation measures before the turn's input is written, the first turn's opening included, and
+when a model step's last host tool call settles, before its result is written. A measure with a reported step is that
+step's input and output plus the corrected estimate of the entries recorded after it; otherwise it is the corrected
+estimate of the whole history and the input. The window and output limit come from the CLI's model list, else the
+published table. At or above the trigger, or after the turn's first too-long refusal, the conversation closes the CLI
+session, compacts the saved history with this turn's entries as the current turn, and opens a new CLI session with the
+compacted history as its opening. It then sends the turn's input, or `Continue from where you stopped. The tool
+results above are complete; do not repeat finished tool calls.` when the turn already ran a step. The conversation
+keeps its thread id and the turn keeps its id across CLI sessions; usage totals add up across them. A second refusal
+ends the turn with the provider's reason. `GetContextStatusAsync` answers from the same measure, and `CompactNowAsync`
+compacts an idle conversation and reopens from the result. Stages, events and failures are those of Codex.
 
 An unclassified managed failure ends the turn with `{exception type}: {message}`, the message with credentials
 removed. Provider errors keep `LlmProviderException.Message`.
@@ -4249,8 +4263,10 @@ and host context operations. Codex and Claude continue, fork and rewind by start
 history; `ResumeSessionAsync` refuses on both. Claude supports interrupt; its steering method is unsupported. Tools return
 text plus provider-neutral image/document attachments. Managed tools reject URL-based image/audio
 content; use `Attachments`. Claude materializes MCP document resources through its read-only
-`Read` tool. A tool-capable session receives a host tool handler unless Codex returns its calls
-(`ToolHandling = ReturnRequests`); a Claude call with no handler gets an error result.
+`Read` tool. A tool-capable session receives a host tool handler unless it returns its calls
+(`ToolHandling = ReturnRequests`); a Claude call with no handler gets an error result. On Claude, returned calls run
+without session persistence: the first host tool call of a step interrupts the CLI unanswered, every call of that step
+is returned with its argument check, and the next turn opens a new CLI session from the saved history.
 
 ## AWS Bedrock AgentCore Harness transport
 

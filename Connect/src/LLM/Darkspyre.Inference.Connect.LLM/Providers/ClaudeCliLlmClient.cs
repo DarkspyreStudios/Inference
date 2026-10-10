@@ -688,7 +688,18 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         request = request with { Messages = [.. request.Messages.Select(message => message with { ContinuationState = null })] };
         _ = ValidateChatRequest(connection, request);
         long attachments = ResourceSizes.Tokens(request.Messages, request.Messages, resources);
-        foreach (var message in request.Messages)
+        // References and workspace tool parts are counted above by their descriptors; the rest is counted as sent.
+        LlmChatRequest prompt = request with
+        {
+            Messages = [.. request.Messages.Select(message => message with
+            {
+                Attachments = [.. message.Attachments.OfType<LlmAttachment>()],
+                ToolResults = [.. message.ToolResults.Select(result => result is LlmToolResult function
+                    ? function with { Output = function.Output with { Parts = [.. function.Output.Parts.Where(part => part is not LlmToolOutputSessionResource)] } }
+                    : result)]
+            })]
+        };
+        foreach (var message in prompt.Messages)
         {
             foreach (LlmAttachment inline in message.Attachments.OfType<LlmAttachment>())
                 attachments += AttachmentTokens.Estimate(inline.Kind, inline.MediaType, inline.Data.Span);
@@ -701,11 +712,6 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                         _ => 0,
                     };
         }
-        // The prompt text names inline attachments only; a reference is counted above by its descriptor.
-        LlmChatRequest prompt = request with
-        {
-            Messages = [.. request.Messages.Select(message => message with { Attachments = [.. message.Attachments.OfType<LlmAttachment>()] })]
-        };
         return new ContextEstimate(LocalTokenCount.Count(BuildClaudePrompt(connection, prompt)) + attachments);
     }
 

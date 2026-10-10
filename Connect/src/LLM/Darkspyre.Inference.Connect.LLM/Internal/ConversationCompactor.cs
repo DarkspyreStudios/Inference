@@ -45,7 +45,11 @@ internal sealed record CompactionLimits(long Window, long Reserve, long UsableWi
 /// were removed.
 /// </summary>
 internal sealed record CompactionResult(LlmAgentContext Context, int? DroppedMessageCount, LlmUsage? Usage,
-    int ShortenedToolOutputCount, int RemovedImageCount);
+    int ShortenedToolOutputCount, int RemovedImageCount)
+{
+    /// <summary>False for a compaction that shortened nothing and summarized nothing; it is not reported.</summary>
+    internal bool Changed => this is not { DroppedMessageCount: null, ShortenedToolOutputCount: 0, RemovedImageCount: 0 };
+}
 
 /// <summary>Compaction cannot bring a request under the usable window, so the request is not sent.</summary>
 internal sealed class CompactionFailedException(string message, LlmUsage? usage) : Exception(message)
@@ -169,6 +173,23 @@ internal sealed class ConversationCompactor(
         LlmAgentContextEntry[] current = [.. kept.Where(entry => entry.TurnId == currentTurnId)];
         return await FinishAsync(remaining with { Entries = [summaryEntry, .. kept] }, current,
             context.Entries.Count - kept.Length, usage, 0, 0, limits, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The current turn's entries that hold a result of a tool marked <see cref="LlmAgentToolDefinition.ProtectedResults"/>,
+    /// or hold its call.
+    /// </summary>
+    internal static HashSet<string> ProtectedEntries(LlmAgentContext context, string turnId,
+        IReadOnlyDictionary<string, LlmAgentToolDefinition> tools)
+    {
+        var protectedCalls = context.Entries.Where(entry => entry.TurnId == turnId)
+            .SelectMany(entry => entry.Message.ToolCalls).OfType<LlmToolCall>()
+            .Where(call => tools.TryGetValue(call.Name, out var tool) && tool.ProtectedResults)
+            .Select(call => call.Id).ToHashSet(StringComparer.Ordinal);
+        return context.Entries.Where(entry => entry.TurnId == turnId
+                && (entry.Message.ToolCalls.Any(call => protectedCalls.Contains(call.Id))
+                    || entry.Message.ToolResults.Any(result => protectedCalls.Contains(result.ToolCallId))))
+            .Select(entry => entry.Id).ToHashSet(StringComparer.Ordinal);
     }
 
     /// <summary>Returns the result below the usable window, or throws with the sizes when it cannot be sent.</summary>

@@ -153,7 +153,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             CompactionResult result = await _compactor.CompactAsync(source, _options.ModelId, lastTurnId,
                 new HashSet<string>(StringComparer.Ordinal), limits, static (_, _) => ValueTask.CompletedTask,
                 cancellationToken).ConfigureAwait(false);
-            if (Unchanged(result)) return null;
+            if (!result.Changed) return null;
             long revision;
             lock (_sync)
             {
@@ -1132,7 +1132,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             source = _context;
             limits = Limits(run.Turn.ModelId!);
-            protectedIds = ProtectedEntries(source, run.Id);
+            protectedIds = ConversationCompactor.ProtectedEntries(source, run.Id, _tools);
         }
         if (limits is null) return true;
         string itemId = NewId();
@@ -1194,7 +1194,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, error.Message);
             return false;
         }
-        bool unchanged = Unchanged(result);
+        bool unchanged = !result.Changed;
         long revision = 0;
         if (!unchanged || installUnchanged)
         {
@@ -1218,32 +1218,12 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private Func<string, CancellationToken, ValueTask> Stage(LiveRun run, string itemId, ChannelWriter<LlmAgentEvent> writer) =>
         (text, token) => writer.WriteAsync(new LlmAgentActivityEvent(ThreadId, run.Id, itemId, text), token);
 
-    /// <summary>A compaction that shortened nothing and summarized nothing.</summary>
-    private static bool Unchanged(CompactionResult result) =>
-        result is { DroppedMessageCount: null, ShortenedToolOutputCount: 0, RemovedImageCount: 0 };
-
     private LlmAgentCompactedEvent Compacted(string turnId, string requestId, long revision, CompactionResult result) =>
         new(ThreadId, turnId, requestId, revision, result.DroppedMessageCount, result.Usage)
         {
             ShortenedToolOutputCount = result.ShortenedToolOutputCount,
             RemovedImageCount = result.RemovedImageCount
         };
-
-    /// <summary>
-    /// The current turn's entries that hold a result of a tool marked <see cref="LlmAgentToolDefinition.ProtectedResults"/>,
-    /// or hold its call.
-    /// </summary>
-    private HashSet<string> ProtectedEntries(LlmAgentContext context, string turnId)
-    {
-        var protectedCalls = context.Entries.Where(entry => entry.TurnId == turnId)
-            .SelectMany(entry => entry.Message.ToolCalls).OfType<LlmToolCall>()
-            .Where(call => _tools.TryGetValue(call.Name, out var tool) && tool.ProtectedResults)
-            .Select(call => call.Id).ToHashSet(StringComparer.Ordinal);
-        return context.Entries.Where(entry => entry.TurnId == turnId
-                && (entry.Message.ToolCalls.Any(call => protectedCalls.Contains(call.Id))
-                    || entry.Message.ToolResults.Any(result => protectedCalls.Contains(result.ToolCallId))))
-            .Select(entry => entry.Id).ToHashSet(StringComparer.Ordinal);
-    }
 
     /// <summary>
     /// The entries whose only content was continuation state the import omitted, such as a native compaction from
@@ -1363,7 +1343,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         if (supported == InferenceSupport.Unsupported) { throw new NotSupportedException("The selected connection disables this agent operation."); }
     }
     private LlmModel? Model(string id) => _models.FirstOrDefault(model => model.Id == id);
-    private static LlmChatMessage UserMessage(LlmAgentTurnRequest turn) => new("user", TextContent(turn.Input)) { Attachments = turn.Attachments };
+    /// <summary>A turn's input as one user message: the text the context and the transcript record.</summary>
+    internal static LlmChatMessage UserMessage(LlmAgentTurnRequest turn) => new("user", TextContent(turn.Input)) { Attachments = turn.Attachments };
     /// <summary>The input as message text; an image URL becomes the text <c>[Image: {url}]</c>.</summary>
     private static string TextContent(IReadOnlyList<LlmAgentContent> input) => string.Join("\n", input.Select(item => item switch
     {

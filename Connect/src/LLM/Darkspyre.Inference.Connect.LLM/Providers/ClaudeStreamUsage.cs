@@ -67,6 +67,9 @@ internal sealed class ClaudeStreamUsage(bool enabled, ISet<string>? accountedCal
 
     public void Finish() => _finished = true;
 
+    /// <summary>The usage reported for the latest model message; null until one reports.</summary>
+    public LlmUsage? Last => _current?.Usage;
+
     public static LlmUsage? ReadFinal(JsonElement root) => LlmJson.GetObject(root, "usage") is { } usage
         ? AnthropicUsage.Create(LlmJson.GetInt(usage, "input_tokens"), LlmJson.GetInt(usage, "output_tokens"),
             LlmJson.GetInt(usage, "cache_read_input_tokens"), LlmJson.GetInt(usage, "cache_creation_input_tokens"))
