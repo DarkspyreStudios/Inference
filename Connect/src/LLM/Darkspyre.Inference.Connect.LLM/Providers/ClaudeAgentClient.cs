@@ -1819,7 +1819,8 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             }
         };
 
-        private static JsonObject McpToolsListResult(IReadOnlyList<LlmAgentToolDefinition> tools, LlmToolNames names) => new()
+        /// <summary>The bridge's MCP tool list: the text the CLI receives for the tools, so the conversation measure counts it too.</summary>
+        internal static JsonObject McpToolsListResult(IReadOnlyList<LlmAgentToolDefinition> tools, LlmToolNames names) => new()
         {
             ["tools"] = new JsonArray([.. tools.Select(tool => new JsonObject
             {

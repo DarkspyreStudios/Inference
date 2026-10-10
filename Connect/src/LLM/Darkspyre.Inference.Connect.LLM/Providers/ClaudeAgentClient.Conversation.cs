@@ -32,6 +32,8 @@ internal sealed partial class ClaudeAgentClient
         private readonly bool _ephemeral;
         private readonly LlmAgentToolHandler? _toolHandler;
         private readonly Dictionary<string, LlmAgentToolDefinition> _toolsByName;
+        // The session instructions followed by the tool list the bridge sends, as the CLI receives both.
+        private readonly string? _framing;
         private readonly LlmAgentExecutionOptions _execution;
         private readonly ConversationCompactor _compactor;
         private readonly NoAgentResources _resources = new(LlmAgentResourceStopStatus.Unknown);
@@ -68,8 +70,12 @@ internal sealed partial class ClaudeAgentClient
             _ephemeral = ephemeral;
             _toolHandler = options.ToolHandler;
             // The first definition of a duplicated name is the one used.
-            _toolsByName = ClientTools.Functions(options.Tools).DistinctBy(tool => tool.Name, StringComparer.Ordinal)
-                .ToDictionary(tool => tool.Name, StringComparer.Ordinal);
+            LlmAgentToolDefinition[] tools = [.. ClientTools.Functions(options.Tools).DistinctBy(tool => tool.Name, StringComparer.Ordinal)];
+            _toolsByName = tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
+            string? toolList = tools.Length == 0 ? null : ClaudeAgentSession.McpToolsListResult(tools,
+                LlmToolNames.Create(tools.Select(tool => tool.Name), IsValidMcpToolName)).ToJsonString();
+            _framing = toolList is null ? options.Instructions
+                : string.IsNullOrEmpty(options.Instructions) ? toolList : $"{options.Instructions}\n\n{toolList}";
             _execution = options.ExecutionOptions ?? new();
             _options = options with { Context = null, ToolHandler = options.ToolHandler is null ? null : HandleToolAsync };
             _saved = history;
@@ -629,8 +635,7 @@ internal sealed partial class ClaudeAgentClient
             }
             else
             {
-                long local = Local(modelId, _options.Instructions, [.. saved.Entries.Select(entry => entry.Message), .. added],
-                    resources);
+                long local = Local(modelId, _framing, [.. saved.Entries.Select(entry => entry.Message), .. added], resources);
                 if (observe) lock (_sync) { _firstStepEstimate = local; }
                 estimate = new(Correct(modelId, local));
             }
@@ -651,8 +656,7 @@ internal sealed partial class ClaudeAgentClient
                 added = _turn?.PendingInput is { } input ? [input] : [];
             }
             var resources = await ResolveAsync(context, added, cancellationToken);
-            return Correct(modelId, Local(modelId, _options.Instructions,
-                [.. context.Entries.Select(entry => entry.Message), .. added], resources));
+            return Correct(modelId, Local(modelId, _framing, [.. context.Entries.Select(entry => entry.Message), .. added], resources));
         }
 
         /// <summary>The refused request's local size and the sizes the refusal names teach the model's rate and limit.</summary>
@@ -666,8 +670,7 @@ internal sealed partial class ClaudeAgentClient
                 added = turn.PendingInput is { } input ? [input] : [];
             }
             var resources = await ResolveAsync(saved, added, turn.Token);
-            long estimate = Local(turn.ModelId, _options.Instructions, [.. saved.Entries.Select(entry => entry.Message), .. added],
-                resources);
+            long estimate = Local(turn.ModelId, _framing, [.. saved.Entries.Select(entry => entry.Message), .. added], resources);
             Match sizes = RefusalSizes().Match(detail ?? string.Empty);
             long? reportedTokens = sizes.Success ? long.Parse(sizes.Groups[1].Value, CultureInfo.InvariantCulture) : null;
             long? reportedLimit = sizes.Success ? long.Parse(sizes.Groups[2].Value, CultureInfo.InvariantCulture) : null;
@@ -699,7 +702,7 @@ internal sealed partial class ClaudeAgentClient
 
         /// <summary>
         /// The local count of a request with these messages, as the Claude CLI client counts it. The chat route refuses
-        /// tool definitions, so the session tools are framing the learned correction covers.
+        /// tool definitions, so a whole-request measure passes the tool list as text in <paramref name="instructions"/>.
         /// </summary>
         private long Local(string modelId, string? instructions, IReadOnlyList<LlmChatMessage> messages,
             IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
