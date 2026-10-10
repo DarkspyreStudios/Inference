@@ -193,7 +193,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         IReadOnlyList<string> arguments = Assert.IsType<ClaudeCliSessionInvocation>(factory.Invocation).Arguments;
         Assert.Equal("dontAsk", arguments[arguments.ToList().IndexOf("--permission-mode") + 1]);
         Assert.Equal(string.Empty, arguments[arguments.ToList().IndexOf("--tools") + 1]);
-        Assert.Equal("mcp__darkspyre-inference-connect__echo", arguments[arguments.ToList().IndexOf("--allowedTools") + 1]);
+        Assert.Equal("mcp__darkspyre-inference-connect__echo,mcp__darkspyre-inference-connect__update_plan", arguments[arguments.ToList().IndexOf("--allowedTools") + 1]);
         Assert.Contains("--restricted", arguments);
         Assert.DoesNotContain("--dangerously-skip-permissions", arguments);
     }
@@ -225,7 +225,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         int start = arguments.IndexOf(ClaudeCliConfiguration.IsolationArguments[0]);
         Assert.Equal(ClaudeCliConfiguration.IsolationArguments, arguments.Skip(start).Take(ClaudeCliConfiguration.IsolationArguments.Count));
         Assert.Equal("dontAsk", arguments[arguments.IndexOf("--permission-mode") + 1]);
-        Assert.Equal("mcp__darkspyre-inference-connect__echo", arguments[arguments.IndexOf("--allowedTools") + 1]);
+        Assert.Equal("mcp__darkspyre-inference-connect__echo,mcp__darkspyre-inference-connect__update_plan", arguments[arguments.IndexOf("--allowedTools") + 1]);
         Assert.DoesNotContain("--add-dir", arguments);
         Assert.DoesNotContain("--dangerously-skip-permissions", arguments);
         Assert.DoesNotContain("--disallowedTools", arguments);
@@ -484,7 +484,7 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         Assert.Contains($"mcp__darkspyre-inference-connect__{alias}", arguments[arguments.ToList().IndexOf("--allowedTools") + 1].Split(','));
         JsonElement listed = process.Requests().Single(request => request.GetProperty("subtype").GetString() == "initialize")
             .GetProperty("sdkMcpServerManifests").GetProperty("darkspyre-inference-connect").GetProperty("toolsListResult").GetProperty("tools");
-        Assert.Equal(alias, Assert.Single(listed.EnumerateArray()).GetProperty("name").GetString());
+        Assert.Equal([alias, "update_plan"], listed.EnumerateArray().Select(tool => tool.GetProperty("name").GetString()));
 
         process.Push(ToolUse("tu1", alias));
         process.Push(ToolCall("c1", 7, alias));
@@ -527,6 +527,35 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         JsonElement arguments = Assert.Single(received);
         Assert.Equal(3, arguments.GetProperty("n").GetInt32());
         Assert.True(arguments.GetProperty("extra").GetBoolean());
+    }
+
+    [Fact]
+    public async Task AbilityToolsOnClaude()
+    {
+        string folder = Directory.CreateDirectory(Path.Combine(_directory, "review")).FullName;
+        File.WriteAllText(Path.Combine(folder, "SKILL.md"), "Reviews a change.\n");
+        var process = new ManualProcess();
+        int hostCalls = 0;
+        await using ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        {
+            ModelId = "claude-test",
+            Runtime = new() { WorkingDirectory = _directory },
+            SkillFolders = [folder],
+            ToolHandler = (_, _) => { Interlocked.Increment(ref hostCalls); return Task.FromResult(LlmToolOutput.FromText("host")); }
+        });
+
+        JsonElement listed = process.Requests().Single(request => request.GetProperty("subtype").GetString() == "initialize")
+            .GetProperty("sdkMcpServerManifests").GetProperty("darkspyre-inference-connect").GetProperty("toolsListResult").GetProperty("tools");
+        Assert.Equal(["update_plan", "load_skill"], listed.EnumerateArray().Select(tool => tool.GetProperty("name").GetString()));
+        process.Push(ToolUse("tu1", "update_plan"));
+        process.Push(ToolCall("c1", 1, "update_plan", new { plan = new[] { new { step = "look", status = "in_progress" } } }));
+        Assert.Equal("Plan updated.", ResultText(await AnswerFor(process, "c1")));
+        process.Push(ToolUse("tu2", "load_skill"));
+        process.Push(ToolCall("c2", 2, "load_skill", new { name = "review" }));
+        Assert.Equal($"Reviews a change.\nSkill folder: {folder}", ResultText(await AnswerFor(process, "c2")));
+        Assert.Equal(0, hostCalls);
+
+        static string? ResultText(JsonElement answer) => answer.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
     }
 
     [Fact]

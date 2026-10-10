@@ -40,6 +40,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             options.ModelId, options.Tools, options.ToolHandler);
         ClaudeCliConfiguration.ValidateConnection(connection);
         ValidateOptions(options.ModelId, workingDirectory);
+        options = AgentAbilityTools.Apply(options);
         LlmAgentContext history = options.Context is null ? new()
             : ManagedAgentContext.WithoutContinuationState(options.Context, supportsResources: true).Context;
         var conversation = new ClaudeConversation(this, connectionId, connection, options, workingDirectory, ephemeral, history);
@@ -1074,7 +1075,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             {
                 if (_toolHandler is not { } handler)
                 {
-                    output = LlmToolOutput.FromText($"No handler is available for tool '{call.Name}'.", isError: true);
+                    output = LlmToolOutput.FromText(ClientTools.NoHandler(call.Name), isError: true);
                 }
                 else
                 {

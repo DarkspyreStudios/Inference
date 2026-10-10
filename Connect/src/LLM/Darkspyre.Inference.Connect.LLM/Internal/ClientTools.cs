@@ -20,6 +20,9 @@ internal static class ClientTools
             throw new NotSupportedException("This agent lane does not bind caller-owned resource access.");
     }
 
+    /// <summary>The error text a tool call gets when the session has no handler to run it (6.2 R16).</summary>
+    internal static string NoHandler(string toolName) => $"No handler is available for tool '{toolName}'.";
+
     internal static void ValidateManagedOpening(LlmAgentSessionOptions options, LlmProviderCapabilities capabilities, bool supportsResources = false)
     {
         LlmAgentCapabilities managed = ManagedCapabilities(capabilities);

@@ -916,7 +916,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         if (!_tools.TryGetValue(call.Name, out var definition)) return await failed(UnknownToolResult);
         if (ArgumentRejection(definition, call.ArgumentsJson, out JsonElement arguments) is { } rejection)
             return await failed(rejection);
-        if (_toolHandler is not { } handler) return await failed($"No handler is available for tool '{call.Name}'.");
+        if (_toolHandler is not { } handler) return await failed(ClientTools.NoHandler(call.Name));
         JsonElement recorded = RecordedArguments(call.ArgumentsJson);
         await writer.WriteAsync(new LlmAgentToolEvent(ThreadId, run.Id, call.Id, null, call.Name,
             recorded, null, "started"), token);

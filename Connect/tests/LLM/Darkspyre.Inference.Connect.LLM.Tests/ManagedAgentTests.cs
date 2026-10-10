@@ -700,6 +700,43 @@ public sealed class ManagedAgentTests
     }
 
     [Fact]
+    public async Task AbilityToolsOnCodex()
+    {
+        const string skillText = "---\nname: review\ndescription: Reviews a change.\n---\nRead the diff first.\n";
+        string folder = Directory.CreateTempSubdirectory("connect-ability-skill-").FullName;
+        try
+        {
+            File.WriteAllText(Path.Combine(folder, "SKILL.md"), skillText);
+            var harness = new Harness();
+            harness.Results.Enqueue(Calls(new LlmToolCall("plan", "update_plan", """{"plan":[{"step":"look","status":"in_progress"}]}"""),
+                new LlmToolCall("skill", "load_skill", """{"name":"review"}""")));
+            harness.Results.Enqueue(Done());
+            int hostCalls = 0;
+            await using var session = harness.Create(AgentAbilityTools.Apply(Options() with
+            {
+                Instructions = "Be brief.",
+                SkillFolders = [folder],
+                ToolHandler = (_, _) => { Interlocked.Increment(ref hostCalls); return Task.FromResult(LlmToolOutput.FromText("host")); }
+            }));
+
+            await Read(session.RunTurnAsync(Turn("hello")));
+
+            Assert.Equal(0, hostCalls);
+            Assert.Contains("Be brief.\n\nSkills are available. Before a task one of them covers, call load_skill with its name.\n"
+                + "- review: Reviews a change.", harness.Requests[0].Instructions, StringComparison.Ordinal);
+            Dictionary<string, string> results = harness.Requests[1].Messages.SelectMany(message => message.ToolResults)
+                .OfType<LlmToolResult>().ToDictionary(result => result.ToolCallId,
+                    result => Assert.IsType<LlmToolOutputText>(Assert.Single(result.Output.Parts)).Text);
+            Assert.Equal("Plan updated.", results["plan"]);
+            Assert.Equal($"{skillText.TrimEnd('\n')}\nSkill folder: {folder}", results["skill"]);
+        }
+        finally
+        {
+            Directory.Delete(folder, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task NonObjectSchemaIsWrappedAndValueUnwrapped()
     {
         JsonElement schema = JsonElement.Parse("""{"type":"string","minLength":2}""");

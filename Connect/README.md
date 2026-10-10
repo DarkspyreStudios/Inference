@@ -4266,7 +4266,10 @@ content; use `Attachments`. Claude receives tool-result resources inline in the 
 its built-in tools, `Read` included, are off (`--tools ""`). A tool-capable session receives a host tool handler unless it returns its calls
 (`ToolHandling = ReturnRequests`); a Claude call with no handler gets an error result. On Claude, returned calls run
 without session persistence: the first host tool call of a step interrupts the CLI unanswered, every call of that step
-is returned with its argument check, and the next turn opens a new CLI session from the saved history.
+is returned with its argument check, and the next turn opens a new CLI session from the saved history. Codex and Claude
+sessions that run their calls add `update_plan` after the Host's tools, and `load_skill` with a skills list in the
+instructions when a `SkillFolders` folder holds a `SKILL.md`. Inference answers both (`Plan updated.`, or the
+SKILL.md text and the skill's folder); a Host tool of either name is used in its place.
 
 ## AWS Bedrock AgentCore Harness transport
 

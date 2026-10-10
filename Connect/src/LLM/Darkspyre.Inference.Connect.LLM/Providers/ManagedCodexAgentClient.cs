@@ -17,7 +17,7 @@ internal sealed class ManagedCodexAgentClient(OpenAiCodexLlmClient client, LlmPr
         using var opening = providers.EnterManagedOpening(cancellationToken);
         void Fence() => providers.FenceManagedOpening(opening.Token);
         Fence();
-        options = ClientTools.Snapshot(options);
+        options = AgentAbilityTools.Apply(ClientTools.Snapshot(options));
         Fence();
         void Preflight(LlmConnection selected)
         {
