@@ -97,7 +97,10 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             tools,
             names,
             ephemeral,
-            (capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
+            (capabilities.SupportsReasoningText != InferenceSupport.Unsupported),
+            options.FallbackModelIds,
+            // A non-positive iteration limit uses the record default, as on every route.
+            options.ExecutionOptions is { } execution ? ManagedAgentPolicy.Normalize(execution, null) : null);
         InferenceResourceSelectionVersion? resourceScope = await ReadResourceScopeAsync(resourceAccess, openingContext.Context, cancellationToken);
         IClaudeCliSessionProcess process;
         try
@@ -151,7 +154,9 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         IReadOnlyList<LlmAgentToolDefinition> tools,
         LlmToolNames names,
         bool ephemeral,
-        bool requestReasoningText)
+        bool requestReasoningText,
+        IReadOnlyList<string> fallbackModelIds,
+        LlmAgentExecutionOptions? execution)
     {
         List<string> arguments =
         [
@@ -182,6 +187,23 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         if (ephemeral)
         {
             arguments.Add("--no-session-persistence");
+        }
+
+        // The CLI stops at launch when a fallback model equals the main model.
+        string[] fallbacks = [.. fallbackModelIds.Where(id => !string.Equals(id, modelId, StringComparison.Ordinal)).Distinct(StringComparer.Ordinal)];
+        if (fallbacks.Length > 0)
+        {
+            arguments.AddRange(["--fallback-model", string.Join(',', fallbacks)]);
+        }
+
+        if (execution is not null)
+        {
+            arguments.AddRange(["--max-turns", execution.MaxModelIterations.ToString(CultureInfo.InvariantCulture)]);
+            // The CLI stops at launch on a budget of 0 or less, which sets no cap.
+            if (execution.MaxSpendUsd > 0)
+            {
+                arguments.AddRange(["--max-budget-usd", execution.MaxSpendUsd.Value.ToString(CultureInfo.InvariantCulture)]);
+            }
         }
 
         return arguments;
@@ -1321,9 +1343,22 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             }
         }
 
-        private LlmAgentWarningEvent? MapSystemMessage(JsonElement root, string turnId)
+        private LlmAgentEvent? MapSystemMessage(JsonElement root, string turnId)
         {
             string subtype = OptionalString(root, "subtype") ?? string.Empty;
+            if (subtype == "api_retry")
+            {
+                // The CLI's attempt is the attempt about to run; error is its failure category.
+                int? attempt = OptionalInt32(root, "attempt");
+                int? status = OptionalInt32(root, "error_status");
+                string? category = OptionalString(root, "error");
+                return new LlmAgentResponseRecoveryEvent(ThreadId, turnId, $"retry-{turnId}-{attempt}", attempt)
+                {
+                    Delay = OptionalInt32(root, "retry_delay_ms") is { } delay ? TimeSpan.FromMilliseconds(delay) : null,
+                    Error = status is null ? category : $"{status}: {category}"
+                };
+            }
+
             if (!subtype.Contains("retry", StringComparison.OrdinalIgnoreCase)
                 && !subtype.Contains("warning", StringComparison.OrdinalIgnoreCase))
             {
@@ -1473,9 +1508,9 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                             break;
                         }
                     case "system":
-                        if (MapSystemMessage(root, CurrentTarget()?.Id ?? string.Empty) is { } warning)
+                        if (MapSystemMessage(root, CurrentTarget()?.Id ?? string.Empty) is { } systemEvent)
                         {
-                            Emit(warning);
+                            Emit(systemEvent);
                         }
                         break;
                     case "result":
@@ -1588,12 +1623,16 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             string? stopReason = OptionalString(root, "stop_reason") ?? OptionalString(root, "terminal_reason");
             LlmAgentCompletionReason reason = subtype.Contains("interrupt", StringComparison.OrdinalIgnoreCase)
                 ? LlmAgentCompletionReason.Interruption
+                : subtype == "error_max_turns" ? LlmAgentCompletionReason.IterationLimit
+                : subtype == "error_max_budget_usd" ? LlmAgentCompletionReason.SpendLimit
                 : isError ? LlmAgentCompletionReason.ProviderFailure
                 : stopReason == "refusal" ? LlmAgentCompletionReason.Refusal
                 : stopReason is "max_tokens" or "model_context_window_exceeded" ? LlmAgentCompletionReason.Truncation
                 : subtype == "success" && stopReason is null or "end_turn" or "stop_sequence"
                     ? LlmAgentCompletionReason.Completed : LlmAgentCompletionReason.Unknown;
-            string? error = isError ? "Claude CLI reported a turn error."
+            string? error = reason is LlmAgentCompletionReason.IterationLimit or LlmAgentCompletionReason.SpendLimit
+                ? FirstError(root)
+                : isError ? "Claude CLI reported a turn error."
                 + ClaudeCliConfiguration.ErrorDetail(root, LlmCredential.Parse(_connection.Credential))
                 : reason == LlmAgentCompletionReason.Unknown
                     ? $"Claude CLI returned result subtype '{subtype}' with stop reason '{stopReason}'." : null;
@@ -1892,6 +1931,23 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             && element.TryGetProperty(propertyName, out JsonElement value)
             && value.ValueKind == JsonValueKind.String
                 ? value.GetString()
+                : null;
+
+        private static int? OptionalInt32(JsonElement element, string propertyName) =>
+            element.ValueKind == JsonValueKind.Object
+            && element.TryGetProperty(propertyName, out JsonElement value)
+            && value.ValueKind == JsonValueKind.Number
+            && value.TryGetInt32(out int number)
+                ? number
+                : null;
+
+        /// <summary>The CLI's first error text in a result message; null when it reports none.</summary>
+        private static string? FirstError(JsonElement result) =>
+            result.TryGetProperty("errors", out JsonElement errors)
+            && errors.ValueKind == JsonValueKind.Array
+            && errors.GetArrayLength() > 0
+            && errors[0].ValueKind == JsonValueKind.String
+                ? errors[0].GetString()
                 : null;
 
         private static bool? OptionalBoolean(JsonElement element, string propertyName) =>

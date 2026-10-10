@@ -171,8 +171,20 @@ signature and refuses on both transports.
 | SupportsCompactNow | Supported | Supported |
 
 **Declared for later behaviour.** These public members exist; the behaviour behind each arrives with its own
-change: `LlmAgentSessionOptions.SkillFolders` and `FallbackModelIds`; `LlmAgentExecutionOptions.MaxSpendUsd`; `LlmAgentCompletionReason.SpendLimit`; `LlmAgentImageOutputEvent`; and
-`LlmAgentResponseRecoveryEvent.Delay` and `Error`. `LlmAgentUsageEvent.ModelId` names the model a Codex step used: the step request's model on
+change: `LlmAgentSessionOptions.SkillFolders` and `LlmAgentImageOutputEvent`.
+
+**Fallback models, caps and retries.** Codex refuses a non-empty `FallbackModelIds` and a `MaxSpendUsd` greater
+than 0 at opening. Claude passes `FallbackModelIds`, without the session model and without repeats, as
+`--fallback-model a,b`; the CLI stops at launch when a fallback equals the main model. When `ExecutionOptions` is
+supplied, Claude sends `--max-turns {MaxModelIterations}` and, when `MaxSpendUsd` is greater than 0,
+`--max-budget-usd {MaxSpendUsd}`; the CLI refuses a budget of 0 or less. Every Claude opening of a conversation,
+reopens included, sends the same arguments. A Claude result with subtype `error_max_turns` ends the turn with
+`IterationLimit` and `error_max_budget_usd` with `SpendLimit`, each with the CLI's first error text. A Claude
+`system` message with subtype `api_retry` becomes `LlmAgentResponseRecoveryEvent` with `NextAttempt` = the CLI's
+`attempt`, `Delay` = `retry_delay_ms` and `Error` = `{error_status}: {error}` (the status is left out when null).
+A Codex retry reports `Delay` as the wait before the next attempt and `Error` as the failure message.
+
+`LlmAgentUsageEvent.ModelId` names the model a Codex step used: the step request's model on
 streamed usage, and the reported model on the step's final usage. On Claude it is the `model` the CLI reports on
 the turn's latest assistant message or message start.
 

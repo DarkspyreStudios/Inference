@@ -651,6 +651,57 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     }
 
     [Fact]
+    public async Task ApiRetryReportsAttemptDelayAndError()
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await Start(process);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(
+            new() { Input = [new LlmAgentTextContent("Reply with OK.")] }, limit.Token).GetAsyncEnumerator(limit.Token);
+
+        Assert.True(await feed.MoveNextAsync());
+        string turnId = await process.WaitForUserMessage(limit.Token);
+        process.Push(new { type = "user", uuid = turnId, isReplay = true });
+        process.Push(new { type = "system", subtype = "api_retry", attempt = 2, max_retries = 10, retry_delay_ms = 1500, error_status = 529, error = "overloaded" });
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "OK", stop_reason = "end_turn" });
+        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+
+        LlmAgentResponseRecoveryEvent recovery = Assert.Single(events.OfType<LlmAgentResponseRecoveryEvent>());
+        Assert.Equal(2, recovery.NextAttempt);
+        Assert.Equal(TimeSpan.FromMilliseconds(1500), recovery.Delay);
+        Assert.Equal("529: overloaded", recovery.Error);
+        Assert.Empty(events.OfType<LlmAgentWarningEvent>());
+    }
+
+    [Fact]
+    public async Task CapResultsEndWithTheirReason()
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await Start(process);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+
+        async Task<LlmAgentTurnCompletedEvent> EndWith(int index, string subtype, string error)
+        {
+            await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(
+                new() { Input = [new LlmAgentTextContent("Work.")] }, limit.Token).GetAsyncEnumerator(limit.Token);
+            Assert.True(await feed.MoveNextAsync());
+            string turnId = await process.WaitForUserMessage(limit.Token, index);
+            process.Push(new { type = "user", uuid = turnId, isReplay = true });
+            process.Push(new { type = "result", subtype, is_error = true, errors = new[] { error } });
+            List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+            return Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        }
+
+        LlmAgentTurnCompletedEvent turns = await EndWith(0, "error_max_turns", "Reached maximum number of turns (3)");
+        LlmAgentTurnCompletedEvent spend = await EndWith(1, "error_max_budget_usd", "Reached maximum budget ($0.5)");
+
+        Assert.Equal(LlmAgentCompletionReason.IterationLimit, turns.Reason);
+        Assert.Equal("Reached maximum number of turns (3)", turns.Error);
+        Assert.Equal(LlmAgentCompletionReason.SpendLimit, spend.Reason);
+        Assert.Equal("Reached maximum budget ($0.5)", spend.Error);
+    }
+
+    [Fact]
     public async Task AHostToolCallRunsOffTheReaderAndTheCliCanCancelIt()
     {
         var process = new ManualProcess();
