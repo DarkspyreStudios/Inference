@@ -84,6 +84,10 @@ internal sealed class ConversationCompactor(
     // About 2,000 tokens: the smallest summary that holds decisions and open work when the kept entries fill the target.
     private const int MinimumSummaryWords = 1500;
 
+    // About 4,000 tokens: long enough for decisions and open work, short enough to write in about a minute
+    // (Brandon, 2026-10-10: compaction takes 1 to 3 minutes).
+    private const int MaximumSummaryWords = 3000;
+
     // About 1,000 tokens for each part's summary.
     private const int MinimumPartWords = 750;
 
@@ -134,7 +138,7 @@ internal sealed class ConversationCompactor(
                 .ConfigureAwait(false);
 
         await stage("Summarizing earlier messages", cancellationToken).ConfigureAwait(false);
-        int words = (int)Math.Max(MinimumSummaryWords, WordsPerToken * (limits.TargetTokens - keptMeasure));
+        int words = (int)Math.Clamp(WordsPerToken * (limits.TargetTokens - keptMeasure), MinimumSummaryWords, MaximumSummaryWords);
         (string summary, LlmUsage? usage) = await SummarizeAsync(source, modelId, words, limits, cancellationToken)
             .ConfigureAwait(false);
         var summaryEntry = new LlmAgentContextEntry(Guid.NewGuid().ToString("N"), SummaryTurnId,
@@ -165,7 +169,7 @@ internal sealed class ConversationCompactor(
         LlmAgentContextEntry[] kept = Kept(remaining.Entries, keptTurns);
         await stage("Summarizing earlier messages", cancellationToken).ConfigureAwait(false);
         long keptMeasure = await Measure(remaining, kept, cancellationToken).ConfigureAwait(false);
-        int words = (int)Math.Max(MinimumSummaryWords, WordsPerToken * (limits.TargetTokens - keptMeasure));
+        int words = (int)Math.Clamp(WordsPerToken * (limits.TargetTokens - keptMeasure), MinimumSummaryWords, MaximumSummaryWords);
         (string summary, LlmUsage? usage) = await SummarizeAsync(source, modelId, words, limits, cancellationToken)
             .ConfigureAwait(false);
         var summaryEntry = new LlmAgentContextEntry(Guid.NewGuid().ToString("N"), SummaryTurnId,
@@ -252,21 +256,43 @@ internal sealed class ConversationCompactor(
         return (string.Join("\n\n", summaries.Select(summary => summary.Text)), usage.Total);
     }
 
-    /// <summary>One side request per part, one at a time; each part's words are in proportion to its size.</summary>
+    /// <summary>One side request per part, all at once; each part's words are in proportion to its size.</summary>
     private async Task<List<(string Text, long Tokens)>> SummarizePartsAsync(List<(string Text, long Tokens)> parts,
         string modelId, int words, UsageSum usage, CancellationToken cancellationToken)
     {
         long total = Math.Max(1, parts.Sum(part => part.Tokens));
-        var summaries = new List<(string Text, long Tokens)>(parts.Count);
-        foreach ((string text, long tokens) in parts)
+        // The first failure cancels the other requests, so no paid request runs for a compaction that already failed.
+        using var failed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task<LlmChatResult>[] requests = [.. parts.Select(async part =>
         {
-            int partWords = (int)Math.Max(MinimumPartWords, (double)words * tokens / total);
-            LlmChatResult result = await sideRequest(SummaryRequest.Create(modelId, text, partWords), cancellationToken)
-                .ConfigureAwait(false);
-            usage.Add(result.Usage);
-            summaries.Add((result.Text, Estimate(result.Text)));
+            try
+            {
+                return await sideRequest(SummaryRequest.Create(modelId, part.Text,
+                    (int)Math.Max(MinimumPartWords, (double)words * part.Tokens / total)), failed.Token).ConfigureAwait(false);
+            }
+            catch
+            {
+                await failed.CancelAsync().ConfigureAwait(false);
+                throw;
+            }
+        })];
+        LlmChatResult[] results;
+        try
+        {
+            results = await Task.WhenAll(requests).ConfigureAwait(false);
         }
-        return summaries;
+        catch when (!cancellationToken.IsCancellationRequested)
+        {
+            // The request that failed is reported, not a sibling the failure cancelled.
+            Exception first = requests.Select(request => request.Exception?.InnerException)
+                .FirstOrDefault(error => error is not null and not OperationCanceledException)
+                ?? requests.First(request => request.IsFaulted || request.IsCanceled).Exception?.InnerException
+                ?? new OperationCanceledException(failed.Token);
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(first);
+            throw;
+        }
+        foreach (LlmChatResult result in results) usage.Add(result.Usage);
+        return [.. results.Select(result => (result.Text, Estimate(result.Text)))];
     }
 
     /// <summary>Joins pieces in order into parts whose estimates stay within the part limit.</summary>

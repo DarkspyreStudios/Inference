@@ -843,7 +843,7 @@ public sealed class ManagedAgentTests
         Assert.Equal(new LlmUsage(10, 2, 12), usage.Usage);
         Assert.True(events.IndexOf(usage) < events.IndexOf(completed));
         Assert.Empty(events.OfType<LlmAgentCompactedEvent>());
-        Assert.Single(harness.Summaries);
+        Assert.NotEmpty(harness.Summaries); // The parts' summary requests start together.
         Assert.Empty(harness.Requests);
         LlmAgentContext kept = await session.CaptureContextAsync();
         Assert.Equal([.. history.Entries.Select(entry => entry.Message.Content), "hello"],
