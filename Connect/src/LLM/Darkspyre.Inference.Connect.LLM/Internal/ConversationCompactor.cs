@@ -189,10 +189,9 @@ internal sealed class ConversationCompactor(
     /// transcript turns the context no longer holds (steps 4-7). Without a transcript, or when the transcript holds no
     /// such turn, the empty entries are dropped and nothing is summarized.
     /// </summary>
-    /// <exception cref="CompactionFailedException">The result stays at or above the usable window.</exception>
     /// <exception cref="LlmProviderException">A summary side request failed; the caller keeps its context.</exception>
     internal async Task<CompactionResult> SummarizeOmittedAsync(LlmAgentContext context, string modelId,
-        string currentTurnId, IReadOnlySet<string> emptyEntryIds, CompactionLimits limits,
+        IReadOnlySet<string> emptyEntryIds, CompactionLimits limits,
         Func<string, CancellationToken, ValueTask> stage, CancellationToken cancellationToken)
     {
         LlmAgentContext remaining = context with { Entries = [.. context.Entries.Where(entry => !emptyEntryIds.Contains(entry.Id))] };
@@ -210,9 +209,8 @@ internal sealed class ConversationCompactor(
             .ConfigureAwait(false);
         var summaryEntry = new LlmAgentContextEntry(Guid.NewGuid().ToString("N"), SummaryTurnId,
             new LlmChatMessage("user", SummaryPrefix + summary));
-        LlmAgentContextEntry[] current = [.. kept.Where(entry => entry.TurnId == currentTurnId)];
-        return await FinishAsync(remaining with { Entries = [summaryEntry, .. kept] }, current,
-            context.Entries.Count - kept.Length, usage, 0, 0, limits, cancellationToken).ConfigureAwait(false);
+        // The result is not checked against the window: the step's own decision point compacts what is still too large.
+        return new(remaining with { Entries = [summaryEntry, .. kept] }, context.Entries.Count - kept.Length, usage, 0, 0);
     }
 
     /// <summary>

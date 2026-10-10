@@ -885,6 +885,32 @@ public sealed class ManagedAgentTests
     }
 
     [Fact]
+    public async Task OmittedNativeCompactionOverTheWindowIsCompactedAndSent()
+    {
+        var foreignState = new LlmContinuationState
+        { ImplementationId = "openai-codex", ModelId = "other", ScopeId = "other-account", Payload = "opaque" };
+        // About 1,500 tokens, over the 1,000-token window even after the omitted state is summarized.
+        string large = string.Join(' ', Enumerable.Repeat("word", 1500));
+        LlmAgentContext recent = History(("t1", large, "large answer"), ("t2", "recent question", "recent answer"));
+        var context = recent with
+        {
+            Entries = [new("native", "native", new("assistant", string.Empty) { ContinuationState = foreignState }), .. recent.Entries]
+        };
+        var harness = new Harness { SummaryText = "summary" };
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "answer", Status = LlmCompletionStatus.Completed });
+        await using var session = harness.Create(Options() with
+        {
+            Context = context,
+            CallerServices = new() { Transcript = new Transcript([.. History(("t0", "oldest question", "oldest answer")).Entries, .. recent.Entries]) }
+        });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("next")));
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.DoesNotContain(large, Assert.Single(harness.Requests).Messages.Select(message => message.Content));
+    }
+
+    [Fact]
     public async Task CompactNowSummarizesAnIdleConversation()
     {
         var harness = new Harness { SummaryText = "summary of t1" };

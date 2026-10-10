@@ -1198,7 +1198,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         }
         string itemId = NewId();
         return await ReportCompactionAsync(run, itemId, writer, () => _compactor.SummarizeOmittedAsync(source,
-            run.Turn.ModelId!, run.Id, emptied, limits, Stage(run, itemId, writer), token), installUnchanged: true, token)
+            run.Turn.ModelId!, emptied, limits, Stage(run, itemId, writer), token), installUnchanged: true, token)
             .ConfigureAwait(false);
     }
 
