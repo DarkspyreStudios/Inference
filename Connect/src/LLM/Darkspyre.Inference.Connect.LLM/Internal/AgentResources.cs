@@ -2,19 +2,6 @@ using System.Runtime.CompilerServices;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
-internal static class AgentResourceOptions
-{
-    /// <summary>Fails before effects when a runtime cannot honour the background-work options.</summary>
-    public static void Validate(LlmAgentCapabilities agent, bool allowRuntimeBackgroundWork, long retentionBytes)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(retentionBytes);
-        if (allowRuntimeBackgroundWork && agent.ResourceObservation == LlmOperationSupport.Unsupported)
-        {
-            throw new NotSupportedException("This runtime does not report background work of its own.");
-        }
-    }
-}
-
 /// <summary>Resource members for a runtime that runs no background work of its own.</summary>
 internal sealed class NoAgentResources(LlmAgentResourceStopStatus stop) : IDisposable
 {

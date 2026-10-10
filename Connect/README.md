@@ -4192,12 +4192,14 @@ await foreach (LlmAgentEvent agentEvent in session.RunTurnAsync(
 ```
 
 `LlmAgentSessionOptions.Runtime` (`LlmAgentNativeRuntimeOptions`) controls a provider-owned runtime:
-its working directory, `Ephemeral` and `Policy`. A provider-owned runtime reads it; a managed session accepts
-and ignores it.
+its working directory, `Ephemeral` and `Policy`. The Claude CLI reads only the working directory and
+`Ephemeral`; with no `Runtime` it runs in the current directory with a persisted CLI session. It accepts
+`Policy` and does not read it, because it runs no tool of its own. A managed session accepts and ignores
+`Runtime`.
 `Policy` is one of two variants:
 
 - `LlmAgentHostRuntimePolicy` (the default): host-selected writable roots, network access, sandbox,
-  approval policy and `AllowRuntimeBackgroundWork`. The runtime enforces these limits.
+  approval policy and `AllowRuntimeBackgroundWork`.
 - `LlmAgentProviderRuntimePolicy`: explicit adoption of the policy configured in the provider's own
   settings, including its background behavior. Connect does not read, edit or strengthen that policy and
   makes no claim about the filesystem, network or background limits it applies.
@@ -4210,14 +4212,14 @@ network tool, or approval executor. Agent DS must enforce authorization, filesys
 policy inside each tool handler. Managed sessions are always live/in-memory; persistence is explicit
 host capture.
 
-Claude uses restricted mode and `--add-dir` for read-only/workspace sessions. A workspace session
-with `NetworkAllowed = false` is rejected because the CLI cannot independently constrain Bash
-network access. AgentCore permits remote Harness-managed tools only with `DangerFullAccess`;
+Every Claude CLI process launches with `ClaudeCliConfiguration.IsolationArguments`: `--safe-mode`,
+`--restricted`, `--strict-mcp-config`, `--disable-slash-commands`, `--tools ""` and
+`--permission-prompts none`. The CLI loads no CLAUDE.md, skills, plugins, hooks, settings files or
+configured MCP servers, and runs no built-in tool. AgentCore permits remote Harness-managed tools only with `DangerFullAccess`;
 local workspace restrictions cannot constrain remote tools.
-Read-only Claude sessions use `dontAsk`, not planning mode. The built-in tool set remains `Read`;
-the exact registered host MCP tools are pre-approved, and permission prompts remain disabled.
-The caller's handler owns the effects of its registered tools. This mode does not enable native
-file edits or shell commands. Claude's [permission contract](https://code.claude.com/docs/en/agent-sdk/permissions)
+Claude agent sessions use `--permission-mode dontAsk`, not planning mode. `--allowedTools` lists only
+the registered host MCP tools, so nothing else may run, and permission prompts remain disabled.
+The caller's handler owns the effects of its registered tools. Claude's [permission contract](https://code.claude.com/docs/en/agent-sdk/permissions)
 separates explicit tool approval from planning mode's write restrictions.
 Claude start retires an unsuccessfully initialized session before returning.
 Successful cleanup preserves the original opening error. Failed cleanup returns an aggregate
@@ -4646,15 +4648,12 @@ A provider-owned runtime can run background work inside its own process. `ILlmAg
   `StopResourceAsync` returns Requested; the resource reports Stopped when the runtime confirms.
 - `LlmAgentCapabilities.ResourceObservation` is Supported for the Claude CLI, Unknown for AgentCore
   (not measured) and Unsupported for managed Codex, whose tools run in the host.
-- `LlmAgentHostRuntimePolicy.AllowRuntimeBackgroundWork` (off by default) lets the Claude CLI start
-  subagents and monitors. A background Bash command is part of the Bash tool and is observed either
-  way. `ResourceOutputRetentionBytes` (1 MiB by default) caps the subagent output Connect retains.
+- The Claude CLI runs no background work of its own: `Task`, `Monitor` and `Bash` are off with every
+  other built-in tool. Its session reports no resources, and `StopResourceAsync` returns Unknown.
+- `LlmAgentHostRuntimePolicy.AllowRuntimeBackgroundWork` and `ResourceOutputRetentionBytes` are stored
+  Host settings. No phase-1 runtime reads them.
 
-The Claude CLI reports each task's start, status and end. Command output is read from the CLI's output
-file, and the exit code from the trailer it appends. A subagent's output is the text of its own messages,
-which stay out of the main turn. Terminal attach is unsupported.
-
-The Claude CLI starts a turn of its own when background work reports. Connect launches it with
+Connect launches the Claude CLI with
 `--replay-user-messages` and reads it for the session's lifetime: a host turn starts at the CLI's echo of
 its message, and output with no echo before it is a provider-started turn on `ObserveAsync`. A host turn
 sent during a provider turn is queued by the CLI and starts after it.

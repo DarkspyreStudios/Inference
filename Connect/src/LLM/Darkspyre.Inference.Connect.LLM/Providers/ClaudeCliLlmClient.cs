@@ -376,10 +376,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         arguments.AddRange(
         [
             "--no-session-persistence",
-            "--safe-mode",
-            "--disable-slash-commands",
-            "--tools", string.Empty,
-            "--permission-prompts", "none",
+            .. ClaudeCliConfiguration.IsolationArguments,
             "--system-prompt", ClaudeSystemPrompt,
             "--model", request.ModelId
         ]);

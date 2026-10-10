@@ -33,42 +33,6 @@ internal static class NativeAgentContract
         ResourceObservation = LlmOperationSupport.Supported
     };
 
-    /// <summary>The validated start settings of a runtime that declares <paramref name="agent"/>.</summary>
-    public static LlmAgentNativeRuntimeOptions ValidateStart(LlmAgentSessionOptions options, LlmAgentCapabilities agent,
-        bool supportsResources = false)
-    {
-        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, agent.HostedTools);
-        ClientTools.ValidateCallerServices(options.CallerServices, supportsResources);
-        // A supplied context becomes opening context; see AgentOpeningContext.
-        if (options.ThreadId is not null || options.SessionId is not null || options.ExecutionOptions is not null)
-        {
-            throw new NotSupportedException(
-                "This native runtime does not accept host identities or managed execution options. "
-                + "Use native resume/fork for provider-owned conversations.");
-        }
-
-        LlmAgentNativeRuntimeOptions runtime = options.Runtime ?? throw new ArgumentException(
-            "This native runtime requires Runtime options with a working directory.", nameof(options));
-        ValidateRuntime(agent, runtime, options.ResourceOutputRetentionBytes);
-        return runtime;
-    }
-
-    /// <summary>The host-controlled policy of the settings, or the default host-controlled policy for any other variant.</summary>
-    public static LlmAgentHostRuntimePolicy HostPolicy(LlmAgentNativeRuntimeOptions runtime) =>
-        runtime.Policy as LlmAgentHostRuntimePolicy ?? new LlmAgentHostRuntimePolicy();
-
-    private static void ValidateRuntime(
-        LlmAgentCapabilities agent,
-        LlmAgentNativeRuntimeOptions runtime,
-        long retentionBytes)
-    {
-        LlmAgentRuntimePolicy? policy = runtime.Policy;
-        AgentResourceOptions.Validate(
-            agent,
-            policy is LlmAgentHostRuntimePolicy { AllowRuntimeBackgroundWork: true },
-            retentionBytes);
-    }
-
     /// <summary>
     /// Fails when the connection's overrides disable the operation. <paramref name="supportsAgentToolUse"/> is
     /// what the runtime implements; overrides can only lower it.

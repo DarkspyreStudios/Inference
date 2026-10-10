@@ -14,6 +14,23 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class ClaudeCliLlmClientTests
 {
+    [Fact]
+    public async Task ChatArgumentsAreIsolated()
+    {
+        var runner = new RecordingRunner(new(0,
+            """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
+            string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+
+        await ReadAllAsync(client.StreamAsync(CliConnection(),
+            new() { ModelId = "claude-test", Messages = [new("user", "test")] }));
+
+        IReadOnlyList<string> arguments = Assert.Single(runner.Invocations).Arguments;
+        int start = arguments.ToList().IndexOf(ClaudeCliConfiguration.IsolationArguments[0]);
+        Assert.Equal(ClaudeCliConfiguration.IsolationArguments, arguments.Skip(start).Take(ClaudeCliConfiguration.IsolationArguments.Count));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

@@ -185,10 +185,45 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         });
         IReadOnlyList<string> arguments = Assert.IsType<ClaudeCliSessionInvocation>(factory.Invocation).Arguments;
         Assert.Equal("dontAsk", arguments[arguments.ToList().IndexOf("--permission-mode") + 1]);
-        Assert.Equal("Read", arguments[arguments.ToList().IndexOf("--tools") + 1]);
-        Assert.Equal("mcp__darkspyre-inference-connect__echo,Read", arguments[arguments.ToList().IndexOf("--allowedTools") + 1]);
+        Assert.Equal(string.Empty, arguments[arguments.ToList().IndexOf("--tools") + 1]);
+        Assert.Equal("mcp__darkspyre-inference-connect__echo", arguments[arguments.ToList().IndexOf("--allowedTools") + 1]);
         Assert.Contains("--restricted", arguments);
         Assert.DoesNotContain("--dangerously-skip-permissions", arguments);
+    }
+
+    [Fact]
+    public async Task LaunchArgumentsAreIsolated()
+    {
+        var factory = new Factory(new ManualProcess());
+        string other = Directory.CreateDirectory(Path.Combine(_directory, "other")).FullName;
+        await using ILlmAgentSession session = await new ClaudeAgentClient(factory).StartSessionAsync("connection", Connection(), new()
+        {
+            ModelId = "claude-test",
+            Runtime = new()
+            {
+                WorkingDirectory = _directory,
+                Policy = new LlmAgentHostRuntimePolicy
+                {
+                    Sandbox = LlmAgentSandboxMode.DangerFullAccess,
+                    NetworkAllowed = true,
+                    WritableRoots = [other],
+                    AllowRuntimeBackgroundWork = true
+                }
+            },
+            Tools = [new LlmAgentToolDefinition { Name = "echo", InputSchema = Json(new { type = "object" }) }],
+            ToolHandler = (_, _) => Task.FromResult(LlmToolOutput.FromText("echo"))
+        });
+
+        List<string> arguments = [.. Assert.IsType<ClaudeCliSessionInvocation>(factory.Invocation).Arguments];
+        int start = arguments.IndexOf(ClaudeCliConfiguration.IsolationArguments[0]);
+        Assert.Equal(ClaudeCliConfiguration.IsolationArguments, arguments.Skip(start).Take(ClaudeCliConfiguration.IsolationArguments.Count));
+        Assert.Equal("dontAsk", arguments[arguments.IndexOf("--permission-mode") + 1]);
+        Assert.Equal("mcp__darkspyre-inference-connect__echo", arguments[arguments.IndexOf("--allowedTools") + 1]);
+        Assert.DoesNotContain("--add-dir", arguments);
+        Assert.DoesNotContain("--dangerously-skip-permissions", arguments);
+        Assert.DoesNotContain("--disallowedTools", arguments);
+        Assert.DoesNotContain("--resume", arguments);
+        Assert.DoesNotContain("--fork-session", arguments);
     }
 
     [Theory]
@@ -574,55 +609,21 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
     }
 
     [Fact]
-    public async Task ATrailerWrittenAfterTheTaskEndedIsStillExcludedAndGivesTheExitCode()
-    {
-        var events = new ConcurrentQueue<LlmAgentEvent>();
-        await using var tasks = new ClaudeBackgroundTasks("thread", 1_048_576, events.Enqueue, TimeSpan.FromMilliseconds(20));
-        string killed = Path.Combine(_directory, "b1.output");
-        string exited = Path.Combine(_directory, "b2.output");
-        await File.WriteAllTextAsync(killed, "tick-1\n");
-        await File.WriteAllTextAsync(exited, "done\n");
-        foreach ((string id, string path) in new[] { ("b1", killed), ("b2", exited) })
-        {
-            tasks.Handle(Json(new { type = "system", subtype = "task_started", task_id = id, tool_use_id = "tu-" + id, description = id, is_backgrounded = true, task_type = "local_bash" }));
-            tasks.ToolResult("tu-" + id, $"Command running in background with ID: {id}. Output is being written to: {path}. You will be notified.");
-        }
-
-        // The stop and the completion both end their tasks before the CLI appends the trailer.
-        tasks.Handle(Json(new { type = "system", subtype = "task_updated", task_id = "b1", patch = new { status = "killed" } }));
-        tasks.Handle(Json(new { type = "system", subtype = "task_updated", task_id = "b2", patch = new { status = "completed" } }));
-        await File.AppendAllTextAsync(killed, "\n[killed]\n");
-        await File.AppendAllTextAsync(exited, "\n[exited with code 2]");
-
-        LlmAgentResourceOutput read = await tasks.ReadAsync("b1", null, CancellationToken.None);
-        Assert.Equal(("tick-1\n", "7", true), (Encoding.UTF8.GetString(read.Data.Span), read.NextCursor, read.Closed));
-        Assert.Equal((LlmAgentResourceOutputStatus.NoData, true), ((await tasks.ReadAsync("b1", "7", CancellationToken.None)).Status, read.Closed));
-        Assert.Null(tasks.Snapshot().Single(resource => resource.ResourceId == "b2").ExitCode);
-        tasks.Handle(Json(new { type = "system", subtype = "task_notification", task_id = "b2", tool_use_id = "tu-b2", status = "completed", output_file = exited, summary = "done" }));
-        Assert.Equal(2, tasks.Snapshot().Single(resource => resource.ResourceId == "b2").ExitCode);
-        Assert.Equal("done\n", Encoding.UTF8.GetString((await tasks.ReadAsync("b2", null, CancellationToken.None)).Data.Span));
-    }
-
-    [Fact]
-    public async Task ARuntimeStartedTurnArrivesOnTheSessionFeedNamingTheTaskThatEnded()
+    public async Task ARuntimeStartedTurnArrivesOnTheSessionFeed()
     {
         var process = new ManualProcess();
         await using ILlmAgentSession session = await Start(process);
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         await using IAsyncEnumerator<LlmAgentEvent> feed = session.ObserveAsync(limit.Token).GetAsyncEnumerator(limit.Token);
 
-        process.Push(new { type = "system", subtype = "task_started", task_id = "t1", tool_use_id = "tu1", description = "sleep", is_backgrounded = true, task_type = "local_bash" });
-        process.Push(new { type = "system", subtype = "task_notification", task_id = "t1", tool_use_id = "tu1", status = "completed", output_file = "", summary = "done" });
         process.Push(new { type = "assistant", message = new { id = "m1", content = new object[] { new { type = "text", text = "It finished." } } } });
         process.Push(new { type = "result", subtype = "success", is_error = false, result = "It finished." });
         List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
 
         LlmAgentProviderTurnStartedEvent started = Assert.Single(events.OfType<LlmAgentProviderTurnStartedEvent>());
-        Assert.Equal("t1", started.ResourceId);
+        Assert.Null(started.ResourceId);
         Assert.Equal("It finished.", Assert.Single(events.OfType<LlmAgentMessageCompletedEvent>()).Text);
         Assert.Equal(started.TurnId, Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]).TurnId);
-        Assert.Equal([LlmAgentResourceChange.Added, LlmAgentResourceChange.Ended],
-            events.OfType<LlmAgentResourceEvent>().Select(item => item.Change));
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
         {
             await foreach (LlmAgentEvent _ in session.ObserveAsync()) { }
@@ -646,10 +647,6 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         process.Push(ToolCall("c1", 7));
         CancellationToken token = await entered.Task.WaitAsync(limit.Token);
 
-        // The reader keeps routing while the tool runs: a task starts, and its stop request completes.
-        process.Push(new { type = "system", subtype = "task_started", task_id = "s1", tool_use_id = "tu-s1", description = "server", is_backgrounded = true, task_type = "local_bash" });
-        await ReadUntil(feed, item => item is LlmAgentResourceEvent { Resource.ResourceId: "s1" });
-        Assert.Equal(LlmAgentResourceStopStatus.Requested, await session.StopResourceAsync("s1", limit.Token));
         Assert.False(token.IsCancellationRequested);
 
         process.Push(Cancelled("c2", 7));

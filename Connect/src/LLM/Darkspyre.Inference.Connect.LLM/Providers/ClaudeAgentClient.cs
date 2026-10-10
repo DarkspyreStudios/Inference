@@ -26,12 +26,14 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         CancellationToken cancellationToken = default)
     {
         options = ClientTools.Snapshot(options);
-        LlmAgentNativeRuntimeOptions runtime = NativeAgentContract.ValidateStart(options, NativeAgentContract.Claude, supportsResources: true);
-        LlmAgentHostRuntimePolicy policy = NativeAgentContract.HostPolicy(runtime);
+        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, NativeAgentContract.Claude.HostedTools);
+        // The CLI owns its id, so ThreadId is ignored. The runtime policy is accepted and not read: no provider tool runs.
+        string workingDirectory = options.Runtime?.WorkingDirectory ?? Environment.CurrentDirectory;
+        bool ephemeral = options.Runtime?.Ephemeral ?? false;
         NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude, supportsAgentToolUse: true,
             options.ModelId, options.Tools, options.ToolHandler);
         ClaudeCliConfiguration.ValidateConnection(connection);
-        ValidateOptions(options.ModelId, runtime.WorkingDirectory);
+        ValidateOptions(options.ModelId, workingDirectory);
         // The first definition of a duplicated name is the one used.
         LlmAgentToolDefinition[] tools = [.. ClientTools.Functions(options.Tools).DistinctBy(tool => tool.Name, StringComparer.Ordinal)];
         (LlmAgentContext? Context, int Omitted) opening = AgentOpeningContext.Validate(options, supportsResources: true);
@@ -43,20 +45,15 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             threadId,
             ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint),
             options.ModelId,
-            runtime.WorkingDirectory,
+            workingDirectory,
             options.Instructions,
-            policy.WritableRoots,
-            policy.Sandbox,
-            policy.NetworkAllowed,
             tools,
             options.ToolHandler,
-            runtime.Ephemeral,
+            ephemeral,
             connection,
             NativeAgentContract.Claude.RichContentSupported.For(connection, options.ModelId),
             opening,
             options.CallerServices?.Resources,
-            policy.AllowRuntimeBackgroundWork,
-            options.ResourceOutputRetentionBytes,
             cancellationToken);
     }
 
@@ -90,9 +87,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         string? modelId,
         string workingDirectory,
         string? instructions,
-        IReadOnlyList<string> writableRoots,
-        LlmAgentSandboxMode sandbox,
-        bool networkAllowed,
         IReadOnlyList<LlmAgentToolDefinition> tools,
         LlmAgentToolHandler? toolHandler,
         bool ephemeral,
@@ -100,8 +94,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         LlmRichContentSupported richContent,
         (LlmAgentContext? Context, int Omitted) opening,
         IInferenceResourceAccess? resourceAccess,
-        bool allowRuntimeBackgroundWork,
-        long retentionBytes,
         CancellationToken cancellationToken)
     {
         string normalizedDirectory = CliInfrastructure.NormalizeWorkingDirectory(workingDirectory);
@@ -113,11 +105,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             tools,
             names,
             ephemeral,
-            normalizedDirectory,
-            writableRoots,
-            sandbox,
-            networkAllowed,
-            allowRuntimeBackgroundWork,
             (capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
         InferenceResourceSelectionVersion? resourceScope = await ReadResourceScopeAsync(resourceAccess, opening.Context, cancellationToken);
         IClaudeCliSessionProcess process;
@@ -148,7 +135,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             opening,
             resourceAccess,
             resourceScope,
-            retentionBytes,
             connection);
         try
         {
@@ -170,72 +156,30 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         IReadOnlyList<LlmAgentToolDefinition> tools,
         LlmToolNames names,
         bool ephemeral,
-        string workingDirectory,
-        IReadOnlyList<string> writableRoots,
-        LlmAgentSandboxMode sandbox,
-        bool networkAllowed,
-        bool allowRuntimeBackgroundWork,
         bool requestReasoningText)
     {
-        string[] background = allowRuntimeBackgroundWork ? BackgroundTools(sandbox) : [];
-        string builtIn = ClaudeTools(sandbox, networkAllowed);
-        var arguments = new List<string>
-        {
+        List<string> arguments =
+        [
             "--verbose",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
             // The echo marks where each host turn starts; output with no echo before it is the runtime's own turn.
             "--replay-user-messages",
             "--include-partial-messages",
-            "--strict-mcp-config",
-            "--disable-slash-commands",
-            "--tools", builtIn == "default" || background.Length == 0 ? builtIn : string.Join(',', [builtIn, .. background]),
-            "--permission-mode", PermissionMode(sandbox),
-            "--permission-prompts", "none",
+            .. ClaudeCliConfiguration.IsolationArguments,
+            // Nothing outside --allowedTools may run.
+            "--permission-mode", "dontAsk",
             "--settings", new JsonObject { ["showThinkingSummaries"] = requestReasoningText }.ToJsonString()
-        };
-        if (sandbox is not LlmAgentSandboxMode.DangerFullAccess)
-        {
-            arguments.Add("--restricted");
-        }
-        else
-        {
-            arguments.Add("--dangerously-skip-permissions");
-            if (!allowRuntimeBackgroundWork)
-            {
-                // The default tool set includes both; background work stays off unless the session allows it.
-                arguments.AddRange(["--disallowedTools", "Task,Monitor"]);
-            }
-        }
-
-        string[] additionalRoots =
-        [
-            .. writableRoots
-                .Where(root => !string.IsNullOrWhiteSpace(root))
-                .Select(CliInfrastructure.NormalizeWorkingDirectory)
-                .Where(root => !string.Equals(root, workingDirectory, StringComparison.Ordinal))
-                .Distinct(StringComparer.Ordinal)
         ];
-        if (additionalRoots.Length > 0)
-        {
-            arguments.Add("--add-dir");
-            arguments.AddRange(additionalRoots);
-        }
         if (!string.IsNullOrWhiteSpace(modelId))
         {
             arguments.AddRange(["--model", modelId]);
         }
 
-        string[] allowed =
-        [
-            .. tools.Select(tool => McpToolName(names.Native(tool.Name))),
-            .. tools.Count > 0 ? ["Read"] : Array.Empty<string>(),
-            .. background
-        ];
-        if (allowed.Length > 0)
+        if (tools.Count > 0)
         {
             arguments.Add("--allowedTools");
-            arguments.Add(string.Join(',', allowed));
+            arguments.Add(string.Join(',', tools.Select(tool => McpToolName(names.Native(tool.Name)))));
         }
 
         arguments.Add($"--session-id={threadId}");
@@ -247,34 +191,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
 
         return arguments;
     }
-
-    private static string ClaudeTools(LlmAgentSandboxMode sandbox, bool networkAllowed) =>
-        sandbox switch
-        {
-            LlmAgentSandboxMode.ReadOnly => "Read",
-            LlmAgentSandboxMode.WorkspaceWrite when networkAllowed =>
-                "Read,Write,Edit,Bash,WebFetch,WebSearch",
-            LlmAgentSandboxMode.WorkspaceWrite =>
-                throw new NotSupportedException(
-                    "Claude CLI cannot isolate network access while allowing workspace commands."),
-            LlmAgentSandboxMode.DangerFullAccess when networkAllowed => "default",
-            LlmAgentSandboxMode.DangerFullAccess =>
-                throw new NotSupportedException(
-                    "Claude CLI cannot disable network access in danger-full-access mode."),
-            _ => throw new ArgumentOutOfRangeException(nameof(sandbox))
-        };
-
-    /// <summary>Subagents in every sandbox; monitors run commands, so not in read-only.</summary>
-    private static string[] BackgroundTools(LlmAgentSandboxMode sandbox) =>
-        sandbox == LlmAgentSandboxMode.ReadOnly ? ["Task"] : ["Task", "Monitor"];
-
-    private static string PermissionMode(LlmAgentSandboxMode sandbox) => sandbox switch
-    {
-        LlmAgentSandboxMode.ReadOnly => "dontAsk",
-        LlmAgentSandboxMode.WorkspaceWrite => "dontAsk",
-        LlmAgentSandboxMode.DangerFullAccess => "bypassPermissions",
-        _ => throw new ArgumentOutOfRangeException(nameof(sandbox))
-    };
 
     private static void ValidateOptions(string? modelId, string workingDirectory)
     {
@@ -332,7 +248,8 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         private readonly Dictionary<string, TaskCompletionSource<JsonElement>> _controlWaiters = new(StringComparer.Ordinal);
         // Host turns written to the CLI and not yet echoed back, in the order written.
         private readonly List<HostTurn> _written = [];
-        private readonly ClaudeBackgroundTasks _tasks;
+        // The CLI runs no background work of its own: its Task and Monitor tools are off.
+        private readonly NoAgentResources _resources = new(LlmAgentResourceStopStatus.Unknown);
         private readonly CancellationTokenSource _readerStop = new();
         private readonly LlmOperationLifetime _lifetime = new();
         private Task _reader = Task.CompletedTask;
@@ -361,12 +278,9 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             (LlmAgentContext? Context, int Omitted) opening,
             IInferenceResourceAccess? resourceAccess,
             InferenceResourceSelectionVersion? resourceScope,
-            long retentionBytes,
             LlmConnection connection)
         {
             _process = process;
-            _tasks = new ClaudeBackgroundTasks(threadId, retentionBytes, item => _sessionEvents.Writer.TryWrite(item),
-                TimeSpan.FromMilliseconds(500));
             _richRoute = richRoute;
             _richContent = richContent;
             (_openingContext, _openingOmitted) = opening;
@@ -716,47 +630,26 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
         public Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default)
         {
             using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-            return Task.FromResult(_tasks.Snapshot());
+            return NoAgentResources.GetAsync();
         }
 
-        public async Task<LlmAgentResourceOutput> ReadResourceOutputAsync(
+        public Task<LlmAgentResourceOutput> ReadResourceOutputAsync(
             string resourceId,
             string? cursor,
             CancellationToken cancellationToken = default)
         {
             using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
             ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
-            LlmAgentResourceOutput output = await _tasks.ReadAsync(resourceId, cursor, operation.Token);
-            operation.Token.ThrowIfCancellationRequested();
-            return output;
+            return NoAgentResources.ReadAsync();
         }
 
-        public async Task<LlmAgentResourceStopStatus> StopResourceAsync(
+        public Task<LlmAgentResourceStopStatus> StopResourceAsync(
             string resourceId,
             CancellationToken cancellationToken = default)
         {
             using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-            cancellationToken = operation.Token;
             ArgumentException.ThrowIfNullOrWhiteSpace(resourceId);
-            if (!_tasks.TryGet(resourceId, out LlmAgentResource resource))
-            {
-                return LlmAgentResourceStopStatus.Unknown;
-            }
-            if (resource.Ended is not null)
-            {
-                return LlmAgentResourceStopStatus.Exited;
-            }
-            try
-            {
-                await SendControlRequestAsync(new JsonObject { ["subtype"] = "stop_task", ["task_id"] = resourceId }, cancellationToken);
-                cancellationToken.ThrowIfCancellationRequested();
-                // The request is not the exit; the resource reports Stopped when the CLI confirms.
-                return LlmAgentResourceStopStatus.Requested;
-            }
-            catch (LlmProviderException)
-            {
-                return LlmAgentResourceStopStatus.Failed;
-            }
+            return _resources.StopAsync();
         }
 
         public ValueTask DisposeAsync()
@@ -776,8 +669,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             try { await _reader; }
             catch (OperationCanceledException) when (_readerStop.IsCancellationRequested) { }
             catch (Exception error) { failures.Add(error); }
-            try { await _tasks.DisposeAsync(); }
-            catch (Exception error) { failures.Add(error); }
+            _resources.Dispose();
             // The stopped reader admits no new calls. Retain each call through its response write.
             Task[] calls;
             lock (_route)
@@ -1433,16 +1325,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     case "user" when OptionalBoolean(root, "isReplay") == true:
                         await StartHostTurnAsync(OptionalString(root, "uuid"));
                         break;
-                    case "user" or "assistant" when parent is not null:
-                        // A subagent's messages are its own output, not the main turn's.
-                        if (root.TryGetProperty("message", out JsonElement subagentMessage))
-                        {
-                            _tasks.SubagentMessage(parent, subagentMessage);
-                        }
-                        break;
-                    case "user":
-                        NoteToolResults(root);
-                        break;
                     case "assistant":
                         {
                             TurnTarget target = EnsureTarget();
@@ -1474,7 +1356,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                             break;
                         }
                     case "system":
-                        _tasks.Handle(root);
                         if (MapSystemMessage(root, CurrentTarget()?.Id ?? string.Empty) is { } warning)
                         {
                             Emit(warning);
@@ -1528,28 +1409,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             }
         }
 
-        private void NoteToolResults(JsonElement root)
-        {
-            if (!root.TryGetProperty("message", out JsonElement message)
-                || !message.TryGetProperty("content", out JsonElement content)
-                || content.ValueKind != JsonValueKind.Array)
-            {
-                return;
-            }
-            foreach (JsonElement block in content.EnumerateArray())
-            {
-                if (OptionalString(block, "type") == "tool_result" && OptionalString(block, "tool_use_id") is { } toolUseId)
-                {
-                    string text = block.TryGetProperty("content", out JsonElement value) && value.ValueKind == JsonValueKind.String
-                        ? value.GetString() ?? string.Empty
-                        : value.ValueKind == JsonValueKind.Array
-                            ? string.Join("\n", value.EnumerateArray().Select(item => OptionalString(item, "text")).Where(item => item is not null))
-                            : string.Empty;
-                    _tasks.ToolResult(toolUseId, text);
-                }
-            }
-        }
-
         private TurnTarget? CurrentTarget()
         {
             lock (_route) { return (TurnTarget?)_host ?? _provider; }
@@ -1570,7 +1429,7 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
                     (capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported), _accountedCalls), (capabilities.SupportsReasoningText != InferenceSupport.Unsupported));
                 _activeTurnId = _provider.Id;
                 _pendingToolCalls.Clear();
-                _sessionEvents.Writer.TryWrite(new LlmAgentProviderTurnStartedEvent(ThreadId, _provider.Id, _tasks.TakeLastReported()));
+                _sessionEvents.Writer.TryWrite(new LlmAgentProviderTurnStartedEvent(ThreadId, _provider.Id, null));
                 return _provider;
             }
         }
@@ -1675,7 +1534,6 @@ internal sealed class ClaudeAgentClient(IClaudeCliSessionProcessFactory processF
             foreach (TaskCompletionSource<JsonElement> waiter in waiters) { waiter.TrySetException(failure); }
             // No CLI remains to take a host tool's result.
             foreach (RunningToolCall call in calls) { Cancel(call); }
-            _tasks.EndAll();
             _sessionEvents.Writer.TryComplete(failure);
         }
 

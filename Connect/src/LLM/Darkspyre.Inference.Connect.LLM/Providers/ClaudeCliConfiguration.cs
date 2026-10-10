@@ -5,6 +5,17 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal static class ClaudeCliConfiguration
 {
+    /// <summary>Arguments that keep every Claude CLI process to the tools and context the Host gives.</summary>
+    internal static IReadOnlyList<string> IsolationArguments { get; } =
+    [
+        "--safe-mode",
+        "--restricted",
+        "--strict-mcp-config",
+        "--disable-slash-commands",
+        "--tools", string.Empty,
+        "--permission-prompts", "none"
+    ];
+
     internal static string ErrorDetail(JsonElement result, LlmCredential? credential)
     {
         var details = new List<string>();

@@ -92,7 +92,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         Func<string, LlmProviderCapabilities> capabilities, bool supportsResources, LearnedModelContext learned)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(options.ModelId);
-        AgentResourceOptions.Validate(ManagedAgentPolicy.Capabilities, allowRuntimeBackgroundWork: false, options.ResourceOutputRetentionBytes);
         _supportsResources = supportsResources;
         _learned = learned;
         _compactor = new(MeasureForCompactionAsync, SideRequestAsync, EstimateText, options.CallerServices?.Transcript);
