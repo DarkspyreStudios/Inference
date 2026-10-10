@@ -88,7 +88,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             SupportsFrequencyPenalty = InferenceSupport.Supported,
             MaxStopSequences = 16,
             SupportsToolUse = InferenceSupport.Supported,
-            Tools = new() { SupportsParallelCalls = InferenceSupport.Supported, StrictInputSchema = LlmStrictInputSchemaSupport.Unsupported },
+            Tools = new() { SupportsParallelCalls = InferenceSupport.Supported },
             SupportsPromptImages = InferenceSupport.Unsupported,
             SupportsPromptDocuments = InferenceSupport.Unsupported
         };
@@ -700,8 +700,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             : StructuredOutputFormat.JsonSchema(
                 request.Name,
                 request.Schema.GetRawText(),
-                request.Strict,
-                request.Description);
+                description: request.Description);
 
     private static List<ChatMessage> BuildMessages(LlmInferenceRequest request)
     {
@@ -846,9 +845,6 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         {
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen accepts at most 16 stop sequences.");
         }
-
-        if (request.Tools.Any(tool => tool is LlmToolDefinition { Strict: true }))
-        { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen cannot enforce strict tool argument schemas."); }
 
         // The chat template has no control for a forced or serial tool choice.
         if (request.ToolChoice is not null || request.AllowParallelToolCalls is not null)
