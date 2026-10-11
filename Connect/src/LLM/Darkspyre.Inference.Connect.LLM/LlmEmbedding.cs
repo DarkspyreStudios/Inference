@@ -3,10 +3,13 @@ using Darkspyre.Inference.Common.Embedding;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
+/// <summary>A request to embed text inputs.</summary>
 public sealed record LlmEmbeddingRequest
 {
+    /// <summary>The identifier of the embedding model.</summary>
     public required string ModelId { get; init; }
 
+    /// <summary>The texts to embed, in order.</summary>
     public required IReadOnlyList<string> Inputs { get; init; }
 
     /// <summary>Requested vector size; null preserves the model default.</summary>
@@ -27,16 +30,23 @@ public sealed record LlmEmbeddingRequest
     /// </summary>
     public bool Truncate { get; init; }
 
+    /// <summary>Provider-specific JSON properties added to the request.</summary>
     public IReadOnlyDictionary<string, JsonElement> ProviderOptions { get; init; } =
         new Dictionary<string, JsonElement>(StringComparer.Ordinal);
 }
 
+/// <summary>Token counts reported for an embedding request.</summary>
+/// <param name="InputTokens">The input tokens, when reported.</param>
+/// <param name="TotalTokens">The total tokens, when reported.</param>
 public sealed record LlmEmbeddingUsage(int? InputTokens, int? TotalTokens);
 
+/// <summary>The result of an embedding request.</summary>
 public sealed record LlmEmbeddingResult
 {
+    /// <summary>One vector per input, in input order.</summary>
     public required IReadOnlyList<float[]> Vectors { get; init; }
 
+    /// <summary>Token usage, when reported.</summary>
     public LlmEmbeddingUsage? Usage { get; init; }
 
     /// <summary>The model that produced the vectors, when the provider reports it.</summary>
@@ -51,5 +61,6 @@ public sealed record LlmEmbeddingResult
     /// <summary>The indices of inputs a SelfHost engine cut to fit the model's limit.</summary>
     public IReadOnlyList<int> TruncatedInputs { get; init; } = [];
 
+    /// <summary>Provider response details for diagnostics.</summary>
     public required LlmProviderDiagnostics Diagnostics { get; init; }
 }

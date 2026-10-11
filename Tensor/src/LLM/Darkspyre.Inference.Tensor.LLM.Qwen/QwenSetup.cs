@@ -5,8 +5,10 @@ using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
+/// <summary>Setup metadata and settings for the in-process Qwen text engine.</summary>
 public static class QwenSetup
 {
+    /// <summary>The Qwen engine's implementation identity and description in the inference catalog.</summary>
     public static InferenceSetupDefinition Definition { get; } = new(
         new("darkspyre.tensor.qwen", "Darkspyre Tensor Qwen", InferenceImplementationKind.Tensor, InferenceTask.TextGeneration),
         "In-process Qwen text inference with explicitly installed weights and a host-owned resident model.");

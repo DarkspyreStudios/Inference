@@ -27,8 +27,10 @@ public sealed class TensorModelLifetime : IDisposable
         _owner = owner;
     }
 
+    /// <summary>Raised for each lifecycle transition, with the owner as sender. A listener's exception is caught and ignored.</summary>
     public event EventHandler<TensorEngineStatus>? EngineStatusChanged;
 
+    /// <summary>The resident model, its backend and the latest lifecycle state.</summary>
     public TensorModelObservation Observation => Volatile.Read(ref _observation);
 
     /// <summary>
@@ -74,11 +76,13 @@ public sealed class TensorModelLifetime : IDisposable
         }
     }
 
+    /// <summary>True once Stop work has been accepted; later lifecycle work is refused.</summary>
     public bool StopAccepted
     {
         get { lock (_chain) { return _stopAccepted; } }
     }
 
+    /// <summary>Takes the request gate for a load and returns a lease that releases it. Throws when a model is already loaded.</summary>
     public async Task<IDisposable> EnterLoadAsync(CancellationToken cancellationToken = default)
     {
         await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
@@ -91,6 +95,7 @@ public sealed class TensorModelLifetime : IDisposable
         return new GateLease(this, reopenRequests: false);
     }
 
+    /// <summary>Records <paramref name="model"/> on <paramref name="backend"/> as resident and opens it to requests. Throws when a model is already loaded.</summary>
     public void MarkLoaded(TensorModelKey model, TensorBackendKind backend)
     {
         ArgumentNullException.ThrowIfNull(model);
@@ -105,6 +110,7 @@ public sealed class TensorModelLifetime : IDisposable
         Observe(Observation.State);
     }
 
+    /// <summary>Takes the request gate for one request against the resident model. Throws a model-unavailable error when no model is loaded or an unload is in progress.</summary>
     public async Task<ExecutionLease> EnterExecutionAsync(CancellationToken cancellationToken = default)
     {
         if (Volatile.Read(ref _unloading) != 0)
@@ -133,6 +139,7 @@ public sealed class TensorModelLifetime : IDisposable
         }
     }
 
+    /// <summary>Refuses new requests, waits for the request gate and returns a lease that reopens requests on release. Cancelling <paramref name="urgencyToken"/> cancels active requests.</summary>
     public async Task<IDisposable> EnterUnloadAsync(CancellationToken urgencyToken = default)
     {
         using CancellationTokenRegistration cancellation = FenceRequests(urgencyToken);
@@ -160,6 +167,7 @@ public sealed class TensorModelLifetime : IDisposable
             }, requestAbort);
     }
 
+    /// <summary>Records that no model is resident and disposes the source that cancels its requests.</summary>
     public void MarkUnloaded()
     {
         _requestAbort?.Dispose();
@@ -169,6 +177,7 @@ public sealed class TensorModelLifetime : IDisposable
         Observe(Observation.State);
     }
 
+    /// <summary>Releases the request cancellation source and the request gate.</summary>
     public void Dispose()
     {
         _requestAbort?.Dispose();
@@ -252,12 +261,17 @@ public sealed class TensorModelLifetime : IDisposable
         }
     }
 
+    /// <summary>Holds the request gate for one request; disposing it releases the gate.</summary>
+    /// <param name="gate">The request gate the lease releases on dispose.</param>
+    /// <param name="linked">The source of the request token, linked with the model's abort token; the lease disposes it.</param>
     public sealed class ExecutionLease(SemaphoreSlim gate, CancellationTokenSource linked) : IAsyncDisposable
     {
         private SemaphoreSlim? _gate = gate;
 
+        /// <summary>Cancelled when the caller cancels or an urgent unload cancels active requests.</summary>
         public CancellationToken CancellationToken => linked.Token;
 
+        /// <summary>Disposes the linked token and releases the request gate once.</summary>
         public ValueTask DisposeAsync()
         {
             linked.Dispose();

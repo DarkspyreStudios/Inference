@@ -43,6 +43,7 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
         SupportedTransports = [.. _clients.Keys.OrderBy(transport => transport)];
     }
 
+    /// <summary>The transports that have a registered agent client, in ascending order.</summary>
     public IReadOnlyList<LlmTransport> SupportedTransports { get; }
 
     /// <summary>Runtime login is unavailable until an adapter implements its complete owned lifecycle.</summary>
@@ -73,6 +74,7 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
             throw new ArgumentException("The agent facade must borrow the same connection source.", nameof(connections));
     }
 
+    /// <summary>Resolves the connection, starts a new agent session on the client for its transport, and returns the session owned by this service.</summary>
     public async Task<ILlmAgentSession> StartSessionAsync(
         string connectionId,
         LlmAgentSessionOptions options,

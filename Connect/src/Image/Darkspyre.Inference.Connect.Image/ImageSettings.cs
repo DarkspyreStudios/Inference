@@ -6,17 +6,29 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.Image;
 
+/// <summary>Supplies the host's image workflow catalog to image setup.</summary>
 public interface IImageWorkflowChoiceSource
 {
+    /// <summary>Returns one page of workflow choices for a transport.</summary>
     Task<SetupChoicePage> GetChoicesAsync(ImageTransport transport, SetupChoiceQuery query, CancellationToken cancellationToken = default);
+    /// <summary>Returns the workflow with the given identifier, or null when the catalog has none.</summary>
     Task<ImageWorkflow?> GetWorkflowAsync(string workflowId, CancellationToken cancellationToken = default);
 }
 
+/// <summary>The saved connection settings for an image provider.</summary>
+/// <param name="Transport">The image transport.</param>
+/// <param name="Endpoint">The provider base URL.</param>
+/// <param name="RequestTimeout">The time limit for one provider request.</param>
+/// <param name="Workflow">The selected workflow.</param>
 public sealed record ImageSetupConfiguration(ImageTransport Transport, Uri Endpoint, TimeSpan RequestTimeout, ImageWorkflowSelection Workflow);
 
 /// <summary>Protected header mutations; omission is not deletion.</summary>
 public sealed record ImageSetupHeaderChanges(IReadOnlyDictionary<string, string> Set, IReadOnlyList<string> Remove);
 
+/// <summary>The changes an image setup session commits.</summary>
+/// <param name="Identity">The saved setup entry the changes apply to.</param>
+/// <param name="Configuration">The new connection settings.</param>
+/// <param name="Headers">The protected header values to set and remove.</param>
 public sealed record ImageSetupChanges(
     SetupConfigurationIdentity Identity, ImageSetupConfiguration Configuration, ImageSetupHeaderChanges Headers);
 
@@ -65,6 +77,7 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
     /// <summary>The workflow the validate action resolved for <see cref="WorkflowId"/>.</summary>
     internal ImageWorkflow? Workflow { get; set; }
 
+    /// <inheritdoc />
     protected override void OnDraftEdited()
     {
         _generation++;
@@ -72,6 +85,7 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
         base.OnDraftEdited();
     }
 
+    /// <inheritdoc />
     protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query)
         => fieldId == "workflow-origin" ? Page(query, [new("Host", "Host"), new("BuiltIn", "Built-in")]) : null;
 
@@ -79,6 +93,7 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
         new("darkspyre.connect.image." + descriptor.Transport.ToString().ToLowerInvariant(), descriptor.DisplayName,
             InferenceImplementationKind.Connect, InferenceTask.ImageGeneration), descriptor.Description);
 
+    /// <inheritdoc />
     protected override IReadOnlyList<SetupStep> CreateSteps() =>
     [
         new("connection", "Connection", "Configure the externally managed image provider.",
@@ -120,6 +135,7 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
             _headers.Remove(header);
         }));
 
+    /// <inheritdoc />
     protected override IReadOnlyList<SetupActionDescriptor> CreateActions() =>
     [
         new("validate-workflow", "Validate workflow selection", SetupActionPurpose.CheckPrerequisites,
@@ -134,6 +150,7 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
             Workflow?.RequiresReferenceImage == true ? "This workflow requires a host-supplied reference image; use the existing transport API to test it." : null)
     ];
 
+    /// <inheritdoc />
     protected override SetupValidation ValidateDraft()
     {
         List<SetupIssue> issues = ConnectionIssues();
@@ -179,10 +196,12 @@ public sealed class ImageSettings : InferenceSettings<ImageSetupChanges>
             .ToDictionary(header => header.Name, header => header.Value!, StringComparer.OrdinalIgnoreCase)
     };
 
+    /// <inheritdoc />
     protected override bool IsDraftDirty => (_endpoint, _timeoutSeconds, _workflowId, _origin) != _baseline
         || _removedHeaders.Count != 0 || _headers.Any(header => header.OriginalName.Length == 0
             || header.Name != header.OriginalName || header.Change.Kind != SetupSecretEditKind.Keep);
 
+    /// <inheritdoc />
     protected override ImageSetupChanges CreateChanges()
     {
         var set = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -241,6 +260,7 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
             _workflows is not null, existing, workflow));
     }
 
+    /// <inheritdoc />
     public override async Task<SetupActionResult> RunAsync(InferenceSettings settings, string actionId,
         IProgress<SetupProgress>? progress = null, CancellationToken cancellationToken = default)
     {
@@ -248,6 +268,7 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
         return await base.RunAsync(settings, actionId, progress, lease.Token).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
     public override async Task<SetupChoicePage> QueryChoicesAsync(InferenceSettings settings, string fieldId,
         SetupChoiceQuery query, CancellationToken cancellationToken = default)
     {
@@ -255,6 +276,7 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
         return await base.QueryChoicesAsync(settings, fieldId, query, lease.Token).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
     public override async Task<SetupCommitResult> SaveAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
     {
         using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
@@ -262,6 +284,7 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
         return await base.SaveAsync(settings, lease.Token).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
     protected override async Task<SetupActionResult> RunCoreAsync(ImageSettings settings, SetupActionDescriptor action,
         IProgress<SetupProgress>? progress, CancellationToken cancellationToken) => action.Id switch
         {
@@ -271,6 +294,7 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
             _ => new(SetupActionState.Unavailable)
         };
 
+    /// <inheritdoc />
     protected override async Task<SetupChoicePage> QueryProviderChoicesAsync(ImageSettings settings, string fieldId,
         SetupChoiceQuery query, CancellationToken cancellationToken)
     {
@@ -389,7 +413,9 @@ public sealed class ImageSettingsManager : InferenceSettingsManager<ImageSetting
 
     private void Fence(CancellationToken token) { token.ThrowIfCancellationRequested(); _lifetime.ThrowIfStopping(); }
 
+    /// <summary>Retires the manager and blocks until in-flight operations finish.</summary>
     public void Dispose() => RetireAsync().GetAwaiter().GetResult();
+    /// <summary>Retires the manager once in-flight operations finish.</summary>
     public ValueTask DisposeAsync() => new(RetireAsync());
     private Task RetireAsync() => _lifetime.RetireAsync(() =>
     {

@@ -38,26 +38,47 @@ public static class ConnectImageJson
         }
     }
 
+    /// <summary>JSON metadata for <see cref="ImageConnection"/>.</summary>
     public static JsonTypeInfo<ImageConnection> ImageConnection => Metadata<ImageConnection>();
+    /// <summary>JSON metadata for <see cref="ImageTransport"/>.</summary>
     public static JsonTypeInfo<ImageTransport> ImageTransport => Metadata<ImageTransport>();
+    /// <summary>JSON metadata for <see cref="ImageTransportCapabilities"/>.</summary>
     public static JsonTypeInfo<ImageTransportCapabilities> ImageTransportCapabilities => Metadata<ImageTransportCapabilities>();
+    /// <summary>JSON metadata for <see cref="ImageTransportDescriptor"/>.</summary>
     public static JsonTypeInfo<ImageTransportDescriptor> ImageTransportDescriptor => Metadata<ImageTransportDescriptor>();
+    /// <summary>JSON metadata for <see cref="ImageWorkflow"/>.</summary>
     public static JsonTypeInfo<ImageWorkflow> ImageWorkflow => Metadata<ImageWorkflow>();
+    /// <summary>JSON metadata for <see cref="ImageReference"/>.</summary>
     public static JsonTypeInfo<ImageReference> ImageReference => Metadata<ImageReference>();
+    /// <summary>JSON metadata for <see cref="ImageWorkflowOrigin"/>.</summary>
     public static JsonTypeInfo<ImageWorkflowOrigin> ImageWorkflowOrigin => Metadata<ImageWorkflowOrigin>();
+    /// <summary>JSON metadata for <see cref="ImageWorkflowSelection"/>.</summary>
     public static JsonTypeInfo<ImageWorkflowSelection> ImageWorkflowSelection => Metadata<ImageWorkflowSelection>();
+    /// <summary>JSON metadata for <see cref="ImageSetupConfiguration"/>.</summary>
     public static JsonTypeInfo<ImageSetupConfiguration> ImageSetupConfiguration => Metadata<ImageSetupConfiguration>();
+    /// <summary>JSON metadata for <see cref="ImageSetupHeaderChanges"/>.</summary>
     public static JsonTypeInfo<ImageSetupHeaderChanges> ImageSetupHeaderChanges => Metadata<ImageSetupHeaderChanges>();
+    /// <summary>JSON metadata for <see cref="ImageSetupChanges"/>.</summary>
     public static JsonTypeInfo<ImageSetupChanges> ImageSetupChanges => Metadata<ImageSetupChanges>();
+    /// <summary>JSON metadata for <see cref="ImageTransportPreparationRequest"/>.</summary>
     public static JsonTypeInfo<ImageTransportPreparationRequest> ImageTransportPreparationRequest => Metadata<ImageTransportPreparationRequest>();
+    /// <summary>JSON metadata for <see cref="ImagePreparedReference"/>.</summary>
     public static JsonTypeInfo<ImagePreparedReference> ImagePreparedReference => Metadata<ImagePreparedReference>();
+    /// <summary>JSON metadata for <see cref="PreparedImageTransportRequest"/>.</summary>
     public static JsonTypeInfo<PreparedImageTransportRequest> PreparedImageTransportRequest => Metadata<PreparedImageTransportRequest>();
+    /// <summary>JSON metadata for <see cref="ImageTransportOutput"/>.</summary>
     public static JsonTypeInfo<ImageTransportOutput> ImageTransportOutput => Metadata<ImageTransportOutput>();
+    /// <summary>JSON metadata for <see cref="ImageTransportDownload"/>.</summary>
     public static JsonTypeInfo<ImageTransportDownload> ImageTransportDownload => Metadata<ImageTransportDownload>();
+    /// <summary>JSON metadata for <see cref="ImageTransportJobState"/>.</summary>
     public static JsonTypeInfo<ImageTransportJobState> ImageTransportJobState => Metadata<ImageTransportJobState>();
+    /// <summary>JSON metadata for <see cref="ImageTransportJobSnapshot"/>.</summary>
     public static JsonTypeInfo<ImageTransportJobSnapshot> ImageTransportJobSnapshot => Metadata<ImageTransportJobSnapshot>();
+    /// <summary>JSON metadata for <see cref="ImageTransportProgressKind"/>.</summary>
     public static JsonTypeInfo<ImageTransportProgressKind> ImageTransportProgressKind => Metadata<ImageTransportProgressKind>();
+    /// <summary>JSON metadata for <see cref="ImageTransportProgress"/>.</summary>
     public static JsonTypeInfo<ImageTransportProgress> ImageTransportProgress => Metadata<ImageTransportProgress>();
+    /// <summary>JSON metadata for <see cref="ImageProviderHealth"/>.</summary>
     public static JsonTypeInfo<ImageProviderHealth> ImageProviderHealth => Metadata<ImageProviderHealth>();
 }
 

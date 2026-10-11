@@ -6,6 +6,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// </summary>
 public sealed class LlmProviderCatalog
 {
+    /// <summary>Creates the catalog, ordered by display order and then display name. Throws <see cref="InvalidOperationException"/> when two definitions share an id or a transport.</summary>
     public LlmProviderCatalog(IEnumerable<LlmProviderDefinition> providers)
     {
         ArgumentNullException.ThrowIfNull(providers);
@@ -40,6 +41,7 @@ public sealed class LlmProviderCatalog
     /// <summary>Canonical provider metadata and guided setup supplied by registered adapters.</summary>
     public IReadOnlyList<LlmProviderDefinition> SupportedProviders { get; }
 
+    /// <summary>The setup definitions of the supported providers, in catalog order.</summary>
     public IReadOnlyList<Common.Setup.InferenceSetupDefinition> SetupDefinitions =>
         SupportedProviders.Select(provider => provider.SetupDefinition).ToArray();
 }

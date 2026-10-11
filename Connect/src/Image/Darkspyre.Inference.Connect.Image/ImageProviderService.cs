@@ -10,6 +10,7 @@ public sealed class ImageProviderService : IDisposable, IAsyncDisposable
     private readonly LlmOperationLifetime _lifetime = new();
     private Dictionary<ImageTransport, IImageTransport>? _transports;
 
+    /// <summary>Indexes <paramref name="transports"/> by provider transport; two registrations for one transport throw.</summary>
     public ImageProviderService(IEnumerable<IImageTransport> transports)
     {
         ArgumentNullException.ThrowIfNull(transports);
@@ -32,8 +33,10 @@ public sealed class ImageProviderService : IDisposable, IAsyncDisposable
             .ToArray();
     }
 
+    /// <summary>The descriptors of the registered transports, ordered by display name.</summary>
     public IReadOnlyList<ImageTransportDescriptor> AvailableTransports { get; }
 
+    /// <summary>One setup definition per registered transport, in <see cref="AvailableTransports"/> order.</summary>
     public IReadOnlyList<Common.Setup.InferenceSetupDefinition> SetupDefinitions
     {
         get
@@ -55,6 +58,7 @@ public sealed class ImageProviderService : IDisposable, IAsyncDisposable
         return new(this, target, workflows);
     }
 
+    /// <summary>Lists the workflows that <paramref name="connection"/>'s transport offers for that connection.</summary>
     public async Task<IReadOnlyList<ImageWorkflow>> GetWorkflowsAsync(ImageConnection connection,
         CancellationToken cancellationToken = default)
     {
@@ -67,6 +71,10 @@ public sealed class ImageProviderService : IDisposable, IAsyncDisposable
         return workflows;
     }
 
+    /// <summary>
+    /// Returns an image inference that runs <paramref name="workflow"/> over <paramref name="connection"/>, polling every
+    /// <paramref name="pollInterval"/> (250 ms when null). The connection and workflow must select the same transport.
+    /// </summary>
     public Darkspyre.Inference.Common.Image.IImageInference Bind(
         ImageConnection connection,
         ImageWorkflow workflow,
@@ -89,6 +97,7 @@ public sealed class ImageProviderService : IDisposable, IAsyncDisposable
             pollInterval ?? TimeSpan.FromMilliseconds(250));
     }
 
+    /// <summary>Returns the registered transport for <paramref name="transport"/>, or throws when none is registered.</summary>
     public IImageTransport GetRequiredTransport(ImageTransport transport)
     {
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
@@ -111,8 +120,10 @@ public sealed class ImageProviderService : IDisposable, IAsyncDisposable
         }
     }
 
+    /// <summary>Retires the service and blocks until in-flight operations finish.</summary>
     public void Dispose() => RetireAsync().GetAwaiter().GetResult();
 
+    /// <summary>Retires the service and completes when in-flight operations finish.</summary>
     public ValueTask DisposeAsync() => new(RetireAsync());
 
     private Task RetireAsync() => _lifetime.RetireAsync(() =>

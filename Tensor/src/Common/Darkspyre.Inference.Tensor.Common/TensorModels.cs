@@ -2,80 +2,118 @@ using System.Collections.Frozen;
 
 namespace Darkspyre.Inference.Tensor.Common;
 
+/// <summary>The kind of inference a model pack serves.</summary>
 public enum TensorCapability
 {
+/// <summary>Large language model text generation.</summary>
     Llm,
+/// <summary>Image generation.</summary>
     Image,
+/// <summary>Decision models, such as Laya.</summary>
     Decision,
+/// <summary>Speech-to-text transcription.</summary>
     SpeechTranscription,
+/// <summary>Text embedding.</summary>
     Embedding
 }
 
+/// <summary>An execution backend a Tensor engine can run a model pack on.</summary>
 public enum TensorBackendKind
 {
+/// <summary>The engine picks a backend the pack supports.</summary>
     Auto,
+/// <summary>The CPU outside GGML.</summary>
     Cpu,
+/// <summary>GGML on the CPU.</summary>
     GgmlCpu,
+/// <summary>GGML on Apple Metal.</summary>
     GgmlMetal,
+/// <summary>GGML on NVIDIA CUDA.</summary>
     GgmlCuda,
+/// <summary>GGML on Vulkan.</summary>
     GgmlVulkan,
+/// <summary>NVIDIA CUDA outside GGML.</summary>
     Cuda,
+/// <summary>Apple MLX.</summary>
     Mlx,
+/// <summary>Apple Core ML.</summary>
     CoreMl
 }
 
+/// <summary>The identity of a model pack.</summary>
+/// <param name="ModelId">The model id.</param>
+/// <param name="Revision">The model revision.</param>
 public sealed record TensorModelKey(string ModelId, string Revision)
 {
+    /// <summary>Returns the key as <c>modelId@revision</c>.</summary>
     public override string ToString() => $"{ModelId}@{Revision}";
 }
 
+/// <summary>One file in a model pack, with its expected size, hash and sources.</summary>
 public sealed record TensorModelArtifactDefinition
 {
+    /// <summary>The name an engine uses to find this file in the pack, such as <c>model</c> or <c>tokenizer</c>.</summary>
     public required string Role { get; init; }
 
+    /// <summary>The portable path of the file inside the pack directory, with forward slashes and no rooted, empty, <c>.</c> or <c>..</c> segments.</summary>
     public required string RelativePath { get; init; }
 
+    /// <summary>The file size in bytes.</summary>
     public required long Length { get; init; }
 
+    /// <summary>The SHA-256 hash of the file as 64 hexadecimal characters.</summary>
     public required string Sha256 { get; init; }
 
+    /// <summary>Absolute URIs the artifact can be downloaded or copied from.</summary>
     public IReadOnlyList<Uri> Sources { get; init; } = [];
 
+    /// <summary>Where the artifact was discovered, when it came from a source.</summary>
     public TensorArtifactProvenance? Provenance { get; init; }
 }
 
 /// <summary>Source metadata only. Never includes an access token or a transient signed download URL.</summary>
 public sealed record TensorArtifactProvenance(Uri Origin, string? Repository, string? Revision, string Path, string? License);
 
+/// <summary>The portable manifest of one model pack: its identity, capability, license, supported backends and artifacts.</summary>
 public sealed record TensorModelPackDefinition
 {
+    /// <summary>The model id and revision that identify the pack.</summary>
     public required TensorModelKey Key { get; init; }
 
+    /// <summary>The kind of inference the pack serves.</summary>
     public required TensorCapability Capability { get; init; }
 
+    /// <summary>The model architecture name an engine checks to decide whether it can run the pack.</summary>
     public required string RuntimeArchitecture { get; init; }
 
+    /// <summary>The license that covers the pack's weights.</summary>
     public required string License { get; init; }
 
+    /// <summary>The model's project page, when known.</summary>
     public Uri? ProjectUri { get; init; }
 
+    /// <summary>The execution backends the pack runs on.</summary>
     public IReadOnlySet<TensorBackendKind> SupportedBackends { get; init; } =
         new HashSet<TensorBackendKind>();
 
+    /// <summary>The files that make up the pack. Each role and relative path appears once.</summary>
     public IReadOnlyList<TensorModelArtifactDefinition> Artifacts { get; init; } = [];
 }
 
+/// <summary>A thread-safe registry of validated, immutable model pack definitions keyed by <see cref="TensorModelKey"/>.</summary>
 public sealed class TensorModelCatalog
 {
     private readonly Dictionary<TensorModelKey, TensorModelPackDefinition> _definitions = [];
     private readonly Lock _gate = new();
 
+    /// <summary>Creates a catalog and registers each definition through <see cref="Register"/>.</summary>
     public TensorModelCatalog(IEnumerable<TensorModelPackDefinition> definitions)
     {
         ArgumentNullException.ThrowIfNull(definitions);
         foreach (TensorModelPackDefinition definition in definitions) { Register(definition); }
     }
 
+    /// <summary>A snapshot of every registered definition.</summary>
     public IReadOnlyList<TensorModelPackDefinition> Definitions
     {
         get { lock (_gate) { return Array.AsReadOnly(_definitions.Values.ToArray()); } }
@@ -105,6 +143,7 @@ public sealed class TensorModelCatalog
         }
     }
 
+    /// <summary>Returns the registered definition for the key, or throws <see cref="KeyNotFoundException"/> when the key is not registered.</summary>
     public TensorModelPackDefinition GetRequired(TensorModelKey key)
     {
         ArgumentNullException.ThrowIfNull(key);
@@ -127,6 +166,7 @@ public sealed class TensorModelCatalog
 /// <summary>Validates portable pack metadata before an engine applies its own compatibility policy.</summary>
 public static class TensorModelDefinitionValidator
 {
+    /// <summary>Throws an <see cref="ArgumentException"/> when the key, license, architecture, capability, backends or any artifact path, hash, source or provenance is missing or invalid.</summary>
     public static void Validate(TensorModelPackDefinition definition)
     {
         ArgumentNullException.ThrowIfNull(definition);

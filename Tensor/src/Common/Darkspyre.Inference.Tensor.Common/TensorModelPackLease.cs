@@ -1,5 +1,6 @@
 namespace Darkspyre.Inference.Tensor.Common;
 
+/// <summary>A held lease on an installed model pack's files. The files stay in place until the lease is released.</summary>
 public sealed class TensorModelPackLease : IAsyncDisposable
 {
     private readonly object _gate = new();
@@ -16,6 +17,7 @@ public sealed class TensorModelPackLease : IAsyncDisposable
         _release = release;
     }
 
+    /// <summary>The model pack the lease holds.</summary>
     public TensorModelKey Key { get; }
 
     /// <summary>The absolute file path of each artifact, by role.</summary>

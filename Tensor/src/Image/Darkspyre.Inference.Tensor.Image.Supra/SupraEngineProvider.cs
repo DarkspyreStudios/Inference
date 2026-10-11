@@ -6,8 +6,10 @@ namespace Darkspyre.Inference.Tensor.Image.Supra;
 /// <summary>Registers Supra image generation. Its packs live under the <c>Supra</c> store key.</summary>
 public sealed class SupraEngineProvider : ITensorEngineProvider
 {
+    /// <summary>The Supra setup definition, with its packs under the <c>Supra</c> store key.</summary>
     public TensorEngineDefinition Definition { get; } = new(SupraSetup.Definition, "Supra");
 
+    /// <inheritdoc />
     public async Task<IReadOnlyList<TensorModelPackDefinition>> GetOfferedModelsAsync(ITensorModelPackManager packs,
         CancellationToken cancellationToken = default)
     {
@@ -20,9 +22,11 @@ public sealed class SupraEngineProvider : ITensorEngineProvider
         return offered;
     }
 
+    /// <inheritdoc />
     public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend) =>
         new SupraImageInference(packs, backend);
 
+    /// <inheritdoc />
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
         ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null)

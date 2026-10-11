@@ -10,25 +10,45 @@ namespace Darkspyre.Inference.Connect.TTS;
 /// <summary>TTS-owned closed portable metadata. Runtime clients and sessions are not data.</summary>
 public static class ConnectTtsJson
 {
+    /// <summary>JSON serializer metadata for the <c>TtsTransport</c> contract.</summary>
     public static JsonTypeInfo<TtsTransport> TtsTransport => Metadata<TtsTransport>();
+    /// <summary>JSON serializer metadata for the <c>PocketTtsProtocol</c> contract.</summary>
     public static JsonTypeInfo<PocketTtsProtocol> PocketTtsProtocol => Metadata<PocketTtsProtocol>();
+    /// <summary>JSON serializer metadata for the <c>TtsAudioFormat</c> contract.</summary>
     public static JsonTypeInfo<TtsAudioFormat> TtsAudioFormat => Metadata<TtsAudioFormat>();
+    /// <summary>JSON serializer metadata for the <c>PocketTtsEndpointOptions</c> contract.</summary>
     public static JsonTypeInfo<PocketTtsEndpointOptions> PocketTtsEndpointOptions => Metadata<PocketTtsEndpointOptions>();
+    /// <summary>JSON serializer metadata for the <c>TtsConnection</c> contract.</summary>
     public static JsonTypeInfo<TtsConnection> TtsConnection => Metadata<TtsConnection>();
+    /// <summary>JSON serializer metadata for the <c>TtsRequest</c> contract.</summary>
     public static JsonTypeInfo<TtsRequest> TtsRequest => Metadata<TtsRequest>();
+    /// <summary>JSON serializer metadata for the <c>TtsVoice</c> contract.</summary>
     public static JsonTypeInfo<TtsVoice> TtsVoice => Metadata<TtsVoice>();
+    /// <summary>JSON serializer metadata for the <c>TtsCapabilities</c> contract.</summary>
     public static JsonTypeInfo<TtsCapabilities> TtsCapabilities => Metadata<TtsCapabilities>();
+    /// <summary>JSON serializer metadata for the <c>TtsResult</c> contract.</summary>
     public static JsonTypeInfo<TtsResult> TtsResult => Metadata<TtsResult>();
+    /// <summary>JSON serializer metadata for the <c>TtsSetupConfiguration</c> contract.</summary>
     public static JsonTypeInfo<TtsSetupConfiguration> TtsSetupConfiguration => Metadata<TtsSetupConfiguration>();
+    /// <summary>JSON serializer metadata for the <c>TtsSetupHeaderChanges</c> contract.</summary>
     public static JsonTypeInfo<TtsSetupHeaderChanges> TtsSetupHeaderChanges => Metadata<TtsSetupHeaderChanges>();
+    /// <summary>JSON serializer metadata for the <c>TtsSetupChanges</c> contract.</summary>
     public static JsonTypeInfo<TtsSetupChanges> TtsSetupChanges => Metadata<TtsSetupChanges>();
+    /// <summary>JSON serializer metadata for the <c>TtsTimestamp</c> contract.</summary>
     public static JsonTypeInfo<TtsTimestamp> TtsTimestamp => Metadata<TtsTimestamp>();
+    /// <summary>JSON serializer metadata for the <c>TtsStreamOptions</c> contract.</summary>
     public static JsonTypeInfo<TtsStreamOptions> TtsStreamOptions => Metadata<TtsStreamOptions>();
+    /// <summary>JSON serializer metadata for the <c>TtsAudioChunk</c> contract.</summary>
     public static JsonTypeInfo<TtsAudioChunk> TtsAudioChunk => Metadata<TtsAudioChunk>();
+    /// <summary>JSON serializer metadata for the <c>TtsUtteranceCompleted</c> contract.</summary>
     public static JsonTypeInfo<TtsUtteranceCompleted> TtsUtteranceCompleted => Metadata<TtsUtteranceCompleted>();
+    /// <summary>JSON serializer metadata for the <c>TtsStreamError</c> contract.</summary>
     public static JsonTypeInfo<TtsStreamError> TtsStreamError => Metadata<TtsStreamError>();
+    /// <summary>JSON serializer metadata for the <c>TtsStreamEvent</c> contract.</summary>
     public static JsonTypeInfo<TtsStreamEvent> TtsStreamEvent => Metadata<TtsStreamEvent>();
+    /// <summary>JSON serializer metadata for the <c>TtsReplacementsUpdated</c> contract.</summary>
     public static JsonTypeInfo<TtsReplacementsUpdated> TtsReplacementsUpdated => Metadata<TtsReplacementsUpdated>();
+    /// <summary>JSON serializer metadata for the <c>TtsUtteranceCleared</c> contract.</summary>
     public static JsonTypeInfo<TtsUtteranceCleared> TtsUtteranceCleared => Metadata<TtsUtteranceCleared>();
 
     private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();

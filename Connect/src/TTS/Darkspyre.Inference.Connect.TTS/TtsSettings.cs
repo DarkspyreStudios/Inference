@@ -9,13 +9,23 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.TTS;
 
+/// <summary>A saved TTS setup: the connection and the speech options each request uses.</summary>
+/// <param name="Connection">The connection to the TTS server.</param>
+/// <param name="VoiceId">The voice to speak with, or null for the provider default.</param>
+/// <param name="Speed">The speaking speed, or null for the provider default.</param>
+/// <param name="Format">The audio format of the generated speech.</param>
 public sealed record TtsSetupConfiguration(TtsConnection Connection, string? VoiceId = null,
     double? Speed = null, TtsAudioFormat Format = TtsAudioFormat.Wav)
 {
+    /// <summary>The connection to the TTS server. Setting it to null throws.</summary>
     [JsonRequired] public TtsConnection Connection { get; init => field = TtsData.Required(value); } = TtsData.Required(Connection);
+    /// <summary>The language to speak, or null for the provider default.</summary>
     public string? Language { get; init; }
+    /// <summary>The output sample rate, or null for the provider default.</summary>
     public int? SampleRate { get; init; }
+    /// <summary>The output bit rate, or null for the provider default.</summary>
     public int? BitRate { get; init; }
+    /// <summary>Whether to request word timestamps, or null for the provider default.</summary>
     public bool? IncludeTimestamps { get; init; }
     internal TtsRequest Request(string text) => new()
     {
@@ -28,19 +38,34 @@ public sealed record TtsSetupConfiguration(TtsConnection Connection, string? Voi
         BitRate = BitRate,
         IncludeTimestamps = IncludeTimestamps
     };
+    /// <summary>Returns a diagnostic string without the configuration values.</summary>
     public override string ToString() => "TtsSetupConfiguration { <data> }";
 }
+/// <summary>The protected header edits a TTS save applies to the stored connection.</summary>
+/// <param name="Set">The headers to add or replace, by case-insensitive name.</param>
+/// <param name="Remove">The names of the headers to delete.</param>
 public sealed record TtsSetupHeaderChanges(IReadOnlyDictionary<string, string> Set, IReadOnlyList<string> Remove)
 {
+    /// <summary>The headers to add or replace, by case-insensitive name.</summary>
     [JsonRequired] public IReadOnlyDictionary<string, string> Set { get; init => field = TtsData.Copy(TtsData.Required(value), StringComparer.OrdinalIgnoreCase)!; } = TtsData.Copy(TtsData.Required(Set), StringComparer.OrdinalIgnoreCase)!;
+    /// <summary>The names of the headers to delete.</summary>
     [JsonRequired] public IReadOnlyList<string> Remove { get; init => field = TtsData.Copy(value); } = TtsData.Copy(Remove);
+    /// <summary>Returns a diagnostic string without header names or values.</summary>
     public override string ToString() => "TtsSetupHeaderChanges { <data> }";
 }
+/// <summary>The changes a TTS settings save commits: the target entry, the configuration without protected headers, and the header edits.</summary>
+/// <param name="Identity">The setup entry the changes create or edit.</param>
+/// <param name="Configuration">The configuration to store, with authorization and headers removed.</param>
+/// <param name="Headers">The protected header edits to apply.</param>
 public sealed record TtsSetupChanges(SetupConfigurationIdentity Identity, TtsSetupConfiguration Configuration, TtsSetupHeaderChanges Headers)
 {
+    /// <summary>The setup entry the changes create or edit.</summary>
     [JsonRequired] public SetupConfigurationIdentity Identity { get; init => field = TtsData.Required(value); } = TtsData.Required(Identity);
+    /// <summary>The configuration to store, with authorization and headers removed.</summary>
     [JsonRequired] public TtsSetupConfiguration Configuration { get; init => field = TtsData.Required(value); } = TtsData.Required(Configuration);
+    /// <summary>The protected header edits to apply.</summary>
     [JsonRequired] public TtsSetupHeaderChanges Headers { get; init => field = TtsData.Required(value); } = TtsData.Required(Headers);
+    /// <summary>Returns a diagnostic string without the configuration values.</summary>
     public override string ToString() => "TtsSetupChanges { <data> }";
 }
 
@@ -76,9 +101,11 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
 
     internal TtsSetupConfiguration Draft => _draft;
     internal long Generation => Interlocked.Read(ref _generation);
+    /// <inheritdoc />
     protected override void OnDraftEdited() { Interlocked.Increment(ref _generation); base.OnDraftEdited(); }
     private static Uri DefaultEndpoint(TtsTransport transport) => new("http://127.0.0.1:8020");
 
+    /// <inheritdoc />
     protected override IReadOnlyList<SetupStep> CreateSteps()
     {
         PocketTtsEndpointOptions options = _draft.Connection.PocketTts;
@@ -136,6 +163,7 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
             _headers.Remove(header);
         }));
 
+    /// <inheritdoc />
     protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query) => fieldId switch
     {
         "protocol" => Page(query, Enum.GetValues<PocketTtsProtocol>().Select(mode => new SetupChoice(mode.ToString(), mode.ToString()))),
@@ -146,6 +174,7 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
         _ => null
     };
 
+    /// <inheritdoc />
     protected override IReadOnlyList<SetupActionDescriptor> CreateActions() =>
     [
         new("check", "Check endpoint and voices", SetupActionPurpose.CheckReadiness, SetupSideEffect.Network, ConnectionValid()),
@@ -168,6 +197,7 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
         catch (Exception error) when (error is InferenceException or ArgumentException or InvalidOperationException or FormatException) { return false; }
     }
 
+    /// <inheritdoc />
     protected override SetupValidation ValidateDraft()
     {
         var issues = new List<SetupIssue>();
@@ -182,6 +212,7 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
         return new(issues.AsReadOnly());
     }
 
+    /// <inheritdoc />
     protected override bool IsDraftDirty => _draft.Connection != _baseline.Connection
         || (_draft.VoiceId ?? string.Empty) != (_baseline.VoiceId ?? string.Empty)
         || _draft.Speed != _baseline.Speed || _draft.Format != _baseline.Format || _endpoint != _baseline.Connection.Endpoint
@@ -191,6 +222,7 @@ public sealed class TtsSettings : InferenceSettings<TtsSetupChanges>
         || _headers.Any(header => header.OriginalName.Length == 0 || header.Name != header.OriginalName
             || header.Edit.Kind != SetupSecretEditKind.Keep);
 
+    /// <inheritdoc />
     protected override TtsSetupChanges CreateChanges()
     {
         var set = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -240,6 +272,7 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
         return Task.FromResult(settings);
     }
 
+    /// <inheritdoc />
     public override async Task<SetupActionResult> RunAsync(InferenceSettings settings, string actionId,
         IProgress<SetupProgress>? progress = null, CancellationToken cancellationToken = default)
     {
@@ -247,6 +280,7 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
         SetupActionResult result = await base.RunAsync(settings, actionId, progress, lease.Token).ConfigureAwait(false);
         return IsStopping(lease.Token) ? new(SetupActionState.Cancelled) : result;
     }
+    /// <inheritdoc />
     public override async Task<SetupChoicePage> QueryChoicesAsync(InferenceSettings settings, string fieldId,
         SetupChoiceQuery query, CancellationToken cancellationToken = default)
     {
@@ -254,12 +288,14 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
         SetupChoicePage result = await base.QueryChoicesAsync(settings, fieldId, query, lease.Token).ConfigureAwait(false);
         return IsStopping(lease.Token) ? new([], State: SetupChoiceState.Cancelled) : result;
     }
+    /// <inheritdoc />
     public override async Task<SetupCommitResult> SaveAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
     {
         using LlmOperationLifetime.Lease lease = _lifetime.Enter(cancellationToken);
         return await base.SaveAsync(settings, lease.Token).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
     protected override async Task<SetupActionResult> RunCoreAsync(TtsSettings settings, SetupActionDescriptor action,
         IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
     {
@@ -295,6 +331,7 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
         }, cancellationToken).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
     protected override async Task<SetupChoicePage> QueryProviderChoicesAsync(TtsSettings settings, string fieldId,
         SetupChoiceQuery query, CancellationToken cancellationToken)
     {
@@ -364,7 +401,9 @@ public sealed class TtsSettingsManager : InferenceSettingsManager<TtsSettings, T
         try { _lifetime.ThrowIfStopping(); return false; }
         catch (ObjectDisposedException) { return true; }
     }
+    /// <inheritdoc />
     public void Dispose() => Retire().GetAwaiter().GetResult();
+    /// <inheritdoc />
     public ValueTask DisposeAsync() => new(Retire());
     private Task Retire() => _lifetime.RetireAsync(() =>
     {

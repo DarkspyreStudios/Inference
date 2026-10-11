@@ -6,6 +6,7 @@ namespace Darkspyre.Inference.Common.LLM;
 /// <summary>Provider-owned typed controls. Metadata and entry validators admit only their fixed variants.</summary>
 public abstract record LlmProviderControls
 {
+    /// <summary>Restricts derivation to provider control variants.</summary>
     protected LlmProviderControls() { }
 }
 

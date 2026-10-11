@@ -29,16 +29,22 @@ public sealed class LlmProviderException : Exception
         IsResponseStreamInterrupted = isResponseStreamInterrupted;
     }
 
+    /// <summary>The transport the failed request used.</summary>
     public LlmTransport Transport { get; }
 
+    /// <summary>The HTTP status the provider returned, when the failure came from an HTTP response.</summary>
     public HttpStatusCode? StatusCode { get; }
 
+    /// <summary>The provider or client error code that classifies the failure, when one is known.</summary>
     public string? ProviderCode { get; }
 
+    /// <summary>The request id the provider assigned to the failed request, when it reported one.</summary>
     public string? RequestId { get; }
 
+    /// <summary>The delay the provider asked for before a retry, when it sent one.</summary>
     public TimeSpan? RetryAfter { get; }
 
+    /// <summary>The response body with secrets removed, safe to display and persist.</summary>
     public string? SanitizedResponseBody { get; }
 
     /// <summary>The provider rejected input that exceeds the model's context window.</summary>

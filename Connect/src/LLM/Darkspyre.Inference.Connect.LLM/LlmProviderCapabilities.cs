@@ -36,14 +36,19 @@ public sealed record LlmProviderCapabilities
     /// <summary>Public reasoning text can arrive separately from the answer. Unsupported suppresses display, not retained state.</summary>
     public InferenceSupport SupportsReasoningText { get; init; }
 
+    /// <summary>The provider can list the models a connection offers.</summary>
     public InferenceSupport SupportsModelListing { get; init; }
 
+    /// <summary>The provider reports account usage, such as quotas and credits, for the connection.</summary>
     public InferenceSupport SupportsAccountUsage { get; init; }
 
+    /// <summary>The route accepts a JSON schema that constrains the response.</summary>
     public InferenceSupport SupportsJsonSchema { get; init; }
 
+    /// <summary>The route accepts a request for a JSON object response without a schema.</summary>
     public InferenceSupport SupportsJsonObject { get; init; }
 
+    /// <summary>How the route caches prompts.</summary>
     public LlmPromptCacheCapabilities PromptCache { get; init; } = new();
 
     /// <summary>The route implements explicit native cache selection. Overrides cannot enable it.</summary>
@@ -56,16 +61,22 @@ public sealed record LlmProviderCapabilities
     public InferenceSupport SupportsReasoning => ReasoningLevels.Count == 0 ? InferenceSupport.Unknown
         : ReasoningLevels.Any(static level => level > LlmReasoningLevel.None) ? InferenceSupport.Supported : InferenceSupport.Unsupported;
 
+    /// <summary>The route accepts a sampling temperature.</summary>
     public InferenceSupport SupportsTemperature { get; init; }
 
+    /// <summary>The route accepts a nucleus sampling (top-p) limit.</summary>
     public InferenceSupport SupportsTopP { get; init; }
 
+    /// <summary>The route accepts a top-k sampling limit.</summary>
     public InferenceSupport SupportsTopK { get; init; }
 
+    /// <summary>The route accepts a sampling seed.</summary>
     public InferenceSupport SupportsSeed { get; init; }
 
+    /// <summary>The route accepts a presence penalty.</summary>
     public InferenceSupport SupportsPresencePenalty { get; init; }
 
+    /// <summary>The route accepts a frequency penalty.</summary>
     public InferenceSupport SupportsFrequencyPenalty { get; init; }
 
     /// <summary>Zero disables string stops; int.MaxValue means no adapter-imposed limit.</summary>
@@ -80,8 +91,10 @@ public sealed record LlmProviderCapabilities
     /// <summary>The route implements shell definitions, calls and typed results.</summary>
     public InferenceSupport SupportsShellTools { get; init; }
 
+    /// <summary>Optional tool-calling controls the route accepts beyond ordinary tool calls.</summary>
     public LlmToolCapabilities Tools { get; init; } = new();
 
+    /// <summary>The provider-hosted tool kinds the route can run.</summary>
     public IReadOnlySet<LlmHostedToolKind> HostedTools { get; init => field = value.ToFrozenSet(); } = FrozenSet<LlmHostedToolKind>.Empty;
 
     /// <summary>How tool calls and results already in the history reach the provider.</summary>
@@ -93,8 +106,10 @@ public sealed record LlmProviderCapabilities
     /// <summary>Agent sessions can invoke host-defined tools through an in-turn callback.</summary>
     public InferenceSupport SupportsAgentToolUse { get; init; }
 
+    /// <summary>Agent sessions accept per-turn instructions that replace the session instructions for one turn.</summary>
     public InferenceSupport SupportsAgentTurnInstructions { get; init; }
 
+    /// <summary>The operations the selected agent runtime implements.</summary>
     public LlmAgentCapabilities Agent { get; init; } = new();
 
     /// <summary>User prompts can include provider-neutral image attachments.</summary>
@@ -112,6 +127,7 @@ public sealed record LlmProviderCapabilities
     /// <summary>How the route carries each kind of tool-output content.</summary>
     internal LlmRichContentSupported RichContentSupported { get; init; } = new();
 
+    /// <summary>Returns these capabilities with the connection overrides applied. Throws when an override enables an unimplemented agent operation, requests agent operations without an agent session lane, or sets a negative stop-sequence limit.</summary>
     public LlmProviderCapabilities Apply(LlmCapabilityOverrides? overrides)
     {
         if (MaxStopSequences < 0 || overrides?.MaxStopSequences < 0)
@@ -191,6 +207,7 @@ public sealed record LlmCapabilityOverrides
     /// <summary>False selects the provider's non-streaming request.</summary>
     public InferenceSupport? SupportsStreaming { get; init; }
 
+    /// <summary>Replaces whether a streamed response reports usage by its completion; null keeps the transport value.</summary>
     public InferenceSupport? SupportsStreamingUsage { get; init; }
 
     /// <summary>Enables continuous usage on a compatible endpoint, or disables an adapter's running usage events.</summary>
@@ -199,41 +216,58 @@ public sealed record LlmCapabilityOverrides
     /// <summary>False suppresses public reasoning events and summary requests without dropping continuation state.</summary>
     public InferenceSupport? SupportsReasoningText { get; init; }
 
+    /// <summary>Replaces model listing support; null keeps the transport value.</summary>
     public InferenceSupport? SupportsModelListing { get; init; }
 
+    /// <summary>Replaces account usage support; null keeps the transport value.</summary>
     public InferenceSupport? SupportsAccountUsage { get; init; }
 
+    /// <summary>Replaces JSON schema response support; null keeps the transport value.</summary>
     public InferenceSupport? SupportsJsonSchema { get; init; }
 
+    /// <summary>Replaces JSON object response support; null keeps the transport value.</summary>
     public InferenceSupport? SupportsJsonObject { get; init; }
 
     /// <summary>The reasoning levels the endpoint accepts, replacing the transport's own set.</summary>
     public IReadOnlySet<LlmReasoningLevel>? ReasoningLevels { get; init; }
 
+    /// <summary>Replaces temperature support; null keeps the transport value.</summary>
     public InferenceSupport? SupportsTemperature { get; init; }
 
+    /// <summary>Replaces top-p support; null keeps the transport value.</summary>
     public InferenceSupport? SupportsTopP { get; init; }
 
+    /// <summary>Replaces top-k support; null keeps the transport value.</summary>
     public InferenceSupport? SupportsTopK { get; init; }
 
+    /// <summary>Replaces seed support; null keeps the transport value.</summary>
     public InferenceSupport? SupportsSeed { get; init; }
 
+    /// <summary>Replaces presence penalty support; null keeps the transport value.</summary>
     public InferenceSupport? SupportsPresencePenalty { get; init; }
 
+    /// <summary>Replaces frequency penalty support; null keeps the transport value.</summary>
     public InferenceSupport? SupportsFrequencyPenalty { get; init; }
 
+    /// <summary>Replaces the stop-sequence limit; null keeps the transport value. It cannot be negative.</summary>
     public int? MaxStopSequences { get; init; }
 
+    /// <summary>Replaces host-executed tool support; null keeps the transport value. Unsupported also clears the tool controls.</summary>
     public InferenceSupport? SupportsToolUse { get; init; }
 
+    /// <summary>Disables agent sessions or keeps them; an override cannot enable an unimplemented agent session lane.</summary>
     public InferenceSupport? SupportsAgentSessions { get; init; }
 
+    /// <summary>Disables agent tool use or keeps it; an override cannot enable it when the route does not implement it.</summary>
     public InferenceSupport? SupportsAgentToolUse { get; init; }
 
+    /// <summary>Disables per-turn agent instructions or keeps them; an override cannot enable them when the route does not implement them.</summary>
     public InferenceSupport? SupportsAgentTurnInstructions { get; init; }
 
+    /// <summary>Replaces prompt image attachment support; null keeps the transport value.</summary>
     public InferenceSupport? SupportsPromptImages { get; init; }
 
+    /// <summary>Replaces prompt document attachment support; null keeps the transport value.</summary>
     public InferenceSupport? SupportsPromptDocuments { get; init; }
 
     /// <summary>False stops sending tool-result images; an override cannot enable them.</summary>

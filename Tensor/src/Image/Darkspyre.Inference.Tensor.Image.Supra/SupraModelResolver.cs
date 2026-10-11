@@ -7,7 +7,9 @@ namespace Darkspyre.Inference.Tensor.Image.Supra;
 /// <summary>Resolves a compatible Supra2 DiT with the pipeline's pinned Flan-T5, tokenizer and VAE companions.</summary>
 public sealed class SupraModelResolver : TensorModelResolver
 {
+    /// <summary>Creates a resolver over an optional repository source and artifact reader.</summary>
     public SupraModelResolver(ITensorModelSource? source = null, ITensorArtifactReader? reader = null) : base(source, reader) { }
+    /// <inheritdoc />
     public override IReadOnlyList<TensorArtifactRequirement> Requirements => [new("supra-model", "*.pt"),
         .. TensorImageModels.Supra2Image.Artifacts.Where(item => item.Role != "supra-model").Select(item =>
             new TensorArtifactRequirement(item.Role, Path.GetFileName(item.RelativePath),
@@ -15,6 +17,7 @@ public sealed class SupraModelResolver : TensorModelResolver
                     ? new TensorModelLocation.RepositoryArtifact(Source.Id, new(item.Provenance!.Repository, item.Provenance.Revision, item.Provenance.Path))
                     : new TensorModelLocation.RemoteFile(item.Sources[0]), item.Provenance!.License, item.Length, item.Sha256)))];
 
+    /// <inheritdoc />
     public override async Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
         ITensorArtifactReader reader, CancellationToken cancellationToken = default)
     {

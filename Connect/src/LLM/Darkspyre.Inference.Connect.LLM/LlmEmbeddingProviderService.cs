@@ -18,6 +18,7 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
     private readonly Lock _disposeGate = new();
     private Task? _disposal;
 
+    /// <summary>Creates the service over a connection source and the embedding clients it routes to. A supplied <paramref name="connectionAccess"/> must use the same connection source.</summary>
     public LlmEmbeddingProviderService(
         ILlmConnectionSource connections,
         IEnumerable<ILlmEmbeddingClient> clients,
@@ -33,6 +34,7 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
         _ownsConnectionAccess = connectionAccess is null;
     }
 
+    /// <summary>Embeds the request through the connection with the given identifier.</summary>
     public async Task<LlmEmbeddingResult> EmbedAsync(
         string connectionId,
         LlmEmbeddingRequest request,

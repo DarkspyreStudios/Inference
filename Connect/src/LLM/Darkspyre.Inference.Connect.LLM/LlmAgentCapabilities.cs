@@ -26,6 +26,7 @@ public enum LlmAgentContextImport
 /// </summary>
 public sealed record LlmAgentCapabilities
 {
+    /// <summary>The provider-hosted tool kinds the runtime offers.</summary>
     public IReadOnlySet<LlmHostedToolKind> HostedTools { get; init => field = value.ToFrozenSet(); } = FrozenSet<LlmHostedToolKind>.Empty;
 
     /// <summary>The agent lane routes shell calls to the borrowed caller executor.</summary>
@@ -34,14 +35,19 @@ public sealed record LlmAgentCapabilities
     /// <summary>How a session start accepts <see cref="LlmAgentSessionOptions.Context"/>.</summary>
     public LlmAgentContextImport ContextImport { get; init; }
 
+    /// <summary>Support for <see cref="ILlmAgentSession.CaptureContextAsync"/>.</summary>
     public InferenceSupport SupportsContextCapture { get; init; }
 
+    /// <summary>Support for <see cref="ILlmAgentSession.ReplaceContextAsync"/>.</summary>
     public InferenceSupport SupportsContextReplacement { get; init; }
 
+    /// <summary>Support for <see cref="ILlmAgentSession.GetContextStatusAsync"/>.</summary>
     public InferenceSupport SupportsContextStatus { get; init; }
 
+    /// <summary>Support for pausing a turn so the host supplies replacement context through <see cref="ILlmAgentSession.ContinueTurnAsync"/>.</summary>
     public InferenceSupport SupportsCompactionHandoff { get; init; }
 
+    /// <summary>Support for resuming a conversation the runtime stores itself.</summary>
     public InferenceSupport SupportsNativeResume { get; init; }
 
     /// <summary>SteerAsync adds input to a running turn.</summary>

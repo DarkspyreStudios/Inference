@@ -120,11 +120,13 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         ];
     }
 
+    /// <summary>The transports of the registered provider adapters.</summary>
     public IReadOnlyList<LlmTransport> SupportedTransports { get; }
 
     /// <summary>Canonical provider metadata and guided setup supplied by registered adapters.</summary>
     public IReadOnlyList<LlmProviderDefinition> SupportedProviders { get; }
 
+    /// <summary>The guided setup definition of each supported provider, in provider order.</summary>
     public IReadOnlyList<Common.Setup.InferenceSetupDefinition> SetupDefinitions =>
         SupportedProviders.Select(provider => provider.SetupDefinition).ToArray();
 
@@ -137,6 +139,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         return new(_clients, _authenticators.Values, _setupEnvironments, target, agents);
     }
 
+    /// <summary>The redirect URI for a Claude sign-in whose code the person pastes back by hand.</summary>
     public const string ClaudeManualRedirectUri =
         Providers.ClaudeAuthenticator.ManualRedirectUri;
 
@@ -171,6 +174,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
     private static LlmProviderCapabilities FileCapabilities(LlmProviderCapabilities capabilities) =>
         capabilities with { Files = new() };
 
+    /// <summary>Whether the connection has a usable credential, or for a provider that signs in outside Connect, whether that sign-in is active.</summary>
     public async Task<bool> IsAuthenticatedAsync(
         string connectionId,
         CancellationToken cancellationToken = default)
@@ -195,6 +199,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
                 || credential.SecretHeaders.Count > 0);
     }
 
+    /// <summary>Saves an API key as the connection's credential. Throws when the connection's version is not <paramref name="expectedVersion"/>.</summary>
     public async Task SetApiKeyAsync(
         string connectionId,
         string apiKey,
@@ -222,12 +227,14 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             cancellationToken);
     }
 
+    /// <summary>Starts a Codex device-code sign-in and returns the code the person enters.</summary>
     public async Task<LlmDeviceCode> StartCodexLoginAsync(CancellationToken cancellationToken = default)
     {
         using var operation = _lifetime.Enter(cancellationToken);
         return await CodexLogin().StartAsync(operation.Token).ConfigureAwait(false);
     }
 
+    /// <summary>Completes a Codex device-code sign-in and saves the resulting credential on the connection.</summary>
     public async Task CompleteCodexLoginAsync(
         string connectionId,
         string deviceAuthId,
@@ -273,6 +280,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         return Task.FromResult(ClaudeLogin().Start(redirectUri));
     }
 
+    /// <summary>Completes a Claude sign-in from the code the person pasted and saves the resulting credential on the connection.</summary>
     public async Task CompleteClaudeLoginAsync(
         string connectionId,
         LlmAuthorizationSession session,
@@ -292,6 +300,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             cancellationToken);
     }
 
+    /// <summary>Completes a Claude sign-in from the redirect code and state and saves the resulting credential on a Claude subscription CLI connection.</summary>
     public async Task CompleteClaudeLoginAsync(
         string connectionId,
         LlmAuthorizationSession session,
@@ -325,6 +334,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             cancellationToken);
     }
 
+    /// <summary>Saves AWS credentials as a Bedrock connection's credential.</summary>
     public async Task SetBedrockCredentialsAsync(
         string connectionId,
         LlmAwsCredentials aws,
@@ -645,6 +655,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         return snapshot;
     }
 
+    /// <summary>Reads the connection's current account usage from the provider. Throws when the connection does not expose account usage.</summary>
     public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(
         string connectionId,
         CancellationToken cancellationToken = default)
@@ -676,6 +687,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         return usage;
     }
 
+    /// <summary>Returns what the connection supports across its models.</summary>
     public async Task<LlmProviderCapabilities> GetCapabilitiesAsync(
         string connectionId,
         CancellationToken cancellationToken = default)
@@ -691,6 +703,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         return capabilities;
     }
 
+    /// <summary>Returns what the connection supports for one model.</summary>
     public async Task<LlmProviderCapabilities> GetModelCapabilitiesAsync(
         string connectionId,
         string modelId,

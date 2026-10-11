@@ -4,12 +4,16 @@ using Darkspyre.Inference.Common.Resources;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
+/// <summary>One message of a chat request.</summary>
+/// <param name="Role">The message role, such as user or assistant.</param>
+/// <param name="Content">The message text.</param>
 [System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
 public sealed record LlmChatMessage(string Role, string Content)
 {
     /// <summary>Complete adapter-owned output, serialized instead of visible assistant text/calls.</summary>
     public LlmContinuationState? ContinuationState { get; init; }
 
+    /// <summary>Metadata for attachments on this message whose bytes are unavailable.</summary>
     public IReadOnlyList<LlmOmittedAttachment> OmittedAttachments { get; init; } = [];
 
     /// <summary>Ordered inline content, provider files or workspace resources supplied with this message.</summary>
@@ -95,6 +99,10 @@ internal sealed record LlmChatRequest
     public LlmUnboundContinuationState UnboundContinuationState { get; init; } = LlmUnboundContinuationState.Reject;
 }
 
+/// <summary>Provider facts about a completed request.</summary>
+/// <param name="HttpStatusCode">The HTTP status of the final response.</param>
+/// <param name="RequestId">The provider's request identity, when reported.</param>
+/// <param name="RawFinalResponseJson">The provider's final response body as JSON, when kept.</param>
 public sealed record LlmProviderDiagnostics(
     int HttpStatusCode,
     string? RequestId,

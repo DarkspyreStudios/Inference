@@ -10,6 +10,7 @@ public sealed class TensorArtifactReader(ITensorModelSource? repository = null, 
     private static readonly HttpClient SharedClient = TensorSourceHttp.CreateClient();
     private readonly TensorSourceHttp _http = new(httpClient ?? SharedClient, access);
 
+    /// <inheritdoc />
     public async Task<TensorSourceResult<TensorMetadataContent>> ReadMetadataAsync(TensorSourceArtifact artifact,
         TensorMetadataRead read, CancellationToken cancellationToken = default)
     {

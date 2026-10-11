@@ -10,15 +10,21 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 public sealed partial class QwenModelResolver : TensorModelResolver
 {
     private readonly GgmlRuntimeOwner _runtimeOwner;
+    /// <summary>Creates a resolver over an optional repository source and artifact reader. Without a runtime owner it uses the shared one.</summary>
     public QwenModelResolver(ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
         GgmlRuntimeOwner? runtimeOwner = null) : base(source, reader) => _runtimeOwner = runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate();
+    /// <inheritdoc />
     public override IReadOnlyList<TensorArtifactRequirement> Requirements => [new("model", "*.gguf")];
+    /// <inheritdoc />
     public override string? AdditionalArtifactRolePrefix => "model-shard-";
+    /// <inheritdoc />
     protected override string CompanionPath(string role, string path, string primary) =>
         primary[..(primary.LastIndexOf('/') + 1)] + Path.GetFileName(path);
+    /// <inheritdoc />
     protected override IReadOnlyList<TensorSourceArtifact> SelectArtifacts(TensorModelCandidate candidate) =>
         CompleteSet(candidate, candidate.Artifacts.Single(artifact => artifact.Path == candidate.Selection.Variant));
 
+    /// <inheritdoc />
     public override async Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
         ITensorArtifactReader reader, CancellationToken cancellationToken = default)
     {

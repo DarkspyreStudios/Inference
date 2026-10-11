@@ -4,8 +4,10 @@ using Darkspyre.Inference.Tensor.Common;
 
 namespace Darkspyre.Inference.Tensor.STT.Whisper;
 
+/// <summary>The setup definition and settings manager factory for Whisper speech transcription.</summary>
 public static class WhisperSetup
 {
+    /// <summary>The Whisper implementation's identity, a resident CPU speech transcription engine, and its setup description.</summary>
     public static InferenceSetupDefinition Definition { get; } = new(
         new("darkspyre.tensor.whisper", "Darkspyre Tensor Whisper", InferenceImplementationKind.Tensor, InferenceTask.SpeechTranscription),
         "Resident CPU speech transcription. Select and explicitly install a model; the host controls Load and Unload.");
@@ -26,9 +28,12 @@ public static class WhisperSetup
 /// Unknown content stays Unverified; a filename or model-host tag is not architecture evidence.</summary>
 public sealed class WhisperModelResolver : TensorModelResolver
 {
+    /// <summary>Creates a resolver that reads repository locations through <paramref name="source"/> and artifacts through <paramref name="reader"/>.</summary>
     public WhisperModelResolver(ITensorModelSource? source = null, ITensorArtifactReader? reader = null) : base(source, reader) { }
+    /// <inheritdoc />
     public override IReadOnlyList<TensorArtifactRequirement> Requirements => [new("model", "*.bin")];
 
+    /// <inheritdoc />
     public override async Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
         ITensorArtifactReader reader, CancellationToken cancellationToken = default)
     {

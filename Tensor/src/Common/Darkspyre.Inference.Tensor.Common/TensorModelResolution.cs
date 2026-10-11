@@ -3,32 +3,72 @@ using System.Text.Json;
 
 namespace Darkspyre.Inference.Tensor.Common;
 
-public enum TensorCompatibilityState { Supported, Unsupported, Unverified }
+/// <summary>Outcome of a family's metadata compatibility check for a model candidate.</summary>
+public enum TensorCompatibilityState
+{
+    /// <summary>The family can run the candidate.</summary>
+    Supported,
+    /// <summary>The candidate's metadata shows the family cannot run it.</summary>
+    Unsupported,
+    /// <summary>The candidate could not be inspected completely, so compatibility is unknown.</summary>
+    Unverified
+}
+
+/// <summary>One check a resolver made against one artifact while evaluating compatibility.</summary>
+/// <param name="ArtifactPath">The artifact path the check inspected.</param>
+/// <param name="Check">The name of the check.</param>
+/// <param name="Detail">What the check found.</param>
 public sealed record TensorCompatibilityEvidence(string ArtifactPath, string Check, string Detail);
+
+/// <summary>A resolver's compatibility verdict for a candidate, with the issues and evidence behind it.</summary>
+/// <param name="State">The compatibility verdict.</param>
+/// <param name="Issues">The problems that prevented a supported verdict.</param>
+/// <param name="Evidence">The checks the resolver made.</param>
+/// <param name="SourceState">The state of the source the candidate came from.</param>
 public sealed record TensorModelEvaluation(TensorCompatibilityState State,
     IReadOnlyList<TensorSourceIssue> Issues, IReadOnlyList<TensorCompatibilityEvidence> Evidence,
     TensorSourceState SourceState = TensorSourceState.Available);
+
+/// <summary>The acquisition input for a model: the primary location plus optional companion locations and expected integrity.</summary>
+/// <param name="Location">Where the primary artifact comes from.</param>
+/// <param name="Backend">The backend the model is evaluated for.</param>
+/// <param name="License">The license to record for artifacts whose source declares none.</param>
+/// <param name="ExpectedLength">The expected byte length of the primary artifact, when known.</param>
+/// <param name="ExpectedSha256">The expected SHA-256 of the primary artifact, when known.</param>
+/// <param name="Companions">Explicit locations for companion artifacts, keyed by family role.</param>
 public sealed record TensorModelSelection(TensorModelLocation Location, TensorBackendKind Backend = TensorBackendKind.Auto,
     string? License = null, long? ExpectedLength = null, string? ExpectedSha256 = null,
     IReadOnlyList<TensorArtifactLocation>? Companions = null);
+
+/// <summary>The result of resolving a candidate: its evaluation and, when supported, the complete pack definition.</summary>
+/// <param name="Evaluation">The compatibility verdict.</param>
+/// <param name="Definition">The resolved pack definition, or null when resolution failed.</param>
 public sealed record TensorModelResolution(TensorModelEvaluation Evaluation, TensorModelPackDefinition? Definition = null);
 
 /// <summary>Engine-owned metadata evaluation and complete immutable pack resolution. Never loads model weights.</summary>
 public interface ITensorModelResolver
 {
+    /// <summary>The repository source used for repository locations, or null when only file locations are read.</summary>
     ITensorModelSource? Source { get; }
+    /// <summary>The artifact roles the family needs; the first entry is the primary artifact and the rest are companions.</summary>
     IReadOnlyList<TensorArtifactRequirement> Requirements { get; }
+    /// <summary>The role prefix for numbered extra artifacts such as split model shards, or null when the family accepts none.</summary>
     string? AdditionalArtifactRolePrefix { get; }
+    /// <summary>Reads the selection's locations into one candidate with every required role assigned to an artifact.</summary>
     Task<TensorSourceResult<TensorModelCandidate>> DiscoverAsync(TensorModelSelection selection, CancellationToken cancellationToken = default);
+    /// <summary>Checks a discovered candidate's metadata through <paramref name="reader"/> and builds its pack definition when the family supports it.</summary>
     Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
         ITensorArtifactReader reader, CancellationToken cancellationToken = default);
+    /// <summary>Returns only the compatibility verdict for a discovered candidate.</summary>
     Task<TensorModelEvaluation> EvaluateAsync(TensorModelCandidate candidate, TensorBackendKind backend, CancellationToken cancellationToken = default);
+    /// <summary>Discovers the selection and resolves the resulting candidate in one step.</summary>
     Task<TensorModelResolution> ResolveAsync(TensorModelSelection selection, CancellationToken cancellationToken = default);
 }
 
 /// <summary>One identity rule shared by engine resolvers. Does not register or install the definition.</summary>
 public static class TensorResolvedPack
 {
+    /// <summary>Builds a validated pack definition keyed by a fingerprint of the canonical manifest, or returns <paramref name="builtIn"/> when it has the same artifacts and provenance.</summary>
     public static TensorModelPackDefinition Create(TensorModelCandidate candidate, TensorCapability capability,
         string architecture, IReadOnlySet<TensorBackendKind> backends, IReadOnlyList<TensorModelArtifactDefinition> artifacts,
         TensorModelPackDefinition? builtIn = null)
@@ -79,6 +119,7 @@ public static class TensorResolvedPack
         return new TensorModelCatalog([definition]).GetRequired(definition.Key);
     }
 
+    /// <summary>Converts a source artifact into a pack artifact under the given role and path; throws when its length or SHA-256 is unknown.</summary>
     public static TensorModelArtifactDefinition Artifact(TensorSourceArtifact source, string role, string relativePath) => new()
     {
         Role = role,

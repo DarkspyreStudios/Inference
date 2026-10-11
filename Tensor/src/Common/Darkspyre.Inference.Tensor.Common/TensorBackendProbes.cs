@@ -5,6 +5,7 @@ namespace Darkspyre.Inference.Tensor.Common;
 /// <summary>Shared CPU/CUDA policy for direct Tensor engines. Creating a probe never invokes native code.</summary>
 public static class TensorBackendProbes
 {
+    /// <summary>Returns an unsupported result when the request names an undefined backend, another implementation or another runtime identifier; otherwise returns null.</summary>
     public static TensorBackendAvailability? ValidateLocalRequest(TensorBackendProbeRequest request, string? implementationId = null)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -34,6 +35,7 @@ public static class TensorBackendProbes
         return null;
     }
 
+    /// <summary>Creates a probe that offers the CPU backend and the CUDA backend when <paramref name="isCudaAvailable"/> returns true.</summary>
     public static ITensorBackendProbe CpuCuda(Func<bool> isCudaAvailable)
     {
         ArgumentNullException.ThrowIfNull(isCudaAvailable);

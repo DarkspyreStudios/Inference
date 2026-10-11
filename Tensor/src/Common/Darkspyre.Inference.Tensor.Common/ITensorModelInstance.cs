@@ -3,14 +3,23 @@ namespace Darkspyre.Inference.Tensor.Common;
 /// <summary>The lifecycle states an in-process tensor engine reports through <see cref="ITensorModelInstance.EngineStatusChanged"/>.</summary>
 public enum TensorEngineState
 {
+    /// <summary>The engine is initializing its resources.</summary>
     Starting,
+    /// <summary>The engine is initialized and holds no model.</summary>
     Started,
+    /// <summary>The engine is loading a model.</summary>
     Loading,
+    /// <summary>The engine has a model resident and accepts requests.</summary>
     Loaded,
+    /// <summary>The engine is releasing its model.</summary>
     Unloading,
+    /// <summary>The engine has released its model.</summary>
     Unloaded,
+    /// <summary>The engine is shutting down.</summary>
     Stopping,
+    /// <summary>The engine has shut down and cannot be reused.</summary>
     Stopped,
+    /// <summary>A lifecycle operation failed; the status carries the error.</summary>
     Failed
 }
 
@@ -41,8 +50,10 @@ public interface ITensorModelInstance : IAsyncDisposable
     /// </summary>
     event EventHandler<TensorEngineStatus>? EngineStatusChanged;
 
+    /// <summary>Returns the instance's resident model, its backend and its latest lifecycle state.</summary>
     Task<TensorModelObservation> GetObservationAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>The backend the instance was created for; <see cref="TensorBackendKind.Auto"/> lets the engine choose.</summary>
     TensorBackendKind RequestedBackend { get; }
 
     /// <summary>Accepts initialization of resources this instance needs; reports Started.</summary>

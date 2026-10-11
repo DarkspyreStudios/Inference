@@ -7,9 +7,13 @@ namespace Darkspyre.Inference.Tensor.STT.Whisper;
 /// <summary>All twelve initial variants, pinned to actual publisher content rather than approximate model sizes.</summary>
 public static class TensorSpeechModels
 {
+    /// <summary>The runtime architecture name of Whisper GGML packs.</summary>
     public const string WhisperRuntimeArchitecture = "whisper-ggml";
+    /// <summary>The Hugging Face repository the Whisper weights come from.</summary>
     public const string Repository = "ggerganov/whisper.cpp";
+    /// <summary>The pinned repository revision of the Whisper weights.</summary>
     public const string Revision = "5359861c739e955e79d9a303bcbc70fb988958b1";
+    /// <summary>The built-in Whisper pack definitions.</summary>
     public static IReadOnlyList<TensorModelPackDefinition> Whisper { get; } = Array.AsReadOnly<TensorModelPackDefinition>([
         Create("base", 147951465L, "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe"),
         Create("base.en", 147964211L, "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002"),

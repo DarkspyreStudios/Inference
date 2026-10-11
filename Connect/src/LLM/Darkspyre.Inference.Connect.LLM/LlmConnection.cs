@@ -28,6 +28,7 @@ public sealed record LlmConnection
     /// </summary>
     public required string Version { get; init; }
 
+    /// <summary>The transport that selects the provider protocol.</summary>
     public required LlmTransport Transport { get; init; }
 
     /// <summary>
@@ -39,12 +40,16 @@ public sealed record LlmConnection
     /// <summary>Serialized <see cref="LlmCredential"/>.</summary>
     public string? Credential { get; init; }
 
+    /// <summary>Google Vertex AI settings, when the connection uses Vertex.</summary>
     public LlmVertexConfiguration? Vertex { get; init; }
 
+    /// <summary>Azure settings, when the connection uses Azure.</summary>
     public LlmAzureConfiguration? Azure { get; init; }
 
+    /// <summary>Agent Client Protocol settings, when the connection uses an ACP agent.</summary>
     public LlmAcpConfiguration? Acp { get; init; }
 
+    /// <summary>GitHub Copilot settings, when the connection uses Copilot.</summary>
     public LlmCopilotConfiguration? Copilot { get; init; }
 
     /// <summary>Transient explicit launch values; non-null values cannot be serialized as configuration.</summary>
@@ -53,6 +58,7 @@ public sealed record LlmConnection
     /// <summary>Chat Completions protocol choices; null selects endpoint-aware defaults.</summary>
     public LlmChatCompletionsConfiguration? ChatCompletions { get; init; }
 
+    /// <summary>xAI settings, when the connection uses xAI.</summary>
     public XaiConnectionOptions? Xai { get; init; }
 
     /// <summary>Non-standard headers such as OpenRouter attribution headers.</summary>
@@ -63,6 +69,7 @@ public sealed record LlmConnection
     public IReadOnlyDictionary<string, JsonElement> ProviderOptions { get; init; } =
         new Dictionary<string, JsonElement>(StringComparer.Ordinal);
 
+    /// <summary>Capability corrections applied to every model on the connection.</summary>
     public LlmCapabilityOverrides? CapabilityOverrides { get; init; }
 
     /// <summary>Optional capability corrections for individual model ids.</summary>

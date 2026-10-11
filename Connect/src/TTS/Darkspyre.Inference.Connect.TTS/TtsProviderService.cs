@@ -7,15 +7,18 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.TTS;
 
+/// <summary>Routes text-to-speech connections to the registered provider for their transport.</summary>
 public sealed class TtsProviderService : IDisposable, IAsyncDisposable
 {
     private readonly LlmOperationLifetime _lifetime = new();
     private IReadOnlyDictionary<TtsTransport, ITtsProvider>? _providers;
+    /// <summary>Creates the service over the registered providers, one per transport.</summary>
     public TtsProviderService(IEnumerable<ITtsProvider> providers)
     {
         ArgumentNullException.ThrowIfNull(providers);
         _providers = providers.ToDictionary(provider => provider.Transport);
     }
+    /// <summary>The setup definition of each registered provider.</summary>
     public IReadOnlyList<InferenceSetupDefinition> SetupDefinitions
     {
         get
@@ -24,6 +27,7 @@ public sealed class TtsProviderService : IDisposable, IAsyncDisposable
             return _providers!.Values.Select(provider => provider.SetupDefinition).ToArray();
         }
     }
+    /// <summary>Validates a connection and binds it to a client from the provider for its transport. Throws <see cref="InferenceException"/> when the transport is unknown or not registered.</summary>
     public ITtsClient Bind(TtsConnection connection,
         IInferenceResourceAccess? resources = null)
     {
@@ -53,8 +57,10 @@ public sealed class TtsProviderService : IDisposable, IAsyncDisposable
         return RequiredProvider(_providers!, transport);
     }
 
+    /// <summary>Cancels running operations, waits for them to end and releases the providers.</summary>
     public void Dispose() => RetireAsync().GetAwaiter().GetResult();
 
+    /// <summary>Cancels running operations, waits for them to end and releases the providers.</summary>
     public ValueTask DisposeAsync() => new(RetireAsync());
 
     private Task RetireAsync() => _lifetime.RetireAsync(() =>
@@ -76,8 +82,10 @@ public sealed class TtsProviderService : IDisposable, IAsyncDisposable
     }
 }
 
+/// <summary>Registers the text-to-speech services with dependency injection.</summary>
 public static class ServiceCollectionExtensions
 {
+    /// <summary>Registers the Pocket TTS provider and <see cref="TtsProviderService"/>.</summary>
     public static IServiceCollection AddTtsConnect(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);

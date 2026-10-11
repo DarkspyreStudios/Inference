@@ -10,6 +10,7 @@ using TensorSharp.Models.Media;
 
 namespace Darkspyre.Inference.Tensor.Image.Supra;
 
+/// <summary>Generates images locally with a Supra model pack.</summary>
 public sealed class SupraImageInference : ITensorImageInference
 {
     private const int DefaultSteps = 50;
@@ -28,6 +29,7 @@ public sealed class SupraImageInference : ITensorImageInference
     private TensorBackendKind? _loadedBackend;
     private bool _disposed;
 
+    /// <summary>Creates an instance over the pack manager for the requested backend. Without a <paramref name="coordinator"/>, the instance creates and owns its own.</summary>
     public SupraImageInference(
         ITensorModelPackManager packs,
         TensorBackendKind backend = TensorBackendKind.Auto,
@@ -48,8 +50,10 @@ public sealed class SupraImageInference : ITensorImageInference
         _ownsCoordinator = coordinator is null;
     }
 
+    /// <inheritdoc />
     public InferenceImplementationDescriptor Descriptor => SupraSetup.Definition.Implementation;
 
+    /// <inheritdoc />
     public async Task<ImageCapabilities> GetCapabilitiesAsync(
         string? modelId = null,
         CancellationToken cancellationToken = default)
@@ -68,6 +72,7 @@ public sealed class SupraImageInference : ITensorImageInference
         };
     }
 
+    /// <inheritdoc />
     public async Task<ImageGenerationResult> GenerateAsync(
         ImageGenerationRequest request,
         IProgress<ImageGenerationProgress>? progress = null,
@@ -157,18 +162,21 @@ public sealed class SupraImageInference : ITensorImageInference
         };
     }
 
+    /// <inheritdoc />
     public event EventHandler<TensorEngineStatus>? EngineStatusChanged
     {
         add => _lifetime.EngineStatusChanged += value;
         remove => _lifetime.EngineStatusChanged -= value;
     }
 
+    /// <inheritdoc />
     public Task<TensorModelObservation> GetObservationAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(_lifetime.Observation);
     }
 
+    /// <inheritdoc />
     public TensorBackendKind RequestedBackend => _requestedBackend;
 
     /// <summary>Start after Stop is an allowed no-op; it does not reset a stopped instance.</summary>
@@ -185,6 +193,7 @@ public sealed class SupraImageInference : ITensorImageInference
             cancellationToken);
     }
 
+    /// <inheritdoc />
     public async Task LoadAsync(TensorModelKey model, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -275,6 +284,7 @@ public sealed class SupraImageInference : ITensorImageInference
         }
     }
 
+    /// <inheritdoc />
     public Task UnloadAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -286,6 +296,7 @@ public sealed class SupraImageInference : ITensorImageInference
         }, cancellationToken, teardown: true);
     }
 
+    /// <inheritdoc />
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
         if (_lifetime.StopAccepted)

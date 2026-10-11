@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
+/// <summary>Registers the LLM connection services in a dependency injection container.</summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>Registers LLM connections with an explicit HTTP creation and logging policy.</summary>

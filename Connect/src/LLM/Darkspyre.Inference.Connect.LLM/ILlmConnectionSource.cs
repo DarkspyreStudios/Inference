@@ -3,6 +3,7 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Host seam that resolves metadata plus a short-lived protected credential.</summary>
 public interface ILlmConnectionSource
 {
+    /// <summary>Returns the connection with this id, including its current credential and concurrency version, or null when no such connection exists.</summary>
     Task<LlmConnection?> GetConnectionAsync(
         string connectionId,
         CancellationToken cancellationToken = default);

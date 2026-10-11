@@ -16,11 +16,14 @@ namespace Darkspyre.Inference.Connect.Audio;
 public sealed class TangoFluxHttpProvider(HttpClient httpClient) : IAudioProvider
 {
     private static readonly IReadOnlyList<string> ContentTypes = Array.AsReadOnly(new[] { "audio/wav" });
+    /// <inheritdoc />
     public AudioTransport Transport => AudioTransport.TangoFluxHttp;
+    /// <inheritdoc />
     public InferenceSetupDefinition SetupDefinition { get; } = new(
         new("darkspyre.connect.tangoflux", "TangoFlux HTTP", InferenceImplementationKind.Connect, InferenceTask.AudioGeneration),
         "Generate audio through an externally managed TangoFlux endpoint. Model listing and health checks are unavailable.");
 
+    /// <inheritdoc />
     public IAudioGenerationClient Bind(AudioConnection connection)
     {
         ArgumentNullException.ThrowIfNull(connection);

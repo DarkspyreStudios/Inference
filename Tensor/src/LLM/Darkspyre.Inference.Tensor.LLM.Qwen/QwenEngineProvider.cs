@@ -8,8 +8,10 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 public sealed class QwenEngineProvider(GgmlRuntimeOwner? runtimeOwner = null) : ITensorEngineProvider
 {
     private readonly GgmlRuntimeOwner _runtimeOwner = runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate();
+    /// <inheritdoc />
     public TensorEngineDefinition Definition { get; } = new(QwenSetup.Definition, "Qwen");
 
+    /// <inheritdoc />
     public async Task<IReadOnlyList<TensorModelPackDefinition>> GetOfferedModelsAsync(ITensorModelPackManager packs,
         CancellationToken cancellationToken = default)
     {
@@ -22,9 +24,11 @@ public sealed class QwenEngineProvider(GgmlRuntimeOwner? runtimeOwner = null) : 
         return offered;
     }
 
+    /// <inheritdoc />
     public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend) =>
         new QwenLlmInference(packs, backend, runtimeOwner: _runtimeOwner);
 
+    /// <inheritdoc />
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
         ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null)

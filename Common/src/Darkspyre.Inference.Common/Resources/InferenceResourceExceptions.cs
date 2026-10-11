@@ -4,6 +4,7 @@ namespace Darkspyre.Inference.Common.Resources;
 public sealed class InferenceResourceOperationException : Exception
 {
     private object? _cleanupOwner;
+    /// <summary>Creates the exception, and throws <see cref="ArgumentNullException"/> when <paramref name="failure"/> is null.</summary>
     public InferenceResourceOperationException(InferenceFailureCode code, string message,
         InferenceResourceOperationFailure failure, Exception? innerException = null)
         : base(message, innerException)
@@ -13,7 +14,9 @@ public sealed class InferenceResourceOperationException : Exception
         Failure = failure;
     }
 
+    /// <summary>The classification of the failure.</summary>
     public InferenceFailureCode Code { get; }
+    /// <summary>The observed effects of the failed operation.</summary>
     public InferenceResourceOperationFailure Failure { get; }
 
     internal void RetainCleanupOwner(object owner)
@@ -35,6 +38,7 @@ public sealed class InferenceResourceOperationException : Exception
 public sealed class InferenceResourceOperationCanceledException : OperationCanceledException
 {
     private object? _cleanupOwner;
+    /// <summary>Creates the exception with the cancellation token that ended the operation, and throws <see cref="ArgumentNullException"/> when <paramref name="failure"/> is null.</summary>
     public InferenceResourceOperationCanceledException(InferenceResourceOperationFailure failure,
         CancellationToken cancellationToken, Exception? innerException = null)
         : base("The resource operation was canceled.", innerException, cancellationToken)
@@ -43,6 +47,7 @@ public sealed class InferenceResourceOperationCanceledException : OperationCance
         Failure = failure;
     }
 
+    /// <summary>The observed effects of the canceled operation.</summary>
     public InferenceResourceOperationFailure Failure { get; }
 
     internal void RetainCleanupOwner(object owner)
@@ -63,6 +68,7 @@ public sealed class InferenceResourceOperationCanceledException : OperationCance
 /// <summary>A refused replacement. No selection mutation occurs on this conflict.</summary>
 public sealed class InferenceResourceSelectionConflictException : Exception
 {
+    /// <summary>Creates the exception, and throws when either revision is negative.</summary>
     public InferenceResourceSelectionConflictException(long expectedRevision, long actualRevision)
         : base("The resource selection revision is stale.")
     {
@@ -70,6 +76,8 @@ public sealed class InferenceResourceSelectionConflictException : Exception
         ActualRevision = ResourceContract.Nonnegative(actualRevision, nameof(actualRevision));
     }
 
+    /// <summary>The selection revision the caller expected.</summary>
     public long ExpectedRevision { get; }
+    /// <summary>The selection revision currently stored.</summary>
     public long ActualRevision { get; }
 }

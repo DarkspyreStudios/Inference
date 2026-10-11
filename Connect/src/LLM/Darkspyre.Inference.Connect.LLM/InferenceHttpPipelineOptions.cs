@@ -7,7 +7,14 @@ using Microsoft.Extensions.Http.Logging;
 namespace Darkspyre.Inference.Connect.LLM;
 
 /// <summary>Selects SDK-owned HTTP retirement or explicit caller-factory borrowing.</summary>
-public enum InferenceHttpCreationMode { SdkGenerationOwned = 0, BorrowHostFactory = 1 }
+public enum InferenceHttpCreationMode
+{
+    /// <summary>The SDK builds HTTP handlers itself and retires them with its DI generation.</summary>
+    SdkGenerationOwned = 0,
+
+    /// <summary>The SDK creates clients from the host's <see cref="IHttpClientFactory"/>.</summary>
+    BorrowHostFactory = 1
+}
 
 /// <summary>Configures one SDK DI generation. This runtime configuration is not portable data.</summary>
 [JsonConverter(typeof(InferenceHttpConfigurationJsonConverterFactory))]
@@ -16,11 +23,13 @@ public sealed class InferenceHttpPipelineOptions
     private readonly List<(string Name, InferenceHttpLoggingBuilder Builder)> _logging = [];
     private InferenceHttpCreationMode _mode;
     private bool _sealed;
+    /// <summary>How the SDK creates HTTP clients. Throws <see cref="ObjectDisposedException"/> once the options are applied.</summary>
     public InferenceHttpCreationMode CreationMode
     {
         get => _mode;
         set { ObjectDisposedException.ThrowIf(_sealed, this); if (!Enum.IsDefined(value)) throw new ArgumentOutOfRangeException(nameof(value)); _mode = value; }
     }
+    /// <summary>Adds logging configuration for the named HTTP client. Throws <see cref="ObjectDisposedException"/> once the options are applied.</summary>
     public void ConfigureLogging(string name, Action<InferenceHttpLoggingBuilder> configure)
     {
         ObjectDisposedException.ThrowIf(_sealed, this); SdkHttpRegistration.ValidateName(name); ArgumentNullException.ThrowIfNull(configure);
@@ -32,6 +41,7 @@ public sealed class InferenceHttpPipelineOptions
         foreach ((string name, InferenceHttpLoggingBuilder logger) in _logging) logger.Apply(services.AddHttpClient(name), configuration);
         _logging.Clear();
     }
+    /// <summary>Returns the type name only.</summary>
     public override string ToString() => nameof(InferenceHttpPipelineOptions);
 }
 
@@ -42,6 +52,7 @@ public sealed class InferenceHttpLoggingBuilder
     private readonly List<Action<IHttpClientBuilder, SdkHttpConfiguration>> _actions = [];
     private bool _sealed;
     internal InferenceHttpLoggingBuilder() { }
+    /// <summary>Adds a logger created from the service provider.</summary>
     public InferenceHttpLoggingBuilder AddLogger(Func<IServiceProvider, IHttpClientLogger> loggerFactory, bool wrapHandlersPipeline = false)
     {
         ArgumentNullException.ThrowIfNull(loggerFactory);
@@ -51,15 +62,20 @@ public sealed class InferenceHttpLoggingBuilder
             else configuration.AddLogger(builder, new(loggerFactory, wrapHandlersPipeline));
         });
     }
+    /// <summary>Adds a logger of type <typeparamref name="TLogger"/> resolved from the service provider.</summary>
     public InferenceHttpLoggingBuilder AddLogger<TLogger>(bool wrapHandlersPipeline = false) where TLogger : class, IHttpClientLogger =>
         AddLogger(provider => provider.GetRequiredService<TLogger>(), wrapHandlersPipeline);
+    /// <summary>Removes every logger from the HTTP client, including loggers added earlier.</summary>
     public InferenceHttpLoggingBuilder RemoveAllLoggers() => Add((builder, configuration) => { builder.RemoveAllLoggers(); configuration.RemoveLoggers(builder.Name); });
+    /// <summary>Adds the default HTTP client logger.</summary>
     public InferenceHttpLoggingBuilder AddDefaultLogger() => Add((builder, _) => builder.AddDefaultLogger());
+    /// <summary>Redacts the values of logged headers that the predicate selects.</summary>
     public InferenceHttpLoggingBuilder RedactLoggedHeaders(Func<string, bool> shouldRedactHeaderValue)
     {
         ArgumentNullException.ThrowIfNull(shouldRedactHeaderValue);
         return Add((builder, _) => builder.RedactLoggedHeaders(shouldRedactHeaderValue));
     }
+    /// <summary>Redacts the values of the named logged headers.</summary>
     public InferenceHttpLoggingBuilder RedactLoggedHeaders(IEnumerable<string> redactedHeaderNames)
     {
         ArgumentNullException.ThrowIfNull(redactedHeaderNames); string[] names = redactedHeaderNames.ToArray();
@@ -75,15 +91,18 @@ public sealed class InferenceHttpLoggingBuilder
         foreach (Action<IHttpClientBuilder, SdkHttpConfiguration> action in _actions) action(builder, configuration);
         _actions.Clear();
     }
+    /// <summary>Returns the type name only.</summary>
     public override string ToString() => nameof(InferenceHttpLoggingBuilder);
 }
 
 /// <summary>Refuses transfer of the two HTTP runtime configuration types while preserving null values.</summary>
 public sealed class InferenceHttpConfigurationJsonConverterFactory : JsonConverterFactory
 {
+    /// <inheritdoc />
     public override bool CanConvert(Type typeToConvert) =>
         typeToConvert == typeof(InferenceHttpPipelineOptions) || typeToConvert == typeof(InferenceHttpLoggingBuilder);
 
+    /// <inheritdoc />
     public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
     {
         if (typeToConvert == typeof(InferenceHttpPipelineOptions)) return new RuntimeRefusalConverter<InferenceHttpPipelineOptions>();

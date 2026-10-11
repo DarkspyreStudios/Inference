@@ -9,6 +9,7 @@ using Microsoft.ML.OnnxRuntime;
 
 namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
+/// <summary>Decision inference that runs a Laya model pack through ONNX Runtime.</summary>
 public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionInputMeasurement
 {
     private readonly ITensorModelPackManager _packs;
@@ -24,6 +25,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
     private TensorBackendKind? _loadedBackend;
     private bool _disposed;
 
+    /// <summary>Creates an instance that loads packs from <paramref name="packs"/> on the requested backend; it creates and owns a coordinator when none is given.</summary>
     public LayaDecisionInference(
         ITensorModelPackManager packs,
         TensorBackendKind backend = TensorBackendKind.Auto,
@@ -46,8 +48,10 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         _ownsCoordinator = coordinator is null;
     }
 
+    /// <inheritdoc />
     public InferenceImplementationDescriptor Descriptor => LayaSetup.Definition.Implementation;
 
+    /// <inheritdoc />
     public Task<DecisionCapabilities> GetCapabilitiesAsync(
         string? modelId = null,
         CancellationToken cancellationToken = default)
@@ -70,6 +74,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         });
     }
 
+    /// <inheritdoc />
     public async Task<DecisionInferenceResult> DecideAsync(
         DecisionInferenceRequest request,
         CancellationToken cancellationToken = default)
@@ -154,6 +159,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         };
     }
 
+    /// <inheritdoc />
     public async Task<DecisionInputMeasurement> MeasureAsync(
         DecisionInferenceRequest request,
         CancellationToken cancellationToken = default)
@@ -175,18 +181,21 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         return await Task.Run(() => meter.Measure(request, executionToken), executionToken).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
     public event EventHandler<TensorEngineStatus>? EngineStatusChanged
     {
         add => _lifetime.EngineStatusChanged += value;
         remove => _lifetime.EngineStatusChanged -= value;
     }
 
+    /// <inheritdoc />
     public Task<TensorModelObservation> GetObservationAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(_lifetime.Observation);
     }
 
+    /// <inheritdoc />
     public TensorBackendKind RequestedBackend => _requestedBackend;
 
     /// <summary>Start after Stop is an allowed no-op; it does not reset a stopped instance.</summary>
@@ -203,6 +212,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
             cancellationToken);
     }
 
+    /// <inheritdoc />
     public async Task LoadAsync(TensorModelKey model, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -303,6 +313,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         }
     }
 
+    /// <inheritdoc />
     public Task UnloadAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -314,6 +325,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         }, cancellationToken, teardown: true);
     }
 
+    /// <inheritdoc />
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
         if (_lifetime.StopAccepted)

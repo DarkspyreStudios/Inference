@@ -5,28 +5,51 @@ using System.Text.Json;
 
 namespace Darkspyre.Inference.Tensor.Common;
 
+/// <summary>The local installation state of a Tensor model pack.</summary>
 public enum TensorModelPackState
 {
+    /// <summary>No installed manifest exists for the pack.</summary>
     NotInstalled,
+    /// <summary>The installed manifest matches the registered pack.</summary>
     Installed,
+    /// <summary>The installed manifest or an artifact does not match the registered pack.</summary>
     Invalid
 }
 
+/// <summary>The installation state of one model pack.</summary>
+/// <param name="Key">The pack's key.</param>
+/// <param name="State">The pack's installation state.</param>
+/// <param name="Detail">Why the pack is invalid, or null when there is nothing to explain.</param>
 public sealed record TensorModelPackStatus(
     TensorModelKey Key,
     TensorModelPackState State,
     string? Detail = null);
 
+/// <summary>The stage of a model pack install or import that a progress report describes.</summary>
 public enum TensorModelInstallStage
 {
+    /// <summary>Checking the existing installation or the import source.</summary>
     Checking,
+    /// <summary>Copying an artifact from its source into staging.</summary>
     Downloading,
+    /// <summary>Publishing a verified artifact into the pack directory.</summary>
     Saving,
+    /// <summary>The pack is installed.</summary>
     Completed,
+    /// <summary>The operation failed.</summary>
     Failed,
+    /// <summary>The operation was cancelled.</summary>
     Cancelled
 }
 
+/// <summary>One progress report from a model pack install or import.</summary>
+/// <param name="Stage">The stage the operation has reached.</param>
+/// <param name="ArtifactRole">The role of the artifact being transferred, or null for a report about the whole pack.</param>
+/// <param name="BytesTransferred">Bytes of the current artifact transferred so far, or null when not applicable.</param>
+/// <param name="TotalBytes">The current artifact's length, or null when unknown.</param>
+/// <param name="OverallBytesTransferred">Bytes of all artifacts transferred so far, or null when not tracked.</param>
+/// <param name="OverallTotalBytes">The combined length of all artifacts, or null when unknown.</param>
+/// <param name="SupportsResume">Whether the current transfer can resume after an interruption.</param>
 public readonly record struct TensorModelInstallProgress(
     TensorModelInstallStage Stage,
     string? ArtifactRole = null,
@@ -36,8 +59,10 @@ public readonly record struct TensorModelInstallProgress(
     long? OverallTotalBytes = null,
     InferenceSupport SupportsResume = InferenceSupport.Unsupported);
 
+/// <summary>Manages the catalog and local installation of Tensor model packs.</summary>
 public interface ITensorModelPackManager
 {
+    /// <summary>Returns every pack definition in the shared catalog.</summary>
     Task<IReadOnlyList<TensorModelPackDefinition>> GetDefinitionsAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Publishes a definition to the shared catalog and returns the registered snapshot.</summary>
@@ -45,33 +70,41 @@ public interface ITensorModelPackManager
         TensorModelPackDefinition definition,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Returns the registered definition for the key, and fails when no definition is registered.</summary>
     Task<TensorModelPackDefinition> GetRequiredDefinitionAsync(
         TensorModelKey key,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Returns the pack's state from its installed manifest alone, without hashing the artifacts.</summary>
     Task<TensorModelPackStatus> GetStatusAsync(
         TensorModelKey key,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Downloads, verifies and publishes every artifact of a registered pack, then writes its manifest last. A pack that already verifies is left as it is.</summary>
     Task InstallAsync(
         TensorModelKey key,
         IProgress<TensorModelInstallProgress>? progress = null,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Discovers, stages and resolves a model from a source, registers the resolved definition and installs it from the staged files.</summary>
     Task<TensorModelImportResult> ImportAsync(TensorModelImportRequest request,
         IProgress<TensorModelInstallProgress>? progress = null, CancellationToken cancellationToken = default);
 
+    /// <summary>Returns the pack's state after checking its manifest and the length and SHA-256 hash of every installed artifact.</summary>
     Task<TensorModelPackStatus> VerifyAsync(
         TensorModelKey key,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Verifies the installed pack and returns a lease on its artifact paths. A leased pack cannot be removed or repaired until the lease is released.</summary>
     Task<TensorModelPackLease> AcquireAsync(
         TensorModelKey key,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Deletes the pack's manifest and artifacts. A pack with an active lease cannot be removed.</summary>
     Task RemoveAsync(TensorModelKey key, CancellationToken cancellationToken = default);
 }
 
+/// <summary>Installs, verifies, leases and removes Tensor model packs in a local pack directory.</summary>
 public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposable
 {
     private readonly TensorModelCatalog _catalog;
@@ -104,6 +137,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         _sourceHttp = new(_httpClient, sourceAccess);
     }
 
+    /// <inheritdoc />
     public Task<IReadOnlyList<TensorModelPackDefinition>> GetDefinitionsAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -111,6 +145,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         return Task.FromResult(_catalog.Definitions);
     }
 
+    /// <inheritdoc />
     public Task<TensorModelPackDefinition> RegisterAsync(
         TensorModelPackDefinition definition,
         CancellationToken cancellationToken = default)
@@ -120,6 +155,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         return Task.FromResult(_catalog.Register(definition));
     }
 
+    /// <inheritdoc />
     public Task<TensorModelPackDefinition> GetRequiredDefinitionAsync(
         TensorModelKey key,
         CancellationToken cancellationToken = default)
@@ -129,6 +165,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         return Task.FromResult(_catalog.GetRequired(key));
     }
 
+    /// <inheritdoc />
     public async Task<TensorModelPackStatus> GetStatusAsync(
         TensorModelKey key,
         CancellationToken cancellationToken = default)
@@ -160,6 +197,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         }
     }
 
+    /// <inheritdoc />
     public Task InstallAsync(
         TensorModelKey key,
         IProgress<TensorModelInstallProgress>? progress = null,
@@ -333,6 +371,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
             }, read, cancellationToken);
     }
 
+    /// <inheritdoc />
     public async Task<TensorModelPackStatus> VerifyAsync(
         TensorModelKey key,
         CancellationToken cancellationToken = default)
@@ -366,6 +405,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         return status;
     }
 
+    /// <inheritdoc />
     public async Task<TensorModelPackLease> AcquireAsync(
         TensorModelKey key,
         CancellationToken cancellationToken = default)
@@ -402,6 +442,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         }
     }
 
+    /// <inheritdoc />
     public async Task RemoveAsync(TensorModelKey key, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -429,6 +470,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         }
     }
 
+    /// <summary>Disposes the HTTP client when this manager created it, and releases the per-pack gates.</summary>
     public void Dispose()
     {
         if (_disposed)
@@ -662,13 +704,16 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
     }
 }
 
+/// <summary>A model pack operation failed for a specific pack.</summary>
 public sealed class TensorModelPackException : Exception
 {
+    /// <summary>Creates the exception for the pack with the given key.</summary>
     public TensorModelPackException(TensorModelKey key, string message, Exception? innerException = null)
         : base(message, innerException)
     {
         Key = key;
     }
 
+    /// <summary>The key of the pack the operation failed for.</summary>
     public TensorModelKey Key { get; }
 }

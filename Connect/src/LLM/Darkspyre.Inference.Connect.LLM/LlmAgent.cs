@@ -9,28 +9,38 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>Filesystem isolation requested for a provider-owned agent runtime.</summary>
 public enum LlmAgentSandboxMode
 {
+    /// <summary>The runtime may read files but not write them.</summary>
     ReadOnly,
+    /// <summary>The runtime may write beneath its writable roots.</summary>
     WorkspaceWrite,
+    /// <summary>The runtime has unrestricted filesystem access.</summary>
     DangerFullAccess
 }
 
 /// <summary>When an agent must ask the host before performing privileged work.</summary>
 public enum LlmAgentApprovalPolicy
 {
+    /// <summary>The agent asks before running any command not known to be safe.</summary>
     Untrusted,
+    /// <summary>The agent decides when to ask.</summary>
     OnRequest,
+    /// <summary>The agent never asks for approval.</summary>
     Never
 }
 
 /// <summary>A host-implemented dynamic tool exposed to an agent session.</summary>
 public sealed record LlmAgentToolDefinition : LlmAgentClientToolDefinition
 {
+    /// <summary>The name the model calls the tool by.</summary>
     public required string Name { get; init; }
 
+    /// <summary>Text that tells the model what the tool does.</summary>
     public string? Description { get; init; }
 
+    /// <summary>JSON Schema for the tool's arguments.</summary>
     public required JsonElement InputSchema { get; init; }
 
+    /// <summary>Requests deferred loading, so the provider loads the definition only when the model needs it. A provider without deferred loading rejects the tool.</summary>
     public bool DeferLoading { get; init; }
 
     /// <summary>Forces an entire managed tool batch to execute sequentially.</summary>
@@ -40,10 +50,15 @@ public sealed record LlmAgentToolDefinition : LlmAgentClientToolDefinition
     public bool ProtectedResults { get; init; }
 }
 
+/// <summary>One piece of user input sent to an agent turn.</summary>
 public abstract record LlmAgentContent;
 
+/// <summary>Text input for an agent turn.</summary>
+/// <param name="Text">The input text.</param>
 public sealed record LlmAgentTextContent(string Text) : LlmAgentContent;
 
+/// <summary>Image input for an agent turn, given by URL.</summary>
+/// <param name="ImageUrl">The image location.</param>
 public sealed record LlmAgentImageContent(string ImageUrl) : LlmAgentContent;
 
 /// <summary>A dynamic tool invocation sent from the agent to the host.</summary>
@@ -55,6 +70,7 @@ public sealed record LlmAgentToolCall(
     string Name,
     JsonElement Arguments);
 
+/// <summary>Runs a host tool call made by the agent and returns its output.</summary>
 public delegate Task<LlmToolOutput> LlmAgentToolHandler(
     LlmAgentToolCall call,
     CancellationToken cancellationToken);
@@ -80,12 +96,14 @@ public abstract record LlmAgentRuntimePolicy
     {
     }
 
+    /// <summary>The policy variant this record carries.</summary>
     public abstract LlmAgentRuntimePolicyKind Kind { get; }
 }
 
 /// <summary>Limits the host selects and the runtime enforces.</summary>
 public sealed record LlmAgentHostRuntimePolicy : LlmAgentRuntimePolicy
 {
+    /// <inheritdoc />
     public override LlmAgentRuntimePolicyKind Kind => LlmAgentRuntimePolicyKind.HostControlled;
 
     /// <summary>Every filesystem root the provider-owned runtime may write beneath.</summary>
@@ -94,8 +112,10 @@ public sealed record LlmAgentHostRuntimePolicy : LlmAgentRuntimePolicy
     /// <summary>Whether provider-owned commands may use the network.</summary>
     public bool NetworkAllowed { get; init; } = true;
 
+    /// <summary>Filesystem isolation the runtime applies.</summary>
     public LlmAgentSandboxMode Sandbox { get; init; } = LlmAgentSandboxMode.WorkspaceWrite;
 
+    /// <summary>When the runtime asks the host before privileged work.</summary>
     public LlmAgentApprovalPolicy ApprovalPolicy { get; init; } = LlmAgentApprovalPolicy.OnRequest;
 
     /// <summary>
@@ -113,6 +133,7 @@ public sealed record LlmAgentHostRuntimePolicy : LlmAgentRuntimePolicy
 /// </summary>
 public sealed record LlmAgentProviderRuntimePolicy : LlmAgentRuntimePolicy
 {
+    /// <inheritdoc />
     public override LlmAgentRuntimePolicyKind Kind => LlmAgentRuntimePolicyKind.ProviderConfigured;
 }
 
@@ -122,8 +143,10 @@ public sealed record LlmAgentProviderRuntimePolicy : LlmAgentRuntimePolicy
 /// </summary>
 public sealed record LlmAgentNativeRuntimeOptions
 {
+    /// <summary>The directory the runtime works in.</summary>
     public required string WorkingDirectory { get; init; }
 
+    /// <summary>When true, the runtime does not persist its native conversation.</summary>
     public bool Ephemeral { get; init; }
 
     /// <summary>
@@ -133,6 +156,7 @@ public sealed record LlmAgentNativeRuntimeOptions
     public LlmAgentRuntimePolicy Policy { get; init; } = new LlmAgentHostRuntimePolicy();
 }
 
+/// <summary>Settings for starting a new agent session.</summary>
 public sealed record LlmAgentSessionOptions
 {
     /// <summary>
@@ -145,8 +169,10 @@ public sealed record LlmAgentSessionOptions
     /// </remarks>
     public LlmAgentContext? Context { get; init; }
 
+    /// <summary>The conversation identity to use; null assigns a new one.</summary>
     public string? ThreadId { get; init; }
 
+    /// <summary>The root session identity shared by a thread and its forks; null uses the thread identity.</summary>
     public string? SessionId { get; init; }
 
     /// <summary>Null selects the defaults. Each adapter reads the members it uses.</summary>
@@ -155,20 +181,26 @@ public sealed record LlmAgentSessionOptions
     /// <summary>Read by provider-owned runtimes; a managed runtime accepts and ignores it.</summary>
     public LlmAgentNativeRuntimeOptions? Runtime { get; init; }
 
+    /// <summary>The model the session runs turns with.</summary>
     public required string ModelId { get; init; }
 
+    /// <summary>System instructions applied to every turn.</summary>
     public string? Instructions { get; init; }
 
+    /// <summary>Host tools the model may call.</summary>
     public IReadOnlyList<LlmAgentClientToolDefinition> Tools { get; init; } = [];
 
     /// <summary>Borrowed runtime services. The session releases references after admitted work drains.</summary>
     [JsonIgnore]
     public LlmAgentCallerServices? CallerServices { get; init; }
 
+    /// <summary>Provider-hosted tools the model may use.</summary>
     public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
 
+    /// <summary>Cap on provider-side hosted tool iterations per turn; null leaves the provider default.</summary>
     public int? MaxHostedTurns { get; init; }
 
+    /// <summary>Runs host tool calls when <see cref="ToolHandling"/> is <see cref="LlmAgentToolHandling.Execute"/>.</summary>
     public LlmAgentToolHandler? ToolHandler { get; init; }
 
     /// <summary>Execute runs the handler; ReturnRequests ends the turn with the calls unrun.</summary>
@@ -194,10 +226,13 @@ public enum LlmAgentToolHandling
     ReturnRequests
 }
 
+/// <summary>Settings for resuming an existing agent conversation.</summary>
 public sealed record LlmAgentResumeOptions
 {
+    /// <summary>The model for the resumed session; null leaves the choice to the runtime.</summary>
     public string? ModelId { get; init; }
 
+    /// <summary>System instructions applied to every turn after resuming.</summary>
     public string? Instructions { get; init; }
 
     /// <summary>
@@ -218,16 +253,20 @@ public sealed record LlmAgentResumeOptions
     [JsonIgnore]
     public LlmAgentCallerServices? CallerServices { get; init; }
 
+    /// <summary>Provider-hosted tools the model may use after resuming.</summary>
     public IReadOnlyList<LlmHostedTool> HostedTools { get; init; } = [];
 
+    /// <summary>Cap on provider-side hosted tool iterations per turn; null leaves the provider default.</summary>
     public int? MaxHostedTurns { get; init; }
 
+    /// <summary>Runs host tool calls made after resuming.</summary>
     public LlmAgentToolHandler? ToolHandler { get; init; }
 
     /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it. No phase-1 runtime reads this value; it stays as a Host-visible stored setting (L2 exception in Inference AGENTS.md).</summary>
     public long ResourceOutputRetentionBytes { get; init; } = 1_048_576;
 }
 
+/// <summary>Input and per-turn overrides for one agent turn.</summary>
 public sealed record LlmAgentTurnRequest
 {
     /// <summary>
@@ -242,11 +281,13 @@ public sealed record LlmAgentTurnRequest
     /// <summary>Provider-neutral binary content supplied with this turn.</summary>
     public IReadOnlyList<LlmMessageAttachment> Attachments { get; init; } = [];
 
+    /// <summary>The model for this turn only; null uses the session model.</summary>
     public string? ModelId { get; init; }
 
     /// <summary>The requested reasoning level; null leaves the provider's default in place.</summary>
     public Darkspyre.Inference.Common.LLM.LlmReasoningLevel? ReasoningLevel { get; init; }
 
+    /// <summary>JSON Schema the final answer must match; null requests free-form output.</summary>
     public JsonElement? OutputSchema { get; init; }
 
     /// <summary>Sampling temperature. A value the selected model cannot use is not sent.</summary>
@@ -259,28 +300,46 @@ public sealed record LlmAgentTurnRequest
     public LlmToolChoice? ToolChoice { get; init; }
 }
 
+/// <summary>The outcome class of a finished turn.</summary>
 public enum LlmAgentTurnStatus
 {
+    /// <summary>The turn finished normally.</summary>
     Completed,
+    /// <summary>The turn was interrupted.</summary>
     Interrupted,
+    /// <summary>The turn ended with an error.</summary>
     Failed,
     /// <summary>Terminal output is available but its natural completion or truncation is unknown.</summary>
     Unknown
 }
 
+/// <summary>Base type for the events an agent session reports.</summary>
+/// <param name="ThreadId">The conversation the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to, or null outside a turn.</param>
 public abstract record LlmAgentEvent(string ThreadId, string? TurnId)
 {
+    /// <summary>The conversation the event belongs to.</summary>
     public virtual string ThreadId { get; init; } = ThreadId;
+    /// <summary>The turn the event belongs to, or null outside a turn.</summary>
     public virtual string? TurnId { get; init; } = TurnId;
 }
 
+/// <summary>A turn began.</summary>
+/// <param name="ThreadId">The conversation the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to.</param>
 public sealed record LlmAgentTurnStartedEvent(string ThreadId, string TurnId)
     : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    /// <summary>The turn identity, which is never null or blank.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
 
+/// <summary>A fragment of assistant message text.</summary>
+/// <param name="ThreadId">The conversation the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to.</param>
+/// <param name="ItemId">The message the text belongs to.</param>
+/// <param name="Delta">The new text.</param>
 public sealed record LlmAgentTextDeltaEvent(
     string ThreadId,
     string TurnId,
@@ -288,6 +347,7 @@ public sealed record LlmAgentTextDeltaEvent(
     string Delta)
     : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    /// <summary>The turn identity, which is never null or blank.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
@@ -300,10 +360,17 @@ public sealed record LlmAgentStructuredOutputSnapshotEvent(
     JsonElement Content)
     : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    /// <summary>The turn identity, which is never null or blank.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
 
+/// <summary>A fragment of model reasoning text.</summary>
+/// <param name="ThreadId">The conversation the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to.</param>
+/// <param name="ItemId">The reasoning item the text belongs to.</param>
+/// <param name="Delta">The new text.</param>
+/// <param name="IsSummary">True when the text is a reasoning summary instead of raw reasoning.</param>
 public sealed record LlmAgentReasoningDeltaEvent(
     string ThreadId,
     string TurnId,
@@ -312,10 +379,16 @@ public sealed record LlmAgentReasoningDeltaEvent(
     bool IsSummary)
     : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    /// <summary>The turn identity, which is never null or blank.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
 
+/// <summary>An assistant message finished.</summary>
+/// <param name="ThreadId">The conversation the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to.</param>
+/// <param name="ItemId">The completed message.</param>
+/// <param name="Text">The full message text.</param>
 public sealed record LlmAgentMessageCompletedEvent(
     string ThreadId,
     string TurnId,
@@ -323,6 +396,7 @@ public sealed record LlmAgentMessageCompletedEvent(
     string Text)
     : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    /// <summary>The turn identity, which is never null or blank.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
@@ -344,6 +418,7 @@ public sealed record LlmAgentToolEvent(
     LlmToolOutput? Output = null)
     : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    /// <summary>The turn identity, which is never null or blank.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
@@ -380,20 +455,31 @@ public sealed record LlmAgentActivityEvent(
     string Activity)
     : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    /// <summary>The turn identity, which is never null or blank.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
 
+/// <summary>A non-fatal warning reported during a turn.</summary>
+/// <param name="ThreadId">The conversation the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to.</param>
+/// <param name="Message">The warning text.</param>
 public sealed record LlmAgentWarningEvent(
     string ThreadId,
     string TurnId,
     string Message)
     : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    /// <summary>The turn identity, which is never null or blank.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
 
+/// <summary>A turn ended.</summary>
+/// <param name="ThreadId">The conversation the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to.</param>
+/// <param name="Reason">Why the turn ended.</param>
+/// <param name="Error">The failure text, or null when the turn did not fail.</param>
 public sealed record LlmAgentTurnCompletedEvent(
     string ThreadId,
     string TurnId,
@@ -401,6 +487,7 @@ public sealed record LlmAgentTurnCompletedEvent(
     string? Error)
     : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    /// <summary>The turn identity, which is never null or blank.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 
@@ -467,11 +554,13 @@ public interface ILlmAgentSession : IAsyncDisposable
         LlmAgentContext proposedContext,
         CancellationToken cancellationToken = default);
 
+    /// <summary>The conversation this session runs.</summary>
     string ThreadId { get; }
 
     /// <summary>Root session identifier shared by a thread and its forks.</summary>
     string SessionId { get; }
 
+    /// <summary>Returns what this session's runtime and model support.</summary>
     Task<LlmAgentCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Who compacts this conversation when its context fills. The Host reads this directly.</summary>
@@ -501,19 +590,23 @@ public interface ILlmAgentSession : IAsyncDisposable
         long expectedRevision,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Resumes a paused turn with replacement context and streams its events.</summary>
     IAsyncEnumerable<LlmAgentEvent> ContinueTurnAsync(
         LlmAgentTurnContinuation continuation,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Runs one turn and streams its events.</summary>
     IAsyncEnumerable<LlmAgentEvent> RunTurnAsync(
         LlmAgentTurnRequest request,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Adds input to the running turn.</summary>
     Task SteerAsync(
         string turnId,
         IReadOnlyList<LlmAgentContent> input,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Interrupts the running turn.</summary>
     Task InterruptAsync(string turnId, CancellationToken cancellationToken = default);
 
     /// <summary>
@@ -522,6 +615,7 @@ public interface ILlmAgentSession : IAsyncDisposable
     /// </summary>
     IAsyncEnumerable<LlmAgentEvent> ObserveAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>Lists the background resources the runtime holds.</summary>
     Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default);
 
     /// <summary>Nondestructive read. A null cursor reads from the earliest retained output.</summary>
@@ -530,5 +624,6 @@ public interface ILlmAgentSession : IAsyncDisposable
         string? cursor,
         CancellationToken cancellationToken = default);
 
+    /// <summary>Asks the runtime to stop a resource and returns the stop outcome.</summary>
     Task<LlmAgentResourceStopStatus> StopResourceAsync(string resourceId, CancellationToken cancellationToken = default);
 }

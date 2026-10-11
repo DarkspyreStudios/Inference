@@ -10,14 +10,23 @@ namespace Darkspyre.Inference.Connect.Audio;
 /// <summary>Audio-owned metadata for closed connection, generation and saved setup data.</summary>
 public static class ConnectAudioJson
 {
+    /// <summary>JSON metadata for the audio transport selection.</summary>
     public static JsonTypeInfo<AudioTransport> AudioTransport => Metadata<AudioTransport>();
+    /// <summary>JSON metadata for TangoFlux endpoint options.</summary>
     public static JsonTypeInfo<TangoFluxEndpointOptions> TangoFluxEndpointOptions => Metadata<TangoFluxEndpointOptions>();
+    /// <summary>JSON metadata for an audio connection.</summary>
     public static JsonTypeInfo<AudioConnection> AudioConnection => Metadata<AudioConnection>();
+    /// <summary>JSON metadata for an audio generation request.</summary>
     public static JsonTypeInfo<AudioGenerationRequest> AudioGenerationRequest => Metadata<AudioGenerationRequest>();
+    /// <summary>JSON metadata for audio generation capabilities, with every property required.</summary>
     public static JsonTypeInfo<AudioGenerationCapabilities> AudioGenerationCapabilities => Metadata<AudioGenerationCapabilities>();
+    /// <summary>JSON metadata for an audio generation result.</summary>
     public static JsonTypeInfo<AudioGenerationResult> AudioGenerationResult => Metadata<AudioGenerationResult>();
+    /// <summary>JSON metadata for a saved audio setup configuration.</summary>
     public static JsonTypeInfo<AudioSetupConfiguration> AudioSetupConfiguration => Metadata<AudioSetupConfiguration>();
+    /// <summary>JSON metadata for audio setup header changes.</summary>
     public static JsonTypeInfo<AudioSetupHeaderChanges> AudioSetupHeaderChanges => Metadata<AudioSetupHeaderChanges>();
+    /// <summary>JSON metadata for a set of audio setup changes.</summary>
     public static JsonTypeInfo<AudioSetupChanges> AudioSetupChanges => Metadata<AudioSetupChanges>();
 
     private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();

@@ -3,16 +3,30 @@ using Darkspyre.Inference.Common.Setup;
 
 namespace Darkspyre.Inference.Connect.Audio;
 
+/// <summary>A saved audio configuration: the connection and the generation defaults.</summary>
+/// <param name="Connection">The connection to the TangoFlux endpoint.</param>
 public sealed record AudioSetupConfiguration(AudioConnection Connection)
 {
+    /// <summary>The default clip length. The default is five seconds.</summary>
     public TimeSpan Duration { get; init; } = TimeSpan.FromSeconds(5);
+    /// <summary>The default number of sampling steps, or null for the adapter default.</summary>
     public int? Steps { get; init; }
+    /// <summary>The default guidance scale, or null for the adapter default.</summary>
     public double? GuidanceScale { get; init; }
+    /// <summary>The default seed, or null to leave seed selection to the server.</summary>
     public int? Seed { get; init; }
+    /// <summary>True to allow the provider's cache, false to bypass it, or null for the server default.</summary>
     public bool? UseCache { get; init; }
 }
 
+/// <summary>The protected HTTP header edits a save applies.</summary>
+/// <param name="Set">The headers to add or replace, by name.</param>
+/// <param name="Remove">The names of headers to remove.</param>
 public sealed record AudioSetupHeaderChanges(IReadOnlyDictionary<string, string> Set, IReadOnlyList<string> Remove);
+/// <summary>The changes the host commits when audio settings are saved.</summary>
+/// <param name="Identity">The entry being created or edited and its expected version.</param>
+/// <param name="Configuration">The configuration to save, without protected headers.</param>
+/// <param name="Headers">The protected header edits to apply.</param>
 public sealed record AudioSetupChanges(SetupConfigurationIdentity Identity, AudioSetupConfiguration Configuration, AudioSetupHeaderChanges Headers);
 
 /// <summary>Editable TangoFlux settings. Plain data: edits change only this object.</summary>
@@ -50,6 +64,7 @@ public sealed class AudioSettings : InferenceSettings<AudioSetupChanges>
 
     internal AudioTransport Transport { get; }
 
+    /// <inheritdoc />
     protected override IReadOnlyList<SetupStep> CreateSteps() =>
     [
         new("connection", "External endpoint", "The host or administrator runs TangoFlux. Model listing and a separate health check are unavailable.",
@@ -85,6 +100,7 @@ public sealed class AudioSettings : InferenceSettings<AudioSetupChanges>
     ];
 
     private static string CacheValue(bool? value) => value switch { true => "use", false => "bypass", _ => "default" };
+    /// <inheritdoc />
     protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query) => fieldId == "cache"
         ? Page(query, [new("default", "Server default"), new("use", "Allow provider cache"), new("bypass", "Bypass provider cache")])
         : null;
@@ -103,6 +119,7 @@ public sealed class AudioSettings : InferenceSettings<AudioSetupChanges>
             _headers.Remove(header);
         }));
 
+    /// <inheritdoc />
     protected override IReadOnlyList<SetupActionDescriptor> CreateActions() =>
     [
         new("test", "Generate a test clip", SetupActionPurpose.Test, SetupSideEffect.Network | SetupSideEffect.PotentialBilling,
@@ -133,6 +150,7 @@ public sealed class AudioSettings : InferenceSettings<AudioSetupChanges>
         catch (InferenceException) { return false; }
     }
 
+    /// <inheritdoc />
     protected override SetupValidation ValidateDraft()
     {
         var issues = new List<SetupIssue>();
@@ -145,12 +163,14 @@ public sealed class AudioSettings : InferenceSettings<AudioSetupChanges>
         return new(issues.AsReadOnly());
     }
 
+    /// <inheritdoc />
     protected override bool IsDraftDirty => _draft != _baseline || _endpoint != _baseline.Connection.Endpoint
         || _timeout != (decimal)_baseline.Connection.RequestTimeout.TotalSeconds
         || _duration != (decimal)_baseline.Duration.TotalSeconds || _steps != _baseline.Steps || _seed != _baseline.Seed
         || _removed.Count != 0 || _headers.Any(header => header.OriginalName.Length == 0
             || header.Name != header.OriginalName || header.Edit.Kind != SetupSecretEditKind.Keep);
 
+    /// <inheritdoc />
     protected override AudioSetupChanges CreateChanges()
     {
         var set = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -193,6 +213,7 @@ public sealed class AudioSettingsManager : InferenceSettingsManager<AudioSetting
         return Task.FromResult(new AudioSettings(provider.SetupDefinition, provider.Transport, identity, existing));
     }
 
+    /// <inheritdoc />
     protected override async Task<SetupActionResult> RunCoreAsync(AudioSettings settings, SetupActionDescriptor action,
         IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
     {

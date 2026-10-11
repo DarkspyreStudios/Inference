@@ -7,6 +7,9 @@ using System.Globalization;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
+/// <summary>The saved configuration of an LLM setup entry.</summary>
+/// <param name="Connection">The provider connection.</param>
+/// <param name="ModelId">The selected model.</param>
 public sealed record LlmSetupConfiguration(LlmConnection Connection, string ModelId);
 
 /// <summary>The credential mutation is separate from ordinary persisted configuration.</summary>
@@ -17,9 +20,13 @@ public sealed record LlmSetupChanges(
 /// <summary>Optional provider SDK operations implemented in the SDK-owning adapter assembly.</summary>
 public interface ILlmSetupEnvironment
 {
+    /// <summary>The transport this environment serves.</summary>
     LlmTransport Transport { get; }
+    /// <summary>Returns the credential profiles the provider SDK finds on this machine.</summary>
     Task<IReadOnlyList<SetupChoice>> GetProfilesAsync(CancellationToken cancellationToken = default);
+    /// <summary>Returns the regions available for a profile, or for the default profile when null.</summary>
     Task<IReadOnlyList<SetupChoice>> GetRegionsAsync(string? profile, CancellationToken cancellationToken = default);
+    /// <summary>Validates the provider SDK settings of a connection.</summary>
     SetupValidation Validate(LlmConnection connection);
 }
 
@@ -127,6 +134,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         || UsesAzure && _azure!.Authentication == LlmAzureAuthenticationMode.ApiKey;
     private LlmCredential Credential => LlmCredential.Parse(_draft.Credential) ?? new();
 
+    /// <inheritdoc />
     protected override bool IsDraftDirty =>
         _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || (UsesAzure ? _azure!.IsDirty : _draft.Azure != _baseline.Azure) || _draft.ChatCompletions != _baseline.ChatCompletions || _draft.Xai != _baseline.Xai || _model != _originalModel
             || (_draft.CapabilityOverrides ?? new()) != (_baseline.CapabilityOverrides ?? new()) || _callback.Length != 0
@@ -143,6 +151,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     private static LlmAwsCredentials NormalizeAws(LlmAwsCredentials? value) => (value ?? new()) with
     { Profile = value?.Profile ?? string.Empty, Region = value?.Region ?? string.Empty };
 
+    /// <inheritdoc />
     protected override IReadOnlyList<SetupStep> CreateSteps()
     {
         var fields = new List<SetupField>();
@@ -415,6 +424,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         if (UsesAzure) _azure!.DeploymentEdited = true;
     }
 
+    /// <inheritdoc />
     protected internal override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query)
     {
         _ = CreateSteps(); // Registers the override field IDs for the current transport.
@@ -429,6 +439,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             : _overrideFields.Contains(fieldId) ? Page(query, fieldId.StartsWith("reasoning-level-", StringComparison.Ordinal) ? OverrideChoices : SupportChoices) : null;
     }
 
+    /// <inheritdoc />
     protected override IReadOnlyList<SetupActionDescriptor> CreateActions()
     {
         var actions = new List<SetupActionDescriptor>();
@@ -532,6 +543,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         };
     }
 
+    /// <inheritdoc />
     protected override SetupValidation ValidateDraft()
     {
         List<SetupIssue> issues = [.. ConnectionValidation().Issues];
@@ -577,6 +589,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         return new(issues.AsReadOnly());
     }
 
+    /// <inheritdoc />
     protected override void OnDraftEdited()
     {
         if (_editingCallback) { _editingCallback = false; return; }
@@ -604,6 +617,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         return null;
     }
 
+    /// <inheritdoc />
     protected internal override LlmSetupChanges CreateChanges()
     {
         LlmConnection draft = CurrentConnection();
@@ -658,6 +672,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         return Task.FromResult(settings);
     }
 
+    /// <inheritdoc />
     public override async Task<SetupActionResult> RunAsync(InferenceSettings settings, string actionId,
         IProgress<SetupProgress>? progress = null, CancellationToken cancellationToken = default)
     {
@@ -666,6 +681,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         return IsStopping(operation.Token) ? new(SetupActionState.Cancelled) : result;
     }
 
+    /// <inheritdoc />
     public override async Task<SetupChoicePage> QueryChoicesAsync(InferenceSettings settings, string fieldId,
         SetupChoiceQuery query, CancellationToken cancellationToken = default)
     {
@@ -674,12 +690,14 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         return IsStopping(operation.Token) ? new([], State: SetupChoiceState.Cancelled) : result;
     }
 
+    /// <inheritdoc />
     public override async Task<SetupCommitResult> SaveAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
     {
         using var operation = _lifetime.Enter(cancellationToken);
         return await base.SaveAsync(settings, operation.Token).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
     protected override async Task<SetupActionResult> RunCoreAsync(LlmSettings settings, SetupActionDescriptor action,
         IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
     {
@@ -713,6 +731,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         }
     }
 
+    /// <inheritdoc />
     protected override async Task<SetupChoicePage> QueryProviderChoicesAsync(LlmSettings settings, string fieldId,
         SetupChoiceQuery query, CancellationToken cancellationToken)
     {
@@ -895,7 +914,9 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         catch (ObjectDisposedException) { return true; }
     }
 
+    /// <summary>Retires the manager and blocks until in-flight operations finish.</summary>
     public void Dispose() => Retire().GetAwaiter().GetResult();
+    /// <summary>Retires the manager once in-flight operations finish.</summary>
     public ValueTask DisposeAsync() => new(Retire());
     private Task Retire() => _lifetime.RetireAsync(() =>
     {

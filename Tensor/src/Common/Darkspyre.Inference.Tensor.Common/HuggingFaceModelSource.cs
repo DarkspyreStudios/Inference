@@ -16,6 +16,7 @@ public sealed class HuggingFaceModelSource : ITensorModelSource, IDisposable
     private readonly TensorSourceHttp _http;
     private bool _disposed;
 
+    /// <summary>Creates the source. Without <paramref name="httpClient"/> the source creates and owns its own client; a supplied client stays owned by the caller.</summary>
     public HuggingFaceModelSource(HttpClient? httpClient = null, TensorSourceAccess? access = null)
     {
         _client = httpClient ?? TensorSourceHttp.CreateClient();
@@ -23,8 +24,10 @@ public sealed class HuggingFaceModelSource : ITensorModelSource, IDisposable
         _http = new(_client, access);
     }
 
+    /// <inheritdoc />
     public string Id => "hugging-face";
 
+    /// <inheritdoc />
     public Task<TensorSourceResult<TensorSourcePage<TensorSourceModel>>> SearchAsync(TensorSourceQuery query, CancellationToken cancellationToken = default) =>
         ExecuteAsync(async () =>
         {
@@ -40,6 +43,7 @@ public sealed class HuggingFaceModelSource : ITensorModelSource, IDisposable
             return new TensorSourcePage<TensorSourceModel>(Array.AsReadOnly(models), NextCursor(response, uri));
         }, cancellationToken);
 
+    /// <inheritdoc />
     public Task<TensorSourceResult<TensorSourcePage<TensorSourceRevision>>> ListRevisionsAsync(TensorRepositoryQuery query, CancellationToken cancellationToken = default) =>
         ExecuteAsync(async () =>
         {
@@ -61,9 +65,11 @@ public sealed class HuggingFaceModelSource : ITensorModelSource, IDisposable
             return new TensorSourcePage<TensorSourceRevision>(Array.AsReadOnly(revisions), NextCursor(response, uri));
         }, cancellationToken);
 
+    /// <inheritdoc />
     public Task<TensorSourceResult<TensorModelCandidate>> GetCandidateAsync(TensorCandidateSelection selection, CancellationToken cancellationToken = default) =>
         FetchCandidateAsync(selection, true, cancellationToken);
 
+    /// <inheritdoc />
     public async Task<TensorSourceResult<TensorSourcePage<TensorSourceArtifact>>> ListVariantsAsync(TensorVariantQuery query, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(query);
@@ -115,6 +121,7 @@ public sealed class HuggingFaceModelSource : ITensorModelSource, IDisposable
                 license, Boolean(root, "private"), Gated(root), artifacts.AsReadOnly());
         }, cancellationToken);
 
+    /// <inheritdoc />
     public Task<TensorSourceResult<TensorMetadataContent>> ReadMetadataAsync(TensorSourceArtifact artifact, TensorMetadataRead read, CancellationToken cancellationToken = default) =>
         ExecuteAsync(async () =>
         {
@@ -231,6 +238,7 @@ public sealed class HuggingFaceModelSource : ITensorModelSource, IDisposable
     private static string? License(JsonElement item) => Text(Property(item, "cardData"), "license");
     private static bool? Gated(JsonElement item) => Text(item, "gated") is "auto" or "manual" ? true : Boolean(item, "gated");
 
+    /// <summary>Disposes the HTTP client when the source created it.</summary>
     public void Dispose()
     {
         if (_disposed) { return; }

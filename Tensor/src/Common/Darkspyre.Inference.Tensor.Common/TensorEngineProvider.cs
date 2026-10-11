@@ -42,6 +42,7 @@ public sealed class TensorEngineDefinition
         ModelStoreKey = modelStoreKey;
     }
 
+    /// <summary>The engine's setup definition, with its prerequisite list copied into a read-only snapshot.</summary>
     public InferenceSetupDefinition Setup { get; }
 
     /// <summary>Opaque namespace metadata. The host joins it beneath its own approved storage root.</summary>
@@ -61,6 +62,7 @@ public sealed class TensorEngineDefinition
 /// </summary>
 public interface ITensorEngineProvider
 {
+    /// <summary>The engine's immutable definition.</summary>
     TensorEngineDefinition Definition { get; }
 
     /// <summary>

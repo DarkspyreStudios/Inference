@@ -4,10 +4,22 @@ using Darkspyre.Inference.Common.LLM;
 namespace Darkspyre.Inference.Connect.LLM;
 
 /// <summary>The observed reason that an explicit cache cannot be used.</summary>
-public enum LlmContextCacheUnavailableReason { Missing = 0, Expired = 1 }
+public enum LlmContextCacheUnavailableReason
+{
+    /// <summary>The cache does not exist at its authorized route.</summary>
+    Missing = 0,
+    /// <summary>The cache's observed expiry has elapsed.</summary>
+    Expired = 1
+}
 
 /// <summary>The explicitly dispatched cache mutation whose acknowledgement is uncertain.</summary>
-public enum LlmContextCacheMutation { UpdateExpiry = 0, Delete = 1 }
+public enum LlmContextCacheMutation
+{
+    /// <summary>An update of the cache's expiry.</summary>
+    UpdateExpiry = 0,
+    /// <summary>A deletion of the cache.</summary>
+    Delete = 1
+}
 
 /// <summary>A selected cache is missing at its authorized route or its observed expiry has elapsed.</summary>
 public sealed class LlmContextCacheUnavailableException : Exception
@@ -27,9 +39,13 @@ public sealed class LlmContextCacheUnavailableException : Exception
         RequestId = requestId;
     }
 
+    /// <summary>Whether the cache was missing or expired.</summary>
     public LlmContextCacheUnavailableReason Reason { get; }
+    /// <summary>The explicit cache the caller selected.</summary>
     public LlmExplicitCacheReference Reference { get; }
+    /// <summary>The HTTP status the provider returned, or null when the fact was observed without a response.</summary>
     public HttpStatusCode? StatusCode { get; }
+    /// <summary>The provider request id of the failed call, when the provider supplied one.</summary>
     public string? RequestId { get; }
 }
 
@@ -51,10 +67,15 @@ public sealed class LlmContextCacheMutationCancelledException : OperationCancele
         ObservedDelete = observedDelete;
     }
 
+    /// <summary>The mutation that was dispatched.</summary>
     public LlmContextCacheMutation Operation { get; }
+    /// <summary>The explicit cache the mutation targeted.</summary>
     public LlmExplicitCacheReference Reference { get; }
+    /// <summary>The provider request id of the mutation, when the provider supplied one.</summary>
     public string? RequestId { get; }
+    /// <summary>The updated cache the provider returned for an expiry update, or null when none was observed.</summary>
     public LlmContextCache? ObservedUpdate { get; }
+    /// <summary>The deletion result the provider returned for a delete, or null when none was observed.</summary>
     public LlmContextCacheDeleteResult? ObservedDelete { get; }
 }
 
@@ -76,10 +97,15 @@ public sealed class LlmContextCacheMutationUncertainException : Exception
         ObservedDelete = observedDelete;
     }
 
+    /// <summary>The mutation that was dispatched.</summary>
     public LlmContextCacheMutation Operation { get; }
+    /// <summary>The explicit cache the mutation targeted.</summary>
     public LlmExplicitCacheReference Reference { get; }
+    /// <summary>The provider request id of the mutation, when the provider supplied one.</summary>
     public string? RequestId { get; }
+    /// <summary>The updated cache the provider returned for an expiry update, or null when none was observed.</summary>
     public LlmContextCache? ObservedUpdate { get; }
+    /// <summary>The deletion result the provider returned for a delete, or null when none was observed.</summary>
     public LlmContextCacheDeleteResult? ObservedDelete { get; }
 }
 
@@ -104,6 +130,7 @@ internal static class CacheMutationEvidence
 /// <summary>Cancellation after cache creation may have been dispatched. Reconciliation is caller-directed.</summary>
 public sealed class LlmContextCacheCreateCancelledException : OperationCanceledException
 {
+    /// <summary>Retains the create correlation, cancellation and any observed receipt. Inner failures must already pass the owning adapter's safe diagnostic boundary.</summary>
     public LlmContextCacheCreateCancelledException(LlmContextCacheCreateCorrelation correlation,
         CancellationToken cancellationToken, Exception? innerException = null,
         string? requestId = null, LlmContextCache? observedReceipt = null)
@@ -114,14 +141,18 @@ public sealed class LlmContextCacheCreateCancelledException : OperationCanceledE
         ObservedReceipt = observedReceipt;
     }
 
+    /// <summary>The operation id and display name that identify the dispatched create for reconciliation.</summary>
     public LlmContextCacheCreateCorrelation Correlation { get; }
+    /// <summary>The provider request id of the create, when the provider supplied one.</summary>
     public string? RequestId { get; }
+    /// <summary>The created cache the provider returned, or null when no receipt was observed.</summary>
     public LlmContextCache? ObservedReceipt { get; }
 }
 
 /// <summary>Cache creation may have committed despite a failed acknowledgement. No retry is implied.</summary>
 public sealed class LlmContextCacheCreateUncertainException : Exception
 {
+    /// <summary>Retains the create correlation and any observed receipt. The required inner failure must already pass the owning adapter's safe diagnostic boundary.</summary>
     public LlmContextCacheCreateUncertainException(LlmContextCacheCreateCorrelation correlation,
         Exception innerException, string? requestId = null, LlmContextCache? observedReceipt = null)
         : base("Cache creation may have committed; reconcile explicitly.", innerException)
@@ -132,7 +163,10 @@ public sealed class LlmContextCacheCreateUncertainException : Exception
         ObservedReceipt = observedReceipt;
     }
 
+    /// <summary>The operation id and display name that identify the dispatched create for reconciliation.</summary>
     public LlmContextCacheCreateCorrelation Correlation { get; }
+    /// <summary>The provider request id of the create, when the provider supplied one.</summary>
     public string? RequestId { get; }
+    /// <summary>The created cache the provider returned, or null when no receipt was observed.</summary>
     public LlmContextCache? ObservedReceipt { get; }
 }

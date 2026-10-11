@@ -4,6 +4,10 @@ using System.Runtime.InteropServices;
 
 namespace Darkspyre.Inference.Tensor.Common;
 
+/// <summary>The saved Tensor selection: the implementation, the model pack and the execution backend.</summary>
+/// <param name="ImplementationId">The id of the Tensor implementation that owns this configuration.</param>
+/// <param name="Model">The model pack key, as model id and revision.</param>
+/// <param name="Backend">The requested execution backend. <see cref="TensorBackendKind.Auto"/> lets the engine choose.</param>
 public sealed record TensorSetupConfiguration(string ImplementationId, TensorModelKey Model, TensorBackendKind Backend);
 /// <summary>The host persists the selected immutable manifest with the configuration and restores its registration on restart.</summary>
 public sealed record TensorSetupChanges(SetupConfigurationIdentity Identity, TensorSetupConfiguration Configuration,
@@ -119,6 +123,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
         }
     }
 
+    /// <inheritdoc />
     protected override IReadOnlyList<SetupStep> CreateSteps()
     {
         string repository = _repository, sourceRevision = _sourceRevision;
@@ -210,6 +215,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
         new(new(id, label) { IsReadOnly = true }, value, string.Empty,
             _ => new(SetupEditState.Invalid, [new("read-only", "This field is an observation.", id)]));
 
+    /// <inheritdoc />
     protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query) => fieldId switch
     {
         "model" => Page(query, Choices().Select(model => new SetupChoice(model.Key.ToString(), model.Key.ModelId, model.Key.Revision))),
@@ -288,6 +294,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
     private IEnumerable<TensorBackendKind> Backends() => new[] { TensorBackendKind.Auto }.Concat(
         SelectedDefinition()?.SupportedBackends ?? _models.SelectMany(model => model.SupportedBackends)).Distinct();
 
+    /// <inheritdoc />
     protected override IReadOnlyList<SetupActionDescriptor> CreateActions()
     {
         bool selected = ValidateDraft().IsValid;
@@ -344,6 +351,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
         lock (_backendCheckGate) { return Edit(change); }
     }
 
+    /// <inheritdoc />
     protected override void OnDraftEdited()
     {
         base.OnDraftEdited();
@@ -357,17 +365,20 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
         if (_instanceObservation is not null) { InstanceObservation = _instanceObservation; }
     }
 
+    /// <inheritdoc />
     protected override SetupValidation ValidateDraft() => SelectedDefinition() is null
         ? new([new("model-required", "Select a supported model pack.", "model")])
         : !Backends().Contains(_backend) ? new([new("backend-unsupported", "The pack does not support this backend.", "backend")])
         : SetupValidation.Valid;
 
+    /// <inheritdoc />
     protected override bool IsDraftDirty => _model != _original?.Model
         || _backend != (_original?.Backend ?? TensorBackendKind.Auto)
         || _repository.Length != 0 || _sourceRevision.Length != 0 || _variant.Length != 0
         || _localPath.Length != 0 || _sourceUrl is not null || _license.Length != 0 || _sha256.Length != 0 || _length is not null
         || _companions.Count != 0 || _locationKind != (_hasSource ? "repository" : "file");
 
+    /// <inheritdoc />
     protected override TensorSetupChanges CreateChanges() => new(Identity,
         new(Definition.Implementation.Id, _model!, _backend),
         _original is not null && (_original.Model != _model || _original.Backend != _backend), SelectedDefinition()!);
@@ -390,6 +401,7 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
     private readonly Lock _listeners = new();
     private EventHandler? _statusChanged;
 
+    /// <summary>Creates a manager over the supported pack definitions, the host's pack manager and the optional instance, backend probe and model resolver.</summary>
     public TensorSettingsManager(InferenceSetupDefinition definition, ISetupCommitTarget<TensorSetupChanges> target,
         IReadOnlyList<TensorModelPackDefinition> supportedModels, ITensorModelPackManager packs,
         ITensorModelInstance? instance = null, ITensorBackendProbe? backendProbe = null, ITensorModelResolver? resolver = null)
@@ -438,6 +450,7 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
         return settings;
     }
 
+    /// <summary>Reads the host instance's current engine observation into Tensor settings. Other settings and a manager without an instance are left unchanged.</summary>
     public async Task RefreshStatusAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
@@ -447,6 +460,7 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
         }
     }
 
+    /// <inheritdoc />
     protected override async Task<SetupActionResult> RunCoreAsync(TensorSettings settings, SetupActionDescriptor action,
         IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
     {
@@ -474,6 +488,7 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
         }
     }
 
+    /// <inheritdoc />
     protected override async Task<SetupChoicePage> QueryProviderChoicesAsync(TensorSettings settings, string fieldId,
         SetupChoiceQuery query, CancellationToken cancellationToken)
     {

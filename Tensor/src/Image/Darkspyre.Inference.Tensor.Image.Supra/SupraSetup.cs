@@ -4,8 +4,10 @@ using Darkspyre.Inference.Tensor.Common;
 
 namespace Darkspyre.Inference.Tensor.Image.Supra;
 
+/// <summary>Setup entry points for the in-process Supra2 image generation engine.</summary>
 public static class SupraSetup
 {
+    /// <summary>The implementation identity, task and description of the Supra2 image engine.</summary>
     public static InferenceSetupDefinition Definition { get; } = new(
         new("darkspyre.tensor.supra2-img", "Darkspyre Tensor Supra2-IMG", InferenceImplementationKind.Tensor, InferenceTask.ImageGeneration),
         "In-process Supra2 image generation using a complete DiT, text encoder, tokenizer and VAE pack.");

@@ -10,6 +10,7 @@ using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.Registry;
 
+/// <summary>Dependency injection registration for the Tensor engines this package ships.</summary>
 public static class ServiceCollectionExtensions
 {
     /// <summary>

@@ -7,9 +7,11 @@ namespace Darkspyre.Inference.Tensor.Decision.Laya;
 public sealed class LayaModelResolver(ITensorModelSource? source = null, ITensorArtifactReader? reader = null)
     : TensorModelResolver(source, reader)
 {
+    /// <inheritdoc />
     public override IReadOnlyList<TensorArtifactRequirement> Requirements =>
         [new("model", "*.onnx"), new("tokenizer", "tokenizer.json"), new("agent-config", "rl_agent_config.json")];
 
+    /// <inheritdoc />
     public override async Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
         ITensorArtifactReader reader, CancellationToken cancellationToken = default)
     {

@@ -12,11 +12,14 @@ public sealed record LlmAgentContextEntry(string Id, string TurnId, LlmChatMessa
 [System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
 public sealed record LlmAgentContext
 {
+    /// <summary>The serialized format version of the context.</summary>
     [System.Text.Json.Serialization.JsonRequired]
     public int FormatVersion { get; init; } = 3;
 
+    /// <summary>The context's revision. The runtime increments it on each change to the context.</summary>
     public long Revision { get; init; }
 
+    /// <summary>The context records in model order.</summary>
     public IReadOnlyList<LlmAgentContextEntry> Entries { get; init; } = [];
 
     private IReadOnlyList<InferenceResourceReference> _selectedResources = [];
@@ -73,6 +76,7 @@ public sealed record LlmAgentContext
     }
 }
 
+/// <summary>Options for capturing an agent session's model context.</summary>
 public sealed record LlmAgentContextCaptureOptions
 {
     /// <summary>
@@ -94,37 +98,51 @@ public sealed record LlmOmittedAttachment(
     int Index,
     string? ToolCallId = null);
 
+/// <summary>How a context occupancy figure was measured.</summary>
 public enum LlmContextMeasurementSource
 {
+    /// <summary>No measurement exists.</summary>
     Unknown,
+    /// <summary>A local estimate alone.</summary>
     Estimated,
+    /// <summary>A local estimate combined with a provider-reported count.</summary>
     Mixed
 }
 
 /// <summary>Projected next input occupancy, not accumulated billing or remaining account quota.</summary>
 public sealed record LlmAgentContextStatus
 {
+    /// <summary>The model the projection is measured against.</summary>
     public required string ModelId { get; init; }
 
+    /// <summary>The revision of the context the projection measures.</summary>
     public long ContextRevision { get; init; }
 
+    /// <summary>The context window in tokens after any host cap, or null when it is unknown.</summary>
     public long? MaxContextTokens { get; init; }
 
     /// <summary>Includes cached input, instructions, tools and attachments; excludes output reserve.</summary>
     public long? UsedContextTokens { get; init; }
 
+    /// <summary>The tokens held back from the window for model output, or null when it is unknown.</summary>
     public long? ReservedOutputTokens { get; init; }
 
+    /// <summary>The input tokens left in the window after the output reserve and used context, or null when it is
+    /// unknown.</summary>
     public long? AvailableInputTokens { get; init; }
 
     /// <summary>Null means insufficient evidence, not false or a guarantee that input will fit.</summary>
     public bool? NeedsCompaction { get; init; }
 
+    /// <summary>How the used context tokens were measured.</summary>
     public LlmContextMeasurementSource Source { get; init; }
 }
 
+/// <summary>The context window limits and compaction behaviour the managed loop applies.</summary>
 public sealed record LlmAgentContextPolicy
 {
+    /// <summary>The tokens held back from the context window for model output. Null, zero or less uses the model's
+    /// output limit, or a default when the model has none.</summary>
     public long? ReservedOutputTokens { get; init; }
 
     /// <summary>Optional host cap; cannot increase a known provider limit.</summary>
@@ -140,21 +158,28 @@ public sealed record LlmAgentContextPolicy
     public bool PreserveSuppliedContext { get; init; }
 }
 
+/// <summary>How the managed loop runs the tool calls of one model step.</summary>
 public enum LlmAgentToolExecutionMode
 {
+    /// <summary>Tool calls run one at a time.</summary>
     Sequential,
+    /// <summary>Tool calls run concurrently, unless a called tool requires sequential execution.</summary>
     Parallel
 }
 
 /// <summary>Managed loop policy. Host tools remain responsible for their own security enforcement.</summary>
 public sealed record LlmAgentExecutionOptions
 {
+    /// <summary>The number of model steps that ends a turn with IterationLimit. Zero or less uses 32.</summary>
     public int MaxModelIterations { get; init; } = 32;
 
+    /// <summary>Whether a step's tool calls run one at a time or concurrently.</summary>
     public LlmAgentToolExecutionMode ToolExecutionMode { get; init; }
 
+    /// <summary>The most tool calls that run at once in parallel mode. Zero or less uses 4.</summary>
     public int MaxConcurrentTools { get; init; } = 4;
 
+    /// <summary>The context limits and compaction policy for the turn.</summary>
     public LlmAgentContextPolicy ContextPolicy { get; init; } = new();
 
     /// <summary>Spend cap in US dollars for each turn. Null, 0 or less sets no cap.</summary>
@@ -171,17 +196,25 @@ public sealed record LlmAgentTurnContinuation(
     long ExpectedContextRevision,
     LlmAgentContext ReplacementContext);
 
+/// <summary>Why a turn paused for compaction.</summary>
 public enum LlmAgentCompactionReason
 {
+    /// <summary>The projected context occupancy reached the compaction trigger.</summary>
     Threshold,
+    /// <summary>The provider rejected the request as exceeding its context window.</summary>
     ProviderOverflow
 }
 
+/// <summary>The projected context occupancy for the next model request in a turn.</summary>
+/// <param name="ThreadId">The identity of the thread.</param>
+/// <param name="TurnId">The identity of the turn.</param>
+/// <param name="Status">The projected occupancy.</param>
 public sealed record LlmAgentContextStatusEvent(
     string ThreadId,
     string TurnId,
     LlmAgentContextStatus Status) : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    /// <summary>The identity of the turn.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
@@ -199,15 +232,21 @@ public sealed record LlmAgentCompactionRequiredEvent(
     /// <summary>Inverse of the protected context's measured NeedsCompaction; null when unknown.</summary>
     public bool? ProtectedFits { get; init; }
 
+    /// <summary>The identity of the paused turn.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
 
+/// <summary>A paused turn resumed with replacement context.</summary>
+/// <param name="ThreadId">The identity of the thread.</param>
+/// <param name="TurnId">The identity of the resumed turn.</param>
+/// <param name="PauseId">The pause the continuation consumed.</param>
 public sealed record LlmAgentTurnContinuedEvent(
     string ThreadId,
     string TurnId,
     string PauseId) : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    /// <summary>The identity of the resumed turn.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
@@ -223,6 +262,7 @@ public sealed record LlmAgentUsageEvent(
     LlmUsage? Usage,
     LlmUsage? RunTotals) : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
+    /// <summary>The identity of the turn the usage belongs to.</summary>
     [AllowNull]
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 
@@ -230,13 +270,20 @@ public sealed record LlmAgentUsageEvent(
     public string? ModelId { get; init; }
 }
 
+/// <summary>Why an agent turn ended.</summary>
 public enum LlmAgentCompletionReason
 {
+    /// <summary>The model completed the turn naturally.</summary>
     Completed,
+    /// <summary>The turn reached LlmAgentExecutionOptions.MaxModelIterations.</summary>
     IterationLimit,
+    /// <summary>The model refused the request.</summary>
     Refusal,
+    /// <summary>The provider failed the request.</summary>
     ProviderFailure,
+    /// <summary>The model's output was cut off before it completed.</summary>
     Truncation,
+    /// <summary>The turn was interrupted.</summary>
     Interruption,
 
     /// <summary>The model operation ended without a reported natural-completion or truncation classification.</summary>

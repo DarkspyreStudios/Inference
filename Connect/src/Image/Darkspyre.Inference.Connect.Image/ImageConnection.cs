@@ -6,6 +6,7 @@ namespace Darkspyre.Inference.Connect.Image;
 /// <summary>Short-lived connection data resolved and protected by the host.</summary>
 public sealed record ImageConnection
 {
+    /// <summary>Protocol used to reach the image provider.</summary>
     public required ImageTransport Transport { get; init; }
 
     /// <summary>Base URL for the image provider.</summary>
@@ -14,6 +15,7 @@ public sealed record ImageConnection
     /// <summary>Maximum duration of one provider HTTP operation.</summary>
     public TimeSpan RequestTimeout { get; init; } = TimeSpan.FromMinutes(10);
 
+    /// <summary>Acquires authorization for each provider operation. The ComfyUI transport rejects a non-null value and uses static headers instead.</summary>
     public IProviderAuthorization? Authorization { get; init; }
 
     /// <summary>

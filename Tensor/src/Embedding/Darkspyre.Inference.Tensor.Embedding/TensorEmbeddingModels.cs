@@ -15,6 +15,7 @@ namespace Darkspyre.Inference.Tensor.Embedding;
 public sealed record TensorEmbeddingArchitecture(string Name, string GgufArchitecture, int NativeDimensions,
     IReadOnlyList<int> SupportedDimensions, int MaximumInputTokens, string QueryTemplate, string? DefaultInstruction)
 {
+    /// <summary>True when <see cref="QueryTemplate"/> has an <c>{instruction}</c> slot for a task statement.</summary>
     public bool TakesInstruction => QueryTemplate.Contains("{instruction}", StringComparison.Ordinal);
 
     /// <summary>The query as the model expects it. A null instruction uses the default.</summary>
@@ -55,6 +56,7 @@ public static class TensorEmbeddingModels
     public static TensorEmbeddingArchitecture BertGguf { get; } = new("bert-embedding-gguf", "bert", 1024, Array.AsReadOnly([256, 1024]), 8192,
         "query: {text}", null);
 
+    /// <summary>The architectures this package can run: <see cref="Qwen3Gguf"/> and <see cref="BertGguf"/>.</summary>
     public static IReadOnlyList<TensorEmbeddingArchitecture> Architectures { get; } = Array.AsReadOnly([Qwen3Gguf, BertGguf]);
 
     /// <summary>
@@ -66,7 +68,9 @@ public static class TensorEmbeddingModels
         TensorBackendKind.Cpu, TensorBackendKind.GgmlCpu, TensorBackendKind.GgmlMetal,
     }.ToFrozenSet();
 
+    /// <summary>The Hugging Face repository the Qwen3 embedding pack downloads from.</summary>
     public const string Qwen3Repository = "Qwen/Qwen3-Embedding-0.6B-GGUF";
+    /// <summary>The pinned commit of <see cref="Qwen3Repository"/> that the Qwen3 embedding pack uses.</summary>
     public const string Qwen3Revision = "370f27d7550e0def9b39c1f16d3fbaa13aa67728";
     private const string Qwen3File = "Qwen3-Embedding-0.6B-Q8_0.gguf";
 
@@ -88,7 +92,9 @@ public static class TensorEmbeddingModels
         }])
     };
 
+    /// <summary>The Hugging Face repository the Arctic embedding pack downloads from.</summary>
     public const string ArcticRepository = "fisher046/snowflake-arctic-embed-l-v2.0-Q8_0-GGUF";
+    /// <summary>The pinned commit of <see cref="ArcticRepository"/> that the Arctic embedding pack uses.</summary>
     public const string ArcticRevision = "2b05c46c74499a1a8e5075cabc6f58490aa6f2c1";
     private const string ArcticFile = "snowflake-arctic-embed-l-v2.0-q8_0.gguf";
 
@@ -110,6 +116,7 @@ public static class TensorEmbeddingModels
         }])
     };
 
+    /// <summary>The embedding packs this package ships: <see cref="Qwen3Embedding06B"/> and <see cref="ArcticEmbedL"/>.</summary>
     public static IReadOnlyList<TensorModelPackDefinition> BuiltIn { get; } = Array.AsReadOnly([Qwen3Embedding06B, ArcticEmbedL]);
 
     /// <summary>The architecture that runs <paramref name="pack"/>, or null when no supported architecture does.</summary>

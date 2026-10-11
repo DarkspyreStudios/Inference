@@ -3,21 +3,29 @@ namespace Darkspyre.Inference.Tensor.Common;
 /// <summary>One acquisition path for all families. Subclasses own compatibility, never transport or installation.</summary>
 public abstract class TensorModelResolver : ITensorModelResolver
 {
+    /// <summary>Creates a resolver over an optional repository source. Without <paramref name="reader"/> it reads artifacts through a reader over <paramref name="source"/>.</summary>
     protected TensorModelResolver(ITensorModelSource? source = null, ITensorArtifactReader? reader = null)
     { Source = source; Reader = reader ?? new TensorArtifactReader(source); }
 
+    /// <inheritdoc />
     public ITensorModelSource? Source { get; }
+    /// <summary>The artifact reader that discovery and evaluation use.</summary>
     protected ITensorArtifactReader Reader { get; }
+    /// <inheritdoc />
     public abstract IReadOnlyList<TensorArtifactRequirement> Requirements { get; }
     /// <summary>Families with split files accept explicitly selected additional artifacts under numbered roles.</summary>
     public virtual string? AdditionalArtifactRolePrefix => null;
+    /// <summary>Returns the pack-relative path of a companion artifact. The default is the role followed by the artifact file name.</summary>
     protected virtual string CompanionPath(string role, string path, string primary) => role + "/" + Path.GetFileName(path);
+    /// <inheritdoc />
     public abstract Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
         ITensorArtifactReader reader, CancellationToken cancellationToken = default);
 
+    /// <inheritdoc />
     public async Task<TensorModelEvaluation> EvaluateAsync(TensorModelCandidate candidate, TensorBackendKind backend, CancellationToken cancellationToken = default)
         => (await ResolveCandidateAsync(candidate, backend, Reader, cancellationToken).ConfigureAwait(false)).Evaluation;
 
+    /// <inheritdoc />
     public async Task<TensorModelResolution> ResolveAsync(TensorModelSelection selection, CancellationToken cancellationToken = default)
     {
         TensorSourceResult<TensorModelCandidate> candidate = await DiscoverAsync(selection, cancellationToken).ConfigureAwait(false);
@@ -33,6 +41,7 @@ public abstract class TensorModelResolver : ITensorModelResolver
         return candidate.Artifacts.Where(artifact => paths.Contains(artifact.Path)).ToArray();
     }
 
+    /// <inheritdoc />
     public async Task<TensorSourceResult<TensorModelCandidate>> DiscoverAsync(TensorModelSelection selection, CancellationToken cancellationToken = default)
     {
         try

@@ -7,20 +7,35 @@ namespace Darkspyre.Inference.Tensor.Common;
 /// <summary>Assembly-owned metadata for Tensor settings, model manifests and runtime observations.</summary>
 public static class TensorJson
 {
+    /// <summary>Serialization metadata for <see cref="TensorSetupConfiguration"/>.</summary>
     public static JsonTypeInfo<TensorSetupConfiguration> SetupConfiguration => Metadata<TensorSetupConfiguration>();
+    /// <summary>Serialization metadata for <see cref="TensorSetupChanges"/>.</summary>
     public static JsonTypeInfo<TensorSetupChanges> SetupChanges => Metadata<TensorSetupChanges>();
+    /// <summary>Serialization metadata for <see cref="TensorModelPackDefinition"/>.</summary>
     public static JsonTypeInfo<TensorModelPackDefinition> ModelPack => Metadata<TensorModelPackDefinition>();
+    /// <summary>Serialization metadata for <see cref="TensorModelPackStatus"/>.</summary>
     public static JsonTypeInfo<TensorModelPackStatus> PackStatus => Metadata<TensorModelPackStatus>();
+    /// <summary>Serialization metadata for <see cref="TensorModelObservation"/>.</summary>
     public static JsonTypeInfo<TensorModelObservation> ModelObservation => Metadata<TensorModelObservation>();
+    /// <summary>Serialization metadata for <see cref="TensorBackendProbeRequest"/>.</summary>
     public static JsonTypeInfo<TensorBackendProbeRequest> BackendProbeRequest => Metadata<TensorBackendProbeRequest>();
+    /// <summary>Serialization metadata for <see cref="TensorBackendAvailability"/>.</summary>
     public static JsonTypeInfo<TensorBackendAvailability> BackendAvailability => Metadata<TensorBackendAvailability>();
+    /// <summary>Serialization metadata for <see cref="T:Darkspyre.Inference.Tensor.Common.TensorRuntimeNativeFile"/>.</summary>
     public static JsonTypeInfo<TensorRuntimeNativeFile> TensorRuntimeNativeFile => Metadata<TensorRuntimeNativeFile>();
+    /// <summary>Serialization metadata for <see cref="T:Darkspyre.Inference.Tensor.Common.TensorRuntimeCandidate"/>.</summary>
     public static JsonTypeInfo<TensorRuntimeCandidate> TensorRuntimeCandidate => Metadata<TensorRuntimeCandidate>();
+    /// <summary>Serialization metadata for <see cref="T:Darkspyre.Inference.Tensor.Common.TensorRuntimePlan"/>.</summary>
     public static JsonTypeInfo<TensorRuntimePlan> TensorRuntimePlan => Metadata<TensorRuntimePlan>();
+    /// <summary>Serialization metadata for <see cref="T:Darkspyre.Inference.Tensor.Common.TensorRuntimeBackendIdentity"/>.</summary>
     public static JsonTypeInfo<TensorRuntimeBackendIdentity> TensorRuntimeBackendIdentity => Metadata<TensorRuntimeBackendIdentity>();
+    /// <summary>Serialization metadata for <see cref="T:Darkspyre.Inference.Tensor.Common.TensorRuntimeState"/>.</summary>
     public static JsonTypeInfo<TensorRuntimeState> TensorRuntimeState => Metadata<TensorRuntimeState>();
+    /// <summary>Serialization metadata for <see cref="T:Darkspyre.Inference.Tensor.Common.TensorRuntimeShutdownState"/>.</summary>
     public static JsonTypeInfo<TensorRuntimeShutdownState> TensorRuntimeShutdownState => Metadata<TensorRuntimeShutdownState>();
+    /// <summary>Serialization metadata for <see cref="T:Darkspyre.Inference.Tensor.Common.TensorRuntimeDiagnostic"/>.</summary>
     public static JsonTypeInfo<TensorRuntimeDiagnostic> TensorRuntimeDiagnostic => Metadata<TensorRuntimeDiagnostic>();
+    /// <summary>Serialization metadata for <see cref="T:Darkspyre.Inference.Tensor.Common.TensorRuntimeShutdownResult"/>.</summary>
     public static JsonTypeInfo<TensorRuntimeShutdownResult> TensorRuntimeShutdownResult => Metadata<TensorRuntimeShutdownResult>();
 
     private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();

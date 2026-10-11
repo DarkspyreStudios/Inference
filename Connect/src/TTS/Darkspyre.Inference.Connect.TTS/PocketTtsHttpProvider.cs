@@ -19,11 +19,14 @@ namespace Darkspyre.Inference.Connect.TTS;
 /// </summary>
 public sealed class PocketTtsHttpProvider(HttpClient httpClient) : ITtsProvider
 {
+    /// <summary>The PocketTTS HTTP transport this provider serves.</summary>
     public TtsTransport Transport => TtsTransport.PocketTtsHttp;
+    /// <summary>The setup metadata for PocketTTS HTTP speech synthesis.</summary>
     public InferenceSetupDefinition SetupDefinition { get; } = new(
         new("darkspyre.connect.pockettts", "PocketTTS HTTP", InferenceImplementationKind.Connect, InferenceTask.SpeechSynthesis),
         "Synthesize speech through an externally managed PocketTTS endpoint.");
 
+    /// <summary>Validates <paramref name="connection"/> and returns a client that sends requests to its PocketTTS endpoint.</summary>
     public ITtsClient Bind(TtsConnection connection,
         IInferenceResourceAccess? resources = null)
     {

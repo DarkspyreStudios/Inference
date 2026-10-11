@@ -5,11 +5,14 @@ namespace Darkspyre.Inference.Tensor.Common;
 /// <summary>One portable integrity declaration. Construction does not inspect files or links.</summary>
 public sealed record TensorRuntimeNativeFile(string RelativePath, long Size, string Sha256)
 {
+    /// <summary>The file's portable path relative to the candidate directory.</summary>
     [JsonRequired]
     public string RelativePath { get; init => field = TensorRuntimeValidation.RelativePath(value); }
         = TensorRuntimeValidation.RelativePath(RelativePath);
+    /// <summary>The file's exact length in bytes.</summary>
     [JsonRequired]
     public long Size { get; init => field = TensorRuntimeValidation.Size(value); } = TensorRuntimeValidation.Size(Size);
+    /// <summary>The file's lowercase hexadecimal SHA-256 hash.</summary>
     [JsonRequired]
     public string Sha256 { get; init => field = TensorRuntimeValidation.Hash(value); } = TensorRuntimeValidation.Hash(Sha256);
 }
@@ -17,6 +20,7 @@ public sealed record TensorRuntimeNativeFile(string RelativePath, long Size, str
 /// <summary>An immutable GGML candidate declaration, not evidence of installation or successful initialization.</summary>
 public sealed class TensorRuntimeCandidate
 {
+    /// <summary>Creates a validated candidate; throws when the identity is incomplete, the backend is not GGML, or the file list is empty or repeats a path.</summary>
     public TensorRuntimeCandidate(TensorNativeCandidate identity, TensorBackendKind backend,
         IReadOnlyList<TensorRuntimeNativeFile> files)
     {
@@ -46,10 +50,13 @@ public sealed class TensorRuntimeCandidate
     }
 
     // Required generated metadata needs a setter; constructor binding preserves the validated snapshots.
+    /// <summary>The candidate's id, bridge library path, variant, build and target RID.</summary>
     [JsonInclude, JsonRequired]
     public TensorNativeCandidate Identity { get; internal init; }
+    /// <summary>The concrete GGML backend the candidate provides.</summary>
     [JsonInclude, JsonRequired]
     public TensorBackendKind Backend { get; internal init; }
+    /// <summary>The complete set of native files the candidate needs, with their sizes and hashes.</summary>
     [JsonInclude, JsonRequired]
     public IReadOnlyList<TensorRuntimeNativeFile> Files { get; internal init; }
 }
@@ -57,6 +64,7 @@ public sealed class TensorRuntimeCandidate
 /// <summary>Null candidates select the standard package policy; an empty list admits no candidates.</summary>
 public sealed class TensorRuntimePlan
 {
+    /// <summary>Creates a plan and snapshots the candidates; throws when a candidate's build or RID differs from the plan or an identity repeats.</summary>
     public TensorRuntimePlan(TensorSharpBuildIdentity build, string targetRid,
         IReadOnlyList<TensorRuntimeCandidate>? candidates = null)
     {
@@ -80,10 +88,13 @@ public sealed class TensorRuntimePlan
     }
 
     // Internal init permits required generated metadata without exposing a public setter.
+    /// <summary>The exact TensorSharp build every candidate must match.</summary>
     [JsonInclude, JsonRequired]
     public TensorSharpBuildIdentity Build { get; internal init; }
+    /// <summary>The runtime identifier every candidate must target.</summary>
     [JsonInclude, JsonRequired]
     public string TargetRid { get; internal init; }
+    /// <summary>The admitted native candidates, or null to use the standard package candidates.</summary>
     public IReadOnlyList<TensorRuntimeCandidate>? Candidates { get; }
 }
 
@@ -91,44 +102,72 @@ public sealed class TensorRuntimePlan
 public sealed record TensorRuntimeBackendIdentity(TensorBackendKind Backend, TensorSharpBuildIdentity Build,
     string TargetRid, string Variant, string? CandidateId, string NativeSourceCommit)
 {
+    /// <summary>The concrete GGML backend that initialized.</summary>
     [JsonRequired]
     public TensorBackendKind Backend { get; init => field = TensorRuntimeValidation.Backend(value); }
         = TensorRuntimeValidation.Backend(Backend);
+    /// <summary>The TensorSharp build identity the loaded native library reports.</summary>
     [JsonRequired]
     public TensorSharpBuildIdentity Build { get; init => field = TensorRuntimeValidation.Build(value); }
         = TensorRuntimeValidation.Build(Build);
+    /// <summary>The runtime identifier the loaded native library targets.</summary>
     [JsonRequired]
     public string TargetRid { get; init => field = TensorRuntimeValidation.Text(value, nameof(TargetRid)); }
         = TensorRuntimeValidation.Text(TargetRid, nameof(TargetRid));
+    /// <summary>The native build variant that loaded.</summary>
     [JsonRequired]
     public string Variant { get; init => field = TensorRuntimeValidation.Text(value, nameof(Variant)); }
         = TensorRuntimeValidation.Text(Variant, nameof(Variant));
+    /// <summary>The plan candidate that was selected, or null when the selection matches no plan candidate.</summary>
     [JsonRequired]
     public string? CandidateId { get; init => field = TensorRuntimeValidation.CandidateId(value); }
         = TensorRuntimeValidation.CandidateId(CandidateId);
+    /// <summary>The source commit the loaded native library was built from.</summary>
     [JsonRequired]
     public string NativeSourceCommit { get; init => field = TensorRuntimeValidation.Text(value, nameof(NativeSourceCommit)); }
         = TensorRuntimeValidation.Text(NativeSourceCommit, nameof(NativeSourceCommit));
 }
 
+/// <summary>The lifecycle state of a generation-owned GGML runtime.</summary>
 public enum TensorRuntimeState
 {
-    Uninitialized = 0, Initializing = 1, Ready = 2, Unavailable = 3,
-    RequiresProcessRestart = 4, Stopping = 5, Stopped = 6
+    /// <summary>No backend initialization has started.</summary>
+    Uninitialized = 0,
+    /// <summary>A backend initialization is in progress.</summary>
+    Initializing = 1,
+    /// <summary>A backend is initialized and admits work.</summary>
+    Ready = 2,
+    /// <summary>The last initialization found no usable backend and left no native state.</summary>
+    Unavailable = 3,
+    /// <summary>Native state may remain after a failure, so only a fresh process can use the runtime.</summary>
+    RequiresProcessRestart = 4,
+    /// <summary>The runtime is fenced and terminal cleanup is in progress or was refused.</summary>
+    Stopping = 5,
+    /// <summary>Terminal cleanup released the runtime.</summary>
+    Stopped = 6
 }
 
+/// <summary>How a runtime shutdown attempt ended.</summary>
 public enum TensorRuntimeShutdownState
 {
-    Completed = 0, AlreadyStopped = 1, Busy = 2,
+    /// <summary>The runtime was released.</summary>
+    Completed = 0,
+    /// <summary>The runtime had already stopped.</summary>
+    AlreadyStopped = 1,
+    /// <summary>Admitted work or active native resources prevented shutdown.</summary>
+    Busy = 2,
+    /// <summary>Release could not be proven, so the process must exit to free native state.</summary>
     FailedRequiresProcessExit = 3
 }
 
 /// <summary>A safe runtime observation. Producers sanitize messages before publishing diagnostics.</summary>
 public sealed record TensorRuntimeDiagnostic(string Code, string Message)
 {
+    /// <summary>A stable machine-readable code for the observation.</summary>
     [JsonRequired]
     public string Code { get; init => field = TensorRuntimeValidation.Text(value, nameof(Code)); }
         = TensorRuntimeValidation.Text(Code, nameof(Code));
+    /// <summary>A sanitized human-readable description of the observation.</summary>
     [JsonRequired]
     public string Message { get; init => field = TensorRuntimeValidation.Text(value, nameof(Message)); }
         = TensorRuntimeValidation.Text(Message, nameof(Message));
@@ -139,19 +178,25 @@ public sealed record TensorRuntimeShutdownResult(TensorRuntimeShutdownState Stat
     DateTimeOffset ObservedAt, int OutstandingLeases, bool NativeStateMayRemain,
     IReadOnlyList<TensorRuntimeDiagnostic> Diagnostics)
 {
+    /// <summary>How the shutdown attempt ended.</summary>
     [JsonRequired]
     public TensorRuntimeShutdownState State { get; init => field = TensorRuntimeValidation.ShutdownState(value); }
         = TensorRuntimeValidation.ShutdownState(State);
+    /// <summary>A nonempty identity for this shutdown observation.</summary>
     [JsonRequired]
     public Guid OperationId { get; init => field = TensorRuntimeValidation.OperationId(value); }
         = TensorRuntimeValidation.OperationId(OperationId);
+    /// <summary>When the outcome was observed.</summary>
     [JsonRequired]
     public DateTimeOffset ObservedAt { get; init; } = ObservedAt;
+    /// <summary>The number of admitted operations and model leases still held when the outcome was observed.</summary>
     [JsonRequired]
     public int OutstandingLeases { get; init => field = TensorRuntimeValidation.OutstandingLeases(value); }
         = TensorRuntimeValidation.OutstandingLeases(OutstandingLeases);
+    /// <summary>True when native libraries or state may still be held by the process.</summary>
     [JsonRequired]
     public bool NativeStateMayRemain { get; init; } = NativeStateMayRemain;
+    /// <summary>Sanitized observations that explain the outcome.</summary>
     [JsonRequired]
     public IReadOnlyList<TensorRuntimeDiagnostic> Diagnostics { get; init => field = TensorRuntimeValidation.Diagnostics(value); }
         = TensorRuntimeValidation.Diagnostics(Diagnostics);
@@ -160,8 +205,11 @@ public sealed record TensorRuntimeShutdownResult(TensorRuntimeShutdownState Stat
 /// <summary>Neutral control and observations for one generation-owned GGML runtime.</summary>
 public interface ITensorRuntimeOwner : ITensorBackendProbe, IAsyncDisposable
 {
+    /// <summary>The build, target RID and native candidates this runtime is bound to.</summary>
     TensorRuntimePlan Plan { get; }
+    /// <summary>The runtime's current lifecycle state.</summary>
     TensorRuntimeState State { get; }
+    /// <summary>The identity of the initialized backend, or null when no backend is initialized.</summary>
     TensorRuntimeBackendIdentity? Current { get; }
 
     /// <summary>Cancels the caller's wait, not shared terminal cleanup. Busy does not assert native release.</summary>

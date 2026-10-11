@@ -32,6 +32,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
     private bool _nativeMayRemain;
     private Action? _mlxShutdown;
 
+    /// <summary>Returns the process generation's runtime owner, creating it on first use; throws when <paramref name="plan"/> differs from the plan the generation already owns.</summary>
     public static GgmlRuntimeOwner GetOrCreate(TensorRuntimePlan? plan = null)
     {
         lock (GenerationGate)
@@ -57,8 +58,11 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         _candidates = Plan.Candidates;
     }
 
+    /// <inheritdoc />
     public TensorRuntimePlan Plan { get; }
+    /// <inheritdoc />
     public TensorRuntimeState State { get { lock (_gate) return _state; } }
+    /// <inheritdoc />
     public TensorRuntimeBackendIdentity? Current { get { lock (_gate) return _current; } }
 
     internal static bool SamePlan(TensorRuntimePlan left, TensorRuntimePlan right) =>
@@ -96,6 +100,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         _ => []
     };
 
+    /// <summary>Checks the request against the bound plan and initializes the shared GGML backend once, returning what initialized or why none could.</summary>
     public async Task<TensorBackendAvailability> CheckAsync(TensorBackendProbeRequest request,
         CancellationToken cancellationToken = default)
     {
@@ -387,6 +392,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         _ => throw new ArgumentOutOfRangeException(nameof(backend))
     };
 
+    /// <inheritdoc />
     public Task<TensorRuntimeShutdownResult> ShutdownAsync(CancellationToken cancellationToken = default) =>
         ReadShutdownResultAsync(ShutdownWithCauseAsync(cancellationToken));
 
@@ -489,6 +495,7 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
             _ => []
         });
 
+    /// <summary>Fences new work and runs terminal shutdown once; the returned task throws when the runtime did not retire safely.</summary>
     public ValueTask DisposeAsync()
     {
         lock (_gate)

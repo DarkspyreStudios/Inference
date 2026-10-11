@@ -6,7 +6,9 @@ namespace Darkspyre.Inference.Tensor.Common;
 /// <summary>A sanitized source failure. Remote response bodies, URLs and credentials are never included.</summary>
 public sealed class TensorSourceException(TensorSourceState state, string code, string message) : IOException(message)
 {
+    /// <summary>The state that classifies the failure, such as a transient failure or an invalid request.</summary>
     public TensorSourceState State { get; } = state;
+    /// <summary>A stable code that names the failure, such as <c>source-timeout</c>.</summary>
     public string Code { get; } = code;
 }
 

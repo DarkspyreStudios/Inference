@@ -2,12 +2,14 @@ using System.Collections.Concurrent;
 
 namespace Darkspyre.Inference.Tensor.Common;
 
+/// <summary>Serializes execution so only one operation at a time runs for each model revision and backend.</summary>
 public sealed class TensorExecutionCoordinator : IDisposable
 {
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _gates =
         new(StringComparer.Ordinal);
     private bool _disposed;
 
+    /// <summary>Waits for exclusive execution of the model on the backend. Disposing the returned handle releases it.</summary>
     public async ValueTask<IAsyncDisposable> AcquireAsync(
         TensorModelKey key,
         TensorBackendKind backend,
@@ -21,6 +23,7 @@ public sealed class TensorExecutionCoordinator : IDisposable
         return new Releaser(gate);
     }
 
+    /// <summary>Releases the execution gates. Further acquisitions throw <see cref="ObjectDisposedException"/>.</summary>
     public void Dispose()
     {
         if (_disposed)

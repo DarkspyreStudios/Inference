@@ -13,6 +13,7 @@ public sealed class TensorMetadataReader
     private readonly Lock _gate = new();
     private int _remaining;
 
+    /// <summary>Creates a reader over <paramref name="source"/> that downloads at most <paramref name="maximumBytes"/> in total. Throws when <paramref name="maximumBytes"/> is not positive.</summary>
     public TensorMetadataReader(ITensorArtifactReader source, int maximumBytes = 64 * 1024 * 1024)
     {
         ArgumentNullException.ThrowIfNull(source);

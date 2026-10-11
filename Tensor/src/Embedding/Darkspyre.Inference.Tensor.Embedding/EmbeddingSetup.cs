@@ -5,8 +5,10 @@ using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.Embedding;
 
+/// <summary>The setup definition and settings-manager factory for local text embeddings.</summary>
 public static class EmbeddingSetup
 {
+    /// <summary>Identifies the Darkspyre Tensor Embedding implementation and describes it to the user.</summary>
     public static InferenceSetupDefinition Definition { get; } = new(
         new("darkspyre.tensor.embedding", "Darkspyre Tensor Embedding", InferenceImplementationKind.Tensor, InferenceTask.Embedding),
         "Resident text embeddings on this machine. Select and explicitly install a model; the host controls Load and Unload.");
@@ -29,9 +31,12 @@ public static class EmbeddingSetup
 /// </summary>
 public sealed class EmbeddingModelResolver : TensorModelResolver
 {
+    /// <summary>Creates a resolver that discovers candidates through <paramref name="source"/> and reads their metadata through <paramref name="reader"/>.</summary>
     public EmbeddingModelResolver(ITensorModelSource? source = null, ITensorArtifactReader? reader = null) : base(source, reader) { }
+    /// <inheritdoc />
     public override IReadOnlyList<TensorArtifactRequirement> Requirements => [new("model", "*.gguf")];
 
+    /// <inheritdoc />
     public override Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
         ITensorArtifactReader reader, CancellationToken cancellationToken = default)
     {
@@ -82,8 +87,10 @@ internal sealed class EmbeddingBackendProbe(GgmlRuntimeOwner? runtimeOwner = nul
 /// </summary>
 public sealed class EmbeddingEngineProvider(GgmlRuntimeOwner runtimeOwner) : ITensorEngineProvider
 {
+    /// <inheritdoc />
     public TensorEngineDefinition Definition { get; } = new(EmbeddingSetup.Definition, "Embedding");
 
+    /// <inheritdoc />
     public async Task<IReadOnlyList<TensorModelPackDefinition>> GetOfferedModelsAsync(ITensorModelPackManager packs,
         CancellationToken cancellationToken = default)
     {
@@ -96,9 +103,11 @@ public sealed class EmbeddingEngineProvider(GgmlRuntimeOwner runtimeOwner) : ITe
         return offered;
     }
 
+    /// <inheritdoc />
     public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend) =>
         new TensorEmbeddingInference(packs, backend, runtimeOwner);
 
+    /// <inheritdoc />
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
         ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null)

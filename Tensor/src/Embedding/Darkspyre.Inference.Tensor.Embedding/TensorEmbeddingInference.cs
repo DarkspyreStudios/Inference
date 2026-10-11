@@ -47,20 +47,24 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
         _lifetime = new(this);
     }
 
+    /// <summary>The embedding implementation's descriptor from <see cref="EmbeddingSetup.Definition"/>.</summary>
     public InferenceImplementationDescriptor Descriptor => EmbeddingSetup.Definition.Implementation;
 
+    /// <inheritdoc />
     public event EventHandler<TensorEngineStatus>? EngineStatusChanged
     {
         add => _lifetime.EngineStatusChanged += value;
         remove => _lifetime.EngineStatusChanged -= value;
     }
 
+    /// <inheritdoc />
     public Task<TensorModelObservation> GetObservationAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(_lifetime.Observation);
     }
 
+    /// <inheritdoc />
     public TensorBackendKind RequestedBackend { get; }
 
     /// <summary>Start after Stop is an allowed no-op; it does not reset a stopped instance.</summary>
@@ -99,6 +103,7 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
         };
     }
 
+    /// <inheritdoc />
     public async Task LoadAsync(TensorModelKey model, CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); ArgumentNullException.ThrowIfNull(model);
@@ -168,6 +173,10 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
         }
     }
 
+    /// <summary>
+    /// Embeds the request's inputs with the resident model and returns the vectors, usage and provenance. The request must
+    /// name the resident model.
+    /// </summary>
     public async Task<EmbeddingResult> EmbedAsync(EmbeddingRequest request, CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); ArgumentNullException.ThrowIfNull(request);
@@ -206,6 +215,7 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
         };
     }
 
+    /// <inheritdoc />
     public Task UnloadAsync(CancellationToken cancellationToken = default)
     {
         lock (_stopGate)
@@ -261,6 +271,7 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
         _definition = null; _architecture = null;
     }
 
+    /// <inheritdoc />
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
         lock (_stopGate)

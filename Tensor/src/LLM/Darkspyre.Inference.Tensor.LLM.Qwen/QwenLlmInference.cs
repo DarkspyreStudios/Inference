@@ -15,6 +15,7 @@ using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
+/// <summary>Runs Qwen GGUF language models locally through the GGML runtime.</summary>
 public sealed partial class QwenLlmInference : ITensorLlmInference
 {
     /// <summary>Qwen's thinking is on or off: <see cref="LlmReasoningLevel.None"/> turns it off, <see cref="LlmReasoningLevel.High"/> on.</summary>
@@ -39,6 +40,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
     private Task? _stopAttempt;
     private Task? _disposal;
 
+    /// <summary>Creates an instance that loads packs from <paramref name="packs"/> on the requested backend. Without a coordinator it creates and owns its own; without a runtime owner it uses the shared one.</summary>
     public QwenLlmInference(
         ITensorModelPackManager packs,
         TensorBackendKind backend = TensorBackendKind.Auto,
@@ -61,8 +63,10 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         _ownsCoordinator = coordinator is null;
     }
 
+    /// <inheritdoc />
     public InferenceImplementationDescriptor Descriptor => QwenSetup.Definition.Implementation;
 
+    /// <inheritdoc />
     public async Task<LlmCapabilities> GetCapabilitiesAsync(
         string? modelId = null,
         CancellationToken cancellationToken = default)
@@ -98,6 +102,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
     public Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(CancellationToken cancellationToken = default) =>
         ListModelsAsync(cancellationToken);
 
+    /// <inheritdoc />
     public async Task<IReadOnlyList<LlmModelInfo>> ListModelsAsync(
         CancellationToken cancellationToken = default)
     {
@@ -113,6 +118,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             }).ToArray();
     }
 
+    /// <inheritdoc />
     public IAsyncEnumerable<LlmStreamEvent> StreamAsync(
         LlmInferenceRequest request, CancellationToken cancellationToken = default) =>
         ReadStreamAsync(this, request, cancellationToken);
@@ -337,18 +343,21 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         });
     }
 
+    /// <inheritdoc />
     public event EventHandler<TensorEngineStatus>? EngineStatusChanged
     {
         add => _lifetime.EngineStatusChanged += value;
         remove => _lifetime.EngineStatusChanged -= value;
     }
 
+    /// <inheritdoc />
     public Task<TensorModelObservation> GetObservationAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(_lifetime.Observation);
     }
 
+    /// <inheritdoc />
     public TensorBackendKind RequestedBackend => _requestedBackend;
 
     /// <summary>Start after Stop is an allowed no-op; it does not reset a stopped instance.</summary>
@@ -382,6 +391,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         catch { admission?.Dispose(); throw; }
     }
 
+    /// <inheritdoc />
     public async Task LoadAsync(TensorModelKey model, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
@@ -534,6 +544,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         }
     }
 
+    /// <inheritdoc />
     public Task UnloadAsync(CancellationToken cancellationToken = default)
     {
         lock (_stopGate)
@@ -548,6 +559,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         }
     }
 
+    /// <inheritdoc />
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
         lock (_stopGate)

@@ -15,6 +15,7 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
     private IWhisperModel? _model;
     private TensorModelPackLease? _lease;
 
+    /// <summary>Creates an unloaded Whisper instance that reads packs from <paramref name="packs"/>. Load accepts only the CPU or automatic backend.</summary>
     public WhisperSpeechToTextInference(ITensorModelPackManager packs, TensorBackendKind backend = TensorBackendKind.Auto)
         : this(packs, new WhisperLoader(), backend) { }
 
@@ -26,19 +27,23 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
         _lifetime = new(this);
     }
 
+    /// <summary>Describes the Whisper implementation from its setup definition.</summary>
     public InferenceImplementationDescriptor Descriptor => WhisperSetup.Definition.Implementation;
 
+    /// <inheritdoc />
     public event EventHandler<TensorEngineStatus>? EngineStatusChanged
     {
         add => _lifetime.EngineStatusChanged += value;
         remove => _lifetime.EngineStatusChanged -= value;
     }
 
+    /// <inheritdoc />
     public Task<TensorModelObservation> GetObservationAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(_lifetime.Observation);
     }
+    /// <inheritdoc />
     public TensorBackendKind RequestedBackend { get; }
     /// <summary>Start after Stop is an allowed no-op; it does not reset a stopped instance.</summary>
     public Task StartAsync(CancellationToken cancellationToken = default)
@@ -50,6 +55,7 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
             cancellationToken);
     }
 
+    /// <summary>Lists the registered speech-transcription packs that use the Whisper runtime architecture.</summary>
     public async Task<IReadOnlyList<SpeechModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); cancellationToken.ThrowIfCancellationRequested();
@@ -59,6 +65,7 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
             .Select(TensorSpeechModels.Info).ToArray());
     }
 
+    /// <summary>Returns the resident model's capabilities when it matches <paramref name="modelId"/>, or capabilities derived from the registered pack otherwise.</summary>
     public async Task<SpeechToTextCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); cancellationToken.ThrowIfCancellationRequested();
@@ -75,6 +82,7 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
             WhisperPcm.MinimumRate, WhisperPcm.MaximumRate, WhisperPcm.MaximumChannels);
     }
 
+    /// <inheritdoc />
     public async Task LoadAsync(TensorModelKey model, CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); ArgumentNullException.ThrowIfNull(model);
@@ -124,6 +132,7 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
         }
     }
 
+    /// <summary>Transcribes one audio buffer with the resident model. Throws when the request names a model other than the resident one.</summary>
     public async Task<SpeechTranscriptionResult> TranscribeAsync(SpeechTranscriptionRequest request, CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); ArgumentNullException.ThrowIfNull(request); ArgumentNullException.ThrowIfNull(request.Audio);
@@ -133,6 +142,7 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
         return await TranscribeCoreAsync(request.Audio, request.Options ?? new(), execution.CancellationToken).ConfigureAwait(false);
     }
 
+    /// <inheritdoc />
     public async IAsyncEnumerable<SpeechWindowTranscription> TranscribeStreamAsync(IAsyncEnumerable<SpeechAudioWindow> windows,
         SpeechToTextOptions options, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
@@ -180,6 +190,7 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
             });
     }
 
+    /// <inheritdoc />
     public Task UnloadAsync(CancellationToken cancellationToken = default)
     {
         ThrowIfStopped();
@@ -202,6 +213,7 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
         _lifetime.MarkUnloaded();
     }
 
+    /// <inheritdoc />
     public Task StopAsync(CancellationToken cancellationToken = default)
     {
         if (_lifetime.StopAccepted) return Task.CompletedTask;

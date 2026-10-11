@@ -2,13 +2,16 @@ using Darkspyre.Inference.Tensor.Common;
 
 namespace Darkspyre.Inference.Tensor.Image.Supra;
 
+/// <summary>Model pack definitions for Tensor image engines.</summary>
 public static class TensorImageModels
 {
+    /// <summary>Runtime architecture of the Supra2 diffusion transformer with a FLAN-T5 text encoder and SD VAE.</summary>
     public const string SupraRuntimeArchitecture = "supra2-dit-flan-t5-sd-vae";
     private const string SupraRevision = "10dec6e4b4b5d1c44fd1d7d3fe5e50137333da5b";
     private const string T5Revision = "7bcac572ce56db69c1ea7c8af255c5d7c9672fc2";
     private const string VaeRevision = "31f26fdeee1355a5c34592e401dd41e45d25a493";
 
+    /// <summary>Pack definition for SupraLabs Supra2-IMG with its pinned text encoder and VAE artifacts.</summary>
     public static TensorModelPackDefinition Supra2Image { get; } = new()
     {
         Key = new TensorModelKey("SupraLabs/Supra2-IMG", SupraRevision),

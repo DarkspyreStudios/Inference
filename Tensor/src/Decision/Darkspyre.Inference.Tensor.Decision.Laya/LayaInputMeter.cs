@@ -21,6 +21,7 @@ public sealed class LayaInputMeter : IDecisionInputMeasurement
         _configuration = configuration;
     }
 
+    /// <summary>Loads a meter from a tokenizer file and an agent configuration file. Throws <see cref="InferenceException"/> when a file is missing or malformed.</summary>
     public static async Task<LayaInputMeter> LoadAsync(
         string tokenizer,
         string agentConfiguration,
@@ -48,6 +49,7 @@ public sealed class LayaInputMeter : IDecisionInputMeasurement
         }
     }
 
+    /// <inheritdoc />
     public Task<DecisionInputMeasurement> MeasureAsync(
         DecisionInferenceRequest request,
         CancellationToken cancellationToken = default)

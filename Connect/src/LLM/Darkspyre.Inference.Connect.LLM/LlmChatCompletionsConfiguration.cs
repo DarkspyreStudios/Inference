@@ -3,7 +3,9 @@ namespace Darkspyre.Inference.Connect.LLM;
 /// <summary>The field that carries an explicit output-token limit on a Chat Completions endpoint.</summary>
 public enum LlmChatCompletionsOutputLimitField
 {
+    /// <summary>Sends the cap as <c>max_tokens</c>.</summary>
     MaxTokens,
+    /// <summary>Sends the cap as <c>max_completion_tokens</c>.</summary>
     MaxCompletionTokens
 }
 

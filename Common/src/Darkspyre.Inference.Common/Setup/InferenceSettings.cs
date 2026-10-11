@@ -10,6 +10,7 @@ namespace Darkspyre.Inference.Common.Setup;
 /// </summary>
 public abstract class InferenceSettings
 {
+    /// <summary>Creates settings for the given implementation and entry. Throws when <paramref name="identity"/> is invalid.</summary>
     protected InferenceSettings(InferenceSetupDefinition definition, SetupConfigurationIdentity identity)
     {
         ArgumentNullException.ThrowIfNull(definition);
@@ -19,16 +20,22 @@ public abstract class InferenceSettings
         Identity = identity;
     }
 
+    /// <summary>Describes the implementation these settings configure.</summary>
     public InferenceSetupDefinition Definition { get; }
 
+    /// <summary>Identifies the entry being created or edited and the version the host expects on save.</summary>
     public SetupConfigurationIdentity Identity { get; }
 
+    /// <summary>The setup steps, rebuilt from the current values on each read.</summary>
     public IReadOnlyList<SetupStep> Steps => CreateSteps();
 
+    /// <summary>The setup actions, rebuilt from the current values on each read.</summary>
     public IReadOnlyList<SetupActionDescriptor> Actions => CreateActions();
 
+    /// <summary>The setup facts observed for this entry. A local edit marks them stale.</summary>
     public SetupStatus Status { get; set; } = new();
 
+    /// <summary>The step the user must take before a running action can continue, or null when none is pending.</summary>
     public SetupInteraction? Interaction { get; set; }
 
     /// <summary>True once these settings have been saved or a save outcome is uncertain; they are not saved again.</summary>
@@ -37,19 +44,25 @@ public abstract class InferenceSettings
     /// <summary>A host write may have occurred; read the saved entry back before trying again.</summary>
     public bool SaveOutcomeUncertain { get; internal set; }
 
+    /// <summary>True when the values differ from the loaded entry and have not been saved.</summary>
     public bool HasUnsavedChanges => !IsSaved && IsDraftDirty;
 
     /// <summary>Every visible required field has a value, and a provider with sign-in has signed in.</summary>
     public bool CanSave => !IsSaved && RequiredFieldsHaveValues() && IsSignInSatisfied && Validate().IsValid;
 
+    /// <summary>Checks the current values locally and returns the validation result.</summary>
     public SetupValidation Validate() => ValidateDraft();
 
+    /// <summary>Builds the setup steps, with their fields, from the current values.</summary>
     protected abstract IReadOnlyList<SetupStep> CreateSteps();
 
+    /// <summary>Builds the setup actions the current values allow.</summary>
     protected abstract IReadOnlyList<SetupActionDescriptor> CreateActions();
 
+    /// <summary>Checks the current values locally and returns the validation result.</summary>
     protected abstract SetupValidation ValidateDraft();
 
+    /// <summary>True when the values differ from the entry the settings were loaded from.</summary>
     protected abstract bool IsDraftDirty { get; }
 
     /// <summary>A provider whose settings require sign-in reports whether it has succeeded.</summary>
@@ -67,6 +80,7 @@ public abstract class InferenceSettings
         return SetupEditResult.Applied;
     }
 
+    /// <summary>Runs after each local edit. The base marks the authenticated, verified and ready observations stale.</summary>
     protected virtual void OnDraftEdited()
     {
         Status = Status with
@@ -77,6 +91,7 @@ public abstract class InferenceSettings
         };
     }
 
+    /// <summary>Returns the observation marked stale, or unchanged when it does not apply.</summary>
     protected static SetupObservation Stale(SetupObservation observation) => observation.IsApplicable
         ? observation with { IsStale = true }
         : observation;

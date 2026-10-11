@@ -10,8 +10,10 @@ namespace Darkspyre.Inference.Tensor.Decision.Laya;
 /// </summary>
 public sealed class LayaEngineProvider : ITensorEngineProvider
 {
+    /// <inheritdoc />
     public TensorEngineDefinition Definition { get; } = new(LayaSetup.Definition, "Laya");
 
+    /// <inheritdoc />
     public async Task<IReadOnlyList<TensorModelPackDefinition>> GetOfferedModelsAsync(ITensorModelPackManager packs,
         CancellationToken cancellationToken = default)
     {
@@ -23,9 +25,11 @@ public sealed class LayaEngineProvider : ITensorEngineProvider
         return offered;
     }
 
+    /// <inheritdoc />
     public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend) =>
         new LayaDecisionInference(packs, backend);
 
+    /// <inheritdoc />
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
         ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null)

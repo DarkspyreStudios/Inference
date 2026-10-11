@@ -9,8 +9,10 @@ namespace Darkspyre.Inference.Tensor.STT.Whisper;
 /// </summary>
 public sealed class WhisperEngineProvider : ITensorEngineProvider
 {
+    /// <inheritdoc />
     public TensorEngineDefinition Definition { get; } = new(WhisperSetup.Definition, "Whisper");
 
+    /// <inheritdoc />
     public async Task<IReadOnlyList<TensorModelPackDefinition>> GetOfferedModelsAsync(ITensorModelPackManager packs,
         CancellationToken cancellationToken = default)
     {
@@ -23,9 +25,11 @@ public sealed class WhisperEngineProvider : ITensorEngineProvider
         return offered;
     }
 
+    /// <inheritdoc />
     public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend) =>
         new WhisperSpeechToTextInference(packs, backend);
 
+    /// <inheritdoc />
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
         IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
         ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null)

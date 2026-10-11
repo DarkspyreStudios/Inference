@@ -25,8 +25,10 @@ public interface IInferenceSettingsManager
 /// </summary>
 public interface IInferenceSettingsStatusSource
 {
+    /// <summary>Raised when the engine the settings follow changes state.</summary>
     event EventHandler? StatusChanged;
 
+    /// <summary>Updates <paramref name="settings"/> from the engine's current state.</summary>
     Task RefreshStatusAsync(InferenceSettings settings, CancellationToken cancellationToken = default);
 }
 
@@ -36,12 +38,14 @@ public abstract class InferenceSettingsManager<TSettings, TChanges> : IInference
 {
     private ISetupCommitTarget<TChanges>? _target;
 
+    /// <summary>Creates a manager that saves through <paramref name="target"/>.</summary>
     protected InferenceSettingsManager(ISetupCommitTarget<TChanges> target)
     {
         ArgumentNullException.ThrowIfNull(target);
         _target = target;
     }
 
+    /// <inheritdoc />
     public virtual async Task<SetupActionResult> RunAsync(InferenceSettings settings, string actionId,
         IProgress<SetupProgress>? progress = null, CancellationToken cancellationToken = default)
     {
@@ -74,6 +78,7 @@ public abstract class InferenceSettingsManager<TSettings, TChanges> : IInference
         }
     }
 
+    /// <inheritdoc />
     public virtual async Task<SetupChoicePage> QueryChoicesAsync(InferenceSettings settings, string fieldId,
         SetupChoiceQuery query, CancellationToken cancellationToken = default)
     {
@@ -106,6 +111,7 @@ public abstract class InferenceSettingsManager<TSettings, TChanges> : IInference
         }
     }
 
+    /// <inheritdoc />
     public virtual async Task<SetupCommitResult> SaveAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
     {
         ISetupCommitTarget<TChanges> target = _target ?? throw new ObjectDisposedException(GetType().Name);

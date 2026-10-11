@@ -4,8 +4,10 @@ using Darkspyre.Inference.Tensor.Common;
 
 namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
+/// <summary>Setup entry points for the Tensor Laya decision implementation.</summary>
 public static class LayaSetup
 {
+    /// <summary>Setup identity and description of the in-process Tensor Laya decision implementation.</summary>
     public static InferenceSetupDefinition Definition { get; } = new(
         new("darkspyre.tensor.laya", "Darkspyre Tensor Laya", InferenceImplementationKind.Tensor, InferenceTask.Decision),
         "In-process typed decisions using a host-selected, compatible Laya checkpoint.");
