@@ -3,6 +3,11 @@ using Darkspyre.Inference.Common.Setup;
 namespace Darkspyre.Inference.UI.Settings;
 
 /// <summary>Safe view state for host-owned Save and dirty-close controls. Contains no input values.</summary>
+/// <param name="HasUnsavedChanges">True when the editor holds changes not yet saved.</param>
+/// <param name="HasPendingInput">True when typed input has not been applied to the settings.</param>
+/// <param name="HasInputErrors">True when any typed input has an error.</param>
+/// <param name="CanSave">True when the host may save now.</param>
+/// <param name="CommitOutcomeUncertain">True when it is unknown whether the last save took effect.</param>
 public sealed record SetupEditorState(bool HasUnsavedChanges, bool HasPendingInput, bool HasInputErrors,
     bool CanSave, bool CommitOutcomeUncertain);
 

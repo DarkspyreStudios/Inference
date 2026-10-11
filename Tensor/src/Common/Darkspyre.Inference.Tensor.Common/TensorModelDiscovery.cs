@@ -67,6 +67,9 @@ public sealed record TensorSourceModel(string Repository, string? Revision, stri
 public sealed record TensorSourceRevision(string Revision, DateTimeOffset? CreatedAt);
 
 /// <summary>Repository metadata is evidence, not a promise that the checkpoint can load. Remote text is inert data.</summary>
+/// <param name="Architecture">The model architecture the repository reports, or null when not reported.</param>
+/// <param name="ContextLength">The context length in tokens the repository reports, or null when not reported.</param>
+/// <param name="HasChatTemplate">Whether the repository reports a chat template, or null when unknown.</param>
 public sealed record TensorCandidateMetadata(string? Architecture, long? ContextLength, bool? HasChatTemplate);
 /// <summary>One file a source offers, with what the source reports about it.</summary>
 /// <param name="Path">The file path inside the repository or location.</param>

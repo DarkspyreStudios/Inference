@@ -72,6 +72,11 @@ public sealed record TensorModelArtifactDefinition
 }
 
 /// <summary>Source metadata only. Never includes an access token or a transient signed download URL.</summary>
+/// <param name="Origin">The base address of the source the artifact came from.</param>
+/// <param name="Repository">The repository in the source, or null when the source has none.</param>
+/// <param name="Revision">The repository revision, or null when unknown.</param>
+/// <param name="Path">The artifact's path in the repository or source.</param>
+/// <param name="License">The artifact license, or null when unknown.</param>
 public sealed record TensorArtifactProvenance(Uri Origin, string? Repository, string? Revision, string Path, string? License);
 
 /// <summary>The portable manifest of one model pack: its identity, capability, license, supported backends and artifacts.</summary>

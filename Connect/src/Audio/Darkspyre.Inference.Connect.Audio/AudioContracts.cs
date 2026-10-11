@@ -68,6 +68,10 @@ public sealed record AudioGenerationCapabilities(
     IReadOnlyList<string> ContentTypes);
 
 /// <summary>Audio plus provenance. MeasuredDuration is null when not measured; it is never the requested duration.</summary>
+/// <param name="ContentType">The media type of the audio.</param>
+/// <param name="Audio">The generated audio bytes.</param>
+/// <param name="MeasuredDuration">The measured length of the audio, or null when not measured.</param>
+/// <param name="Provenance">Where the audio came from.</param>
 public sealed record AudioGenerationResult(
     string ContentType, ReadOnlyMemory<byte> Audio, TimeSpan? MeasuredDuration, InferenceProvenance Provenance);
 

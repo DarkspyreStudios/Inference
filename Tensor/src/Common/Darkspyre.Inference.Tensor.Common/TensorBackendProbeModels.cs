@@ -1,9 +1,17 @@
 namespace Darkspyre.Inference.Tensor.Common;
 
 /// <summary>The managed package version and exact native bridge/upstream identity are distinct.</summary>
+/// <param name="Version">The managed package version.</param>
+/// <param name="NativeAbi">The native bridge ABI identity.</param>
+/// <param name="GgmlCommit">The upstream GGML commit the native bridge was built from.</param>
 public sealed record TensorSharpBuildIdentity(string Version, string NativeAbi, string GgmlCommit);
 
 /// <summary>One ordered execution candidate. The executing runtime validates its absolute bridge path.</summary>
+/// <param name="Id">The candidate's identity.</param>
+/// <param name="AbsoluteBridgePath">The absolute path of the candidate's native bridge library.</param>
+/// <param name="Variant">The candidate's native build variant.</param>
+/// <param name="Build">The managed and native build identity of the candidate.</param>
+/// <param name="TargetRid">The runtime identifier the candidate is built for.</param>
 public sealed record TensorNativeCandidate(string Id, string AbsoluteBridgePath, string Variant,
     TensorSharpBuildIdentity Build, string TargetRid);
 

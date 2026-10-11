@@ -12,6 +12,13 @@ namespace Darkspyre.Inference.Tensor.Embedding;
 /// <c>{instruction}</c>; documents are embedded as given. <see cref="SupportedDimensions"/> lists the vector sizes the
 /// model was trained to be cut to, including its native size.
 /// </summary>
+/// <param name="Name">The architecture name.</param>
+/// <param name="GgufArchitecture">The <c>general.architecture</c> value the loaded GGUF must report.</param>
+/// <param name="NativeDimensions">The size of the vectors the model produces.</param>
+/// <param name="SupportedDimensions">The vector sizes the model was trained to be cut to, including the native size.</param>
+/// <param name="MaximumInputTokens">The most tokens one input may hold.</param>
+/// <param name="QueryTemplate">The template a query is formatted with.</param>
+/// <param name="DefaultInstruction">The task statement used when a query gives none, or null when the model takes none.</param>
 public sealed record TensorEmbeddingArchitecture(string Name, string GgufArchitecture, int NativeDimensions,
     IReadOnlyList<int> SupportedDimensions, int MaximumInputTokens, string QueryTemplate, string? DefaultInstruction)
 {

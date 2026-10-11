@@ -165,6 +165,10 @@ public enum InferenceResourceCommitOutcome
 }
 
 /// <summary>Portable observed effects, not an exception or live storage graph.</summary>
+/// <param name="Phase">The step of the operation that failed.</param>
+/// <param name="Reference">The resource the operation acted on, when known.</param>
+/// <param name="CommitOutcome">Whether the operation's commit took effect.</param>
+/// <param name="BytesTransferred">How many bytes moved before the failure, or null when unknown.</param>
 public sealed record InferenceResourceOperationFailure(
     [property: JsonRequired] InferenceResourceOperationPhase Phase,
     InferenceResourceReference? Reference,

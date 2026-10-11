@@ -23,6 +23,8 @@ public interface IImageWorkflowChoiceSource
 public sealed record ImageSetupConfiguration(ImageTransport Transport, Uri Endpoint, TimeSpan RequestTimeout, ImageWorkflowSelection Workflow);
 
 /// <summary>Protected header mutations; omission is not deletion.</summary>
+/// <param name="Set">The headers to add or replace, by name.</param>
+/// <param name="Remove">The names of the headers to delete.</param>
 public sealed record ImageSetupHeaderChanges(IReadOnlyDictionary<string, string> Set, IReadOnlyList<string> Remove);
 
 /// <summary>The changes an image setup session commits.</summary>

@@ -80,6 +80,7 @@ public sealed record EmbeddingCapabilities
 }
 
 /// <summary>One input over the model's limit, by its index in the request.</summary>
+/// <param name="Index">The zero-based position of the input in the request.</param>
 public sealed record EmbeddingOverLimitInput(int Index);
 
 /// <summary>Inputs that exceed the model's limit in a request that does not permit truncation.</summary>

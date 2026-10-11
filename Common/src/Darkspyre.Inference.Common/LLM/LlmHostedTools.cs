@@ -277,6 +277,10 @@ public sealed record LlmHostedToolCallCompletedEvent(LlmHostedToolCall Call) : L
 }
 
 /// <summary>Offsets, when reported, are UTF-16 positions in emitted text; EndIndex is exclusive.</summary>
+/// <param name="Title">The title of the cited source, or null when not reported.</param>
+/// <param name="StartIndex">The first UTF-16 position of the cited span in the emitted text, or null when not reported.</param>
+/// <param name="EndIndex">The UTF-16 position just past the cited span, or null when not reported.</param>
+/// <param name="Url">The URL of the cited source.</param>
 public sealed record LlmCitation(string Url, string? Title = null, int? StartIndex = null, int? EndIndex = null)
 {
     /// <summary>The URL of the cited source.</summary>

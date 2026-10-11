@@ -77,6 +77,7 @@ public sealed record ImagePreparedReference(ImageReference Metadata,
 }
 
 /// <summary>Opaque adapter request state that can be persisted and submitted later.</summary>
+/// <param name="ProviderRequest">The adapter's serialized request, which only the same adapter reads.</param>
 public sealed record PreparedImageTransportRequest(string ProviderRequest)
 {
     /// <summary>Returns a fixed placeholder so request content never reaches logs.</summary>
@@ -97,6 +98,12 @@ public enum ImageTransportJobState
 }
 
 /// <summary>Completed output metadata plus opaque adapter state needed to download it.</summary>
+/// <param name="FileName">The output's file name, or null when the provider gives none.</param>
+/// <param name="ContentType">The output's media type, or null when unknown.</param>
+/// <param name="File">The provider file that holds the output, or null when there is none.</param>
+/// <param name="Resource">The workspace resource that holds the output, or null when there is none.</param>
+/// <param name="Scope">The scope the output resource belongs to.</param>
+/// <param name="ProviderState">Opaque adapter state needed to download the output.</param>
 public sealed record ImageTransportOutput(string? FileName,
     InferenceResourceScope Scope, JsonElement ProviderState,
     string? ContentType = null, ProviderFileReference? File = null,

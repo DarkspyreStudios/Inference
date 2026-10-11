@@ -101,6 +101,9 @@ public enum SetupChangeIntent
 }
 
 /// <summary>The host compares this version over configuration and protected credentials atomically.</summary>
+/// <param name="Intent">Whether the change creates or edits a configuration.</param>
+/// <param name="Id">The configuration id.</param>
+/// <param name="ExpectedVersion">The saved version an edit expects; null for a create.</param>
 public sealed record SetupConfigurationIdentity(SetupChangeIntent Intent, string Id, string? ExpectedVersion)
 {
     /// <summary>Throws <see cref="ArgumentException"/> when the id is blank, or when a create carries an expected version or an edit lacks one.</summary>
@@ -254,11 +257,21 @@ public enum SetupActionState
 public abstract record SetupInteraction;
 
 /// <summary>A device sign-in in progress. Its Continue and Cancel actions run through the settings manager.</summary>
+/// <param name="VerificationUri">The address where the user enters the code.</param>
+/// <param name="UserCode">The code the user enters at the verification address.</param>
+/// <param name="ExpiresAt">When the code expires, or null when unknown.</param>
+/// <param name="Continue">The action that checks whether the sign-in finished.</param>
+/// <param name="Cancel">The action that abandons the sign-in.</param>
 public sealed record SetupDeviceAuthorization(
     Uri VerificationUri, string UserCode, DateTimeOffset? ExpiresAt,
     SetupActionDescriptor Continue, SetupActionDescriptor Cancel) : SetupInteraction;
 
 /// <summary>A browser sign-in in progress. The callback field is local; Continue and Cancel run through the settings manager.</summary>
+/// <param name="AuthorizationUri">The address the user opens in a browser to sign in.</param>
+/// <param name="Callback">The local field that receives the callback address after sign-in.</param>
+/// <param name="Continue">The action that completes the sign-in.</param>
+/// <param name="Cancel">The action that abandons the sign-in.</param>
+/// <param name="ExpiresAt">When the sign-in expires, or null when unknown.</param>
 public sealed record SetupBrowserAuthorization(
     Uri AuthorizationUri, SetupTextField Callback, SetupActionDescriptor Continue,
     SetupActionDescriptor Cancel, DateTimeOffset? ExpiresAt = null) : SetupInteraction;

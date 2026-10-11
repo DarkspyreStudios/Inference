@@ -8,6 +8,8 @@ public interface IProviderAuthorization
 }
 
 /// <summary>An operation's authorization scheme and secret value.</summary>
+/// <param name="Scheme">The authorization scheme, such as Bearer.</param>
+/// <param name="Value">The secret credential sent with the scheme.</param>
 public sealed record ProviderAuthorizationHeader(string Scheme, string Value)
 {
     /// <summary>Returns a diagnostic description without either header field.</summary>

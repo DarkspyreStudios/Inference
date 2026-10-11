@@ -88,6 +88,8 @@ public sealed record LlmToolChoice
 public sealed record LlmToolCall(string Id, string Name, string ArgumentsJson) : LlmClientToolCall(Id);
 
 /// <summary>The output of a tool invocation executed by the host application.</summary>
+/// <param name="Output">The tool's output.</param>
+/// <param name="ToolCallId">The id of the tool call this result answers.</param>
 public sealed record LlmToolResult(string ToolCallId, LlmToolOutput Output) : LlmClientToolResult(ToolCallId);
 
 /// <summary>How structured output is enforced for a request.</summary>

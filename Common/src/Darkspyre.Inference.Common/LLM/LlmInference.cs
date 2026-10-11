@@ -162,9 +162,12 @@ public abstract record LlmStreamEvent;
 public sealed record LlmTextDeltaEvent(string Delta) : LlmStreamEvent;
 
 /// <summary>Replaces the previous partial structured object. Only the terminal result is schema-validated.</summary>
+/// <param name="Content">The partial structured object so far.</param>
 public sealed record LlmStructuredOutputSnapshotEvent(JsonElement Content) : LlmStreamEvent;
 
 /// <summary>Provider-exposed reasoning text only; never encrypted or private response-state bytes.</summary>
+/// <param name="Delta">The new reasoning text.</param>
+/// <param name="IsSummary">True when the text is a provider summary of the reasoning, not the reasoning itself.</param>
 public sealed record LlmReasoningDeltaEvent(string Delta, bool IsSummary) : LlmStreamEvent;
 
 /// <summary>A fragment of refusal text from the model.</summary>
@@ -194,6 +197,7 @@ public sealed record LlmToolCallCompletedEvent(LlmToolCall ToolCall) : LlmStream
 /// Running usage for the entire call. Each observation replaces the previous one; never add observations together.
 /// Null fields are unreported. Completion usage is authoritative and can differ from the last observation.
 /// </summary>
+/// <param name="Cumulative">The usage for the whole call so far.</param>
 public sealed record LlmUsageDeltaEvent(LlmUsage Cumulative) : LlmStreamEvent;
 
 /// <summary>The final event of a stream, carrying the whole result.</summary>

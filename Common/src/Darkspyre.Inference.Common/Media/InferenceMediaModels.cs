@@ -26,15 +26,20 @@ public enum InferenceMediaSourceKind
 public abstract record InferenceMediaSource;
 
 /// <summary>Caller-owned input bytes, borrowed and not mutated during an entered request.</summary>
+/// <param name="ContentType">The media type of the bytes, or null when unknown.</param>
+/// <param name="Data">The input bytes.</param>
+/// <param name="FileName">The file name to present with the bytes, or null for none.</param>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record BinaryMediaSource(string? ContentType,
     [property: JsonRequired] ReadOnlyMemory<byte> Data, string? FileName = null) : InferenceMediaSource;
 
 /// <summary>A provider-fetch input, not a request for library-side URL fetching.</summary>
+/// <param name="Url">The address the provider fetches.</param>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record UrlMediaSource([property: JsonRequired] Uri Url) : InferenceMediaSource;
 
 /// <summary>A provider-native file ID. It proves neither portable ownership nor entitlement.</summary>
+/// <param name="FileId">The provider's id for the uploaded file.</param>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ProviderFileReference([property: JsonRequired] string FileId);
 
@@ -49,6 +54,8 @@ public sealed record FileMediaSource([property: JsonRequired] ProviderFileRefere
 public sealed record ResourceMediaSource([property: JsonRequired] InferenceResourceReference Resource) : InferenceMediaSource;
 
 /// <summary>Native receipt scope for selected endpoint, route and account authority; not content ownership.</summary>
+/// <param name="Owner">The absolute endpoint URI that issued the receipt.</param>
+/// <param name="Identity">The connection or transport identity that holds the receipt.</param>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record InferenceResourceScope([property: JsonRequired] string Owner,
     [property: JsonRequired] string Identity);

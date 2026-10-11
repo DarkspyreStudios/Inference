@@ -50,6 +50,10 @@ public sealed record LlmAgentResourceSupport(
 public sealed record LlmAgentResourceUsage(long TotalTokens, int ToolUses, long DurationMs);
 
 /// <summary>Background work inside the runtime's own process. ResourceId is the runtime's opaque identity.</summary>
+/// <param name="ResourceId">The runtime's opaque identity for the resource.</param>
+/// <param name="Kind">The runtime's name for the kind of resource.</param>
+/// <param name="Label">The text that names the resource for display.</param>
+/// <param name="State">The lifecycle state the runtime reports.</param>
 public sealed record LlmAgentResource(string ResourceId, string Kind, string Label, LlmAgentResourceState State)
 {
     /// <summary>When the resource started, or null when the runtime does not report it.</summary>
@@ -98,14 +102,23 @@ public enum LlmAgentResourceChange
 }
 
 /// <summary>A resource was added, changed or ended. Carried on the session feed, outside any turn.</summary>
+/// <param name="Change">What happened to the resource.</param>
+/// <param name="Resource">The resource as reported after the change.</param>
+/// <param name="ThreadId">The thread the event belongs to.</param>
 public sealed record LlmAgentResourceEvent(string ThreadId, LlmAgentResourceChange Change, LlmAgentResource Resource)
     : LlmAgentEvent(ThreadId, null);
 
 /// <summary>New output is readable up to LatestCursor. A hint, not the data.</summary>
+/// <param name="ResourceId">The resource that produced the output.</param>
+/// <param name="LatestCursor">The position up to which output is readable.</param>
+/// <param name="ThreadId">The thread the event belongs to.</param>
 public sealed record LlmAgentResourceOutputEvent(string ThreadId, string ResourceId, string LatestCursor)
     : LlmAgentEvent(ThreadId, null);
 
 /// <summary>Coalescible hint for committed selected-resource membership, not a per-resource feed.</summary>
+/// <param name="ResourceSelectionRevision">The revision of the selected-resource membership after the change.</param>
+/// <param name="ThreadId">The thread the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to, or null outside a turn.</param>
 public sealed record LlmAgentResourceSelectionChangedEvent(string ThreadId, string? TurnId,
     [property: System.Text.Json.Serialization.JsonRequired] long ResourceSelectionRevision) : LlmAgentEvent(HostedEventFacts.Identity(ThreadId), TurnId is null ? null : HostedEventFacts.Identity(TurnId))
 {
@@ -120,6 +133,9 @@ public sealed record LlmAgentResourceSelectionChangedEvent(string ThreadId, stri
 /// The runtime started a turn without host input. ResourceId names the resource whose end or report
 /// immediately preceded it, or is null when the runtime gives no such signal.
 /// </summary>
+/// <param name="ResourceId">The resource whose end or report preceded the turn, or null when the runtime gives no such signal.</param>
+/// <param name="ThreadId">The thread the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to, or null outside a turn.</param>
 public sealed record LlmAgentProviderTurnStartedEvent(string ThreadId, string TurnId, string? ResourceId)
     : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {
@@ -145,6 +161,11 @@ public enum LlmAgentResourceOutputStatus
 /// One nondestructive read. NextCursor continues after Data; EarliestCursor is the oldest retained position.
 /// Closed means no further output will arrive.
 /// </summary>
+/// <param name="Status">The outcome of the read.</param>
+/// <param name="Data">The output bytes read.</param>
+/// <param name="NextCursor">The position after the bytes read, or null when there is none.</param>
+/// <param name="EarliestCursor">The oldest retained position, or null when there is none.</param>
+/// <param name="Closed">True when no further output will arrive.</param>
 public sealed record LlmAgentResourceOutput(
     LlmAgentResourceOutputStatus Status,
     ReadOnlyMemory<byte> Data,

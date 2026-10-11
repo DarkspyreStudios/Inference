@@ -50,6 +50,12 @@ public sealed record LlmContextCacheCreateCorrelation(string OperationId, string
 }
 
 /// <summary>Observed cache facts. Expiry is required provider evidence, not a calculated request lifetime.</summary>
+/// <param name="DisplayName">The display name the provider stores on the cache, or null when it has none.</param>
+/// <param name="CreatedAt">When the provider created the cache, or null when not reported.</param>
+/// <param name="UpdatedAt">When the provider last updated the cache, or null when not reported.</param>
+/// <param name="ExpiresAt">When the provider discards the cache.</param>
+/// <param name="Usage">What the cache holds, or null when not reported.</param>
+/// <param name="Reference">The provider cache identity.</param>
 public sealed record LlmContextCache(
     LlmExplicitCacheReference Reference, string? DisplayName,
     DateTimeOffset? CreatedAt, DateTimeOffset? UpdatedAt,

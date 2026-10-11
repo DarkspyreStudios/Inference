@@ -143,6 +143,11 @@ public sealed record LlmAgentCompactedEvent(string ThreadId, string TurnId, stri
 }
 
 /// <summary>An image the model produced, saved as a session resource.</summary>
+/// <param name="ItemId">The item that produced the image.</param>
+/// <param name="Image">The session resource that holds the image.</param>
+/// <param name="MediaType">The media type of the image.</param>
+/// <param name="ThreadId">The thread the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to, or null outside a turn.</param>
 public sealed record LlmAgentImageOutputEvent(string ThreadId, string TurnId, string ItemId,
     LlmResourceAttachment Image, string MediaType) : LlmAgentEvent(ThreadId, HostedEventFacts.Identity(TurnId))
 {

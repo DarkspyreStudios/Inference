@@ -13,6 +13,11 @@ namespace Darkspyre.Inference.Connect.LLM;
 public sealed record LlmSetupConfiguration(LlmConnection Connection, string ModelId);
 
 /// <summary>The credential mutation is separate from ordinary persisted configuration.</summary>
+/// <param name="Identity">The saved setup entry the changes apply to.</param>
+/// <param name="Configuration">The new configuration.</param>
+/// <param name="Credential">The change to the protected credential.</param>
+/// <param name="RequiresReauthentication">True when the changes require signing in again.</param>
+/// <param name="RequiresRetest">True when the changes require testing the connection again.</param>
 public sealed record LlmSetupChanges(
     SetupConfigurationIdentity Identity, LlmSetupConfiguration Configuration,
     SetupSecretEdit Credential, bool RequiresReauthentication, bool RequiresRetest);

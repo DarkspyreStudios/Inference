@@ -3,6 +3,8 @@ using Darkspyre.Inference.Common.LLM;
 namespace Darkspyre.Inference.Connect.LLM;
 
 /// <summary>One engine the host runs in its own process, as a SelfHost connection names it.</summary>
+/// <param name="Id">The engine id a SelfHost connection stores in its endpoint.</param>
+/// <param name="DisplayName">The engine name shown to the user.</param>
 public sealed record LlmSelfHostEngine(string Id, string DisplayName);
 
 /// <summary>

@@ -27,10 +27,19 @@ public enum TensorEngineState
 /// One lifecycle transition. <see cref="Model"/> and <see cref="Backend"/> name the model and backend
 /// the transition concerns; <see cref="Error"/> is set only for <see cref="TensorEngineState.Failed"/>.
 /// </summary>
+/// <param name="Model">The model the transition concerns, or null when none.</param>
+/// <param name="Backend">The backend the transition concerns, or null when none.</param>
+/// <param name="State">The lifecycle state after the transition.</param>
+/// <param name="At">When the transition happened.</param>
+/// <param name="Error">The failure, set only for a failed state.</param>
 public sealed record TensorEngineStatus(
     TensorModelKey? Model, TensorBackendKind? Backend, TensorEngineState State, DateTimeOffset At, Exception? Error = null);
 
 /// <summary>The instance's resident model, its backend and its latest lifecycle state.</summary>
+/// <param name="Model">The resident model, or null when none is loaded.</param>
+/// <param name="Backend">The backend of the resident model, or null when none is loaded.</param>
+/// <param name="State">The latest lifecycle state.</param>
+/// <param name="ObservedAt">When the state was observed.</param>
 public sealed record TensorModelObservation(
     TensorModelKey? Model, TensorBackendKind? Backend, TensorEngineState State, DateTimeOffset ObservedAt);
 

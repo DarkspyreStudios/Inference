@@ -6,6 +6,9 @@ using Darkspyre.Inference.Common.Resources;
 namespace Darkspyre.Inference.Connect.LLM;
 
 /// <summary>One stable record in model context, distinct from a display transcript.</summary>
+/// <param name="Id">The entry's stable identity.</param>
+/// <param name="TurnId">The turn the entry belongs to.</param>
+/// <param name="Message">The message the entry holds.</param>
 public sealed record LlmAgentContextEntry(string Id, string TurnId, LlmChatMessage Message);
 
 /// <summary>Portable model context. An incomplete final tool group is data, not runnable input.</summary>
@@ -92,6 +95,10 @@ public sealed record LlmAgentContextCaptureOptions
 /// message's attachment list, or within the owning tool output's parts. This metadata is never
 /// substitute model input.
 /// </summary>
+/// <param name="Kind">The category of the omitted bytes.</param>
+/// <param name="FileName">The file name of the omitted attachment.</param>
+/// <param name="Index">The zero-based position of the attachment in its list.</param>
+/// <param name="ToolCallId">The tool result that owns the attachment, or null for a prompt attachment.</param>
 public sealed record LlmOmittedAttachment(
     LlmBinaryKind Kind,
     string FileName,
@@ -190,6 +197,10 @@ public sealed record LlmAgentExecutionOptions
 /// Atomically replaces paused context and resumes the same live logical run without appending
 /// another prompt. Pause IDs are single-use and do not survive session disposal/process death.
 /// </summary>
+/// <param name="TurnId">The paused turn to resume.</param>
+/// <param name="PauseId">The pause the continuation resolves.</param>
+/// <param name="ExpectedContextRevision">The context revision the replacement was built from.</param>
+/// <param name="ReplacementContext">The context that replaces the paused context.</param>
 public sealed record LlmAgentTurnContinuation(
     string TurnId,
     string PauseId,
@@ -220,6 +231,13 @@ public sealed record LlmAgentContextStatusEvent(
 }
 
 /// <summary>Ends this enumeration, not the run. All issued tools have settled before this event.</summary>
+/// <param name="PauseId">The single-use pause a continuation must name.</param>
+/// <param name="Status">The projected context occupancy that caused the pause.</param>
+/// <param name="Reason">Why the turn paused.</param>
+/// <param name="CanCompactHistory">True when compacting the session's history can resolve the pause.</param>
+/// <param name="ProtectedEntryIds">The ids of the context entries compaction must keep unchanged.</param>
+/// <param name="ThreadId">The thread the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to, or null outside a turn.</param>
 public sealed record LlmAgentCompactionRequiredEvent(
     string ThreadId,
     string TurnId,
@@ -255,6 +273,11 @@ public sealed record LlmAgentTurnContinuedEvent(
 /// Usage for one model step and this logical run, including earlier continued segments. Repeated observations for
 /// the same request replace earlier ones. The step's completion supplies its authoritative usage.
 /// </summary>
+/// <param name="RequestId">The model request the usage belongs to.</param>
+/// <param name="Usage">The usage of this model step, or null when not reported.</param>
+/// <param name="RunTotals">The usage of the whole logical run so far, or null when not reported.</param>
+/// <param name="ThreadId">The thread the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to, or null outside a turn.</param>
 public sealed record LlmAgentUsageEvent(
     string ThreadId,
     string TurnId,

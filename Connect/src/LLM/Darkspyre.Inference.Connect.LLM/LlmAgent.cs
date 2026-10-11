@@ -62,6 +62,12 @@ public sealed record LlmAgentTextContent(string Text) : LlmAgentContent;
 public sealed record LlmAgentImageContent(string ImageUrl) : LlmAgentContent;
 
 /// <summary>A dynamic tool invocation sent from the agent to the host.</summary>
+/// <param name="ThreadId">The conversation the call belongs to.</param>
+/// <param name="TurnId">The turn the call belongs to.</param>
+/// <param name="CallId">The identity of the call.</param>
+/// <param name="Namespace">The namespace of the called tool, or null when it has none.</param>
+/// <param name="Name">The name of the called tool.</param>
+/// <param name="Arguments">The call arguments.</param>
 public sealed record LlmAgentToolCall(
     string ThreadId,
     string TurnId,
@@ -353,6 +359,10 @@ public sealed record LlmAgentTextDeltaEvent(
 }
 
 /// <summary>Replaces the previous partial structured object for this item.</summary>
+/// <param name="ItemId">The item the structured output belongs to.</param>
+/// <param name="Content">The partial structured object so far.</param>
+/// <param name="ThreadId">The thread the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to, or null outside a turn.</param>
 public sealed record LlmAgentStructuredOutputSnapshotEvent(
     string ThreadId,
     string TurnId,
@@ -406,6 +416,15 @@ public sealed record LlmAgentMessageCompletedEvent(
 /// null when none was reported. It is an observation only: a tool the runtime owns never reaches a host
 /// handler through this event.
 /// </summary>
+/// <param name="ItemId">The identity of the tool call.</param>
+/// <param name="Namespace">The namespace of the tool, such as its server name, or null when it has none.</param>
+/// <param name="Tool">The name of the tool.</param>
+/// <param name="Arguments">The call arguments.</param>
+/// <param name="Success">True when the call succeeded, false when it failed, or null while it runs.</param>
+/// <param name="Status">The call status the runtime reports, such as <c>inProgress</c>, <c>completed</c> or <c>failed</c>.</param>
+/// <param name="Output">The result the runtime reported for the call, or null when none was reported.</param>
+/// <param name="ThreadId">The thread the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to, or null outside a turn.</param>
 public sealed record LlmAgentToolEvent(
     string ThreadId,
     string TurnId,
@@ -448,6 +467,10 @@ public sealed record LlmAgentResponseRecoveryEvent(
 }
 
 /// <summary>Adapter-owned progress text. It is not assistant transcript content.</summary>
+/// <param name="ItemId">The item the progress belongs to.</param>
+/// <param name="Activity">The progress text.</param>
+/// <param name="ThreadId">The thread the event belongs to.</param>
+/// <param name="TurnId">The turn the event belongs to, or null outside a turn.</param>
 public sealed record LlmAgentActivityEvent(
     string ThreadId,
     string TurnId,

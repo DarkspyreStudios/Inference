@@ -207,6 +207,9 @@ public sealed record SetupChoicePage(
     SetupChoiceState State = SetupChoiceState.Completed, IReadOnlyList<SetupIssue>? Issues = null);
 
 /// <summary>Choice-source behavior, independent of any UI framework or manual-entry permission.</summary>
+/// <param name="SupportsSearch">Whether the source filters options by a search term.</param>
+/// <param name="SupportsPaging">Whether the source returns options in pages.</param>
+/// <param name="SupportsRefresh">Whether the source can reload its options.</param>
 public sealed record SetupChoiceCapabilities(InferenceSupport SupportsSearch = InferenceSupport.Unknown, InferenceSupport SupportsPaging = InferenceSupport.Unknown, InferenceSupport SupportsRefresh = InferenceSupport.Unknown)
 {
     /// <summary>Capabilities of a fixed option list with no search, paging or refresh.</summary>

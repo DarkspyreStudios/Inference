@@ -10,6 +10,10 @@ namespace Darkspyre.Inference.Tensor.Common;
 /// <param name="Backend">The requested execution backend. <see cref="TensorBackendKind.Auto"/> lets the engine choose.</param>
 public sealed record TensorSetupConfiguration(string ImplementationId, TensorModelKey Model, TensorBackendKind Backend);
 /// <summary>The host persists the selected immutable manifest with the configuration and restores its registration on restart.</summary>
+/// <param name="Identity">The saved setup entry the changes apply to.</param>
+/// <param name="Configuration">The new Tensor selection.</param>
+/// <param name="RequiresUnload">True when the changes require unloading the resident model.</param>
+/// <param name="Definition">The manifest of the selected model pack.</param>
 public sealed record TensorSetupChanges(SetupConfigurationIdentity Identity, TensorSetupConfiguration Configuration,
     bool RequiresUnload, TensorModelPackDefinition Definition);
 

@@ -4,6 +4,9 @@ using Darkspyre.Inference.Tensor.Common;
 namespace Darkspyre.Inference.Tensor.STT;
 
 /// <summary>Interleaved floating-point PCM. The caller retains ownership and must not mutate it during a request.</summary>
+/// <param name="Samples">The interleaved PCM samples.</param>
+/// <param name="SampleRate">The sample rate in hertz.</param>
+/// <param name="Channels">The number of interleaved channels.</param>
 public sealed record SpeechAudio(ReadOnlyMemory<float> Samples, int SampleRate, int Channels);
 
 /// <summary>Options for a local speech transcription.</summary>
@@ -18,6 +21,9 @@ public sealed record SpeechToTextOptions(string? Language = null, bool Translate
 public sealed record SpeechTranscriptionRequest(SpeechAudio Audio, SpeechToTextOptions? Options = null, string? ModelId = null);
 
 /// <summary>Timestamps are relative to the beginning of the supplied clip or window.</summary>
+/// <param name="Text">The segment text.</param>
+/// <param name="Start">When the segment starts.</param>
+/// <param name="End">When the segment ends.</param>
 public sealed record SpeechSegment(string Text, TimeSpan Start, TimeSpan End);
 
 /// <summary>The result of transcribing one audio clip or window.</summary>
@@ -34,6 +40,8 @@ public sealed record SpeechTranscriptionResult(string Text, IReadOnlyList<Speech
 public sealed record SpeechAudioWindow(string Id, SpeechAudio Audio);
 
 /// <summary>A completed window, not a partial-token event. Timestamps in Transcription remain window-relative.</summary>
+/// <param name="WindowId">The caller-chosen identifier of the window.</param>
+/// <param name="Transcription">The window's transcript.</param>
 public sealed record SpeechWindowTranscription(string WindowId, SpeechTranscriptionResult Transcription);
 
 /// <summary>The speech-to-text features a model offers.</summary>

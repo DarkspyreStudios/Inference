@@ -14,4 +14,6 @@ public interface ILlmConversationTranscript
 }
 
 /// <summary>One page of transcript entries; NextCursor is null after the newest entry.</summary>
+/// <param name="Entries">The entries on this page, oldest first.</param>
+/// <param name="NextCursor">The cursor that reads the next page, or null after the newest entry.</param>
 public sealed record LlmTranscriptPage(IReadOnlyList<LlmAgentContextEntry> Entries, string? NextCursor);

@@ -13,6 +13,7 @@ namespace Darkspyre.Inference.Common.LLM;
 public abstract record LlmToolOutputPart;
 
 /// <summary>Committed caller-owned content. Resolution requires the current operation's resource access.</summary>
+/// <param name="Resource">The committed caller-owned resource.</param>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record LlmToolOutputSessionResource([property: JsonRequired] InferenceResourceReference Resource) : LlmToolOutputPart;
 
@@ -45,6 +46,7 @@ public sealed record LlmToolOutputBinary(
     string? FileName = null) : LlmToolOutputPart;
 
 /// <summary>A resource reference, with an optional embedded body. Connect never fetches it.</summary>
+/// <param name="Uri">The URI that identifies the resource.</param>
 public sealed record LlmToolOutputResource(string Uri) : LlmToolOutputPart
 {
     /// <summary>A display name for the resource, or null for none.</summary>
