@@ -845,12 +845,16 @@ public sealed class ManagedAgentTests
     public async Task CodexRefusalCompactsAndResendsOnce(LlmTransport transport)
     {
         LlmProviderException TooLong() => new("Your input exceeds the context window of this model.",
-            transport, isContextOverflow: true) { ReportedContextLimit = transport == LlmTransport.OpenAiResponses ? 900 : null };
+            transport, isContextOverflow: true)
+        {
+            ReportedContextLimit = transport == LlmTransport.OpenAiResponses ? 900 : null
+        };
         LlmConnection connection = Harness.Connection with { Transport = transport };
         // The first refusal is compacted and the step sent again; the Host never sees it.
         var recovered = new Harness
         {
-            RequestFailure = request => request == 1 ? TooLong() : null, SummaryText = "summary of turn one",
+            RequestFailure = request => request == 1 ? TooLong() : null,
+            SummaryText = "summary of turn one",
             SessionConnection = connection
         };
         recovered.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "answer", Status = LlmCompletionStatus.Completed });
