@@ -300,7 +300,13 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
                     {
                         continue;
                     }
-                    if (!model.TryGetProperty("context_window", out JsonElement limit) || limit.ValueKind == JsonValueKind.Null)
+                    // A model that allows experimental context takes its catalog maximum; the live limit test confirmed
+                    // Codex accepts requests that large.
+                    bool experimental = model.TryGetProperty("supports_experimental_context", out JsonElement flag)
+                        && flag.ValueKind == JsonValueKind.True;
+                    JsonElement limit = default;
+                    if ((!experimental || !model.TryGetProperty("max_context_window", out limit) || limit.ValueKind != JsonValueKind.Number)
+                        && (!model.TryGetProperty("context_window", out limit) || limit.ValueKind == JsonValueKind.Null))
                     {
                         model.TryGetProperty("max_context_window", out limit);
                     }

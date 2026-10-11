@@ -184,6 +184,23 @@ public sealed class DirectCodexTests
         """;
 
     [Fact]
+    public async Task ExperimentalContextModelsTakeTheCatalogMaximum()
+    {
+        using var handler = new Handler(_ => Json("""
+            {"models":[
+                {"slug":"wide","context_window":272000,"max_context_window":872000,"supports_experimental_context":true},
+                {"slug":"plain","context_window":272000,"max_context_window":872000,"supports_experimental_context":false}
+            ]}
+            """));
+        var client = new OpenAiCodexLlmClient(new HttpClient(handler));
+
+        IReadOnlyList<LlmModel> models = await client.ListModelsAsync(Connection());
+
+        Assert.Equal(872000, Assert.Single(models, model => model.Id == "wide").MaxContextTokens);
+        Assert.Equal(272000, Assert.Single(models, model => model.Id == "plain").MaxContextTokens);
+    }
+
+    [Fact]
     public async Task ReportedTokensTravelWithTheStateAndCountTheEncryptedHistory()
     {
         using var handler = new Handler(request => request.Method == HttpMethod.Get

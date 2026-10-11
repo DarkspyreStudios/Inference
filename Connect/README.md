@@ -4096,8 +4096,9 @@ Its `User-Agent`, `version` header and catalog `client_version` use that same ve
 generation and account usage. Additional `version` and `User-Agent` headers are reserved on this
 transport; other custom headers retain their existing policy. The reviewed upstream baseline is
 [`rust-v0.159.3`](https://github.com/openai/codex/releases/tag/rust-v0.159.3), source commit
-`01fc69f4026735edfdf6789820549727a4867b11`. Catalog limits use `context_window`, falling back to
-`max_context_window` only when the former is absent or null. Positive reported limits are physical
+`01fc69f4026735edfdf6789820549727a4867b11`. A model with `supports_experimental_context` uses its
+`max_context_window`. Other catalog limits use `context_window`, falling back to `max_context_window` only when the
+former is absent or null. Positive reported limits are physical
 context limits, not an invented usable-context or compaction budget. Unknown limits remain null.
 Matching the version does not establish full CLI tooling or endpoint parity.
 The focused direct-Codex regression verifies the same pin on catalog, generation and account-usage
