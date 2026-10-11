@@ -20,6 +20,7 @@ public sealed class TensorModelLifetime : IDisposable
     private TensorBackendKind? _backend;
     private TensorModelObservation _observation = new(null, null, TensorEngineState.Unloaded, DateTimeOffset.UtcNow);
 
+    /// <summary>Creates a lifetime with no resident model, in the Unloaded state.</summary>
     /// <param name="owner">The engine instance, passed as the sender of <see cref="EngineStatusChanged"/>.</param>
     public TensorModelLifetime(object owner)
     {

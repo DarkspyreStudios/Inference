@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Components.Web
 @typeparam T where T : struct, INumber<T>, IMinMaxValue<T>
 
+@* A numeric text box with decrease and increase buttons that parses typed text exactly and reports each edit with its value or error. *@
 @* Layout/accessibility adapted from Lumeo 5.9.1 NumberInput; see THIRD-PARTY-NOTICES.md.
    Parsing and stepping are owned here: never narrow long/decimal through double or coerce typed input. *@
 <div data-slot="number-input" class="flex w-full items-center">
@@ -20,14 +21,23 @@
 @code {
     [CascadingParameter] private FormField.FormFieldContext? FormField { get; set; }
     [CascadingParameter] private Density? InheritedDensity { get; set; }
+    /// <summary>The text shown in the box, as last typed or stepped.</summary>
     [Parameter] public string Text { get; set; } = string.Empty;
+    /// <summary>The lowest accepted value, or null for the type's minimum.</summary>
     [Parameter] public T? Minimum { get; set; }
+    /// <summary>The highest accepted value, or null for the type's maximum.</summary>
     [Parameter] public T? Maximum { get; set; }
+    /// <summary>The positive amount the buttons and arrow keys add or subtract.</summary>
     [Parameter] public T Step { get; set; } = T.One;
+    /// <summary>True reports an empty box as an error.</summary>
     [Parameter] public bool Required { get; set; }
+    /// <summary>True disables the box and both buttons and ignores input.</summary>
     [Parameter] public bool Disabled { get; set; }
+    /// <summary>True draws the box and buttons with the error border.</summary>
     [Parameter] public bool Invalid { get; set; }
+    /// <summary>The accessible name of the box, also used in the buttons' labels.</summary>
     [Parameter] public string Label { get; set; } = string.Empty;
+    /// <summary>Raised on each input or step with the text, its parsed value and any error.</summary>
     [Parameter] public EventCallback<SetupNumberEdit<T>> Edited { get; set; }
 
     private string Height => InheritedDensity switch { Density.Compact => "h-7", Density.Spacious => "h-9", _ => "h-[var(--lumeo-control-h,calc(var(--spacing,0.25rem)*8))]" };

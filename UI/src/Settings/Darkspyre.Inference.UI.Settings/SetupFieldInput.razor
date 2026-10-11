@@ -1,6 +1,7 @@
 @using Darkspyre.Inference.Common
 @implements IDisposable
 
+@* Renders one setup field with the input that fits its kind, applies each edit to the settings and shows the field's first error. *@
 @if (Field.Description.IsVisible)
 {
     @if (Field is SetupRepeatableGroupField group)
@@ -135,15 +136,23 @@
 }
 
 @code {
+    /// <summary>The setup field this input shows and edits.</summary>
     [Parameter, EditorRequired] public SetupField Field { get; set; } = default!;
+    /// <summary>The host that authorizes choice loading and, when it picks paths, shows a Browse button.</summary>
     [Parameter, EditorRequired] public IInferenceSettingsInteractionHost Host { get; set; } = default!;
+    /// <summary>The provider settings the field belongs to.</summary>
     [Parameter, EditorRequired] public InferenceSettings Settings { get; set; } = default!;
+    /// <summary>The manager that loads the field's choices.</summary>
     [Parameter, EditorRequired] public IInferenceSettingsManager Manager { get; set; } = default!;
     /// <summary>The page's count of local edits. A choice result requested at an earlier count is dropped.</summary>
     [Parameter] public long EditVersion { get; set; }
+    /// <summary>The editor's issues; the first error naming this field is shown under it.</summary>
     [Parameter] public IReadOnlyList<SetupIssue> Issues { get; set; } = [];
+    /// <summary>Raised with the result after each edit is applied to the field.</summary>
     [Parameter] public EventCallback<SetupEditResult> Edited { get; set; }
+    /// <summary>True makes the field read only, as while the editor saves or runs an action.</summary>
     [Parameter] public bool Disabled { get; set; }
+    /// <summary>True masks a text field's input and keeps the typed text when parameters are set again.</summary>
     [Parameter] public bool SensitiveInput { get; set; }
     [CascadingParameter] private SetupEditorInputState? EditorInputs { get; set; }
 

@@ -2,6 +2,7 @@
 @using Microsoft.JSInterop
 @inject IJSRuntime JS
 
+@* Walks a person through an inference provider's setup steps, fields, sign-in, actions and save, and shows its status and issues. *@
 <CascadingValue Value="_inputs" IsFixed="true">
 <section class="inference-settings-editor" aria-label="@($"{Settings.Definition.Implementation.DisplayName} settings")">
     @if (ShowHeading)
@@ -153,18 +154,25 @@
 </CascadingValue>
 
 @code {
+    /// <summary>The provider settings being edited, with their steps, fields, status and actions.</summary>
     [Parameter, EditorRequired] public InferenceSettings Settings { get; set; } = default!;
+    /// <summary>The manager that validates and saves the settings and refreshes a running engine's status.</summary>
     [Parameter, EditorRequired] public IInferenceSettingsManager Manager { get; set; } = default!;
+    /// <summary>The host that authorizes and runs provider actions and opens authorization pages in a browser.</summary>
     [Parameter, EditorRequired] public IInferenceSettingsInteractionHost Host { get; set; } = default!;
+    /// <summary>True shows a Save button on the last step; false leaves saving to the host through <see cref="SaveAsync"/>.</summary>
     [Parameter] public bool ShowSaveButton { get; set; } = true;
     /// <summary>False when the host already shows the provider's name and description in its own frame.</summary>
     [Parameter] public bool ShowHeading { get; set; } = true;
     /// <summary>False when the host treats the person's click as consent, so declared side effects need no label.</summary>
     [Parameter] public bool ShowActionEffects { get; set; } = true;
+    /// <summary>Host content shown below the heading and above the status line.</summary>
     [Parameter] public RenderFragment? IntroContent { get; set; }
+    /// <summary>Host content shown below the current step and above the issue list.</summary>
     [Parameter] public RenderFragment? SupplementaryContent { get; set; }
     /// <summary>Raised after Save. A Committed result means the host closes the dialog.</summary>
     [Parameter] public EventCallback<SetupCommitResult> CommitCompleted { get; set; }
+    /// <summary>Raised each time the editor's unsaved, pending, error or can-save state changes.</summary>
     [Parameter] public EventCallback<SetupEditorState> StateChanged { get; set; }
 
     private InferenceSettings? _shown;
@@ -187,6 +195,7 @@
     private bool _disposed;
     private bool Busy => _running || _saving || Settings.IsSaved;
 
+    /// <summary>The editor's current unsaved, pending input, error, can-save and uncertain-save state.</summary>
     public SetupEditorState State => new(Settings.HasUnsavedChanges || _inputs.HasPendingInput || Settings.SaveOutcomeUncertain,
         _inputs.HasPendingInput, _inputs.Issues.Any(issue => issue.Severity == SetupIssueSeverity.Error),
         !Busy && !_inputs.HasPendingInput && Settings.CanSave

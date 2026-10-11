@@ -116,6 +116,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
     private readonly ConcurrentDictionary<TensorModelKey, int> _activeLeases = new();
     private bool _disposed;
 
+    /// <summary>Creates a manager over the catalog, the pack directory and a download client.</summary>
     /// <param name="catalog">The shared definition catalog.</param>
     /// <param name="packDirectory">
     /// The local directory that holds installed packs. Null selects

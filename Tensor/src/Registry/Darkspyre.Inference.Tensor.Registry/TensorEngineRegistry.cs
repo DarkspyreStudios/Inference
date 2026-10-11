@@ -15,6 +15,7 @@ public sealed class TensorEngineRegistry
     private readonly FrozenDictionary<string, ITensorEngineProvider> _providers;
     private readonly FrozenDictionary<InferenceTask, IReadOnlyList<TensorEngineDefinition>> _byTask;
 
+    /// <summary>Validates the registered providers and builds the lookup by implementation ID and by task.</summary>
     /// <exception cref="ArgumentException">
     /// A provider or its definition is missing, two providers share an implementation ID, or two store
     /// keys are equal ignoring case.

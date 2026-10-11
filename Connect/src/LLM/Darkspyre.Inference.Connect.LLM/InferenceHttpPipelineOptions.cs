@@ -98,11 +98,11 @@ public sealed class InferenceHttpLoggingBuilder
 /// <summary>Refuses transfer of the two HTTP runtime configuration types while preserving null values.</summary>
 public sealed class InferenceHttpConfigurationJsonConverterFactory : JsonConverterFactory
 {
-    /// <inheritdoc />
+    /// <summary>Returns true for <see cref="InferenceHttpPipelineOptions"/> and <see cref="InferenceHttpLoggingBuilder"/> only.</summary>
     public override bool CanConvert(Type typeToConvert) =>
         typeToConvert == typeof(InferenceHttpPipelineOptions) || typeToConvert == typeof(InferenceHttpLoggingBuilder);
 
-    /// <inheritdoc />
+    /// <summary>Returns a converter that reads and writes null and refuses any other value of the requested type.</summary>
     public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
     {
         if (typeToConvert == typeof(InferenceHttpPipelineOptions)) return new RuntimeRefusalConverter<InferenceHttpPipelineOptions>();

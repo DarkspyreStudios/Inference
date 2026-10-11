@@ -17,6 +17,7 @@ public sealed class TensorEngineDefinition
         "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
     ];
 
+    /// <summary>Validates the setup definition and store key and snapshots the prerequisite list.</summary>
     /// <param name="setup">The engine's existing setup definition. It must describe a Tensor implementation.</param>
     /// <param name="modelStoreKey">
     /// A stable single path segment of at most 64 characters: ASCII letters, digits, '-', '_' and '.',
