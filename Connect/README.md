@@ -2,14 +2,15 @@
 
 ## Phase-1 build
 
-This build compiles two LLM providers: the native Codex client (`OpenAiCodexLlmClient` and
-`ManagedCodexAgentClient`) and the Claude CLI (`ClaudeCliLlmClient` and `ClaudeAgentClient`).
-`AddLlmConnect` registers only these clients, their authenticators, the Claude and ChatGPT subscription
-setup definitions and `OpenAiEmbeddingClient`. Setup offers only the Claude and ChatGPT subscription providers.
+This build compiles three LLM providers: the native Codex client (`OpenAiCodexLlmClient`), the OpenAI API
+(`OpenAiResponsesLlmClient`), both opened by `ManagedResponsesAgentClient`, and the Claude CLI
+(`ClaudeCliLlmClient` and `ClaudeAgentClient`). `AddLlmConnect` registers only these clients, their
+authenticators, the Claude subscription, ChatGPT subscription and OpenAI API Key setup definitions and
+`OpenAiEmbeddingClient`. Setup offers only those three providers.
 
 Every other LLM provider is out of the build. `Darkspyre.Inference.Connect.LLM.csproj` excludes the
-Anthropic API, Antigravity, Apple, OpenAI-compatible chat, Gemini API, OpenAI Responses API, SelfHost and
-xAI files with `Compile Remove`. The Image project excludes the xAI image transport and the TTS project
+Anthropic API, Antigravity, Apple, OpenAI-compatible chat, Gemini API, SelfHost and xAI files with
+`Compile Remove`. The Image project excludes the xAI image transport and the TTS project
 excludes the xAI speech transport. The Bedrock, Vertex, Azure, STT, Realtime, Video, Resources and examples
 projects are out of the solution, the `Darkspyre.Inference.Connect` package and the source references in
 `eng/SourceReferences.targets`. The Tensor ConsoleTester is out of the Tensor solution because it uses the
@@ -102,7 +103,8 @@ not implement; context capture, replacement or compaction handoff where unsuppor
 it; and an opening on a model that marks agent sessions or agent tool use Unsupported
 (`The selected model does not support agent sessions.` or `... agent tool use.`).
 
-**Tools.** A session's tool names are logical names, unique within the session. Codex sends a name that matches
+**Tools.** A session's tool names are logical names, unique within the session. Codex and the OpenAI API send a
+name that matches
 `^[a-zA-Z0-9_-]{1,64}$` unchanged and any other name as its alias: `t_` followed by the first 40 lowercase hex
 characters of SHA-256 over the UTF-8 name. The alias applies to the tool list, a Specific tool choice and the calls in
 history, and returned calls carry the logical name again. Continuation state that stored a call under its alias still
@@ -151,26 +153,46 @@ state the selected model, provider and account cannot replay is left out and cou
 provider or connection continues, including one whose connection was removed. `ResumeSessionAsync` keeps its
 signature and refuses on both transports.
 
-**Feature list.** `LlmAgentCapabilities` reports public features only. Phase-1 values:
+**Feature list.** `LlmAgentCapabilities` reports public features only. Values:
 
-| Member | Codex | Claude |
-| --- | --- | --- |
-| HostedTools | ImageGeneration | none |
-| SupportsShellTools | Unsupported | Unsupported |
-| SupportsContextCapture, SupportsContextReplacement | Supported | Unsupported |
-| SupportsContextStatus | Supported | Supported |
-| SupportsCompactionHandoff | Unsupported | Unsupported |
-| SupportsNativeResume | Unsupported | Unsupported |
-| SupportsSteering | Supported | Unsupported |
-| SupportsInterrupt | Supported | Supported |
-| SupportsExternalToolHandoff | Supported | Unknown |
-| ResourceObservation | Unsupported | Supported |
-| SupportsFallbackModels | Unsupported | Unknown |
-| SupportsTurnCap | Supported | Unknown |
-| SupportsSpendCap | Unsupported | Unknown |
-| SupportsCompactNow | Supported | Supported |
+| Member | Codex | OpenAI API | Claude |
+| --- | --- | --- | --- |
+| HostedTools | ImageGeneration | ImageGeneration | none |
+| SupportsShellTools | Unsupported | Unsupported | Unsupported |
+| SupportsContextCapture, SupportsContextReplacement | Supported | Supported | Unsupported |
+| SupportsContextStatus | Supported | Supported | Supported |
+| SupportsCompactionHandoff | Unsupported | Unsupported | Unsupported |
+| SupportsNativeResume | Unsupported | Unsupported | Unsupported |
+| SupportsSteering | Supported | Supported | Unsupported |
+| SupportsInterrupt | Supported | Supported | Supported |
+| SupportsExternalToolHandoff | Supported | Supported | Unknown |
+| ResourceObservation | Unsupported | Unsupported | Supported |
+| SupportsFallbackModels | Unsupported | Unsupported | Unknown |
+| SupportsTurnCap | Supported | Supported | Unknown |
+| SupportsSpendCap | Unsupported | Unsupported | Unknown |
+| SupportsCompactNow | Supported | Supported | Supported |
 
-**Images out on Codex.** An `LlmImageGenerationTool` in `HostedTools` lets Codex generate images, and the session
+**The OpenAI API and its endpoint.** An OpenAI API connection has an endpoint, `https://api.openai.com/v1` by
+default, and may point at any service that serves the same API, such as a local llama.cpp server or OpenRouter. The
+API key is optional: the connection saves without one, counts as authenticated, and sends `Authorization` only when
+a key is set. Requests send `store: false` and the whole history every time. The model feature list depends on the
+endpoint's host. On `api.openai.com` it comes from the built-in model profiles (`OpenAiModelProfiles`): reasoning
+levels, temperature and top-p, prompt-cache options, and the published context window and output limit. On any other
+host the profiles are not read, so a local model named like an OpenAI model gets no OpenAI facts: every service
+feature is Unknown, the reasoning level set is empty, and the prompt cache reports Unknown. Both list the image tool.
+The listing is the service's own `/models`; on OpenAI's endpoint a model with no listed window takes its published
+window and output limit, and elsewhere the listed values are used as they are.
+
+**Settings a model or service does not accept.** No setting refuses a turn. On OpenAI's endpoint a reasoning model
+that accepts temperature only at reasoning None loses temperature and top-p at any other level, and when the request
+names no level; a model with no reasoning gets no `reasoning` object. Elsewhere, and for a model with no profile, the
+value is sent. When the service answers HTTP 400 with OpenAI's `unsupported_parameter` or `unsupported_value` code
+naming `temperature` or a `reasoning` parameter, or with a message that says unsupported or not supported and names
+temperature or reasoning, the session records the value for that connection id and model, sends the step once more
+without it, and leaves it out of later requests on that connection and model. A refusal that names nothing new ends
+the turn with the provider's message. What refusals taught lives in memory for the process.
+
+**Images out.** An `LlmImageGenerationTool` in `HostedTools` lets Codex and the OpenAI API generate images, and the session
 commits each finished image through `CallerServices.Resources` and reports it as an `LlmAgentImageOutputEvent`.
 A session that asks for images opens and runs on any model: the opening and each step drop the image tool when the
 model's `HostedTools` lacks `ImageGeneration`, so Claude opens with it and runs without it. Every other hosted tool a
@@ -178,7 +200,7 @@ model lacks is still refused. The managed session also drops the image tool with
 adopts the caller's current resource selection in place of the stored context's, or clears it without access, so a
 context whose selection came from an earlier run opens without a refusal; a message reference the access cannot
 resolve still refuses. A committed image joins the selection, and a Responses request is prepared without the
-selection, so the image is not sent again as an attachment: the next Codex turn replays it from the
+selection, so the image is not sent again as an attachment: the next Codex or OpenAI API turn replays it from the
 `image_generation_call` item in continuation state.
 
 **Fallback models, caps and retries.** Codex refuses a non-empty `FallbackModelIds` and a `MaxSpendUsd` greater
@@ -202,6 +224,8 @@ the turn's latest assistant message or message start.
 
 **Context limits.** One rule sets every request's limits (`CompactionLimits.For`). The window is the smallest
 known value of the listed model window, a learned limit when one is known and `LlmAgentContextPolicy.MaxContextTokens`.
+A context length set on the connection for a model (`ModelCapabilityOverrides[model].MaxContextTokens`) is that
+model's limit: the OpenAI API listing gives the model that window, and no learned limit applies to it.
 The reserve is `ReservedOutputTokens`, else the model's output limit, else 8,000. The usable window is the window
 minus the reserve. `NeedsCompaction` is true when the request measures at or above 85% of the usable window, and the
 compaction target is `CompactionTargetRatio` (clamped to 0.05-0.80) of it. `LlmRequestAccounting.MaxContextTokens`,
@@ -209,12 +233,12 @@ compaction target is `CompactionTargetRatio` (clamped to 0.05-0.80) of it. `LlmR
 options never refuse: a non-positive iteration or tool-concurrency limit uses the record default, a non-positive
 reserve or cap is ignored, and a cap above the model limit uses the model limit.
 
-**Compaction on Codex.** Every conversation reports `CompactionResponsibility = Provider`: Codex compacts inside
-Inference and never pauses for the host, and its `ContinueTurnAsync` refuses because `SupportsCompactionHandoff` is
+**Compaction on Codex and the OpenAI API.** Every conversation reports `CompactionResponsibility = Provider`: both compact inside
+Inference and never pause for the host, and their `ContinueTurnAsync` refuses because `SupportsCompactionHandoff` is
 Unsupported. Codex's own compaction is never requested. Before every model step the session measures the request and
 emits `LlmAgentContextStatusEvent`. A local estimate that does not rest on a provider-reported count is corrected
-with the rate the model's reported counts taught; the rate and any learned limit are kept per transport and model for
-the process and never stored. At or above the trigger the session compacts toward the target: it cuts each
+with the rate the model's reported counts taught; the rate and any learned limit are kept per connection id and model
+for the process and never stored, so a limit learned on one service never applies to another connection. At or above the trigger the session compacts toward the target: it cuts each
 unprotected tool-result text part and structured content to its first and last 1,000 characters, sending cut structured
 content as text, and replaces binary parts with a notice,
 then keeps the current turn and the newest whole turns that fit in the room under the target that a 3,000-word
@@ -233,7 +257,10 @@ context emits `LlmAgentCompactedEvent` with the dropped-entry, shortened-output 
 {usable}-token usable window. The current turn alone measures {mandatory} tokens.` A failed summary request ends the
 turn with the provider's message after the usage it reported; the context is unchanged.
 
-A too-long refusal teaches the model's size, compacts whatever the measure says and sends the same step again once; a
+A too-long refusal teaches the model's size, compacts whatever the measure says and sends the same step again once; on
+the OpenAI API the refusal is OpenAI's `context_length_exceeded` code, the llama.cpp server's
+`exceed_context_size_error` type, whose `n_prompt_tokens` and `n_ctx` are learned as the request's size and the
+limit, or a message naming the context length. A
 second refusal in the turn ends it with `ProviderFailure` and the provider's message. With
 `PreserveSuppliedContext` the session measures and reports but never compacts or resends. An opened history whose
 entry held only continuation state the import left out, such as a native compaction from another connection or model,
