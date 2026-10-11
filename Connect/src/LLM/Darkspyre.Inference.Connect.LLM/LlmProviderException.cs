@@ -56,4 +56,13 @@ public sealed class LlmProviderException : Exception
 
     /// <summary>Usage the provider reported for the failed response, when it reported any.</summary>
     public Darkspyre.Inference.Common.LLM.LlmUsage? Usage { get; init; }
+
+    /// <summary>The input tokens a too-long refusal reported, when it reported them.</summary>
+    internal long? ReportedInputTokens { get; init; }
+
+    /// <summary>The context limit a too-long refusal reported, when it reported it.</summary>
+    internal long? ReportedContextLimit { get; init; }
+
+    /// <summary>The request values an "unsupported" refusal named.</summary>
+    internal Internal.LlmRefusedSettings RefusedSettings { get; init; }
 }

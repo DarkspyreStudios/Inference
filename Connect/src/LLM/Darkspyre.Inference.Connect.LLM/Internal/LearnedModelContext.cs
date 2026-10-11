@@ -1,11 +1,8 @@
-using Darkspyre.Inference.Common.LLM;
-
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 /// <summary>
-/// What reported counts and too-long refusals taught about each model: the rate that corrects a local estimate, and
-/// a context limit. One instance serves the process, keyed by transport and model, because a model's limit and token
-/// rate do not depend on which connection sends it. Nothing is stored.
+/// What reported counts and too-long refusals taught about each model on each connection. A local server's limit is
+/// its own setting, so nothing learned on one connection applies to another. Nothing is stored.
 /// </summary>
 internal sealed class LearnedModelContext
 {
@@ -14,22 +11,22 @@ internal sealed class LearnedModelContext
     private const double MinimumReportShare = 0.25;
 
     private readonly Lock _sync = new();
-    private readonly Dictionary<(LlmTransport Transport, string ModelId), Facts> _facts = [];
+    private readonly Dictionary<(string ConnectionId, string ModelId), Facts> _facts = [];
 
     /// <summary>A step's full local estimate and the input tokens the provider reported for it.</summary>
-    internal void ObserveReport(LlmTransport transport, string modelId, long estimated, long reported, long usableWindow)
+    internal void ObserveReport(string connectionId, string modelId, long estimated, long reported, long usableWindow)
     {
         if (estimated <= 0 || reported <= 0 || estimated < MinimumReportShare * usableWindow) return;
-        lock (_sync) { For(transport, modelId).Pair = (estimated, reported); }
+        lock (_sync) { For(connectionId, modelId).Pair = (estimated, reported); }
     }
 
     /// <summary>A too-long refusal. Reported values come from the refusal text when present.</summary>
-    internal void ObserveRefusal(LlmTransport transport, string modelId, long estimated, long? reportedTokens,
+    internal void ObserveRefusal(string connectionId, string modelId, long estimated, long? reportedTokens,
         long? reportedLimit, long? knownLimit)
     {
         lock (_sync)
         {
-            Facts facts = For(transport, modelId);
+            Facts facts = For(connectionId, modelId);
             if (estimated > 0)
             {
                 if (reportedTokens is > 0)
@@ -50,20 +47,32 @@ internal sealed class LearnedModelContext
     }
 
     /// <summary>The estimate times the learned rate; the estimate unchanged when nothing was learned.</summary>
-    internal long Correct(LlmTransport transport, string modelId, long estimated)
+    internal long Correct(string connectionId, string modelId, long estimated)
     {
-        lock (_sync) { return _facts.TryGetValue((transport, modelId), out Facts? facts) ? Correct(facts, estimated) : estimated; }
+        lock (_sync) { return _facts.TryGetValue((connectionId, modelId), out Facts? facts) ? Correct(facts, estimated) : estimated; }
     }
 
     /// <summary>The limit a refusal taught, or null.</summary>
-    internal long? Limit(LlmTransport transport, string modelId)
+    internal long? Limit(string connectionId, string modelId)
     {
-        lock (_sync) { return _facts.TryGetValue((transport, modelId), out Facts? facts) ? facts.Limit : null; }
+        lock (_sync) { return _facts.TryGetValue((connectionId, modelId), out Facts? facts) ? facts.Limit : null; }
     }
 
-    private Facts For(LlmTransport transport, string modelId)
+    /// <summary>Adds the values an "unsupported" refusal named; later requests on the connection and model leave them out.</summary>
+    internal void ObserveRefusedSettings(string connectionId, string modelId, LlmRefusedSettings settings)
     {
-        if (!_facts.TryGetValue((transport, modelId), out Facts? facts)) _facts[(transport, modelId)] = facts = new();
+        lock (_sync) { For(connectionId, modelId).Refused |= settings; }
+    }
+
+    /// <summary>The values refusals named for the connection and model.</summary>
+    internal LlmRefusedSettings RefusedSettings(string connectionId, string modelId)
+    {
+        lock (_sync) { return _facts.TryGetValue((connectionId, modelId), out Facts? facts) ? facts.Refused : LlmRefusedSettings.None; }
+    }
+
+    private Facts For(string connectionId, string modelId)
+    {
+        if (!_facts.TryGetValue((connectionId, modelId), out Facts? facts)) _facts[(connectionId, modelId)] = facts = new();
         return facts;
     }
 
@@ -76,5 +85,6 @@ internal sealed class LearnedModelContext
     {
         internal (long Estimated, long Reported)? Pair { get; set; }
         internal long? Limit { get; set; }
+        internal LlmRefusedSettings Refused { get; set; }
     }
 }

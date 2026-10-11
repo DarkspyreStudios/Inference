@@ -84,7 +84,7 @@ internal static class ProviderDefinitions
     {
         Id = "openai-api-key",
         DisplayName = "OpenAI API Key",
-        Description = "Connect directly to the OpenAI API with usage billed to an OpenAI platform account.",
+        Description = "Connect to the OpenAI API, or to another service that serves the same API at its own endpoint.",
         Transport = LlmTransport.OpenAiResponses,
         DefaultEndpoint = "https://api.openai.com/v1",
         DisplayOrder = 10,
@@ -93,10 +93,10 @@ internal static class ProviderDefinitions
             new SetupStep
             {
                 Id = "enter-api-key",
-                Title = "Enter an OpenAI API key",
-                Instructions = "Create or copy an API key from your OpenAI platform account, then paste it here. API usage is billed separately from a ChatGPT subscription.",
-                CompletionRequirement = "The API key must authenticate successfully and allow the model list to be loaded.",
-                Troubleshooting = "Confirm the key belongs to an active OpenAI platform project with API billing enabled. A ChatGPT subscription alone is not an API key."
+                Title = "Enter an API key",
+                Instructions = "Paste an API key for the endpoint. An OpenAI API key comes from your OpenAI platform account and is billed separately from a ChatGPT subscription. Leave it blank for a service that takes no key, such as a local model server.",
+                CompletionRequirement = "The model list loads from the endpoint.",
+                Troubleshooting = "Check the endpoint and the key. A ChatGPT subscription alone is not an OpenAI API key."
             },
             SelectModel,
             TestConnection

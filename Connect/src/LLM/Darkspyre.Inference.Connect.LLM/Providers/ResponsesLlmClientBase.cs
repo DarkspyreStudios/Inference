@@ -20,7 +20,6 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
-        ValidateModelSampling(connection, request);
         var enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
         // Attachments, binary tool parts and caller-owned resources are counted by AttachmentTokens and the resolved
         // descriptors; the tokenized projection leaves them out. Accounting never reads or uploads resource content.
@@ -87,8 +86,47 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         return tokens;
     }
 
-    public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
-        CancellationToken cancellationToken = default) => StreamCoreAsync(connection, request, cancellationToken);
+    /// <summary>Sends the request under native tool names and reports the calls under their logical names.</summary>
+    public override async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        LlmToolNames names = ToolNames(request);
+        LlmToolCall Logical(LlmToolCall call) => call with { Name = names.Logical(call.Name) ?? call.Name };
+        await foreach (LlmStreamEvent item in StreamCoreAsync(connection, request, cancellationToken).ConfigureAwait(false))
+        {
+            yield return item switch
+            {
+                LlmToolCallStartedEvent started => started with { Name = names.Logical(started.Name) ?? started.Name },
+                LlmToolCallCompletedEvent completed => completed with { ToolCall = Logical(completed.ToolCall) },
+                LlmChatCompletionEvent completion => completion with
+                {
+                    Result = completion.Result with
+                    {
+                        ToolCalls = [.. completion.Result.ToolCalls.Select(call => call is LlmToolCall function ? Logical(function) : call)]
+                    }
+                },
+                _ => item
+            };
+        }
+    }
+
+    /// <summary>The request's tool names under the OpenAI function-name rule.</summary>
+    private static LlmToolNames ToolNames(LlmChatRequest request) =>
+        LlmToolNames.Create(request.Tools.OfType<LlmToolDefinition>().Select(tool => tool.Name), IsValidFunctionName);
+
+    private static bool IsValidFunctionName(string name) =>
+        name.Length is > 0 and <= 64 && name.All(character => char.IsAsciiLetterOrDigit(character) || character is '_' or '-');
+
+    /// <summary>The managed agent abilities of every Responses client (DSA-919 5.9 Codex column).</summary>
+    protected static LlmAgentCapabilities ManagedAbilities { get; } = ManagedAgentPolicy.Capabilities with
+    {
+        SupportsShellTools = InferenceSupport.Unsupported,
+        SupportsNativeResume = InferenceSupport.Unsupported,
+        SupportsExternalToolHandoff = InferenceSupport.Supported,
+        SupportsFallbackModels = InferenceSupport.Unsupported,
+        SupportsTurnCap = InferenceSupport.Supported,
+        SupportsSpendCap = InferenceSupport.Unsupported
+    };
 
     private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(LlmConnection connection, LlmChatRequest request,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
@@ -100,7 +138,6 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         request = ClientTools.Snapshot(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         ValidateRequest(connection, request, capabilities);
-        ValidateModelSampling(connection, request);
         LlmStructuredOutputEnforcement? enforcement = ResolveStructuredOutputEnforcement(connection, request, capabilities);
         bool resourceAdmitted = request.Resources is not null;
 
@@ -279,7 +316,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         var text = new StringBuilder();
         var refusal = new StringBuilder();
         var toolCallStream = new OpenAiToolCallStream();
-        ResponsesHostedToolObserver? hosted = CreateHostedToolObserver(() =>
+        ResponsesHostedToolObserver hosted = CreateHostedToolObserver(() =>
             ProtocolException($"{ResponseName} returned a malformed hosted-tool observation.", response, string.Empty, credential,
                 extraSecrets: secrets));
         var completedOutput = new SortedDictionary<int, JsonElement>();
@@ -315,8 +352,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 if (LlmJson.GetObject(root, "response") is { } modelResponse)
                     observedModel = ObservedModel.Read(modelResponse, "model", Transport, connection,
                         credential, response.RequestMessage, observedModel, secrets);
-                if (hosted is not null)
-                    foreach (LlmStreamEvent observed in hosted.Observe(root)) yield return consumption.Publish(observed);
+                foreach (LlmStreamEvent observed in hosted.Observe(root)) yield return consumption.Publish(observed);
                 switch (type)
                 {
                     case "response.text.delta":
@@ -406,12 +442,9 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                                 yield return consumption.Publish<LlmStreamEvent>(toolEvent);
                             }
 
-                            if (hosted is not null)
-                            {
-                                foreach (LlmStreamEvent toolEvent in await hosted.CompleteAsync(root, cancellationToken).ConfigureAwait(false))
-                                    yield return consumption.Publish(toolEvent);
-                                result = hosted.Decorate(result);
-                            }
+                            foreach (LlmStreamEvent toolEvent in await hosted.CompleteAsync(root, cancellationToken).ConfigureAwait(false))
+                                yield return consumption.Publish(toolEvent);
+                            result = hosted.Decorate(result);
 
                             completed = true;
                             yield return consumption.Publish<LlmStreamEvent>(new LlmChatCompletionEvent(result));
@@ -436,18 +469,11 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
     protected virtual LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
         OpenAiRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
 
-    protected virtual ResponsesHostedToolObserver? CreateHostedToolObserver(Func<Exception> malformed) => null;
+    /// <summary>Reports image_generation_call items; the payload carries the image tool only when the request asks for it.</summary>
+    private static ResponsesImageGenerationObserver CreateHostedToolObserver(Func<Exception> malformed) =>
+        new ResponsesImageGenerationObserver(malformed);
 
     private const string ResponseName = "OpenAI Responses";
-
-    /// <summary>Applies OpenAI Responses model sampling rules only to the OpenAI API transport.</summary>
-    protected virtual void ValidateModelSampling(LlmConnection connection, LlmChatRequest request)
-    {
-        if (Transport == LlmTransport.OpenAiResponses)
-        {
-            OpenAiModelProfiles.ValidateSampling(request);
-        }
-    }
 
     protected virtual Uri BuildRequestUri(LlmConnection connection, LlmChatRequest request) =>
         ProviderHttp.BuildUri(connection, "responses");
@@ -499,12 +525,11 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 credential,
                 connection,
                 request.ModelId, extraSecrets: secrets);
-            ResponsesHostedToolObserver? hosted = CreateHostedToolObserver(() =>
+            ResponsesHostedToolObserver hosted = CreateHostedToolObserver(() =>
                 ProtocolException($"{ResponseName} returned a malformed hosted-tool observation.", response, string.Empty, credential,
                     extraSecrets: secrets));
-            IReadOnlyList<LlmStreamEvent> hostedEvents = hosted is null ? []
-                : await hosted.CompleteAsync(root, token).ConfigureAwait(false);
-            if (hosted is not null) result = hosted.Decorate(result);
+            IReadOnlyList<LlmStreamEvent> hostedEvents = await hosted.CompleteAsync(root, token).ConfigureAwait(false);
+            result = hosted.Decorate(result);
             var observed = CompleteResponseEvents.From(result, reasoningText ? ReadReasoning(root) : []).ToList();
             observed.InsertRange(observed.Count - 1, hostedEvents);
             return observed;
@@ -586,16 +611,22 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             payload["max_output_tokens"] = maxOutputTokens;
         }
 
-        if (request.ReasoningLevel is { } level)
+        LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        // An OpenAI API model that does not reason gets no reasoning object (B4). Codex accepts effort none from a
+        // catalog that offers only none, so its payload keeps it.
+        if (Transport != LlmTransport.OpenAiResponses || capabilities.SupportsReasoning != InferenceSupport.Unsupported)
         {
-            payload["reasoning"] = new JsonObject { ["effort"] = LlmReasoningEffort.OpenAiWord(level) };
-        }
-        if ((GetCapabilities(connection, request.ModelId).SupportsReasoningText != InferenceSupport.Unsupported)
-            && request.ReasoningLevel != LlmReasoningLevel.None
-            && (request.ReasoningLevel is not null || ReasonsByDefault(connection, request.ModelId)))
-        {
-            payload["reasoning"] ??= new JsonObject();
-            payload["reasoning"]!["summary"] = "auto";
+            if (request.ReasoningLevel is { } level)
+            {
+                payload["reasoning"] = new JsonObject { ["effort"] = LlmReasoningEffort.OpenAiWord(level) };
+            }
+            if ((capabilities.SupportsReasoningText != InferenceSupport.Unsupported)
+                && request.ReasoningLevel != LlmReasoningLevel.None
+                && (request.ReasoningLevel is not null || ReasonsByDefault(connection, request.ModelId)))
+            {
+                payload["reasoning"] ??= new JsonObject();
+                payload["reasoning"]!["summary"] = "auto";
+            }
         }
 
         // Stateless ordinary responses need their reasoning state just as tool responses do.
@@ -625,12 +656,34 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         {
             payload["prompt_cache_key"] = request.ConversationKey;
         }
-        if (Transport == LlmTransport.OpenAiResponses && request.PromptCache is { } hint
-            && (OpenAiModelProfiles.Get(request.ModelId).SupportsPromptCacheOptions != InferenceSupport.Unsupported))
+        if (request.PromptCache is { } hint && capabilities.PromptCache == PromptCaching.OpenAi)
         {
             PromptCaching.RejectRawOption(connection, request, "prompt_cache_options");
             if (hint.Retention == LlmPromptCacheRetention.Extended)
                 payload["prompt_cache_options"] = new JsonObject { ["ttl"] = "30m" };
+        }
+        LlmToolNames names = ToolNames(request);
+        foreach (JsonObject tool in (payload["tools"] as JsonArray ?? []).OfType<JsonObject>()
+            .Where(tool => tool["type"]?.GetValue<string>() == "function"))
+        {
+            tool["name"] = names.Native(tool["name"]!.GetValue<string>());
+        }
+        if (payload["tool_choice"] is JsonObject { } choice && choice["name"] is { } chosen)
+        {
+            choice["name"] = names.Native(chosen.GetValue<string>());
+        }
+        foreach (JsonObject call in ((JsonArray)payload["input"]!).OfType<JsonObject>()
+            .Where(item => item["type"]?.GetValue<string>() == "function_call"))
+        {
+            call["name"] = names.Native(call["name"]!.GetValue<string>());
+        }
+        foreach (LlmImageGenerationTool image in request.HostedTools.OfType<LlmImageGenerationTool>())
+        {
+            var tool = new JsonObject { ["type"] = "image_generation" };
+            if (image.Action != LlmImageGenerationAction.Auto)
+                tool["action"] = image.Action == LlmImageGenerationAction.Edit ? "edit" : "generate";
+            if (payload["tools"] is not JsonArray tools) payload["tools"] = tools = [];
+            tools.Add(tool);
         }
         return payload;
     }
@@ -639,9 +692,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         LlmConnection connection, LlmChatRequest request, LlmProviderCapabilities capabilities) =>
         request.StructuredOutput is { } output ? StructuredOutput.ResolveEnforcement(output, capabilities) : null;
 
-    /// <summary>Only a verified API-key profile requests a default summary; fallback effort levels are not evidence.</summary>
-    protected virtual bool ReasonsByDefault(LlmConnection connection, string modelId) =>
-        OpenAiModelProfiles.Get(modelId) is { Verified: true, IsReasoning: true };
+    /// <summary>Whether the model reasons when the request names no level.</summary>
+    protected abstract bool ReasonsByDefault(LlmConnection connection, string modelId);
 
     private static JsonElement CompleteOutput(JsonElement root, SortedDictionary<int, JsonElement> completedOutput,
         LlmTransport transport)
@@ -710,7 +762,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         IEnumerable<string>? extraSecrets = null)
     {
         JsonElement terminal = LlmJson.GetObject(eventRoot, "response") ?? eventRoot;
-        if (LlmContextOverflow.Responses(terminal))
+        if (IsContextOverflow(terminal))
             throw StreamError(terminal, response, rawEvent, credential, extraSecrets);
         return BuildResultCore(eventRoot, response, rawEvent, streamedText, streamedRefusal,
             structuredRequest, enforcement, credential, connection, modelId, observedModel, extraSecrets);
@@ -869,7 +921,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         LlmCredential? credential, IEnumerable<string>? extraSecrets = null)
     {
         string safe = SecretRedactor.Sanitize(rawEvent, credential, extraSecrets);
-        (string? code, string? message, _) = ProviderHttp.ReadProviderError(
+        (string? code, string? message, _, _) = ProviderHttp.ReadProviderError(
             SecretRedactor.Sanitize(root.GetRawText(), credential, extraSecrets));
         return new LlmProviderException(
             message ?? "The provider returned a stream error.",
@@ -878,9 +930,19 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             code,
             ProviderHttp.ReadRequestId(response, credential, extraSecrets),
             sanitizedResponseBody: safe,
-            isContextOverflow: LlmContextOverflow.Responses(root))
+            isContextOverflow: IsContextOverflow(root))
         {
             Usage = ReadUsage(root)
         };
+    }
+
+    /// <summary>A too-long refusal in an error object: every service the OpenAI API can point at, or Codex's code.</summary>
+    private bool IsContextOverflow(JsonElement root)
+    {
+        JsonElement error = LlmJson.GetObject(root, "error") ?? root;
+        string? code = LlmJson.GetString(error, "code");
+        return Transport == LlmTransport.OpenAiResponses
+            ? LlmContextOverflow.OpenAiApi(code, LlmJson.GetString(error, "type"), LlmJson.GetString(error, "message"))
+            : LlmContextOverflow.Responses(code);
     }
 }

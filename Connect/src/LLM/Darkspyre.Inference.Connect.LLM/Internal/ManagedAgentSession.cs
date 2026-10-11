@@ -27,6 +27,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private LlmAgentToolHandler? _toolHandler;
     private LlmAgentCallerServices? _callerServices;
     private readonly LearnedModelContext _learned;
+    // What the session learns is kept under this connection id (DSA-942 B6).
+    private readonly string _connectionId;
     private readonly ConversationCompactor _compactor;
     // Entries an opening left empty by omitting their native compaction state; summarized at the first decision point.
     private HashSet<string> _emptiedByOmission;
@@ -44,7 +46,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     // Managed runs host-executed tools; their processes belong to the host, not this runtime.
     private readonly NoAgentResources _resources = new(LlmAgentResourceStopStatus.Unsupported);
 
-    internal static async Task<ManagedAgentSession> CreateAsync(LlmConnection connection, LlmAgentSessionOptions options,
+    internal static async Task<ManagedAgentSession> CreateAsync(string connectionId, LlmConnection connection,
+        LlmAgentSessionOptions options,
         IReadOnlyList<LlmModel> models, ILlmContextEstimator estimator,
         Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> stream,
         Func<string, LlmProviderCapabilities> capabilities, LearnedModelContext learned, Action? openingFence = null,
@@ -57,7 +60,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             && (capabilities(options.ModelId).SupportsPromptDocuments != InferenceSupport.Unsupported);
         cancellationToken.ThrowIfCancellationRequested();
         openingFence?.Invoke();
-        var session = new ManagedAgentSession(connection, options, models, estimator, stream, capabilities,
+        var session = new ManagedAgentSession(connectionId, connection, options, models, estimator, stream, capabilities,
             supportsResources, learned);
         try
         {
@@ -84,13 +87,14 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         }
     }
 
-    private ManagedAgentSession(LlmConnection connection, LlmAgentSessionOptions options,
+    private ManagedAgentSession(string connectionId, LlmConnection connection, LlmAgentSessionOptions options,
         IReadOnlyList<LlmModel> models, ILlmContextEstimator estimator,
         Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> stream,
         Func<string, LlmProviderCapabilities> capabilities, bool supportsResources, LearnedModelContext learned)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(options.ModelId);
         _supportsResources = supportsResources;
+        _connectionId = connectionId;
         _learned = learned;
         _compactor = new(MeasureForCompactionAsync, SideRequestAsync, EstimateText, options.CallerServices?.Transcript);
         _connection = connection;
@@ -231,7 +235,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             ContextEstimate? used = Corrected(EstimateInputTokens(proposal, turn, ResourceSizes.None), turn.ModelId!);
             cancellationToken.ThrowIfCancellationRequested();
             return Task.FromResult(ManagedAgentPolicy.Account(turn.ModelId!, used,
-                _execution.ContextPolicy, Model(turn.ModelId!), _learned.Limit(_connection.Transport, turn.ModelId!)) with
+                _execution.ContextPolicy, Model(turn.ModelId!), LearnedLimit(turn.ModelId!)) with
             {
                 ContextRevision = _context.Revision,
                 OutputLimitEnforcement = _capabilities(turn.ModelId!).OutputLimitEnforcement
@@ -680,14 +684,22 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     // sends the same step again; a second refusal in the turn ends it.
                     run.OverflowResent = true;
                     if (estimate is { } refused)
-                        _learned.ObserveRefusal(_connection.Transport, request.ModelId, refused.Tokens, null, null,
-                            Model(request.ModelId)?.MaxContextTokens);
+                        _learned.ObserveRefusal(_connectionId, request.ModelId, refused.Tokens, error.ReportedInputTokens,
+                            error.ReportedContextLimit, Model(request.ModelId)?.MaxContextTokens);
                     if (Limits(request.ModelId) is null)
                     {
                         await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, error.Message);
                         return;
                     }
                     if (!await CompactRunAsync(run, writer, token).ConfigureAwait(false)) return;
+                    continue;
+                }
+                catch (LlmProviderException error) when ((error.RefusedSettings
+                    & ~_learned.RefusedSettings(_connectionId, request.ModelId)) != LlmRefusedSettings.None)
+                {
+                    // The service refused a value as unsupported: remember it for this connection and model, and send the
+                    // step once more without it. Each resend adds a flag, so a step is sent at most three times (B4).
+                    _learned.ObserveRefusedSettings(_connectionId, request.ModelId, error.RefusedSettings);
                     continue;
                 }
                 if (request.Resources is not null)
@@ -698,7 +710,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 if (result is null) { throw new InvalidOperationException("Model stream ended without completion."); }
                 if (estimate is { IncludesProviderReport: false } observed && result.Usage?.InputTokens is int reported
                     && Limits(request.ModelId) is { } window)
-                    _learned.ObserveReport(_connection.Transport, request.ModelId, observed.Tokens, reported, window.UsableWindow);
+                    _learned.ObserveReport(_connectionId, request.ModelId, observed.Tokens, reported, window.UsableWindow);
                 run.Iterations++;
                 AddUsage(run, result.Usage);
                 await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId, result.Usage, run.Usage)
@@ -1088,7 +1100,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     /// the turn's tool choice; later steps use Auto, so a Required or Specific choice does not force every step.
     /// </summary>
     private LlmChatRequest Request(LlmAgentContext context, LlmAgentTurnRequest turn, bool firstStep = true) =>
-        LlmRequestNormalizer.Normalize(_connection, new()
+        WithoutRefused(LlmRequestNormalizer.Normalize(_connection, new()
         {
             ModelId = turn.ModelId!,
             UnboundContinuationState = LlmUnboundContinuationState.Omit,
@@ -1115,7 +1127,18 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             HostedTools = HostedTools.WithoutUnofferedImages(_hostedTools, _capabilities(turn.ModelId!).HostedTools),
             MaxHostedTurns = _options.MaxHostedTurns,
             Resources = _callerServices?.Resources
-        }, _capabilities(turn.ModelId!));
+        }, _capabilities(turn.ModelId!)));
+
+    /// <summary>The request without the values a refusal taught this connection and model to leave out (5.10).</summary>
+    private LlmChatRequest WithoutRefused(LlmChatRequest request)
+    {
+        LlmRefusedSettings refused = _learned.RefusedSettings(_connectionId, request.ModelId);
+        return refused == LlmRefusedSettings.None ? request : request with
+        {
+            Temperature = refused.HasFlag(LlmRefusedSettings.Temperature) ? null : request.Temperature,
+            ReasoningLevel = refused.HasFlag(LlmRefusedSettings.Reasoning) ? null : request.ReasoningLevel
+        };
+    }
 
     private LlmAgentContextStatus Measure(LlmAgentContext context, LlmAgentTurnRequest turn,
         IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources) =>
@@ -1126,22 +1149,27 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     {
         LlmAgentContextPolicy policy = ManagedAgentPolicy.Normalize(_execution, Model(turn.ModelId!)).ContextPolicy;
         return ManagedAgentPolicy.Status(turn.ModelId!, context.Revision, Corrected(estimate, turn.ModelId!), policy,
-            Model(turn.ModelId!), _learned.Limit(_connection.Transport, turn.ModelId!));
+            Model(turn.ModelId!), LearnedLimit(turn.ModelId!));
     }
 
     /// <summary>An estimate anchored on a provider report is already the provider's count; any other is corrected.</summary>
     private ContextEstimate? Corrected(ContextEstimate? estimate, string modelId) =>
         estimate is { IncludesProviderReport: false } local
-            ? local with { Tokens = _learned.Correct(_connection.Transport, modelId, local.Tokens) }
+            ? local with { Tokens = _learned.Correct(_connectionId, modelId, local.Tokens) }
             : estimate;
 
     /// <summary>The model's limits under the one limit rule; null when no window is known.</summary>
     private CompactionLimits? Limits(string modelId)
     {
         LlmModel? model = Model(modelId);
-        return CompactionLimits.For(model?.MaxContextTokens, _learned.Limit(_connection.Transport, modelId),
+        return CompactionLimits.For(model?.MaxContextTokens, LearnedLimit(modelId),
             model?.MaxOutputTokens, ManagedAgentPolicy.Normalize(_execution, model).ContextPolicy);
     }
+
+    /// <summary>The limit refusals taught, or null when the connection sets a context length for the model: the listed
+    /// model already carries that length, and it is the limit (B6).</summary>
+    private long? LearnedLimit(string modelId) =>
+        LlmCapabilityOverrideLookup.ContextLength(_connection, modelId) is null ? _learned.Limit(_connectionId, modelId) : null;
 
     /// <summary>
     /// Compacts the running turn's context, installs it as the next revision and reports it. Returns false when the turn

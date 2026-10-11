@@ -192,7 +192,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         {
             fields.Add(new SetupSecretField(new("api-key", "API key")
             {
-                IsRequired = _draft.Transport != LlmTransport.OpenAiCompatibleChat,
+                IsRequired = _draft.Transport is not (LlmTransport.OpenAiCompatibleChat or LlmTransport.OpenAiResponses),
                 HelpText = "Keep preserves the saved key; replace and clear are committed only when saved."
             }, !string.IsNullOrEmpty(Credential.ApiKey), _credentialChange,
                 value => Edit(() =>
@@ -578,6 +578,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
                 || endpoint.UserInfo.Length > 0 || endpoint.Query.Length > 0 || endpoint.Fragment.Length > 0))
         { issues.Add(new("endpoint-invalid", "Use an HTTP(S) base URL without credentials, query or fragment.", "endpoint")); }
         if (UsesApiKey && !UsesAzure && _draft.Transport != LlmTransport.OpenAiCompatibleChat
+            && _draft.Transport != LlmTransport.OpenAiResponses
             && string.IsNullOrWhiteSpace(Credential.ApiKey) && Credential.SecretHeaders.Count == 0)
         { issues.Add(new("key-required", "An API credential is required.", "api-key")); }
         if (UsesAzure)

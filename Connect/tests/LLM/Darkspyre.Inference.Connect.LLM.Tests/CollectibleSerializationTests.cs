@@ -115,7 +115,7 @@ public sealed class CollectibleSerializationTests
             Type clientType = assembly.GetType(typeof(ILlmClient).FullName!, throwOnError: true)!;
             var clients = (System.Collections.IEnumerable)container.GetRequiredService(typeof(IEnumerable<>).MakeGenericType(clientType));
             object[] resolved = clients.Cast<object>().ToArray();
-            Assert.Equal(2, resolved.Length);
+            Assert.Equal(3, resolved.Length);
             Assert.All(resolved, client => Assert.Same(assembly, client.GetType().Assembly));
             object pool = container.GetRequiredService(assembly.GetType(
                 "Darkspyre.Inference.Connect.LLM.Internal.SdkHttpGenerationPool", throwOnError: true)!);

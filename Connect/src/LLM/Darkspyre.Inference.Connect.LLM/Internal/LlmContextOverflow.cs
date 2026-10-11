@@ -7,8 +7,9 @@ internal static class LlmContextOverflow
 {
     internal static bool Responses(string? code) => code == "context_length_exceeded";
 
-    internal static bool Responses(JsonElement root) =>
-        Responses(LlmJson.GetString(LlmJson.GetObject(root, "error") ?? root, "code"));
+    /// <summary>A too-long refusal from OpenAI (code), the local llama.cpp server (type) or OpenRouter (message, inferred).</summary>
+    internal static bool OpenAiApi(string? code, string? type, string? message) =>
+        Responses(code) || type == "exceed_context_size_error" || Chat(null, message);
 
     internal static bool Chat(string? code, string? message) => Responses(code)
         || Contains(message, "maximum context length") || Contains(message, "context length");
@@ -26,7 +27,8 @@ internal static class LlmContextOverflow
 
     internal static bool Http(LlmTransport transport, string? code, string? type, string? message) => transport switch
     {
-        LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses => Responses(code),
+        LlmTransport.OpenAiResponses => OpenAiApi(code, type, message),
+        LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses => Responses(code),
         LlmTransport.OpenAiCompatibleChat or LlmTransport.AzureOpenAiChat => Chat(code, message),
         // Vertex Claude reaches this boundary through the same Anthropic Messages adapter.
         LlmTransport.AnthropicMessages or LlmTransport.GoogleVertexAi => Anthropic(type, message),

@@ -574,7 +574,7 @@ internal sealed partial class ClaudeAgentClient
                     _reportedTokens = (long)input + (step.OutputTokens ?? 0);
                     _reportedMark = _sequence;
                     if (_firstStepEstimate is long estimate && Limits(turn.ModelId) is { } limits)
-                        _owner.Learned.ObserveReport(_connection.Transport, turn.ModelId, estimate, input, limits.UsableWindow);
+                        _owner.Learned.ObserveReport(_connectionId, turn.ModelId, estimate, input, limits.UsableWindow);
                     _firstStepEstimate = null;
                     return;
                 }
@@ -645,7 +645,7 @@ internal sealed partial class ClaudeAgentClient
             LlmModel model = Model(modelId);
             LlmAgentContextPolicy policy = ManagedAgentPolicy.Normalize(_execution, model).ContextPolicy;
             return new(ManagedAgentPolicy.Status(modelId, saved.Revision, estimate, policy, model,
-                _owner.Learned.Limit(_connection.Transport, modelId)));
+                _owner.Learned.Limit(_connectionId, modelId)));
         }
 
         /// <summary>The corrected size of the whole request a CLI session opened with <paramref name="context"/> receives.</summary>
@@ -675,7 +675,7 @@ internal sealed partial class ClaudeAgentClient
             var resources = await ResolveAsync(saved, added, turn.Token);
             long estimate = Local(turn.ModelId, _framing, [.. saved.Entries.Select(entry => entry.Message), .. added], resources);
             (long? reportedTokens, long? reportedLimit) = ReadRefusalSizes(detail);
-            _owner.Learned.ObserveRefusal(_connection.Transport, turn.ModelId, estimate, reportedTokens, reportedLimit,
+            _owner.Learned.ObserveRefusal(_connectionId, turn.ModelId, estimate, reportedTokens, reportedLimit,
                 ClaudeModelLimits.Get(turn.ModelId).ContextTokens);
         }
 
@@ -696,7 +696,7 @@ internal sealed partial class ClaudeAgentClient
             return Correct(modelId, Local(modelId, null, [new("user", text)], ResourceSizes.None));
         }
 
-        private long Correct(string modelId, long local) => _owner.Learned.Correct(_connection.Transport, modelId, local);
+        private long Correct(string modelId, long local) => _owner.Learned.Correct(_connectionId, modelId, local);
 
         /// <summary>
         /// The local count of a request with these messages, as the Claude CLI client counts it. The chat route refuses
@@ -737,7 +737,7 @@ internal sealed partial class ClaudeAgentClient
         private CompactionLimits? Limits(string modelId)
         {
             LlmModel model = Model(modelId);
-            return CompactionLimits.For(model.MaxContextTokens, _owner.Learned.Limit(_connection.Transport, modelId),
+            return CompactionLimits.For(model.MaxContextTokens, _owner.Learned.Limit(_connectionId, modelId),
                 model.MaxOutputTokens, ManagedAgentPolicy.Normalize(_execution, model).ContextPolicy);
         }
 

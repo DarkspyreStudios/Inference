@@ -18,11 +18,14 @@ internal static class LlmRequestNormalizer
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(capabilities);
         LlmClientToolDefinition[] tools = [.. Tools(request.Tools)];
+        LlmReasoningLevel? level = LlmReasoningEffort.Nearest(request.ReasoningLevel, capabilities.ReasoningLevels);
+        // A request with no level counts as reasoning: such a model reasons by default.
+        bool sampling = !capabilities.SamplingOnlyWithoutReasoning || level == LlmReasoningLevel.None;
         return request with
         {
-            ReasoningLevel = LlmReasoningEffort.Nearest(request.ReasoningLevel, capabilities.ReasoningLevels),
-            Temperature = Usable(request.Temperature, capabilities.SupportsTemperature, double.IsFinite),
-            TopP = Usable(request.TopP, capabilities.SupportsTopP, value => double.IsFinite(value) && value is > 0 and <= 1),
+            ReasoningLevel = level,
+            Temperature = sampling ? Usable(request.Temperature, capabilities.SupportsTemperature, double.IsFinite) : null,
+            TopP = sampling ? Usable(request.TopP, capabilities.SupportsTopP, value => double.IsFinite(value) && value is > 0 and <= 1) : null,
             TopK = Usable(request.TopK, capabilities.SupportsTopK, value => value > 0),
             Seed = Usable(request.Seed, capabilities.SupportsSeed, value => value >= 0),
             PresencePenalty = Usable(request.PresencePenalty, capabilities.SupportsPresencePenalty, double.IsFinite),

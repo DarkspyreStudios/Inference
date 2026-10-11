@@ -36,8 +36,9 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(ProviderDefinitions.ClaudeSubscription);
         services.AddSingleton(ProviderDefinitions.ChatGptSubscription);
+        services.AddSingleton(ProviderDefinitions.OpenAiApiKey);
         services.AddSingleton<LlmProviderCatalog>();
-        // What reported counts and refusals taught about each model, shared by every session on that model.
+        // What reported counts and refusals taught about each model on each connection, shared by its sessions.
         services.AddSingleton<LearnedModelContext>();
         services.AddInferenceHttpClient<ClaudeCliLlmClient>();
         services.AddInferenceHttpClient<OpenAiEmbeddingClient>();
@@ -51,9 +52,14 @@ public static class ServiceCollectionExtensions
         services.AddInferenceHttpClient<OpenAiCodexLlmClient>();
         services.AddTransient<ILlmClient>(provider =>
             provider.GetRequiredService<OpenAiCodexLlmClient>());
-        services.AddTransient<ManagedCodexAgentClient>();
-        services.AddTransient<ILlmAgentClient>(provider =>
-            provider.GetRequiredService<ManagedCodexAgentClient>());
+        services.AddTransient<ILlmAgentClient>(provider => new ManagedResponsesAgentClient(
+            provider.GetRequiredService<OpenAiCodexLlmClient>(), provider.GetRequiredService<LlmProviderService>(),
+            provider.GetRequiredService<LearnedModelContext>()));
+        services.AddInferenceHttpClient<OpenAiResponsesLlmClient>();
+        services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<OpenAiResponsesLlmClient>());
+        services.AddTransient<ILlmAgentClient>(provider => new ManagedResponsesAgentClient(
+            provider.GetRequiredService<OpenAiResponsesLlmClient>(), provider.GetRequiredService<LlmProviderService>(),
+            provider.GetRequiredService<LearnedModelContext>()));
         services.AddTransient<ClaudeAgentClient>();
         services.AddTransient<ILlmAgentClient>(provider =>
             provider.GetRequiredService<ClaudeAgentClient>());

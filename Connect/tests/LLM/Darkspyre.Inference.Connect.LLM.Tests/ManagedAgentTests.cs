@@ -1098,7 +1098,7 @@ public sealed class ManagedAgentTests
         /// <summary>The connection the session uses; <see cref="Connection"/> unless a test sets one.</summary>
         public LlmConnection SessionConnection { get; init; } = Connection;
         public ManagedAgentSession Create(LlmAgentSessionOptions? options = null) => ManagedAgentSession.CreateAsync(
-            SessionConnection,
+            ConnectionId, SessionConnection,
             options ?? Options(), [new("test", "Test") { MaxContextTokens = Window, MaxOutputTokens = 100 }, new("other", "Other") { MaxContextTokens = 2000, MaxOutputTokens = 100 }], this, Stream,
             _ => Capabilities ?? new()
             {
@@ -1110,6 +1110,8 @@ public sealed class ManagedAgentTests
                 Agent = ManagedAgentPolicy.Capabilities
             }, Learned).GetAwaiter().GetResult();
         public LearnedModelContext Learned { get; } = new();
+        /// <summary>The connection id the session learns under.</summary>
+        public string ConnectionId { get; init; } = "test-connection";
         /// <summary>The test model's context window.</summary>
         public long Window { get; init; } = 1000;
         public string? EstimateDiagnostic => null;

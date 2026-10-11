@@ -31,13 +31,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Phase 1 builds only the Codex and Claude CLI providers. Excluded source stays in the repository. -->
+    <!-- The build has only the Codex, Claude CLI and OpenAI API providers. Excluded source stays in the repository. -->
     <Compile Remove="Providers/Anthropic*.cs;Providers/ManagedAnthropicAgentClient.cs" />
     <Compile Remove="Providers/Antigravity*.cs;Providers/IAntigravityCliRunner.cs" />
     <Compile Remove="Providers/Apple*.cs;Providers/ManagedAppleAgentClient.cs" />
     <Compile Remove="Providers/ChatCompletionsLlmClientBase.cs;Providers/OpenAiCompatibleChatLlmClient.cs;Providers/ManagedOpenAiCompatibleAgentClient.cs" />
     <Compile Remove="Providers/GeminiApiLlmClient*.cs;Providers/ManagedGeminiApiAgentClient.cs" />
-    <Compile Remove="Providers/OpenAiResponsesLlmClient.cs;Providers/ManagedOpenAiResponsesAgentClient.cs" />
     <Compile Remove="Providers/SelfHost*.cs;Providers/ManagedSelfHostAgentClient.cs" />
     <Compile Remove="Providers/Xai*.cs;Providers/ManagedXaiAgentClient.cs" />
     <Compile Remove="Internal/AnthropicContentStream.cs;Internal/AnthropicProgrammaticSchemas.cs;Internal/AnthropicPromptCache.cs;Internal/AnthropicSchemas.cs;Internal/AnthropicToolContinuation.cs;Internal/AnthropicTools.cs" />

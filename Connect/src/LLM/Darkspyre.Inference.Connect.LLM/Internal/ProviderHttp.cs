@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 
@@ -80,11 +81,12 @@ internal static class ProviderHttp
         }
 
         string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
-        (string? actualCode, string? actualMessage, string? actualType) = ReadProviderError(body);
+        (string? actualCode, string? actualMessage, string? actualType, string? actualParam) = ReadProviderError(body);
         bool overflow = LlmContextOverflow.Http(transport, actualCode, actualType, actualMessage);
         string[] secrets = additionalSecrets.ToArray();
         string sanitized = SecretRedactor.Sanitize(body, credential, secrets);
-        (string? code, string? providerMessage, _) = ReadProviderError(sanitized);
+        (string? code, string? providerMessage, _, _) = ReadProviderError(sanitized);
+        (long? reportedTokens, long? reportedLimit) = overflow ? ReadReportedSize(body) : (null, null);
         string? requestId = ReadRequestId(response, credential, secrets);
         string summary = string.IsNullOrWhiteSpace(providerMessage) ? sanitized : providerMessage;
         string message = $"{operation} failed ({(int)response.StatusCode}, request {requestId ?? "unknown"}): {summary}";
@@ -97,7 +99,32 @@ internal static class ProviderHttp
             requestId,
             response.Headers.RetryAfter?.Delta,
             sanitized,
-            isContextOverflow: overflow);
+            isContextOverflow: overflow)
+        {
+            ReportedInputTokens = reportedTokens,
+            ReportedContextLimit = reportedLimit,
+            RefusedSettings = transport == LlmTransport.OpenAiResponses && response.StatusCode == HttpStatusCode.BadRequest
+                ? LlmUnsupportedSetting.Read(actualCode, actualParam, actualMessage) : LlmRefusedSettings.None
+        };
+    }
+
+    /// <summary>The numeric n_prompt_tokens and n_ctx of a too-long refusal's error object (the llama.cpp server).</summary>
+    private static (long? Tokens, long? Limit) ReadReportedSize(string body)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(body);
+            JsonElement error = LlmJson.GetObject(document.RootElement, "error") ?? document.RootElement;
+            return (Positive(error, "n_prompt_tokens"), Positive(error, "n_ctx"));
+        }
+        catch (JsonException)
+        {
+            return (null, null);
+        }
+
+        static long? Positive(JsonElement error, string field) =>
+            error.ValueKind == JsonValueKind.Object && error.TryGetProperty(field, out JsonElement value)
+            && value.ValueKind == JsonValueKind.Number && value.TryGetInt64(out long number) && number > 0 ? number : null;
     }
 
     public static string? ReadRequestId(HttpResponseMessage response, LlmCredential? credential = null,
@@ -141,18 +168,19 @@ internal static class ProviderHttp
         }
     }
 
-    internal static (string? Code, string? Message, string? Type) ReadProviderError(string body)
+    internal static (string? Code, string? Message, string? Type, string? Param) ReadProviderError(string body)
     {
         try
         {
             using JsonDocument document = JsonDocument.Parse(body);
             JsonElement root = document.RootElement;
             JsonElement error = LlmJson.GetObject(root, "error") ?? root;
-            return (LlmJson.GetString(error, "code"), LlmJson.GetString(error, "message"), LlmJson.GetString(error, "type"));
+            return (LlmJson.GetString(error, "code"), LlmJson.GetString(error, "message"), LlmJson.GetString(error, "type"),
+                LlmJson.GetString(error, "param"));
         }
         catch (JsonException)
         {
-            return (null, null, null);
+            return (null, null, null, null);
         }
     }
 }

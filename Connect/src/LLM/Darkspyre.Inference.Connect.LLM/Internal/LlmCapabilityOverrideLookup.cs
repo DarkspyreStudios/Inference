@@ -23,6 +23,11 @@ internal static class LlmCapabilityOverrideLookup
         return capabilities;
     }
 
+    /// <summary>The context length set for the model on this connection, or null.</summary>
+    internal static long? ContextLength(LlmConnection connection, string modelId) =>
+        connection.ModelCapabilityOverrides.TryGetValue(modelId, out LlmCapabilityOverrides? overrides)
+            ? overrides.MaxContextTokens : null;
+
     /// <summary>True when the connection override or the model's override sets the selected value.</summary>
     public static bool Overrides(LlmConnection connection, string? modelId, Func<LlmCapabilityOverrides, object?> selector) =>
         (connection.CapabilityOverrides is { } overrides && selector(overrides) is not null)

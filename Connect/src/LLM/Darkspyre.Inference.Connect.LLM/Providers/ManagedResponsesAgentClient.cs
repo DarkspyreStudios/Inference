@@ -3,12 +3,11 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-/// <summary>Codex registration for the provider-neutral live engine.</summary>
-internal sealed class ManagedCodexAgentClient(OpenAiCodexLlmClient client, LlmProviderService providers,
-    LearnedModelContext learned)
-    : ILlmAgentClient
+/// <summary>The managed opening of every Responses client: Codex and the OpenAI API.</summary>
+internal sealed class ManagedResponsesAgentClient(ResponsesLlmClientBase client, LlmProviderService providers,
+    LearnedModelContext learned) : ILlmAgentClient
 {
-    public LlmTransport Transport => LlmTransport.OpenAiCodex;
+    public LlmTransport Transport => client.Transport;
 
     public async Task<ILlmAgentSession> StartSessionAsync(
         string connectionId, LlmConnection connection, LlmAgentSessionOptions options, CancellationToken cancellationToken = default)
@@ -38,7 +37,7 @@ internal sealed class ManagedCodexAgentClient(OpenAiCodexLlmClient client, LlmPr
         connection = await providers.PrepareManagedConnectionAsync(connectionId, connection, client, Preflight, opening.Token).ConfigureAwait(false);
         Fence();
         string scope = ProviderContinuationStateCodec.Scope(connection);
-        return await ManagedAgentSession.CreateAsync(connection, options, connection.Catalog ?? [], client,
+        return await ManagedAgentSession.CreateAsync(connectionId, connection, options, connection.Catalog ?? [], client,
             (request, token) => providers.StreamAgentAsync(connectionId, request, scope, token),
             model => client.GetCapabilities(connection, model), learned, openingFence: Fence,
             cancellationToken: opening.Token).ConfigureAwait(false);

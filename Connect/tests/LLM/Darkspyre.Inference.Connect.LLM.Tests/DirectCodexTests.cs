@@ -299,7 +299,7 @@ public sealed class DirectCodexTests
             Revision = 7,
             Entries = messages.Select((message, index) => new LlmAgentContextEntry("entry-" + index, "turn", message)).ToArray()
         };
-        await using var session = await ManagedAgentSession.CreateAsync(connection, new()
+        await using var session = await ManagedAgentSession.CreateAsync("test-connection", connection, new()
         {
             ModelId = "model",
             Context = context,
@@ -502,7 +502,7 @@ public sealed class DirectCodexTests
         {
             WriteFactory = create => written = new("workspace", create, () => { })
         };
-        await using var session = await ManagedAgentSession.CreateAsync(connection, new()
+        await using var session = await ManagedAgentSession.CreateAsync("test-connection", connection, new()
         {
             ModelId = "model",
             HostedTools = [new LlmImageGenerationTool()],
@@ -623,7 +623,7 @@ public sealed class DirectCodexTests
     {
         var client = new OpenAiCodexLlmClient(new HttpClient(handler));
         LlmConnection connection = Connection();
-        return ManagedAgentSession.CreateAsync(connection, new()
+        return ManagedAgentSession.CreateAsync("test-connection", connection, new()
         {
             ModelId = "model",
             Context = context,

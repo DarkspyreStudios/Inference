@@ -4,8 +4,8 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-/// <summary>Reports the image_generation_call items of a Codex response as hosted image calls.</summary>
-internal sealed class CodexImageGenerationObserver(Func<Exception> malformed) : ResponsesHostedToolObserver
+/// <summary>Reports the image_generation_call items of a Codex or OpenAI API response as hosted image calls.</summary>
+internal sealed class ResponsesImageGenerationObserver(Func<Exception> malformed) : ResponsesHostedToolObserver
 {
     private const string Name = "image_generation";
 

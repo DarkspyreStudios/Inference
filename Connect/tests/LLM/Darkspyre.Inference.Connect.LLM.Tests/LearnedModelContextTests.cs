@@ -8,7 +8,7 @@ public sealed class LearnedModelContextTests
     public void ReportsCorrectEstimatesAndRefusalsSetLimits()
     {
         var learned = new LearnedModelContext();
-        const LlmTransport codex = LlmTransport.OpenAiCodex;
+        const string codex = "codex-connection";
 
         // A report under a quarter of the usable window carries framing noise and sets no rate.
         learned.ObserveReport(codex, "model", estimated: 1_000, reported: 1_500, usableWindow: 100_000);
@@ -26,6 +26,18 @@ public sealed class LearnedModelContextTests
         learned.ObserveRefusal(codex, "unlisted", estimated: 90_000, reportedTokens: null, reportedLimit: null, knownLimit: null);
         Assert.Equal(90_000, learned.Limit(codex, "unlisted"));
 
-        Assert.Null(learned.Limit(LlmTransport.AnthropicClaudeCli, "model"));
+        Assert.Null(learned.Limit("claude-connection", "model"));
+    }
+
+    [Fact]
+    public void LimitBelongsToTheConnection()
+    {
+        var learned = new LearnedModelContext();
+
+        learned.ObserveRefusal("local", "qwen3", estimated: 140_000, reportedTokens: 140_068, reportedLimit: 131_072, knownLimit: null);
+
+        Assert.Equal(131_072, learned.Limit("local", "qwen3"));
+        Assert.Null(learned.Limit("openrouter", "qwen3"));
+        Assert.Equal(10_000, learned.Correct("openrouter", "qwen3", 10_000));
     }
 }

@@ -64,6 +64,12 @@ public sealed record LlmProviderCapabilities
     /// <summary>The route accepts a sampling temperature.</summary>
     public InferenceSupport SupportsTemperature { get; init; }
 
+    /// <summary>
+    /// True when the model accepts temperature and top-p only with <see cref="LlmReasoningLevel.None"/>; the request
+    /// normalizer drops both at any other level, and when the request names no level.
+    /// </summary>
+    internal bool SamplingOnlyWithoutReasoning { get; init; }
+
     /// <summary>The route accepts a nucleus sampling (top-p) limit.</summary>
     public InferenceSupport SupportsTopP { get; init; }
 
@@ -275,4 +281,8 @@ public sealed record LlmCapabilityOverrides
 
     /// <summary>False stops sending tool-result documents; an override cannot enable them.</summary>
     public InferenceSupport? SupportsToolResultDocuments { get; init; }
+
+    /// <summary>The model's context length in tokens. Set, it is the model's limit, above the listed window, the published
+    /// value and what refusals taught (B6). Meaningful only in ModelCapabilityOverrides.</summary>
+    public long? MaxContextTokens { get; init; }
 }

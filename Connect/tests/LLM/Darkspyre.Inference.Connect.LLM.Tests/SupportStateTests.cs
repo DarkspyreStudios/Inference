@@ -65,7 +65,7 @@ public sealed class SupportStateTests
         using var http = new HttpClient();
         var codex = new OpenAiCodexLlmClient(http);
         LlmConnection connection = DirectCodexTests.Connection();
-        await using ManagedAgentSession session = await ManagedAgentSession.CreateAsync(connection, new() { ModelId = "model" }, [],
+        await using ManagedAgentSession session = await ManagedAgentSession.CreateAsync("test-connection", connection, new() { ModelId = "model" }, [],
             codex, (_, _) => throw new InvalidOperationException("Capabilities send no request."),
             model => codex.GetCapabilities(connection, model), new LearnedModelContext());
         LlmAgentCapabilities codexMarks = await session.GetCapabilitiesAsync();
