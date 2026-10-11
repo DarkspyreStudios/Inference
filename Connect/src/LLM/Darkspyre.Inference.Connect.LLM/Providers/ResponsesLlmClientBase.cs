@@ -29,57 +29,33 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         JsonObject payload = BuildPayload(connection, request, enforcement, (capabilities.SupportsStreaming != InferenceSupport.Unsupported));
         RequestJson.ApplyProviderOptions(payload, connection, request);
 
-        // The provider's own count covers the history up to the last response that reported one, including
-        // encrypted reasoning and attachments the local tokenizer cannot count. Only what follows is tokenized.
-        int reported = -1;
-        for (int index = request.Messages.Count - 1; index >= 0 && reported < 0; index--)
+        // The size is the request actually being sent, tokenized locally. A count the provider reported for an earlier
+        // request describes that request, not this one, so none is used (Brandon, 2026-10-11).
+        long media = checked(sent.Sum(MediaTokens) + ResourceSizes.Tokens(sent, sent, resources));
+        // Tokenize the actual textual projection, including schemas/framing. This is an estimate:
+        // server framing/current-model tokenization can differ from the bundled o200k encoding.
+        var input = new JsonObject
         {
-            if (request.Messages[index].ContinuationState is { InputTokens: not null, OutputTokens: not null }) { reported = index; }
-        }
-        // Retained protected messages can carry reports from before this replacement prefix.
-        if (Transport == LlmTransport.OpenAiCodex && ((JsonArray)payload["input"]!).OfType<JsonObject>()
-            .Any(item => item["type"]?.GetValue<string>() is "compaction" or "compaction_summary")) reported = -1;
-        bool approximateCipher = Transport == LlmTransport.OpenAiCodex && reported < 0;
-        long media = checked(sent.Skip(reported + 1).Sum(MediaTokens)
-            + ResourceSizes.Tokens(sent.Skip(reported + 1), sent, resources));
-        if (reported < 0)
+            ["input"] = payload["input"]?.DeepClone(),
+            ["instructions"] = payload["instructions"]?.DeepClone(),
+            ["tools"] = payload["tools"]?.DeepClone(),
+            ["text"] = payload["text"]?.DeepClone()
+        };
+        long cipherTokens = 0;
+        if (Transport == LlmTransport.OpenAiCodex)
         {
-            // Tokenize the actual textual projection, including schemas/framing. This is an estimate:
-            // server framing/current-model tokenization can differ from the bundled o200k encoding.
-            var input = new JsonObject
+            foreach (JsonObject item in ((JsonArray)input["input"]!).OfType<JsonObject>())
             {
-                ["input"] = payload["input"]?.DeepClone(),
-                ["instructions"] = payload["instructions"]?.DeepClone(),
-                ["tools"] = payload["tools"]?.DeepClone(),
-                ["text"] = payload["text"]?.DeepClone()
-            };
-            long cipherTokens = 0;
-            if (approximateCipher)
-            {
-                foreach (JsonObject item in ((JsonArray)input["input"]!).OfType<JsonObject>())
-                {
-                    if (item["type"]?.GetValue<string>() is not ("reasoning" or "compaction" or "compaction_summary")
-                        || item["encrypted_content"] is not { } cipher) continue;
-                    // Codex 0.159.3 estimates decoded bytes minus fixed framing, then four bytes per token.
-                    // A CLR string's int length keeps both multiplications below long overflow.
-                    long bytes = Math.Max(0, cipher.GetValue<string>().Length * 3L / 4 - 650);
-                    cipherTokens = checked(cipherTokens + (bytes + 3) / 4);
-                    item.Remove("encrypted_content");
-                }
+                if (item["type"]?.GetValue<string>() is not ("reasoning" or "compaction" or "compaction_summary")
+                    || item["encrypted_content"] is not { } cipher) continue;
+                // Codex 0.159.3 estimates decoded bytes minus fixed framing, then four bytes per token.
+                // A CLR string's int length keeps both multiplications below long overflow.
+                long bytes = Math.Max(0, cipher.GetValue<string>().Length * 3L / 4 - 650);
+                cipherTokens = checked(cipherTokens + (bytes + 3) / 4);
+                item.Remove("encrypted_content");
             }
-            return new ContextEstimate(checked(LocalTokenCount.Count(input.ToJsonString()) + cipherTokens + media));
         }
-
-        // Input items are built message by message, so the prefix's own projection marks where the rest begins.
-        // The reported input already includes that request's instructions and tools.
-        JsonArray full = (JsonArray)payload["input"]!;
-        int prefixItems = ((JsonArray)BuildPayload(connection,
-            request with { Messages = [.. request.Messages.Take(reported + 1)] }, enforcement,
-            (capabilities.SupportsStreaming != InferenceSupport.Unsupported))["input"]!).Count;
-        var tail = new JsonArray([.. full.Skip(prefixItems).Select(item => item?.DeepClone())]);
-        LlmContinuationState state = request.Messages[reported].ContinuationState!;
-        return new ContextEstimate(checked(state.InputTokens!.Value + state.OutputTokens!.Value
-            + (tail.Count == 0 ? 0 : LocalTokenCount.Count(tail.ToJsonString())) + media), IncludesProviderReport: true);
+        return new ContextEstimate(checked(LocalTokenCount.Count(input.ToJsonString()) + cipherTokens + media));
     }
 
     /// <summary>The message as the tokenizer counts it: without attachments, binary tool parts or resource parts.</summary>

@@ -201,7 +201,7 @@ public sealed class DirectCodexTests
     }
 
     [Fact]
-    public async Task ReportedTokensTravelWithTheStateAndCountTheEncryptedHistory()
+    public async Task ReportedTokensTravelWithTheStateButTheEstimateCountsTheActualRequest()
     {
         using var handler = new Handler(request => request.Method == HttpMethod.Get
             ? Json("{\"models\":[{\"slug\":\"model\",\"context_window\":100000}]}")
@@ -219,8 +219,9 @@ public sealed class DirectCodexTests
 
         ContextEstimate estimate = client.EstimateInputTokens(Connection(), followup, ResourceSizes.None)!.Value;
 
-        Assert.True(estimate.IncludesProviderReport);
-        Assert.InRange(estimate.Tokens, 1281, 1400); // The report, plus the tokenized tool result after it.
+        // The earlier request's 1,280 reported tokens are not this request; the estimate tokenizes what is sent.
+        Assert.False(estimate.IncludesProviderReport);
+        Assert.InRange(estimate.Tokens, 1, 1279);
     }
 
     private const string ReasonedToolCall = """
@@ -291,8 +292,7 @@ public sealed class DirectCodexTests
         ];
         var request = new LlmChatRequest { ModelId = "model", Messages = messages, Instructions = "Answer briefly." };
         var policy = new LlmAgentContextPolicy { ReservedOutputTokens = 8000 };
-        LlmContextMeasurementSource source = reported && !compacted
-            ? LlmContextMeasurementSource.Mixed : LlmContextMeasurementSource.Estimated;
+        LlmContextMeasurementSource source = LlmContextMeasurementSource.Estimated;
         ContextEstimate expected = client.EstimateInputTokens(connection, request, ResourceSizes.None)!.Value;
         var context = new LlmAgentContext
         {

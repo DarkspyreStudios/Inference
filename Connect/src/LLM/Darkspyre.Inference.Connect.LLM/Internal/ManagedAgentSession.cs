@@ -160,7 +160,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             lock (_sync)
             {
                 FenceResourceCallback(cancellationToken);
-                _context = ManagedAgentContext.WithoutReportedCounts(result.Context) with { Revision = revision = checked(_context.Revision + 1) };
+                _context = result.Context with { Revision = revision = checked(_context.Revision + 1) };
                 _latestStatus = null;
             }
             return Compacted(lastTurnId, NewId(), revision, result);
@@ -1230,7 +1230,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             await writer.WriteAsync(new LlmAgentActivityEvent(ThreadId, run.Id, itemId, "Applying the compacted context"), token);
             lock (_sync)
             {
-                _context = ManagedAgentContext.WithoutReportedCounts(result.Context) with { Revision = revision = checked(_context.Revision + 1) };
+                _context = result.Context with { Revision = revision = checked(_context.Revision + 1) };
                 if (result.Usage is not null) AddUsage(run, result.Usage);
             }
         }
@@ -1290,8 +1290,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         var resources = await ResolveResourcesAsync(access, references, token).ConfigureAwait(false);
         lock (_sync)
         {
-            // Compaction measures changed and partial histories, which no reported count describes.
-            return Corrected(EstimateInputTokens(ManagedAgentContext.WithoutReportedCounts(context), turn, resources), turn.ModelId!)?.Tokens
+            return Corrected(EstimateInputTokens(context, turn, resources), turn.ModelId!)?.Tokens
                 ?? throw new InvalidOperationException("The request size is unknown.");
         }
     }

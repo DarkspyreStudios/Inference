@@ -3270,17 +3270,11 @@ tokenizer, including instructions and schemas. It is not an exact current-model 
 Anthropic and compatible Chat use the same validated plaintext generation mapper without provider I/O.
 Actual media, selected resources and their opaque continuation make occupancy unknown.
 Responses, direct Codex and Bedrock Converse record the provider's reported input
-and output tokens on the continuation state (`LlmContinuationState.InputTokens` and `OutputTokens`), and
-the estimate counts the history up to the last such state as their sum, tokenizing only what follows.
-That estimate reports `Source = Mixed`. Codex without an applicable report uses the pinned 0.159.3
-CLI's coarse encrypted-content length approximation plus actual plaintext and reports `Estimated`.
-Standalone and managed Codex accounting retain that estimate when history contains omitted-attachment
-metadata. A retained provider report covers its earlier history; without an applicable report, the
-existing plaintext/ciphertext approximation counts the actual projected request. Omission descriptors
-are not replacement attachment input and do not discard the estimate. This permits compaction
-budgeting with either `Mixed` or `Estimated` occupancy, not an exact provider admission proof.
-Any retained Codex compaction suppresses historical count anchors, including protected pre-compaction
-reports. Compaction-request usage never becomes replacement occupancy. Other providers do not inherit
+and output tokens on the continuation state (`LlmContinuationState.InputTokens` and `OutputTokens`). The
+Responses and Codex estimates do not use them: a reported count describes the earlier request it answered,
+not the one being measured. They tokenize the actual projected request and, on Codex, add the pinned 0.159.3
+CLI's coarse encrypted-content length approximation, and report `Estimated`. Omission descriptors are not
+replacement attachment input and do not discard the estimate. Compaction-request usage never becomes replacement occupancy. Other providers do not inherit
 this heuristic. Codex and Claude CLI estimates count inline attachments and binary tool output with
 `AttachmentTokens` (an image 1,600 tokens, a PDF page 4,600, text by content, other bytes/3) and caller-owned
 resources by their descriptors (an image 1,600, text and JSON bytes/4, a PDF one page per 100 KB, other bytes/3),
