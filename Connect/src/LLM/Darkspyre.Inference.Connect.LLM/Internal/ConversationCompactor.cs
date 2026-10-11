@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text;
 using Darkspyre.Inference.Common.LLM;
 
@@ -427,9 +428,17 @@ internal sealed class ConversationCompactor(
                         break;
                 }
             }
+            // Structured content reaches the model as text, so a large one is cut like a text part and sent as one.
+            JsonElement? structured = function.Output.StructuredContent;
+            if (structured is { } json && json.GetRawText() is { Length: > 2 * KeptCharacters } raw)
+            {
+                parts.Add(new LlmToolOutputText(Cut(raw)));
+                structured = null;
+                cut = true;
+            }
             if (cut) shortened++;
             if (image) removedImages++;
-            results.Add(function with { Output = function.Output with { Parts = parts } });
+            results.Add(function with { Output = function.Output with { Parts = parts, StructuredContent = structured } });
         }
         return entry with { Message = entry.Message with { ToolResults = results } };
     }

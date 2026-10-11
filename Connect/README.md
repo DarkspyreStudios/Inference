@@ -203,7 +203,8 @@ Unsupported. Codex's own compaction is never requested. Before every model step 
 emits `LlmAgentContextStatusEvent`. A local estimate that does not rest on a provider-reported count is corrected
 with the rate the model's reported counts taught; the rate and any learned limit are kept per transport and model for
 the process and never stored. At or above the trigger the session compacts toward the target: it cuts each
-unprotected tool-result text part to its first and last 1,000 characters and replaces binary parts with a notice,
+unprotected tool-result text part and structured content to its first and last 1,000 characters, sending cut structured
+content as text, and replaces binary parts with a notice,
 then keeps the current turn and the newest whole turns that fit in the room under the target that a 3,000-word
 summary leaves, plus the newest part of the next turn from the earliest tool call that still fits, and replaces the
 rest with one user entry `Summary of the earlier conversation:\n{summary}`. The summary is built from

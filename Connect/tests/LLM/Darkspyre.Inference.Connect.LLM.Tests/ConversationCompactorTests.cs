@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -87,6 +88,30 @@ public sealed class ConversationCompactorTests
         Assert.Equal("big-result70", kept[^1].Id);
         string material = string.Join("\n", harness.Requests.Select(request => request.Messages.Single().Content));
         Assert.Contains("do the work", material, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task LargeStructuredContentIsCutLikeText()
+    {
+        string json = "{\"rows\":\"" + new string('s', 6_000) + "\"}";
+        LlmAgentContextEntry[] older = ToolTurn("t1", "short");
+        older[1] = older[1] with
+        {
+            Message = older[1].Message with
+            {
+                ToolResults = [new LlmToolResult("t1-c", LlmToolOutput.FromText("short") with { StructuredContent = JsonElement.Parse(json) })]
+            }
+        };
+        var context = new LlmAgentContext { Entries = [.. older, .. Turn("t2", "now")] };
+        var harness = new Harness(null);
+
+        CompactionResult result = await harness.Compactor.CompactAsync(context, "model", "t2", new HashSet<string>(), Limits,
+            NoStage, CancellationToken.None);
+
+        LlmToolOutput output = Assert.IsType<LlmToolResult>(Assert.Single(result.Context.Entries[1].Message.ToolResults)).Output;
+        Assert.Null(output.StructuredContent);
+        Assert.Contains(output.Parts.OfType<LlmToolOutputText>(), part => part.Text.Contains("characters removed by compaction.]", StringComparison.Ordinal));
+        Assert.Equal(1, result.ShortenedToolOutputCount);
     }
 
     [Fact]
