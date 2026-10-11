@@ -88,6 +88,8 @@ internal static class StructuredOutput
         try
         {
             EvaluationResults results = built.Evaluate(instance, new EvaluationOptions { OutputFormat = OutputFormat.List });
+            // The whole schema decides. A passing schema can still list errors from alternatives that did not match.
+            if (results.IsValid) return new(true, [], instance);
             var errors = new List<string>();
             foreach (EvaluationResults detail in (results.Details ?? []).Prepend(results))
             {
