@@ -524,6 +524,124 @@ public sealed class DirectCodexTests
         Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
     }
 
+    /// <summary>A 429 through resource access is retried with its attempt, wait and error, and the third ends the turn
+    /// with the provider's message.</summary>
+    [Fact]
+    public async Task BusyRefusalThroughResourceAccessIsRetriedWithProgress()
+    {
+        using var handler = new Handler(request => request.Method == HttpMethod.Get
+            ? Json("{\"models\":[{\"slug\":\"model\",\"context_window\":272000}]}")
+            : new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+            { Content = new StringContent("{\"error\":{\"message\":\"Rate limit reached.\",\"code\":\"rate_limit_exceeded\"}}", Encoding.UTF8, "application/json") });
+        await using ManagedAgentSession session = await ResourceSession(handler, EmptyAccess());
+
+        List<LlmAgentEvent> events = await RunAsync(session, "hello");
+
+        Assert.Equal(3, handler.Bodies.Count);
+        Assert.Single(handler.Bodies.Distinct());
+        LlmAgentResponseRecoveryEvent[] recoveries = [.. events.OfType<LlmAgentResponseRecoveryEvent>()];
+        Assert.Equal(new int?[] { 2, 3 }, recoveries.Select(item => item.NextAttempt));
+        Assert.Equal(new TimeSpan?[] { TimeSpan.FromMilliseconds(250), TimeSpan.FromMilliseconds(500) }, recoveries.Select(item => item.Delay));
+        Assert.All(recoveries, item => Assert.Contains("Rate limit reached.", item.Error, StringComparison.Ordinal));
+        LlmAgentTurnCompletedEvent completed = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal(LlmAgentCompletionReason.ProviderFailure, completed.Reason);
+        Assert.Contains("Rate limit reached.", completed.Error, StringComparison.Ordinal);
+    }
+
+    /// <summary>A too-long refusal through resource access compacts the history and sends the step once more.</summary>
+    [Fact]
+    public async Task OverflowThroughResourceAccessCompactsAndResends()
+    {
+        int posts = 0;
+        using var handler = new Handler(request => request.Method == HttpMethod.Get
+            ? Json("{\"models\":[{\"slug\":\"model\",\"context_window\":272000}]}")
+            : ++posts == 1
+                ? new HttpResponseMessage(HttpStatusCode.BadRequest)
+                { Content = new StringContent("{\"error\":{\"message\":\"Your input exceeds the context window of this model.\",\"code\":\"context_length_exceeded\"}}", Encoding.UTF8, "application/json") }
+                : Sse(Completed));
+        var history = new LlmAgentContext
+        {
+            Entries = [new("t1-user", "t1", new("user", new string('a', 600))), new("t1-assistant", "t1", new("assistant", "first answer"))]
+        };
+        await using ManagedAgentSession session = await ResourceSession(handler, EmptyAccess(), history);
+
+        List<LlmAgentEvent> events = await RunAsync(session, "hello");
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Single(events.OfType<LlmAgentCompactedEvent>());
+        Assert.DoesNotContain(new string('a', 600), handler.Bodies[^1], StringComparison.Ordinal);
+    }
+
+    /// <summary>An image committed in one turn is not sent again as a user attachment in the next.</summary>
+    [Fact]
+    public async Task SelectedImageIsNotResentAsAnAttachment()
+    {
+        int posts = 0;
+        using var handler = new Handler(request => request.Method == HttpMethod.Get
+            ? Json("{\"models\":[{\"slug\":\"model\",\"context_window\":272000}]}")
+            : Sse(++posts == 1 ? ImageReply : Completed));
+        var generated = new InferenceResourceReference("workspace", "generated");
+        var content = new List<(InferenceResourceReference Reference, string Name, byte[] Bytes)>();
+        ResourcePreparationTests.Resources? access = null;
+        access = new ResourcePreparationTests.Resources(new("workspace", "session", 0, []), content)
+        {
+            WriteFactory = create => new ResourcePreparationTests.GeneratedWrite("workspace", create, () =>
+            {
+                content.Add((generated, "image.webp", [1, 2, 3]));
+                access!.Selection = new("workspace", "session", 4, [generated]);
+            })
+        };
+        await using ManagedAgentSession session = await ResourceSession(handler, access);
+
+        _ = await RunAsync(session, "Draw a cat");
+        List<LlmAgentEvent> events = await RunAsync(session, "Describe it");
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Equal([generated], access.Selection.SelectedResources);
+        Assert.Equal(2, handler.Bodies.Count);
+        // The image travels in the replayed image_generation_call item, never as an attachment on the new prompt.
+        JsonNode prompt = JsonNode.Parse(handler.Bodies[1])!["input"]!.AsArray()[^1]!;
+        Assert.Equal("user", prompt["role"]!.GetValue<string>());
+        Assert.Equal("Describe it", prompt["content"]!.GetValue<string>());
+    }
+
+    private const string ImageReply = """
+        data: {"type":"response.output_item.added","output_index":0,"item":{"type":"image_generation_call","id":"ig","status":"in_progress"}}
+
+        data: {"type":"response.output_item.done","output_index":0,"item":{"type":"image_generation_call","id":"ig","status":"completed","result":"AQID","output_format":"webp"}}
+
+        data: {"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"m","role":"assistant","content":[{"type":"output_text","text":"Here it is."}]}}
+
+        data: {"type":"response.completed","response":{"status":"completed","output":[],"id":"r"}}
+
+        """;
+
+    private static ResourcePreparationTests.Resources EmptyAccess() => new(new("workspace", "session", 0, []), []);
+
+    /// <summary>A Codex session over <paramref name="handler"/> that asks for images and holds <paramref name="access"/>.</summary>
+    private static Task<ManagedAgentSession> ResourceSession(Handler handler, IInferenceResourceAccess access, LlmAgentContext? context = null)
+    {
+        var client = new OpenAiCodexLlmClient(new HttpClient(handler));
+        LlmConnection connection = Connection();
+        return ManagedAgentSession.CreateAsync(connection, new()
+        {
+            ModelId = "model",
+            Context = context,
+            HostedTools = [new LlmImageGenerationTool()],
+            CallerServices = new() { Resources = access }
+        }, [new("model", "Model") { MaxContextTokens = 272000 }], client,
+            (request, token) => client.StreamAsync(connection, request, token),
+            model => client.GetCapabilities(connection, model), new LearnedModelContext());
+    }
+
+    private static async Task<List<LlmAgentEvent>> RunAsync(ManagedAgentSession session, string text)
+    {
+        var events = new List<LlmAgentEvent>();
+        await foreach (LlmAgentEvent item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent(text)] }))
+            events.Add(item);
+        return events;
+    }
+
     /// <summary>A model reply with reasoning state and a tool call, then a follow-up history for another model.</summary>
     private static async Task<(Handler Handler, LlmProviderService Providers, LlmChatRequest Followup)> OtherModelFollowupAsync()
     {
@@ -602,6 +720,8 @@ public sealed class DirectCodexTests
         public HttpMethod? Method { get; private set; }
         public Dictionary<string, string> Headers { get; private set; } = new(StringComparer.OrdinalIgnoreCase);
         public int Calls { get; private set; }
+        /// <summary>Every request body, in order.</summary>
+        public List<string> Bodies { get; } = [];
         public List<string> AuthorizationHistory { get; } = [];
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -609,6 +729,7 @@ public sealed class DirectCodexTests
             Uri = request.RequestUri;
             Method = request.Method;
             Body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
+            if (Body is not null) { Bodies.Add(Body); }
             Headers = request.Headers.ToDictionary(header => header.Key, header => string.Join(",", header.Value), StringComparer.OrdinalIgnoreCase);
             if (Headers.TryGetValue("Authorization", out var authorization)) { AuthorizationHistory.Add(authorization); }
             return Response(request);

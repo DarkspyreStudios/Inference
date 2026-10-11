@@ -358,6 +358,77 @@ public sealed class ManagedAgentTests
         Assert.Contains("Provider-side work may already have run", Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Error);
     }
 
+    /// <summary>An image-only request replays a lost stream unless the failed attempt started a hosted call.</summary>
+    [Fact]
+    public async Task InterruptWithImageToolRecoversWhenNoHostedCallStarted()
+    {
+        var images = new HashSet<LlmHostedToolKind> { LlmHostedToolKind.ImageGeneration };
+        var recovering = new Harness { PreparesResources = true, HostedKinds = images, RequestFailure = number => number == 1 ? Interrupted() : null };
+        recovering.Results.Enqueue(Done());
+        await using (var session = recovering.Create(ImageOptions()))
+        {
+            var events = await Read(session.RunTurnAsync(Turn("hello")));
+            Assert.Equal(2, recovering.Requests.Count);
+            Assert.IsType<LlmImageGenerationTool>(Assert.Single(recovering.Requests[0].HostedTools));
+            Assert.Equal(2, Assert.Single(events.OfType<LlmAgentResponseRecoveryEvent>()).NextAttempt);
+            Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        }
+
+        var started = new Harness { PreparesResources = true, HostedKinds = images, StartsHostedCall = true, Failure = Interrupted() };
+        await using (var session = started.Create(ImageOptions()))
+        {
+            var events = await Read(session.RunTurnAsync(Turn("hello")));
+            Assert.Single(started.Requests);
+            Assert.Null(Assert.Single(events.OfType<LlmAgentResponseRecoveryEvent>()).NextAttempt);
+            Assert.Contains("Provider-side work may already have run", Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Error);
+        }
+    }
+
+    /// <summary>A session that asks for images opens and runs on a model without image generation; other hosted tools stay.</summary>
+    [Fact]
+    public async Task ImageToolIsDroppedOnAModelWithoutImages()
+    {
+        var harness = new Harness { PreparesResources = true };
+        harness.Results.Enqueue(Done());
+        await using var session = harness.Create(ImageOptions() with { HostedTools = [new LlmImageGenerationTool(), new LlmWebSearchTool()] });
+
+        var events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        Assert.IsType<LlmWebSearchTool>(Assert.Single(Assert.Single(harness.Requests).HostedTools));
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+    }
+
+    /// <summary>A stored context whose selection differs from the caller's current one opens with the current one.</summary>
+    [Fact]
+    public async Task OpeningAdoptsTheCurrentSelection()
+    {
+        var reference = new InferenceResourceReference("workspace", "reference");
+        var access = new ResourcePreparationTests.Resources(new("workspace", "session", 4, [reference]),
+            [(reference, "reference.txt", "reference text"u8.ToArray())]);
+        var harness = new Harness { PreparesResources = true };
+        await using var session = harness.Create(Options() with
+        {
+            Context = new()
+            {
+                ResourceSelectionVersion = new("workspace", "session", 3),
+                SelectedResources = [new InferenceResourceReference("workspace", "stale")]
+            },
+            CallerServices = new() { Resources = access }
+        });
+
+        LlmAgentContext captured = await session.CaptureContextAsync();
+
+        Assert.Equal([reference], captured.SelectedResources);
+        Assert.Equal(new InferenceResourceSelectionVersion("workspace", "session", 4), captured.ResourceSelectionVersion);
+    }
+
+    /// <summary>Options for a session that asks for images and holds empty caller-owned resource access.</summary>
+    private static LlmAgentSessionOptions ImageOptions() => Options() with
+    {
+        HostedTools = [new LlmImageGenerationTool()],
+        CallerServices = new() { Resources = new ResourcePreparationTests.Resources(new("workspace", "session", 0, []), []) }
+    };
+
     /// <summary>A rejected request is not an interrupted response body and does not retry.</summary>
     [Fact]
     public async Task ProviderRejectionDoesNotRetry()
@@ -994,8 +1065,15 @@ public sealed class ManagedAgentTests
         return events;
     }
 
-    private sealed class Harness : ILlmContextEstimator
+    private sealed class Harness : ILlmContextEstimator, ILlmResourcePreparationClient
     {
+        /// <summary>Whether the session may take caller-owned resource access; the harness itself prepares nothing.</summary>
+        public bool PreparesResources { get; init; }
+        public bool CanPrepareResources => PreparesResources;
+        /// <summary>The hosted-tool kinds the default capabilities offer.</summary>
+        public IReadOnlySet<LlmHostedToolKind> HostedKinds { get; init; } = new HashSet<LlmHostedToolKind> { LlmHostedToolKind.WebSearch };
+        /// <summary>Whether each model request reports a started image call before its scripted failure.</summary>
+        public bool StartsHostedCall { get; init; }
         public Queue<LlmChatResult> Results { get; } = new();
         public Queue<IReadOnlyList<LlmUsage>> UsageObservations { get; } = new();
         public List<LlmChatRequest> Requests { get; } = [];
@@ -1028,7 +1106,7 @@ public sealed class ManagedAgentTests
                 SupportsAgentToolUse = InferenceSupport.Supported,
                 SupportsAgentTurnInstructions = InferenceSupport.Supported,
                 RichContentSupported = RichContentRoutes.Responses,
-                HostedTools = new HashSet<LlmHostedToolKind> { LlmHostedToolKind.WebSearch },
+                HostedTools = HostedKinds,
                 Agent = ManagedAgentPolicy.Capabilities
             }, Learned).GetAwaiter().GetResult();
         public LearnedModelContext Learned { get; } = new();
@@ -1061,6 +1139,7 @@ public sealed class ManagedAgentTests
             }
             Requests.Add(request);
             if (ExposeBeforeFailure) { yield return new LlmTextDeltaEvent("partial"); }
+            if (StartsHostedCall) { yield return new LlmHostedToolCallStartedEvent("image-1", LlmHostedToolKind.ImageGeneration, "image_generation"); }
             Exception? failure = RequestFailure is null ? Failure : RequestFailure(Requests.Count);
             if (failure is not null) { throw failure; }
             foreach (var snapshot in Snapshots) yield return new LlmStructuredOutputSnapshotEvent(snapshot);

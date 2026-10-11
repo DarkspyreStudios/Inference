@@ -167,6 +167,14 @@ internal sealed class LlmResourcePreparation : IAsyncDisposable
         return ValidateDescriptor(descriptor, reference, scope);
     }
 
+    /// <summary>The context with the caller's current selection, or with no selection when there is no access.
+    /// An opening never refuses a stored selection that differs from the current one (P1-B3, P1-B18, P1-B39).</summary>
+    internal static LlmAgentContext Adopt(LlmAgentContext context, InferenceResourceSelection? selection) => context with
+    {
+        SelectedResources = selection?.SelectedResources ?? [],
+        ResourceSelectionVersion = selection is null ? null : new(selection.WorkspaceId, selection.SessionId, selection.Revision)
+    };
+
     internal static async Task ValidateContextAsync(LlmAgentContext context, InferenceResourceSelection selection,
         IInferenceResourceAccess access, Action fence, CancellationToken token)
     {

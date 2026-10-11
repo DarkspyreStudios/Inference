@@ -49,8 +49,6 @@ internal static class ManagedAgentContext
     internal static void ValidateRuntimeResources(LlmAgentContext context)
     {
         context = ValidatePortable(context);
-        if (context.SelectedResources.Count > 0 || context.ResourceSelectionVersion is not null)
-            throw new NotSupportedException("This runtime does not bind caller-owned resource selections.");
         LlmAttachments.ValidateReferences(new LlmChatRequest
         {
             ModelId = string.Empty,

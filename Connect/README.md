@@ -172,6 +172,14 @@ signature and refuses on both transports.
 
 **Images out on Codex.** An `LlmImageGenerationTool` in `HostedTools` lets Codex generate images, and the session
 commits each finished image through `CallerServices.Resources` and reports it as an `LlmAgentImageOutputEvent`.
+A session that asks for images opens and runs on any model: the opening and each step drop the image tool when the
+model's `HostedTools` lacks `ImageGeneration`, so Claude opens with it and runs without it. Every other hosted tool a
+model lacks is still refused. The managed session also drops the image tool without resource access. An opening
+adopts the caller's current resource selection in place of the stored context's, or clears it without access, so a
+context whose selection came from an earlier run opens without a refusal; a message reference the access cannot
+resolve still refuses. A committed image joins the selection, and a Responses request is prepared without the
+selection, so the image is not sent again as an attachment: the next Codex turn replays it from the
+`image_generation_call` item in continuation state.
 
 **Fallback models, caps and retries.** Codex refuses a non-empty `FallbackModelIds` and a `MaxSpendUsd` greater
 than 0 at opening. Claude passes `FallbackModelIds`, without the session model and without repeats, as
@@ -182,7 +190,11 @@ reopens included, sends the same arguments. A Claude result with subtype `error_
 `IterationLimit` and `error_max_budget_usd` with `SpendLimit`, each with the CLI's first error text. A Claude
 `system` message with subtype `api_retry` becomes `LlmAgentResponseRecoveryEvent` with `NextAttempt` = the CLI's
 `attempt`, `Delay` = `retry_delay_ms` and `Error` = `{error_status}: {error}` (the status is left out when null).
-A Codex retry reports `Delay` as the wait before the next attempt and `Error` as the failure message.
+A Codex retry reports `Delay` as the wait before the next attempt and `Error` as the failure message. A 429, 502,
+503 or 504, or an `HttpRequestException`, before any output is sent again up to three attempts in all, with or
+without resource access, and each wait is reported first as an `LlmAgentResponseRecoveryEvent`. A provider error
+that resource preparation wrapped before any resource effect reaches the retry, the too-long refusal handling and
+the turn's final message as the provider's own `LlmProviderException`.
 
 `LlmAgentUsageEvent.ModelId` names the model a Codex step used: the step request's model on
 streamed usage, and the reported model on the step's final usage. On Claude it is the `model` the CLI reports on
@@ -926,9 +938,9 @@ Format-3 context requires an explicit `SelectedResources` list. Its optional
 `ResourceSelectionVersion` records the caller's workspace, logical session and selection revision,
 independently of transcript revision. The codec copies and validates this data without accessing
 storage. Legacy captures upgrade to empty membership with unknown provenance, not revision zero.
-Byte-excluded captures retain logical references and the selection snapshot. Current session
-implementations reject selections they cannot bind; import never silently installs or deletes caller
-membership.
+Byte-excluded captures retain logical references and the selection snapshot. A session opening replaces a
+stored selection with the caller's current one, or clears it without caller access; it never installs or deletes
+caller membership.
 
 Portable context and its owned codec preserve a final incomplete mixed tool-call group with each
 actual completed same-kind result. No later transcript message can follow an unresolved group.
@@ -1725,8 +1737,8 @@ references, selection and transcript revisions. Terminal completion follows owne
 operation and independent cleanup failures remain visible together. This lane does not implement
 provider Files CRUD or create a paid cache.
 OpenAI Responses, Anthropic, Gemini API, Vertex and Bedrock managed-session opening admits resource-bearing portable contexts only with explicit
-caller-owned access and a document-capable model. The shared managed session validates the exact
-Workspace/Session selection snapshot before import. Capture keeps logical references after generation.
+caller-owned access and a document-capable model. The shared managed session adopts the current
+Workspace/Session selection snapshot at opening and validates the context against it. Capture keeps logical references after generation.
 OpenAI Responses carries committed bytes and filenames in its existing native inline `input_file`
 projection ([official file inputs](https://developers.openai.com/api/docs/guides/file-inputs)).
 The Responses operation owns inline preparation, terminal publication and reader release. Its SDK
@@ -3162,7 +3174,8 @@ that ends without a terminal response, carries `LlmProviderException.IsResponseS
 content, resource-cleanup failures and native CLI failures do not receive this classification.
 The managed runtime retries only the current uncommitted model request, with three total attempts
 and cancellable waits of one and two seconds. Completed application tools and their results remain
-in history and never run again through recovery. Requests enabling provider-hosted tools do not retry.
+in history and never run again through recovery. Requests enabling provider-hosted tools do not retry, except a
+request whose only hosted tool is image generation: it retries unless the failed attempt started a hosted call.
 A failure after a terminal result does not retry. Interrupted usage leaves the exact run total unknown.
 `LlmAgentResponseRecoveryEvent` names the failed attempt and the next attempt, or null when recovery
 ends. Consumers discard unfinished text and reasoning without changing completed messages. The first

@@ -114,7 +114,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             {
                 if (request.Resources is not null)
                 {
-                    resources = await LlmResourcePreparation.PrepareInlineAsync(request, Fence, cancellationToken).ConfigureAwait(false);
+                    resources = await LlmResourcePreparation.PrepareInlineAsync(request, Fence, cancellationToken, includeSelection: false).ConfigureAwait(false);
                     ValidateRequest(connection, resources.Request, capabilities);
                     Fence();
                     request = resources.Request;

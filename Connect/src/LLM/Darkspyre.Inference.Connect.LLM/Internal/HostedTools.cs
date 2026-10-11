@@ -41,6 +41,16 @@ internal static class HostedTools
         }
     }
 
+    /// <summary>The tools with every LlmImageGenerationTool removed when the model does not offer ImageGeneration.
+    /// A session that asks for images still runs on a model without them (DSA-942 B8).</summary>
+    internal static IReadOnlyList<LlmHostedTool> WithoutUnofferedImages(IReadOnlyList<LlmHostedTool> tools,
+        IReadOnlySet<LlmHostedToolKind> supported)
+    {
+        ArgumentNullException.ThrowIfNull(tools);
+        return supported.Contains(LlmHostedToolKind.ImageGeneration)
+            ? tools : [.. tools.Where(tool => tool is not LlmImageGenerationTool)];
+    }
+
     internal static IReadOnlyList<LlmHostedTool> Snapshot(IReadOnlyList<LlmHostedTool> tools) =>
         Array.AsReadOnly(tools.Select<LlmHostedTool, LlmHostedTool>(tool => tool switch
         {

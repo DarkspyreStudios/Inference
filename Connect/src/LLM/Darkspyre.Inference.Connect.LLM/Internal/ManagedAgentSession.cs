@@ -66,9 +66,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             if (options.CallerServices?.Resources is { } access)
             {
                 InferenceResourceSelection selection = await LlmResourcePreparation.ReadSelectionAsync(access, Fence, operation.Token).ConfigureAwait(false);
-                LlmAgentContext context = session._context;
-                if (options.Context is null)
-                    context = WithSelection(context, selection);
+                LlmAgentContext context = LlmResourcePreparation.Adopt(session._context, selection);
                 await LlmResourcePreparation.ValidateContextAsync(context, selection, access, Fence, operation.Token).ConfigureAwait(false);
                 Fence();
                 session._resourceScope = new(selection.WorkspaceId, selection.SessionId, selection.Revision);
@@ -100,11 +98,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         _estimator = estimator;
         _stream = stream;
         _capabilities = capabilities;
-        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities(options.ModelId).HostedTools);
+        IReadOnlyList<LlmHostedTool> offered = HostedTools.WithoutUnofferedImages(options.HostedTools,
+            capabilities(options.ModelId).HostedTools);
+        HostedTools.Validate(offered, options.MaxHostedTurns, capabilities(options.ModelId).HostedTools);
         ClientTools.ValidateManagedOpening(options, capabilities(options.ModelId), supportsResources);
         // A generated image is saved as a session resource, so without resource access the image tool is dropped (B4).
         _hostedTools = options.CallerServices?.Resources is null
-            ? [.. options.HostedTools.Where(tool => tool is not LlmImageGenerationTool)] : options.HostedTools;
+            ? [.. offered.Where(tool => tool is not LlmImageGenerationTool)] : offered;
         _execution = ManagedAgentPolicy.Normalize(options.ExecutionOptions ?? new(), Model(options.ModelId));
         _toolHandler = options.ToolHandler;
         _callerServices = options.CallerServices;
@@ -120,6 +120,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             .ToDictionary(tool => tool.Name, StringComparer.Ordinal);
         (_context, _startOmittedContinuationStates) = ManagedAgentContext.Import(
             options.Context ?? new(), connection, options.ModelId, supportsResources);
+        if (_callerServices?.Resources is null) { _context = LlmResourcePreparation.Adopt(_context, null); }
         _emptiedByOmission = EmptiedByOmission(options.Context, _context);
         ThreadId = options.ThreadId ?? Guid.NewGuid().ToString();
         SessionId = options.SessionId ?? ThreadId;
@@ -256,7 +257,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         if (access is not null)
         {
             InferenceResourceSelection selection = await ReadAdmittedSelectionAsync(access, cancellationToken).ConfigureAwait(false);
-            capture = WithSelection(capture, selection);
+            capture = LlmResourcePreparation.Adopt(capture, selection);
             await LlmResourcePreparation.ValidateContextAsync(capture, selection, access,
                 () => FenceResourceCallback(cancellationToken), cancellationToken).ConfigureAwait(false);
         }
@@ -579,9 +580,10 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     for (int attempt = 1; ; attempt++)
                     {
                         bool replacementStarted = false;
+                        bool hostedStarted = false;
                         try
                         {
-                            await foreach (var item in StreamModelAsync(run, request, token))
+                            await foreach (var item in StreamModelAsync(run, request, stepId, writer, token))
                             {
                                 if (request.Resources is not null)
                                 {
@@ -614,6 +616,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                                             reasoning.Delta, reasoning.IsSummary), token);
                                         break;
                                     case LlmHostedToolCallStartedEvent hosted:
+                                        hostedStarted = true;
                                         await writer.WriteAsync(new LlmAgentHostedToolCallStartedEvent(
                                             ThreadId, run.Id, stepId, hosted.CallId, hosted.Kind, hosted.Name), token);
                                         break;
@@ -642,14 +645,10 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                             break;
                         }
                         catch (Exception error) when (result is null && !token.IsCancellationRequested &&
-                            (error is LlmProviderException { IsResponseStreamInterrupted: true }
-                            || error is InferenceResourceOperationException
-                            {
-                                Failure: { Phase: InferenceResourceOperationPhase.Materialize, CommitOutcome: InferenceResourceCommitOutcome.NotAttempted },
-                                InnerException: LlmProviderException { IsResponseStreamInterrupted: true }
-                            }))
+                            error is LlmProviderException { IsResponseStreamInterrupted: true })
                         {
-                            bool hostedTools = request.HostedTools.Count > 0;
+                            // An image-only request replays unless a hosted call started, since that call may already have run.
+                            bool hostedTools = hostedStarted || request.HostedTools.Any(tool => tool is not LlmImageGenerationTool);
                             int? nextAttempt = hostedTools || attempt == 3 ? null : attempt + 1;
                             run.UsageUnknown = true;
                             await writer.WriteAsync(new LlmAgentResponseRecoveryEvent(ThreadId, run.Id, stepId, nextAttempt)
@@ -1113,7 +1112,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 LlmAgentShellTool shell => shell.Tool,
                 _ => throw new NotSupportedException("Unknown agent tool definition.")
             }).ToArray(),
-            HostedTools = _hostedTools,
+            HostedTools = HostedTools.WithoutUnofferedImages(_hostedTools, _capabilities(turn.ModelId!).HostedTools),
             MaxHostedTurns = _options.MaxHostedTurns,
             Resources = _callerServices?.Resources
         }, _capabilities(turn.ModelId!));
@@ -1361,7 +1360,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         ArgumentNullException.ThrowIfNull(turn.Input);
         ArgumentNullException.ThrowIfNull(turn.Attachments);
         var capabilities = _capabilities(turn.ModelId ?? _options.ModelId);
-        HostedTools.Validate(_hostedTools, _options.MaxHostedTurns, capabilities.HostedTools);
+        HostedTools.Validate(HostedTools.WithoutUnofferedImages(_hostedTools, capabilities.HostedTools),
+            _options.MaxHostedTurns, capabilities.HostedTools);
         ClientTools.ValidateManagedOpening(_options with { ToolHandler = _toolHandler, CallerServices = _callerServices }, capabilities, _supportsResources);
         if (capabilities.SupportsAgentSessions == InferenceSupport.Unsupported)
             throw new NotSupportedException(NativeAgentContract.AgentSessionsUnsupported);
@@ -1428,11 +1428,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             throw new ArgumentException("The caller-owned resource scope changed after session admission.");
         return selection;
     }
-    private static LlmAgentContext WithSelection(LlmAgentContext context, InferenceResourceSelection selection) => context with
-    {
-        SelectedResources = selection.SelectedResources,
-        ResourceSelectionVersion = new(selection.WorkspaceId, selection.SessionId, selection.Revision)
-    };
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
     private void RequireIdle()
     {
@@ -1468,23 +1463,31 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         }
     }
 
-    private async IAsyncEnumerable<LlmStreamEvent> StreamModelAsync(LiveRun run, LlmChatRequest request,
-        [EnumeratorCancellation] CancellationToken token)
+    private async IAsyncEnumerable<LlmStreamEvent> StreamModelAsync(LiveRun run, LlmChatRequest request, string stepId,
+        ChannelWriter<LlmAgentEvent> writer, [EnumeratorCancellation] CancellationToken token)
     {
         // Only pre-output transient failures are repeatable. Never splice a new response into an exposed stream.
+        // A repeated send repeats no resource effect: inline preparation only reads.
         for (int attempt = 0; ; attempt++)
         {
             bool exposed = false;
             TimeSpan? retryDelay = null;
+            Exception? failure = null;
             await using var stream = _stream(request, token).GetAsyncEnumerator(token);
             while (true)
             {
                 bool next;
                 try { next = await stream.MoveNextAsync(); }
-                catch (Exception error) when (request.Resources is null && !token.IsCancellationRequested && !exposed && attempt < 2
-                    && RetryDelay(error, attempt) is not null)
+                catch (Exception caught)
                 {
-                    retryDelay = RetryDelay(error, attempt);
+                    Exception error = Unwrapped(caught);
+                    retryDelay = token.IsCancellationRequested || exposed || attempt >= 2 ? null : RetryDelay(error, attempt);
+                    if (retryDelay is null)
+                    {
+                        if (ReferenceEquals(error, caught)) throw;
+                        ExceptionDispatchInfo.Throw(error);
+                    }
+                    failure = error;
                     run.UsageUnknown = true;
                     break;
                 }
@@ -1492,9 +1495,23 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 exposed = true;
                 yield return stream.Current;
             }
+            await writer.WriteAsync(new LlmAgentResponseRecoveryEvent(ThreadId, run.Id, stepId, NextAttempt: attempt + 2)
+            {
+                Delay = retryDelay,
+                Error = failure!.Message
+            }, token);
             await Task.Delay(retryDelay!.Value, token);
         }
     }
+
+    /// <summary>The provider's own error when resource preparation wrapped it before any resource effect: a
+    /// Materialize/NotAttempted InferenceResourceOperationException whose InnerException is an LlmProviderException.
+    /// Any other error is returned unchanged.</summary>
+    private static Exception Unwrapped(Exception error) => error is InferenceResourceOperationException
+    {
+        Failure: { Phase: InferenceResourceOperationPhase.Materialize, CommitOutcome: InferenceResourceCommitOutcome.NotAttempted },
+        InnerException: LlmProviderException provider
+    } ? provider : error;
 
     private static TimeSpan? RetryDelay(Exception error, int attempt)
     {

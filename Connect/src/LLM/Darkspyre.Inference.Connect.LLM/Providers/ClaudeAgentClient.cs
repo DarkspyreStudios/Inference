@@ -31,6 +31,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         CancellationToken cancellationToken = default)
     {
         options = ClientTools.Snapshot(options);
+        options = options with { HostedTools = HostedTools.WithoutUnofferedImages(options.HostedTools, NativeAgentContract.Claude.HostedTools) };
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, NativeAgentContract.Claude.HostedTools);
         // The CLI owns its id, so ThreadId is ignored. The runtime policy is accepted and not read: no provider tool runs.
         string workingDirectory = options.Runtime?.WorkingDirectory ?? Environment.CurrentDirectory;
@@ -48,26 +49,25 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         return conversation;
     }
 
-    private static async Task<InferenceResourceSelectionVersion?> ReadResourceScopeAsync(
+    /// <summary>The opening context with the caller's current selection (or none without access), and the resource scope.</summary>
+    private static async Task<(LlmAgentContext? Context, InferenceResourceSelectionVersion? Scope)> ReadResourceScopeAsync(
         IInferenceResourceAccess? access, LlmAgentContext? context, CancellationToken token)
     {
         if (access is null)
         {
-            if (context is not null) ManagedAgentContext.ValidateRuntimeResources(context);
-            return null;
+            if (context is null) return (null, null);
+            LlmAgentContext cleared = LlmResourcePreparation.Adopt(context, null);
+            ManagedAgentContext.ValidateRuntimeResources(cleared);
+            return (cleared, null);
         }
         InferenceResourceSelection selection = await LlmResourcePreparation.ReadSelectionAsync(access, static () => { }, token);
-        context ??= new()
-        {
-            ResourceSelectionVersion = new(selection.WorkspaceId, selection.SessionId, selection.Revision),
-            SelectedResources = selection.SelectedResources
-        };
-        await LlmResourcePreparation.ValidateContextAsync(context, selection, access, static () => { }, token);
-        LlmAttachments.ValidateReferences(new() { ModelId = string.Empty, Messages = context.Entries.Select(entry => entry.Message).ToArray() },
+        LlmAgentContext adopted = LlmResourcePreparation.Adopt(context ?? new(), selection);
+        await LlmResourcePreparation.ValidateContextAsync(adopted, selection, access, static () => { }, token);
+        LlmAttachments.ValidateReferences(new() { ModelId = string.Empty, Messages = adopted.Entries.Select(entry => entry.Message).ToArray() },
             supportsResources: true);
-        foreach (LlmAgentContextEntry entry in context.Entries)
+        foreach (LlmAgentContextEntry entry in adopted.Entries)
             LlmAttachments.Validate(entry.Message.Attachments, true, true, nameof(context), supportsReferences: true);
-        return new(selection.WorkspaceId, selection.SessionId, selection.Revision);
+        return (context is null ? null : adopted, new(selection.WorkspaceId, selection.SessionId, selection.Revision));
     }
 
     /// <summary>Starts one CLI process and its session, with <paramref name="opening"/> sent before the first input.</summary>
@@ -101,7 +101,9 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             options.FallbackModelIds,
             // A non-positive iteration limit uses the record default, as on every route.
             options.ExecutionOptions is { } execution ? ManagedAgentPolicy.Normalize(execution, null) : null);
-        InferenceResourceSelectionVersion? resourceScope = await ReadResourceScopeAsync(resourceAccess, openingContext.Context, cancellationToken);
+        (LlmAgentContext? adoptedContext, InferenceResourceSelectionVersion? resourceScope) =
+            await ReadResourceScopeAsync(resourceAccess, openingContext.Context, cancellationToken);
+        openingContext = (adoptedContext, openingContext.Omitted);
         IClaudeCliSessionProcess process;
         try
         {

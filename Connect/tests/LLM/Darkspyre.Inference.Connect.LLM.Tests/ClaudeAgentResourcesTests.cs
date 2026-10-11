@@ -294,23 +294,49 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         Assert.IsType<LlmResourceAttachment>(restored.Entries[0].Message.Attachments[0]);
     }
 
+    /// <summary>A stored selection that differs from the caller's current one is replaced by it, and the process starts.</summary>
     [Fact]
-    public async Task NativeOpeningRejectsADifferentSelectionBeforeStartingTheProcess()
+    public async Task ClaudeOpeningAdoptsTheCurrentSelection()
     {
         var reference = new InferenceResourceReference("workspace", "reference");
+        var stale = new InferenceResourceReference("workspace", "stale");
         var access = new ResourcePreparationTests.Resources(new("workspace", "session", 4, [reference]),
             [(reference, "reference.txt", "reference text"u8.ToArray())]);
         var factory = new Factory(new ManualProcess());
-        var client = Client(factory);
-        await Assert.ThrowsAsync<ArgumentException>(() => client.StartSessionAsync("connection", Connection(), new()
+        await using ILlmAgentSession session = await Client(factory).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
-            Context = new() { ResourceSelectionVersion = new("workspace", "session", 3), SelectedResources = [reference] },
+            Context = new() { ResourceSelectionVersion = new("workspace", "session", 3), SelectedResources = [stale] },
             CallerServices = new() { Resources = access },
             Runtime = new() { WorkingDirectory = _directory }
-        }));
-        Assert.Null(factory.Invocation);
-        Assert.Empty(access.Reads);
+        });
+        Assert.NotNull(factory.Invocation);
+    }
+
+    /// <summary>Claude offers no image generation, so a session that asks for it opens and runs without it.</summary>
+    [Fact]
+    public async Task ClaudeOpensWithTheImageToolAndRunsWithoutIt()
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        {
+            ModelId = "claude-test",
+            HostedTools = [new LlmImageGenerationTool()],
+            Runtime = new() { WorkingDirectory = _directory }
+        });
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(new()
+        {
+            Input = [new LlmAgentTextContent("Reply with OK.")]
+        }, limit.Token).GetAsyncEnumerator(limit.Token);
+
+        Assert.True(await feed.MoveNextAsync());
+        string turnId = await process.WaitForUserMessage(limit.Token);
+        process.Push(new { type = "user", uuid = turnId, isReplay = true });
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "OK", stop_reason = "end_turn" });
+        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]).Reason);
     }
 
     [Theory]
