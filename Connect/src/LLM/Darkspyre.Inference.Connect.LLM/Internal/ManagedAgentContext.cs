@@ -31,6 +31,19 @@ internal static class ManagedAgentContext
     }
 
     /// <summary>
+    /// The context with every provider-reported token count removed. A count measures the exact request the provider
+    /// answered; a history restored from storage or changed by compaction is not that request, and a kept count would
+    /// make the next size estimate far from the truth.
+    /// </summary>
+    public static LlmAgentContext WithoutReportedCounts(LlmAgentContext context) =>
+        context with { Entries = [.. context.Entries.Select(entry => entry with { Message = WithoutReportedCounts(entry.Message) })] };
+
+    private static LlmChatMessage WithoutReportedCounts(LlmChatMessage message) =>
+        message.ContinuationState is { InputTokens: not null } or { OutputTokens: not null }
+            ? message with { ContinuationState = message.ContinuationState with { InputTokens = null, OutputTokens = null } }
+            : message;
+
+    /// <summary>
     /// Validates a context for a new provider-side conversation, which carries no continuation state. Every
     /// entry's state is removed and counted.
     /// </summary>
