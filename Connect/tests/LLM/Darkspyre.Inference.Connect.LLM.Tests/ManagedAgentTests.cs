@@ -851,6 +851,21 @@ public sealed class ManagedAgentTests
     }
 
     [Fact]
+    public async Task InterruptedSummaryIsSentAgainInsideTheSession()
+    {
+        var harness = new Harness { InterruptedSummaries = 2, SummaryText = "summary of t1" };
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "answer", Status = LlmCompletionStatus.Completed });
+        await using var session = harness.Create(Options() with { Context = History(("t1", new string('a', 800), "first answer")) });
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Empty(events.OfType<LlmAgentResponseRecoveryEvent>());
+        Assert.True(harness.Summaries.Count > 2); // The two interrupted requests were sent again.
+        Assert.Single(events.OfType<LlmAgentCompactedEvent>());
+    }
+
+    [Fact]
     public async Task OmittedNativeCompactionIsSummarizedBeforeFirstSend()
     {
         // A Codex session another connection compacted natively: one entry holds only the compaction state, and the
@@ -988,6 +1003,9 @@ public sealed class ManagedAgentTests
         /// <summary>Compaction summary requests, answered with <see cref="SummaryText"/> or <see cref="SummaryFailure"/>.</summary>
         public List<LlmChatRequest> Summaries { get; } = [];
         public string SummaryText { get; init; } = "summary";
+
+        /// <summary>How many summary requests, from the first, end with an interrupted stream.</summary>
+        public int InterruptedSummaries { get; init; }
         public Exception? SummaryFailure { get; init; }
         public Exception? Failure { get; set; }
         /// <summary>An optional scripted failure for each numbered model request.</summary>
@@ -1036,6 +1054,7 @@ public sealed class ManagedAgentTests
             {
                 Summaries.Add(request);
                 if (SummaryFailure is not null) throw SummaryFailure;
+                if (Summaries.Count <= InterruptedSummaries) throw Interrupted();
                 yield return new LlmChatCompletionEvent(new()
                 { Diagnostics = new(200, null, null), Text = SummaryText, Status = LlmCompletionStatus.Completed });
                 yield break;

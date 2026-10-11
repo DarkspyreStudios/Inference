@@ -1295,13 +1295,29 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         }
     }
 
-    /// <summary>Sends one summary request on this conversation's connection and returns its result.</summary>
+    /// <summary>
+    /// Sends one summary request on this conversation's connection and returns its result. A refusal a model step would
+    /// repeat, or an interrupted stream, sends the request again inside the session, up to the three attempts a model step
+    /// gets; the caller sees only the last failure. Nothing of a summary reaches the caller before it completes, so a
+    /// repeat replays nothing.
+    /// </summary>
     private async Task<LlmChatResult> SideRequestAsync(LlmChatRequest request, CancellationToken token)
     {
-        LlmChatResult? result = null;
-        await foreach (LlmStreamEvent item in _stream(request, token).WithCancellation(token).ConfigureAwait(false))
-            if (item is LlmChatCompletionEvent completion) result = completion.Result;
-        return result ?? throw new InvalidOperationException("The summary request ended without completion.");
+        for (int attempt = 0; ; attempt++)
+        {
+            try
+            {
+                LlmChatResult? result = null;
+                await foreach (LlmStreamEvent item in _stream(request, token).WithCancellation(token).ConfigureAwait(false))
+                    if (item is LlmChatCompletionEvent completion) result = completion.Result;
+                return result ?? throw new InvalidOperationException("The summary request ended without completion.");
+            }
+            catch (Exception error) when (!token.IsCancellationRequested && attempt < 2
+                && (RetryDelay(error, attempt) is not null || error is LlmProviderException { IsResponseStreamInterrupted: true }))
+            {
+                await Task.Delay(RetryDelay(error, attempt) ?? TimeSpan.FromSeconds(attempt + 1), token).ConfigureAwait(false);
+            }
+        }
     }
 
     /// <summary>The corrected size of a text sent as one user message.</summary>

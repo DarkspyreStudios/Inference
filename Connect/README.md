@@ -211,7 +211,8 @@ rest with one user entry `Summary of the earlier conversation:\n{summary}`. The 
 `LlmAgentCallerServices.Transcript` when the caller supplies it, else from the live context's real entries, and never
 from an earlier summary. The summary input cuts tool output the same way. Summary requests run on the conversation's
 own connection and model, all parts at once, each within half the usable window, and the summary holds at most
-3,000 words. The working indicator shows `Pruning old context`, `Summarizing earlier messages` and
+3,000 words. On Codex a summary request that is refused as overloaded or whose stream is interrupted is sent
+again inside the session, up to three attempts. The working indicator shows `Pruning old context`, `Summarizing earlier messages` and
 `Applying the compacted context` as `LlmAgentActivityEvent` text, cleared by empty text. A compaction that changed the
 context emits `LlmAgentCompactedEvent` with the dropped-entry, shortened-output and removed-image counts, then an
 `LlmAgentUsageEvent` with the summary requests' usage. Results of a current-turn call to a tool with
