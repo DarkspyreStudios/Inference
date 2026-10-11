@@ -176,7 +176,7 @@ public sealed class DirectCodexTests
         Assert.Equal(1, handler.Calls);
     }
 
-    private const string Completed = """
+    internal const string Completed = """
         data: {"type":"response.output_text.delta","delta":"Hello"}
 
         data: {"type":"response.completed","response":{"id":"response","status":"completed","output":[{"type":"message","id":"msg","role":"assistant","phase":"final_answer","content":[{"type":"output_text","text":"Hello"}]}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}}
@@ -605,6 +605,128 @@ public sealed class DirectCodexTests
         Assert.Equal("Describe it", prompt["content"]!.GetValue<string>());
     }
 
+    /// <summary>An OpenAI API image item is kept in continuation state and replayed on the next request (S9).</summary>
+    [Fact]
+    public async Task OpenAiImageCallIsKeptInContinuationState()
+    {
+        using var handler = new Handler(_ => Sse(ImageReply));
+        var client = new OpenAiResponsesLlmClient(new HttpClient(handler));
+        LlmConnection connection = OpenAiConnection("http://local.test/v1");
+
+        LlmChatResult first = await Complete(client, connection, Request() with { HostedTools = [new LlmImageGenerationTool()] });
+
+        Assert.NotNull(first.ContinuationState);
+        handler.Response = _ => Sse(Completed);
+        _ = await Complete(client, connection, Request() with
+        {
+            Messages = [new("user", "Draw a cat"),
+                new("assistant", first.Text) { ContinuationState = first.ContinuationState }, new("user", "Describe it")]
+        });
+        JsonNode image = JsonNode.Parse(handler.Body!)!["input"]!.AsArray()
+            .Single(item => item!["type"]?.GetValue<string>() == "image_generation_call")!;
+        Assert.Equal("AQID", image["result"]!.GetValue<string>());
+    }
+
+    /// <summary>Codex keeps its tool names, image tool and reasoning after they moved to the shared base (6.7).</summary>
+    [Fact]
+    public async Task CodexPayloadIsUnchangedByTheSharedBase()
+    {
+        using var handler = new Handler(_ => Sse(Completed));
+        var client = new OpenAiCodexLlmClient(new HttpClient(handler));
+        LlmChatRequest request = Request() with
+        {
+            ReasoningLevel = LlmReasoningLevel.High,
+            Tools = [LongNameTool(), new LlmToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("""{"type":"object"}""") }],
+            HostedTools = [new LlmImageGenerationTool { Action = LlmImageGenerationAction.Edit }],
+            Messages = [new("user", "first"),
+                new("assistant", "") { ToolCalls = [new LlmToolCall("earlier", LongName, "{}")] },
+                new("user", "") { ToolResults = [new LlmToolResult("earlier", LlmToolOutput.FromText("answer"))] }]
+        };
+
+        _ = await Complete(client, Connection(), request);
+
+        JsonNode sent = JsonNode.Parse(handler.Body!)!;
+        string alias = LlmToolNames.Alias(LongName);
+        Assert.Equal([alias, "echo", null], sent["tools"]!.AsArray().Select(tool => tool!["name"]?.GetValue<string>()));
+        Assert.True(JsonNode.DeepEquals(new JsonObject { ["type"] = "image_generation", ["action"] = "edit" }, sent["tools"]![2]));
+        Assert.Equal(alias, sent["input"]!.AsArray().Single(item => item!["type"]?.GetValue<string>() == "function_call")!["name"]!.GetValue<string>());
+        Assert.True(JsonNode.DeepEquals(new JsonObject { ["effort"] = "high", ["summary"] = "auto" }, sent["reasoning"]));
+    }
+
+    /// <summary>A temperature refused as unsupported is dropped, the step sent once more, and the refusal remembered
+    /// for that connection and model only (S3a).</summary>
+    [Fact]
+    public async Task RefusedTemperatureIsDroppedResentAndRemembered()
+    {
+        int posts = 0;
+        using var handler = new Handler(_ => ++posts == 1
+            ? Refusal("""{"error":{"message":"Unsupported parameter: 'temperature' is not supported with this model.","type":"invalid_request_error","param":"temperature","code":"unsupported_parameter"}}""")
+            : Sse(Completed));
+        var learned = new LearnedModelContext();
+        LlmAgentTurnRequest turn = new() { Input = [new LlmAgentTextContent("hello")], Temperature = 0.7 };
+        await using (ManagedAgentSession session = await OpenAiSession(handler, "openrouter", learned))
+        {
+            List<LlmAgentEvent> first = await RunAsync(session, turn);
+            List<LlmAgentEvent> second = await RunAsync(session, turn);
+
+            Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(first.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+            Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(second.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        }
+        await using (ManagedAgentSession other = await OpenAiSession(handler, "other-service", learned))
+            _ = await RunAsync(other, turn);
+
+        bool[] sentTemperature = [.. handler.Bodies.Select(body => JsonNode.Parse(body)!.AsObject().ContainsKey("temperature"))];
+        Assert.Equal([true, false, false, true], sentTemperature);
+    }
+
+    /// <summary>A reasoning value refused as unsupported is dropped from the resent request and the next turn (B4).</summary>
+    [Fact]
+    public async Task RefusedReasoningIsDroppedResentAndRemembered()
+    {
+        int posts = 0;
+        using var handler = new Handler(_ => ++posts == 1
+            ? Refusal("""{"error":{"message":"Unsupported parameter: 'reasoning.effort' is not supported with this model.","type":"invalid_request_error","param":"reasoning.effort","code":"unsupported_parameter"}}""")
+            : Sse(Completed));
+        LlmAgentTurnRequest turn = new() { Input = [new LlmAgentTextContent("hello")], ReasoningLevel = LlmReasoningLevel.High };
+        await using ManagedAgentSession session = await OpenAiSession(handler, "local", new LearnedModelContext());
+
+        List<LlmAgentEvent> first = await RunAsync(session, turn);
+        _ = await RunAsync(session, turn);
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(first.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        bool[] sentReasoning = [.. handler.Bodies.Select(body => JsonNode.Parse(body)!.AsObject().ContainsKey("reasoning"))];
+        Assert.Equal([true, false, false], sentReasoning);
+    }
+
+    private static HttpResponseMessage Refusal(string body) => new(HttpStatusCode.BadRequest)
+    { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+
+    /// <summary>An OpenAI API connection at <paramref name="endpoint"/> with no key.</summary>
+    internal static LlmConnection OpenAiConnection(string endpoint) =>
+        new() { Version = "1", Transport = LlmTransport.OpenAiResponses, Endpoint = endpoint };
+
+    /// <summary>An OpenAI API session on another endpoint that asks for images and holds resource access, as the Host opens it.</summary>
+    private static Task<ManagedAgentSession> OpenAiSession(Handler handler, string connectionId, LearnedModelContext learned)
+    {
+        var client = new OpenAiResponsesLlmClient(new HttpClient(handler));
+        LlmConnection connection = OpenAiConnection("https://openrouter.test/api/v1");
+        return ManagedAgentSession.CreateAsync(connectionId, connection, new()
+        {
+            ModelId = "model",
+            HostedTools = [new LlmImageGenerationTool()],
+            CallerServices = new() { Resources = EmptyAccess() }
+        }, [new("model", "Model") { MaxContextTokens = 128000 }], client,
+            (request, token) => client.StreamAsync(connection, request, token),
+            model => client.GetCapabilities(connection, model), learned);
+    }
+
+    private static async Task<List<LlmAgentEvent>> RunAsync(ManagedAgentSession session, LlmAgentTurnRequest turn)
+    {
+        var events = new List<LlmAgentEvent>();
+        await foreach (LlmAgentEvent item in session.RunTurnAsync(turn)) events.Add(item);
+        return events;
+    }
+
     private const string ImageReply = """
         data: {"type":"response.output_item.added","output_index":0,"item":{"type":"image_generation_call","id":"ig","status":"in_progress"}}
 
@@ -699,11 +821,11 @@ public sealed class DirectCodexTests
     private static string Credential(string account) => new LlmCredential
     { OAuth = new() { AccessToken = "token", AccountId = account } }.Serialize();
     private static LlmChatRequest Request() => new() { ModelId = "model", Messages = [new("user", "hello")] };
-    private static HttpResponseMessage Sse(string text) => new(HttpStatusCode.OK)
+    internal static HttpResponseMessage Sse(string text) => new(HttpStatusCode.OK)
     { Content = new StringContent(text, Encoding.UTF8, "text/event-stream") };
     private static HttpResponseMessage Json(string text) => new(HttpStatusCode.OK)
     { Content = new StringContent(text, Encoding.UTF8, "application/json") };
-    private static async Task<LlmChatResult> Complete(OpenAiCodexLlmClient client, LlmConnection connection, LlmChatRequest request) =>
+    private static async Task<LlmChatResult> Complete(ResponsesLlmClientBase client, LlmConnection connection, LlmChatRequest request) =>
         Assert.Single((await Read(client.StreamAsync(connection, request))).OfType<LlmChatCompletionEvent>()).Result;
     private static async Task<List<LlmStreamEvent>> Read(IAsyncEnumerable<LlmStreamEvent> source)
     {
@@ -712,7 +834,7 @@ public sealed class DirectCodexTests
         return result;
     }
 
-    private sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler
+    internal sealed class Handler(Func<HttpRequestMessage, HttpResponseMessage> response) : HttpMessageHandler
     {
         public Func<HttpRequestMessage, HttpResponseMessage> Response { get; set; } = response;
         public string? Body { get; private set; }

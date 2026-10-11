@@ -7,6 +7,7 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Darkspyre.Inference.Connect.LLM.Providers;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -838,13 +839,20 @@ public sealed class ManagedAgentTests
         Assert.InRange(harness.EstimateInputTokens(Harness.Connection, harness.Requests[1], ResourceSizes.None)!.Value.Tokens, 0, 3465);
     }
 
-    [Fact]
-    public async Task CodexRefusalCompactsAndResendsOnce()
+    [Theory]
+    [InlineData(LlmTransport.OpenAiCodex)]
+    [InlineData(LlmTransport.OpenAiResponses)]
+    public async Task CodexRefusalCompactsAndResendsOnce(LlmTransport transport)
     {
-        static LlmProviderException TooLong() => new("Your input exceeds the context window of this model.",
-            LlmTransport.OpenAiCodex, isContextOverflow: true);
+        LlmProviderException TooLong() => new("Your input exceeds the context window of this model.",
+            transport, isContextOverflow: true) { ReportedContextLimit = transport == LlmTransport.OpenAiResponses ? 900 : null };
+        LlmConnection connection = Harness.Connection with { Transport = transport };
         // The first refusal is compacted and the step sent again; the Host never sees it.
-        var recovered = new Harness { RequestFailure = request => request == 1 ? TooLong() : null, SummaryText = "summary of turn one" };
+        var recovered = new Harness
+        {
+            RequestFailure = request => request == 1 ? TooLong() : null, SummaryText = "summary of turn one",
+            SessionConnection = connection
+        };
         recovered.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "answer", Status = LlmCompletionStatus.Completed });
         await using (var session = recovered.Create(Options() with { Context = History(("t1", new string('a', 600), "first answer")) }))
         {
@@ -856,10 +864,12 @@ public sealed class ManagedAgentTests
             string resent = string.Join("\n", recovered.Requests[1].Messages.Select(message => message.Content));
             Assert.Contains("summary of turn one", resent);
             Assert.DoesNotContain(new string('a', 600), resent);
+            // A limit the refusal reported is learned for this connection and model.
+            Assert.Equal(transport == LlmTransport.OpenAiResponses ? 900 : null, recovered.Learned.Limit(recovered.ConnectionId, "test"));
         }
 
         // A second refusal in the same turn ends it with the provider's message and is not sent again.
-        var refused = new Harness { RequestFailure = _ => TooLong() };
+        var refused = new Harness { RequestFailure = _ => TooLong(), SessionConnection = connection };
         await using (var session = refused.Create(Options() with { Context = History(("t1", new string('a', 600), "first answer")) }))
         {
             List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
@@ -869,6 +879,70 @@ public sealed class ManagedAgentTests
             Assert.Equal("Your input exceeds the context window of this model.", completed.Error);
             Assert.Equal(2, refused.Requests.Count);
         }
+    }
+
+    /// <summary>A context length set on the connection is the model's limit, above a learned one; without it the learned
+    /// limit applies (S6a).</summary>
+    [Theory]
+    [InlineData(true, 1000L)]
+    [InlineData(false, 300L)]
+    public async Task ConfiguredContextLengthIsTheLimit(bool configured, long expected)
+    {
+        LlmConnection connection = Harness.Connection with
+        {
+            Transport = LlmTransport.OpenAiResponses,
+            ModelCapabilityOverrides = configured
+                ? new Dictionary<string, LlmCapabilityOverrides> { ["test"] = new() { MaxContextTokens = 1000 } }
+                : new Dictionary<string, LlmCapabilityOverrides>()
+        };
+        var harness = new Harness { SessionConnection = connection };
+        harness.Learned.ObserveRefusal(harness.ConnectionId, "test", estimated: 0, reportedTokens: null, reportedLimit: 300, knownLimit: 1000);
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "answer", Status = LlmCompletionStatus.Completed });
+        await using var session = harness.Create();
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+
+        Assert.Equal(expected, events.OfType<LlmAgentContextStatusEvent>().First().Status.MaxContextTokens);
+    }
+
+    /// <summary>Plugin tools run on the OpenAI API under their own names, and only the image tool is hosted (S2, B7).</summary>
+    [Fact]
+    public async Task PluginToolsRunOnTheOpenAiApi()
+    {
+        const string name = "mcp.server/look up";
+        string alias = LlmToolNames.Alias(name);
+        int posts = 0;
+        using var handler = new DirectCodexTests.Handler(_ => DirectCodexTests.Sse(++posts == 1 ? """
+            data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc","call_id":"call","name":"ALIAS","arguments":"{\"q\":1}"}}
+
+            data: {"type":"response.completed","response":{"status":"completed","output":[],"id":"r"}}
+
+            """.Replace("ALIAS", alias, StringComparison.Ordinal) : DirectCodexTests.Completed));
+        var client = new OpenAiResponsesLlmClient(new HttpClient(handler));
+        LlmConnection connection = DirectCodexTests.OpenAiConnection("http://local.test/v1");
+        var calls = new List<LlmAgentToolCall>();
+        await using ManagedAgentSession session = await ManagedAgentSession.CreateAsync("local", connection, new()
+        {
+            ModelId = "qwen3",
+            Tools = [new LlmAgentToolDefinition { Name = name, InputSchema = JsonElement.Parse("""{"type":"object"}""") }],
+            ToolHandler = (call, _) => { calls.Add(call); return Task.FromResult(LlmToolOutput.FromText("found")); },
+            HostedTools = [new LlmImageGenerationTool()],
+            CallerServices = new() { Resources = new ResourcePreparationTests.Resources(new("workspace", "session", 0, []), []) }
+        }, [new("qwen3", "Qwen3") { MaxContextTokens = 131072 }], client,
+            (request, token) => client.StreamAsync(connection, request, token),
+            model => client.GetCapabilities(connection, model), new LearnedModelContext());
+
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("look it up")));
+
+        LlmAgentTurnCompletedEvent done = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal((LlmAgentCompletionReason.Completed, (string?)null), (done.Reason, done.Error));
+        LlmAgentToolCall call = Assert.Single(calls);
+        Assert.Equal(name, call.Name);
+        Assert.Equal(1, call.Arguments.GetProperty("q").GetInt32());
+        JsonNode first = JsonNode.Parse(handler.Bodies[0])!;
+        Assert.Equal([("function", alias), ("image_generation", null)],
+            first["tools"]!.AsArray().Select(tool => (tool!["type"]!.GetValue<string>(), tool["name"]?.GetValue<string>())));
+        Assert.Contains("\"function_call_output\"", handler.Bodies[1], StringComparison.Ordinal);
     }
 
     [Fact]

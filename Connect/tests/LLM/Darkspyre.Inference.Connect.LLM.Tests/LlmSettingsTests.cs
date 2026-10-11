@@ -133,6 +133,24 @@ public sealed class LlmSettingsTests
         Assert.False(unchanged.HasUnsavedChanges);
     }
 
+    /// <summary>An OpenAI API connection saves without a key, such as one for a local model server (B1, S10).</summary>
+    [Fact]
+    public async Task OpenAiApiConnectionSavesWithoutKey()
+    {
+        using var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiApiKey)]);
+        var target = new Target();
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiResponses,
+            new(SetupChangeIntent.Create, "id", null), target, modelId: "model");
+        using (manager)
+        {
+            SetupSecretField key = Assert.IsType<SetupSecretField>(Fields(settings).Single(field => field.Description.Id == "api-key"));
+            Assert.False(key.Description.IsRequired);
+            Assert.DoesNotContain(settings.Validate().Issues, issue => issue.Code == "key-required");
+            Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
+            Assert.Null(LlmCredential.Parse(target.Changes!.Configuration.Connection.Credential)?.ApiKey);
+        }
+    }
+
     private static LlmConnection Connection(LlmTransport transport, string key) => new()
     { Version = "v1", Transport = transport, Endpoint = "https://example.test/v1", Credential = new LlmCredential { ApiKey = key }.Serialize() };
 

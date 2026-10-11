@@ -1,6 +1,7 @@
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -110,6 +111,102 @@ public sealed class SupportStateTests
 
         Assert.Equal(expected, sent.ReasoningLevel);
     }
+
+    /// <summary>A connection with no key counts as authenticated and lists the service's models (S10).</summary>
+    [Fact]
+    public async Task OpenAiApiKeylessConnectionIsAuthenticated()
+    {
+        using var handler = new DirectCodexTests.Handler(_ => ModelList("""{"data":[{"id":"qwen3","context_length":131072}]}"""));
+        var client = new OpenAiResponsesLlmClient(new HttpClient(handler));
+        await using var providers = new LlmProviderService(new Source(DirectCodexTests.OpenAiConnection("http://local.test/v1")), [client]);
+
+        Assert.True(await providers.IsAuthenticatedAsync("local"));
+        LlmModel model = Assert.Single(await providers.ListModelsAsync("local"));
+        Assert.Equal(131072, model.MaxContextTokens);
+        Assert.False(handler.Headers.ContainsKey("Authorization"));
+    }
+
+    /// <summary>Published limits fill an unlisted window on OpenAI's endpoint only; a listed window stays (B6).</summary>
+    [Fact]
+    public async Task OpenAiListingTakesPublishedLimitsOnlyOnOpenAi()
+    {
+        using var handler = new DirectCodexTests.Handler(_ => ModelList("""{"data":[{"id":"gpt-4o"},{"id":"gpt-5.5","context_length":5000}]}"""));
+        var client = new OpenAiResponsesLlmClient(new HttpClient(handler));
+
+        Dictionary<string, LlmModel> openAi = (await client.ListModelsAsync(
+            DirectCodexTests.OpenAiConnection(OpenAiResponsesLlmClient.DefaultEndpoint))).ToDictionary(model => model.Id);
+        Dictionary<string, LlmModel> local = (await client.ListModelsAsync(
+            DirectCodexTests.OpenAiConnection("http://local.test/v1"))).ToDictionary(model => model.Id);
+
+        Assert.Equal((128_000L, 16_384L), (openAi["gpt-4o"].MaxContextTokens, openAi["gpt-4o"].MaxOutputTokens));
+        Assert.Equal(5000, openAi["gpt-5.5"].MaxContextTokens);
+        Assert.Null(local["gpt-4o"].MaxContextTokens);
+        Assert.Equal(5000, local["gpt-5.5"].MaxContextTokens);
+    }
+
+    /// <summary>Another endpoint gets no OpenAI facts; the spend cap is Unsupported everywhere (B11, B12).</summary>
+    [Fact]
+    public void OtherEndpointMarksServiceFeaturesUnknown()
+    {
+        var client = new OpenAiResponsesLlmClient(new HttpClient());
+        LlmProviderCapabilities local = client.GetCapabilities(DirectCodexTests.OpenAiConnection("http://local.test/v1"), "gpt-5.5");
+        LlmProviderCapabilities openAi = client.GetCapabilities(DirectCodexTests.OpenAiConnection(OpenAiResponsesLlmClient.DefaultEndpoint), "gpt-5.5");
+
+        Assert.Equal(
+            [InferenceSupport.Unknown, InferenceSupport.Unknown, InferenceSupport.Unknown, InferenceSupport.Unknown, InferenceSupport.Unknown, InferenceSupport.Unknown],
+            new[] { local.SupportsStreaming, local.SupportsJsonSchema, local.SupportsToolUse, local.SupportsPromptImages,
+                local.SupportsTemperature, local.PromptCache.Automatic });
+        Assert.Equal(LlmOutputLimitEnforcement.Unknown, local.OutputLimitEnforcement);
+        Assert.Empty(local.ReasoningLevels);
+        Assert.False(local.SamplingOnlyWithoutReasoning);
+        Assert.Equal([LlmHostedToolKind.ImageGeneration], local.HostedTools);
+        Assert.Equal(InferenceSupport.Supported, openAi.SupportsStreaming);
+        Assert.NotEmpty(openAi.ReasoningLevels);
+        Assert.Equal(InferenceSupport.Unsupported, local.Agent.SupportsSpendCap);
+        Assert.Equal(InferenceSupport.Unsupported, openAi.Agent.SupportsSpendCap);
+    }
+
+    /// <summary>On OpenAI's endpoint a reasoning model drops temperature unless the level is None, and a non-reasoning
+    /// model gets no reasoning object (B4, S3).</summary>
+    [Theory]
+    [InlineData("gpt-5.5", LlmReasoningLevel.Medium, false, true)]
+    [InlineData("gpt-5.5", null, false, true)]
+    [InlineData("gpt-5.5", LlmReasoningLevel.None, true, true)]
+    [InlineData("gpt-4o", LlmReasoningLevel.Medium, true, false)]
+    public async Task TemperatureIsDroppedOnAReasoningModel(string model, LlmReasoningLevel? level, bool temperature, bool reasoning)
+    {
+        JsonNode sent = await SentAsync(OpenAiResponsesLlmClient.DefaultEndpoint, model, level, 0.5);
+
+        Assert.Equal((temperature, reasoning), (sent.AsObject().ContainsKey("temperature"), sent.AsObject().ContainsKey("reasoning")));
+    }
+
+    /// <summary>Only a verified reasoning profile on OpenAI's endpoint asks for reasoning when the request names no level (B4, 6.5).</summary>
+    [Theory]
+    [InlineData(OpenAiResponsesLlmClient.DefaultEndpoint, "gpt-5.5", true)]
+    [InlineData(OpenAiResponsesLlmClient.DefaultEndpoint, "unlisted-model", false)]
+    [InlineData("http://local.test/v1", "gpt-5.5", false)]
+    public async Task OnlyAVerifiedOpenAiReasoningProfileReasonsByDefault(string endpoint, string model, bool reasons)
+    {
+        JsonNode sent = await SentAsync(endpoint, model, null, null);
+
+        Assert.Equal(reasons, sent.AsObject().ContainsKey("reasoning"));
+    }
+
+    /// <summary>The payload the OpenAI API client sends for a normalized request.</summary>
+    private static async Task<JsonNode> SentAsync(string endpoint, string model, LlmReasoningLevel? level, double? temperature)
+    {
+        using var handler = new DirectCodexTests.Handler(_ => DirectCodexTests.Sse(DirectCodexTests.Completed));
+        var client = new OpenAiResponsesLlmClient(new HttpClient(handler));
+        LlmConnection connection = DirectCodexTests.OpenAiConnection(endpoint);
+        LlmChatRequest request = LlmRequestNormalizer.Normalize(connection,
+            new() { ModelId = model, Messages = [new("user", "hello")], ReasoningLevel = level, Temperature = temperature },
+            client.GetCapabilities(connection, model));
+        await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
+        return JsonNode.Parse(handler.Body!)!;
+    }
+
+    private static HttpResponseMessage ModelList(string body) => new(HttpStatusCode.OK)
+    { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
     private static LlmConnection Connection() => new()
     {
