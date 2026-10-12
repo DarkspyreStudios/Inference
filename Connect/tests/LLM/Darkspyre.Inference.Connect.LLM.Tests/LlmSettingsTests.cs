@@ -176,6 +176,25 @@ public sealed class LlmSettingsTests
         Assert.NotEqual(first.Callback.Description.Id, Assert.IsType<SetupBrowserAuthorization>(settings.Interaction).Callback.Description.Id);
     }
 
+    [Fact]
+    public async Task ClaudeSignInSavesTheTokenAsTheConnectionCredentialAndMarksItAuthenticated()
+    {
+        var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.ClaudeSubscription)], [new BrowserAuth()]);
+        var created = new Target();
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.AnthropicClaudeCli,
+            new(SetupChangeIntent.Create, "id", null), created, modelId: "model");
+        SetupActionDescriptor signIn = Action(settings, SetupActionPurpose.Authenticate);
+        Assert.Equal(("sign-in-claude", "Sign in to a Claude account"), (signIn.Id, signIn.DisplayName));
+
+        await manager.RunAsync(settings, signIn.Id);
+        Assert.IsType<SetupBrowserAuthorization>(settings.Interaction).Callback.SetValue("code#state");
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.ContinueAuthentication).Id);
+
+        Assert.Equal(true, settings.Status.Authenticated.Value);
+        Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
+        Assert.Equal("account-token", LlmCredential.Parse(created.Changes!.Credential.Value)!.OAuth!.AccessToken);
+    }
+
     private sealed class Client(LlmProviderDefinition definition) : ILlmClient, IExternalLlmAuthenticationProbe
     {
         public bool Authenticated { get; set; } = true;
@@ -203,7 +222,7 @@ public sealed class LlmSettingsTests
         public LlmAuthorizationSession Start(string redirectUri) => new()
         { AuthorizeUrl = "https://example.test/authorize", State = "state", CodeVerifier = "private-verifier", RedirectUri = redirectUri };
         public Task<LlmCredential> CompleteAsync(LlmAuthorizationSession session, string code, string state, CancellationToken cancellationToken = default)
-        { Completed++; return Task.FromResult(new LlmCredential { OAuth = new() { AccessToken = "catalog-token" } }); }
+        { Completed++; return Task.FromResult(new LlmCredential { OAuth = new() { AccessToken = "account-token" } }); }
         public Task<LlmCredential> EnsureFreshAsync(LlmCredential credential, CancellationToken cancellationToken = default) => Task.FromResult(credential);
     }
 

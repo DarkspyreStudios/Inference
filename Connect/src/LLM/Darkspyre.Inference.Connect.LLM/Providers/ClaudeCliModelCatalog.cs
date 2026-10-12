@@ -25,7 +25,8 @@ internal static class ClaudeCliModelCatalog
             process = await factory.StartAsync(new(executable,
                 ["--verbose", "--input-format", "stream-json", "--output-format", "stream-json", "--tools", "",
                     "--strict-mcp-config", "--disable-slash-commands", "--permission-prompts", "none", "--no-session-persistence"],
-                directory) { AccountToken = accountToken }, token).ConfigureAwait(false);
+                directory)
+            { AccountToken = accountToken }, token).ConfigureAwait(false);
             fence();
             if (process is null) throw ProtocolFailure();
             string requestId = Guid.NewGuid().ToString("N");

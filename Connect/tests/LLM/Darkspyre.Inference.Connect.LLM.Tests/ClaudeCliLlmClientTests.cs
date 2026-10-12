@@ -428,6 +428,82 @@ public sealed class ClaudeCliLlmClientTests
         new LlmChatMessage("user", "Round it."),
     ];
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task AccountTokenReachesBothChildEnvironmentsAndRemovesConflictingVariables(bool streaming)
+    {
+        var runner = new RecordingRunner(new(0,
+            """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
+            string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        LlmConnection connection = CliConnection() with
+        {
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "account-token" } }.Serialize(),
+            CapabilityOverrides = new() { SupportsStreaming = streaming ? InferenceSupport.Supported : InferenceSupport.Unsupported }
+        };
+
+        await ReadAllAsync(client.StreamAsync(connection, new() { ModelId = "claude-test", Messages = [new("user", "test")] }));
+
+        ClaudeCliInvocation invocation = Assert.Single(runner.Invocations);
+        Assert.Equal("account-token", invocation.AccountToken);
+        Assert.Equal("account-token", ClaudeCliProcessRunner.CreateStartInfo(invocation).Environment[ClaudeCliEnvironment.OAuthTokenVariable]);
+        Assert.Equal("account-token", ClaudeCliSessionProcessFactory.CreateStartInfo(
+            new("claude", [], Path.GetTempPath()) { AccountToken = invocation.AccountToken }).Environment[ClaudeCliEnvironment.OAuthTokenVariable]);
+        var inherited = new System.Diagnostics.ProcessStartInfo();
+        inherited.Environment["ANTHROPIC_API_KEY"] = "key";
+        inherited.Environment["ANTHROPIC_AUTH_TOKEN"] = "auth";
+        inherited.Environment["CLAUDE_CODE_OAUTH_SCOPES"] = "user:profile";
+        ClaudeCliEnvironment.Apply(inherited, "account-token");
+        Assert.False(inherited.Environment.ContainsKey("ANTHROPIC_API_KEY"));
+        Assert.False(inherited.Environment.ContainsKey("ANTHROPIC_AUTH_TOKEN"));
+        Assert.False(inherited.Environment.ContainsKey("CLAUDE_CODE_OAUTH_SCOPES"));
+    }
+
+    [Fact]
+    public async Task AConnectionWithoutASignInLeavesTheChildEnvironmentAsInherited()
+    {
+        var runner = new RecordingRunner(new(0,
+            """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
+            string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+
+        await ReadAllAsync(client.StreamAsync(CliConnection(), new() { ModelId = "claude-test", Messages = [new("user", "test")] }));
+
+        ClaudeCliInvocation invocation = Assert.Single(runner.Invocations);
+        Assert.Null(invocation.AccountToken);
+        var inherited = new System.Diagnostics.ProcessStartInfo();
+        inherited.Environment["ANTHROPIC_API_KEY"] = "key";
+        inherited.Environment.Remove(ClaudeCliEnvironment.OAuthTokenVariable);
+        ClaudeCliEnvironment.Apply(inherited, invocation.AccountToken);
+        Assert.Equal("key", inherited.Environment["ANTHROPIC_API_KEY"]);
+        Assert.False(inherited.Environment.ContainsKey(ClaudeCliEnvironment.OAuthTokenVariable));
+    }
+
+    [Fact]
+    public async Task ClaudeSignInRequestsInferenceScopeAndOneYearLifetime()
+    {
+        JsonNode? exchange = null;
+        using var http = new HttpClient(new UnexpectedHttpHandler(request =>
+        {
+            exchange = JsonNode.Parse(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+            return new(HttpStatusCode.OK)
+            {
+                Content = new StringContent("""{"access_token":"account-token","expires_in":31536000,"scope":"user:inference"}""")
+            };
+        }));
+        var authenticator = new ClaudeAuthenticator(http);
+
+        LlmAuthorizationSession session = authenticator.Start(ClaudeAuthenticator.ManualRedirectUri);
+        LlmCredential credential = await authenticator.CompleteAsync(session, "code", session.State);
+
+        Assert.Contains("scope=user%3Ainference&", session.AuthorizeUrl, StringComparison.Ordinal);
+        Assert.Equal(31536000, exchange!["expires_in"]!.GetValue<int>());
+        Assert.Equal("account-token", credential.OAuth!.AccessToken);
+    }
+
     private static LlmConnection CliConnection() => new()
     {
         Version = "v1",

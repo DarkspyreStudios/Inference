@@ -11,21 +11,7 @@ internal sealed class ClaudeCliSessionProcessFactory(ClaudeCliExits exits) : ICl
     {
         ArgumentNullException.ThrowIfNull(invocation);
         cancellationToken.ThrowIfCancellationRequested();
-        var cliInvocation = new ClaudeCliInvocation(
-            invocation.Executable,
-            invocation.Arguments,
-            StandardInput: null,
-            invocation.WorkingDirectory);
-        var process = new Process
-        {
-            StartInfo = CliProcessLauncher.CreateStartInfo(cliInvocation.Executable, cliInvocation.Arguments, cliInvocation.WorkingDirectory)
-        };
-        // The conversation compacts its own history; the CLI never compacts on its own.
-        process.StartInfo.Environment["DISABLE_COMPACT"] = "1";
-        // Host tool results reach the model whole; the CLI would otherwise file results over its 25,000-token cap,
-        // which the model cannot read back with Read off. 1,000,000 is the largest Claude window.
-        process.StartInfo.Environment["MAX_MCP_OUTPUT_TOKENS"] = "1000000";
-        ClaudeCliEnvironment.Apply(process.StartInfo, invocation.AccountToken);
+        var process = new Process { StartInfo = CreateStartInfo(invocation) };
         try
         {
             if (!process.Start())
@@ -41,6 +27,19 @@ internal sealed class ClaudeCliSessionProcessFactory(ClaudeCliExits exits) : ICl
             process.Dispose();
             throw new ClaudeCliUnavailableException(invocation.Executable, exception);
         }
+    }
+
+    internal static ProcessStartInfo CreateStartInfo(ClaudeCliSessionInvocation invocation)
+    {
+        ProcessStartInfo startInfo = CliProcessLauncher.CreateStartInfo(
+            invocation.Executable, invocation.Arguments, invocation.WorkingDirectory);
+        // The conversation compacts its own history; the CLI never compacts on its own.
+        startInfo.Environment["DISABLE_COMPACT"] = "1";
+        // Host tool results reach the model whole; the CLI would otherwise file results over its 25,000-token cap,
+        // which the model cannot read back with Read off. 1,000,000 is the largest Claude window.
+        startInfo.Environment["MAX_MCP_OUTPUT_TOKENS"] = "1000000";
+        ClaudeCliEnvironment.Apply(startInfo, invocation.AccountToken);
+        return startInfo;
     }
 }
 
