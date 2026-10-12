@@ -154,3 +154,11 @@ Phase 1 of the conversation contract (DSA-919) builds only the native Codex clie
 - **Background-work settings.** `LlmAgentHostRuntimePolicy.AllowRuntimeBackgroundWork` and `ResourceOutputRetentionBytes` stay public. The Host shows and stores them, and no phase-1 runtime reads them.
 
 When a provider returns, its files rejoin the build and the matching line here is deleted.
+
+## Design rule exceptions
+
+### D6 — Per-model context lengths are repeatable rows
+
+An OpenAI API connection's `Context lengths` setting in the provider editor uses the existing repeatable group (`SetupRepeatableGroupField`, rendered by `UI/src/Settings/Darkspyre.Inference.UI.Settings/SetupFieldInput.razor`). Each row holds a model and its context length, edited inline, with `Add row` and `Remove row`. D6 asks for a list with an **Add** button that opens a layered editor.
+
+The reason: the repeatable group is the provider editor's one collection control (D3), and it shows no row until `Add row` is pressed, so no empty entry form appears. A layered row editor inside the provider editor's sheet would be a second collection control for the same job. Brandon approved this on 2026-10-11 (DSA-942).
