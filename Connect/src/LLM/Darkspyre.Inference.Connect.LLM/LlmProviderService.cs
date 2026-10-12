@@ -261,11 +261,11 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             cancellationToken);
     }
 
-    /// <summary>Starts the optional OAuth flow used only for Claude subscription model discovery.</summary>
+    /// <summary>Starts a Claude account sign-in for a Claude subscription connection.</summary>
     public Task<LlmAuthorizationSession> StartClaudeLoginAsync(CancellationToken cancellationToken = default) =>
         StartClaudeLoginAsync(ClaudeManualRedirectUri, cancellationToken);
 
-    /// <summary>Starts the optional OAuth flow used only for Claude subscription model discovery.</summary>
+    /// <summary>Starts a Claude account sign-in for a Claude subscription connection.</summary>
     public Task<LlmAuthorizationSession> StartClaudeLoginAsync(
         string redirectUri,
         CancellationToken cancellationToken = default)
@@ -280,7 +280,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         return Task.FromResult(ClaudeLogin().Start(redirectUri));
     }
 
-    /// <summary>Completes a Claude sign-in from the code the person pasted and saves the resulting credential on the connection.</summary>
+    /// <summary>Completes a Claude account sign-in from the code the person pasted and saves the one-year token as the connection's credential.</summary>
     public async Task CompleteClaudeLoginAsync(
         string connectionId,
         LlmAuthorizationSession session,
@@ -300,7 +300,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             cancellationToken);
     }
 
-    /// <summary>Completes a Claude sign-in from the redirect code and state and saves the resulting credential on a Claude subscription CLI connection.</summary>
+    /// <summary>Completes a Claude account sign-in from the redirect code and state and saves the one-year token as the connection's credential.</summary>
     public async Task CompleteClaudeLoginAsync(
         string connectionId,
         LlmAuthorizationSession session,
@@ -318,7 +318,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         if (connection.Transport != LlmTransport.AnthropicClaudeCli)
         {
             throw new InvalidOperationException(
-                "Claude catalog OAuth can be attached only to a Claude subscription CLI connection.");
+                "A Claude account can be signed in only on a Claude subscription CLI connection.");
         }
         LlmCredential credential = await ClaudeLogin().CompleteAsync(
             session,

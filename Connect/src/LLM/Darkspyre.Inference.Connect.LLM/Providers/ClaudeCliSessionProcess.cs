@@ -25,6 +25,7 @@ internal sealed class ClaudeCliSessionProcessFactory(ClaudeCliExits exits) : ICl
         // Host tool results reach the model whole; the CLI would otherwise file results over its 25,000-token cap,
         // which the model cannot read back with Read off. 1,000,000 is the largest Claude window.
         process.StartInfo.Environment["MAX_MCP_OUTPUT_TOKENS"] = "1000000";
+        ClaudeCliEnvironment.Apply(process.StartInfo, invocation.AccountToken);
         try
         {
             if (!process.Start())

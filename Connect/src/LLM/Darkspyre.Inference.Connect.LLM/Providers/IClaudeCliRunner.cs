@@ -9,12 +9,18 @@ internal sealed record ClaudeCliInvocation(
     string WorkingDirectory)
 {
     internal int? MaxOutputTokens { get; init; }
+    /// <summary>The token of the Claude account the connection is signed in to, or null to run as the machine's active login.</summary>
+    internal string? AccountToken { get; init; }
 }
 
 internal sealed record ClaudeCliSessionInvocation(
     string Executable,
     IReadOnlyList<string> Arguments,
-    string WorkingDirectory);
+    string WorkingDirectory)
+{
+    /// <summary>The token of the Claude account the connection is signed in to, or null to run as the machine's active login.</summary>
+    internal string? AccountToken { get; init; }
+}
 
 internal sealed record ClaudeCliProcessResult(
     int ExitCode,

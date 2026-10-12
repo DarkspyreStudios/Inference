@@ -232,6 +232,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                            standardInput,
                            (capabilities.SupportsReasoningText != InferenceSupport.Unsupported),
                            request.MaxOutputTokens,
+                           ClaudeCliEnvironment.AccountToken(credential),
                            cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -335,7 +336,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         ClaudeCliProcessResult processResult;
         try
         {
-            processResult = await InvokeClaudeAsync(executable, arguments, prompt, request.MaxOutputTokens, cancellationToken);
+            processResult = await InvokeClaudeAsync(executable, arguments, prompt, request.MaxOutputTokens,
+                ClaudeCliEnvironment.AccountToken(credential), cancellationToken);
         }
         catch (ClaudeCliUnavailableException exception)
         {
@@ -470,7 +472,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         LlmConnection connection,
         CancellationToken cancellationToken = default)
     {
-        _ = ClaudeCliConfiguration.ValidateConnection(connection);
+        LlmCredential? credential = ClaudeCliConfiguration.ValidateConnection(connection);
         try
         {
             ClaudeCliProcessResult result = await InvokeClaudeAsync(
@@ -478,6 +480,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 ["auth", "status", "--json"],
                 standardInput: null,
                 maxOutputTokens: null,
+                ClaudeCliEnvironment.AccountToken(credential),
                 cancellationToken);
             if (result.ExitCode != 0 || result.StandardInputError is not null)
             {
@@ -520,6 +523,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 ],
                 standardInput: null,
                 maxOutputTokens: null,
+                ClaudeCliEnvironment.AccountToken(credential),
                 cancellationToken);
         }
         catch (ClaudeCliUnavailableException exception)
@@ -580,7 +584,8 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             using var cliConsumption = SdkHttpConsumption.Enter(Http, cancellationToken);
             void Fence() { cliConsumption.Token.ThrowIfCancellationRequested(); cliConsumption.Fence(); }
             IReadOnlyList<LlmModel> options = await ClaudeCliModelCatalog.ReadAsync(processFactory,
-                ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint), Fence, cliConsumption.Token).ConfigureAwait(false);
+                ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint), ClaudeCliEnvironment.AccountToken(credential),
+                Fence, cliConsumption.Token).ConfigureAwait(false);
             return cliConsumption.Publish(options);
         }
 
@@ -851,6 +856,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         IReadOnlyList<string> arguments,
         string? standardInput,
         int? maxOutputTokens,
+        string? accountToken,
         CancellationToken cancellationToken)
     {
         string workingDirectory = CliInfrastructure.CreateWorkingDirectory("claude");
@@ -858,7 +864,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         {
             return await runner.RunAsync(
                 new ClaudeCliInvocation(executable, arguments, standardInput, workingDirectory)
-                { MaxOutputTokens = maxOutputTokens },
+                { MaxOutputTokens = maxOutputTokens, AccountToken = accountToken },
                 cancellationToken);
         }
         finally
@@ -873,6 +879,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         string standardInput,
         bool requestReasoningText,
         int? maxOutputTokens,
+        string? accountToken,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         string workingDirectory = CliInfrastructure.CreateWorkingDirectory("claude");
@@ -888,7 +895,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             }
             IAsyncEnumerable<ClaudeCliProcessEvent> events = runner.StreamAsync(
                 new ClaudeCliInvocation(executable, arguments, standardInput, workingDirectory)
-                { MaxOutputTokens = maxOutputTokens },
+                { MaxOutputTokens = maxOutputTokens, AccountToken = accountToken },
                 cancellationToken);
             IAsyncEnumerator<ClaudeCliProcessEvent> enumerator = events.GetAsyncEnumerator(cancellationToken);
             try

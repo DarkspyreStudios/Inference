@@ -109,7 +109,8 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                 new ClaudeCliSessionInvocation(
                     ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint),
                     arguments,
-                    normalizedDirectory),
+                    normalizedDirectory)
+                { AccountToken = ClaudeCliEnvironment.AccountToken(LlmCredential.Parse(connection.Credential)) },
                 cancellationToken);
         }
         catch (ClaudeCliUnavailableException exception)

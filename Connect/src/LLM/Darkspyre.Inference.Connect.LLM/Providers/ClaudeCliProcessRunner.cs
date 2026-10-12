@@ -248,6 +248,7 @@ internal sealed class ClaudeCliProcessRunner(ClaudeCliExits exits) : IClaudeCliR
             startInfo.Environment["CLAUDE_CODE_MAX_OUTPUT_TOKENS"] =
                 limit.ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
+        ClaudeCliEnvironment.Apply(startInfo, invocation.AccountToken);
         return startInfo;
     }
 

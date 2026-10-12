@@ -455,7 +455,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         }
         if (_draft.Transport == LlmTransport.AnthropicClaudeCli)
         {
-            actions.Add(new("authorize-catalog", "Authorize optional model catalog", SetupActionPurpose.Authenticate,
+            actions.Add(new("sign-in-claude", "Sign in to a Claude account", SetupActionPurpose.Authenticate,
                 SetupSideEffect.Network | SetupSideEffect.BrowserInteraction));
         }
         if (DeviceCode is not null || BrowserAuthorization is not null)
@@ -717,7 +717,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
                 Fence(cancellationToken);
                 settings.BeginDeviceAuthorization(code);
                 return new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);
-            case "authorize-catalog":
+            case "sign-in-claude":
                 LlmAuthorizationSession authorization = await service.StartClaudeLoginAsync(cancellationToken).ConfigureAwait(false);
                 Fence(cancellationToken);
                 settings.BeginBrowserAuthorization(authorization);
@@ -802,8 +802,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         else { return new(SetupActionState.Unavailable); }
         Fence(token);
         settings.ClearAuthorization();
-        // Catalog OAuth does not establish CLI authentication.
-        if (settings.Transport == LlmTransport.OpenAiCodex)
+        if (settings.Transport is LlmTransport.OpenAiCodex or LlmTransport.AnthropicClaudeCli)
         {
             settings.Status = settings.Status with { Authenticated = SetupObservation.Known(true) };
         }

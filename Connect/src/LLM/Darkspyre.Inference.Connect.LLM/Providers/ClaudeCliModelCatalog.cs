@@ -11,7 +11,7 @@ internal static class ClaudeCliModelCatalog
 {
     [SuppressMessage("Design", "CA1031", Justification = "The owned process preserves independent operation and cleanup failures before publication.")]
     internal static async Task<IReadOnlyList<LlmModel>> ReadAsync(IClaudeCliSessionProcessFactory factory,
-        string executable, Action fence, CancellationToken token)
+        string executable, string? accountToken, Action fence, CancellationToken token)
     {
         fence();
         string directory = CliInfrastructure.CreateWorkingDirectory("claude");
@@ -25,7 +25,7 @@ internal static class ClaudeCliModelCatalog
             process = await factory.StartAsync(new(executable,
                 ["--verbose", "--input-format", "stream-json", "--output-format", "stream-json", "--tools", "",
                     "--strict-mcp-config", "--disable-slash-commands", "--permission-prompts", "none", "--no-session-persistence"],
-                directory), token).ConfigureAwait(false);
+                directory) { AccountToken = accountToken }, token).ConfigureAwait(false);
             fence();
             if (process is null) throw ProtocolFailure();
             string requestId = Guid.NewGuid().ToString("N");
