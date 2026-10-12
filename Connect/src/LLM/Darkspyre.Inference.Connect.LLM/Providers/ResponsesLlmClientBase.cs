@@ -54,7 +54,39 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 item.Remove("encrypted_content");
             }
         }
-        return new ContextEstimate(checked(LocalTokenCount.Count(input.ToJsonString()) + cipherTokens + media));
+        return new ContextEstimate(checked(LocalTokenCount.Count(DecodedText(input)) + cipherTokens + media));
+    }
+
+    /// <summary>
+    /// The projection's property names and string values, decoded, as the model reads them. Tokenizing the wire JSON
+    /// instead counts its escapes: a tool result holding JSON sends each quote as an escape sequence the model never
+    /// reads, so the wire count runs well above the server's (Brandon, 2026-10-12).
+    /// </summary>
+    internal static string DecodedText(JsonNode? node)
+    {
+        var text = new StringBuilder();
+        Append(node);
+        return text.ToString();
+
+        void Append(JsonNode? current)
+        {
+            switch (current)
+            {
+                case JsonObject item:
+                    foreach ((string name, JsonNode? value) in item)
+                    {
+                        text.Append(name).Append(' ');
+                        Append(value);
+                    }
+                    break;
+                case JsonArray items:
+                    foreach (JsonNode? value in items) Append(value);
+                    break;
+                case JsonValue value:
+                    text.Append(value.GetValueKind() == JsonValueKind.String ? value.GetValue<string>() : value.ToJsonString()).Append(' ');
+                    break;
+            }
+        }
     }
 
     /// <summary>The message as the tokenizer counts it: without attachments, binary tool parts or resource parts.</summary>

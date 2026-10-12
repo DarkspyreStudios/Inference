@@ -653,6 +653,21 @@ public sealed class DirectCodexTests
         Assert.True(JsonNode.DeepEquals(new JsonObject { ["effort"] = "high", ["summary"] = "auto" }, sent["reasoning"]));
     }
 
+    /// <summary>Text full of characters the wire JSON escapes, such as a tool result holding JSON, is counted as the
+    /// model reads it, not as its escape sequences.</summary>
+    [Fact]
+    public void EscapedTextIsEstimatedAtItsDecodedSize()
+    {
+        var client = new OpenAiCodexLlmClient(new HttpClient(new Handler(_ => Sse(Completed))));
+        string text = string.Concat(Enumerable.Repeat("{\"key\":\"value+<&>\"} ", 500));
+        LlmChatRequest request = Request();
+
+        long empty = client.EstimateInputTokens(Connection(), request, ResourceSizes.None)!.Value.Tokens;
+        long full = client.EstimateInputTokens(Connection(), request with { Messages = [new("user", text)] }, ResourceSizes.None)!.Value.Tokens;
+
+        Assert.InRange(full - empty, 0, LocalTokenCount.Count(text) * 11 / 10);
+    }
+
     /// <summary>Every history message, with or without attachments, is sent as a typed message item; the local llama.cpp
     /// server refuses an untyped one with "Cannot determine type of 'item'".</summary>
     [Fact]
