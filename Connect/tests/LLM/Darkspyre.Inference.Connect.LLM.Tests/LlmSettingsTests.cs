@@ -151,6 +151,70 @@ public sealed class LlmSettingsTests
         }
     }
 
+    /// <summary>Complete context-length rows become model overrides; a removed row clears only its length, and an
+    /// incomplete or duplicate row blocks the save (B6).</summary>
+    [Fact]
+    public async Task ContextLengthRowsWriteModelOverrides()
+    {
+        using var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiApiKey)]);
+        var target = new Target();
+        LlmConnection existing = new()
+        {
+            Version = "v1",
+            Transport = LlmTransport.OpenAiResponses,
+            Endpoint = "http://local.test/v1",
+            ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>
+            {
+                ["a"] = new() { MaxContextTokens = 1000, SupportsTemperature = InferenceSupport.Unsupported },
+                ["b"] = new() { MaxContextTokens = 2000 }
+            }
+        };
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiResponses,
+            new(SetupChangeIntent.Edit, "id", "v1"), target, existing, "model");
+        using (manager)
+        {
+            SetupRepeatableGroupField Group() => Assert.IsType<SetupRepeatableGroupField>(
+                Fields(settings).Single(field => field.Description.Id == "context-lengths"));
+            SetupFieldRow Added()
+            {
+                string[] before = [.. Group().Rows.Select(row => row.Id)];
+                Assert.Equal(SetupEditState.Applied, Group().Add().State);
+                return Group().Rows.Single(row => !before.Contains(row.Id));
+            }
+            void Set(SetupFieldRow row, string? model, long? length)
+            {
+                if (model is not null)
+                    Assert.Equal(SetupEditState.Applied, Assert.IsType<SetupChoiceField>(row.Fields[0]).SetValue(model).State);
+                if (length is not null)
+                    Assert.Equal(SetupEditState.Applied, Assert.IsType<SetupIntegerField>(row.Fields[1]).SetValue(length).State);
+            }
+            IEnumerable<string> Codes() => settings.Validate().Issues.Select(issue => issue.Code);
+
+            Assert.Equal(["a", "b"], Group().Rows.Select(row => Assert.IsType<SetupChoiceField>(row.Fields[0]).Value));
+            string a = Group().Rows[0].Id, b = Group().Rows[1].Id;
+            Assert.Equal(SetupEditState.Applied, Group().Remove(a).State);
+            Assert.Equal(SetupEditState.Applied, Group().Remove(b).State);
+
+            SetupFieldRow c = Added();
+            Set(c, "c", null);
+            Assert.Contains("context-length-incomplete", Codes());
+            Set(c, null, 3000);
+            Assert.DoesNotContain("context-length-incomplete", Codes());
+
+            SetupFieldRow duplicate = Added();
+            Set(duplicate, "c", 5);
+            Assert.Contains("context-length-duplicate", Codes());
+            Assert.Equal(SetupEditState.Applied, Group().Remove(duplicate.Id).State);
+            Assert.Empty(Codes());
+
+            Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
+            IReadOnlyDictionary<string, LlmCapabilityOverrides> saved = target.Changes!.Configuration.Connection.ModelCapabilityOverrides;
+            Assert.Equal(["a", "c"], saved.Keys.Order(StringComparer.Ordinal));
+            Assert.Equal(new LlmCapabilityOverrides { SupportsTemperature = InferenceSupport.Unsupported }, saved["a"]);
+            Assert.Equal(3000, saved["c"].MaxContextTokens);
+        }
+    }
+
     private static LlmConnection Connection(LlmTransport transport, string key) => new()
     { Version = "v1", Transport = transport, Endpoint = "https://example.test/v1", Credential = new LlmCredential { ApiKey = key }.Serialize() };
 

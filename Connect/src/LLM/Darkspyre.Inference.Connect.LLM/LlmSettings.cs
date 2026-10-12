@@ -66,6 +66,10 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     private string _cacheBucket = string.Empty;
     private string _cachePrefix = string.Empty;
     private readonly AzureEditorDraft? _azure;
+    private readonly List<ContextLengthRow> _contextRows = [];
+
+    /// <summary>One Context lengths row of an OpenAI API connection; a complete row sets the model's context length.</summary>
+    private sealed record ContextLengthRow(string Id, string? ModelId, long? Length);
 
     internal LlmSettings(LlmProviderDefinition definition, LlmTransport transport, SetupConfigurationIdentity identity,
         LlmConnection? existing, string? modelId, ILlmSetupEnvironment? environment)
@@ -102,6 +106,10 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         _baseline = opened;
         _cacheBucket = opened.Vertex?.CacheStaging?.Bucket ?? string.Empty;
         _cachePrefix = opened.Vertex?.CacheStaging?.ObjectPrefix ?? string.Empty;
+        _contextRows.AddRange(opened.ModelCapabilityOverrides
+            .Where(pair => pair.Value.MaxContextTokens is not null)
+            .OrderBy(pair => pair.Key, StringComparer.Ordinal)
+            .Select(pair => new ContextLengthRow(Guid.NewGuid().ToString("N"), pair.Key, pair.Value.MaxContextTokens)));
         Status = new() { Configured = SetupObservation.Known(existing is not null), Authenticated = SetupObservation.Unknown };
     }
 
@@ -143,6 +151,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     protected override bool IsDraftDirty =>
         _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || (UsesAzure ? _azure!.IsDirty : _draft.Azure != _baseline.Azure) || _draft.ChatCompletions != _baseline.ChatCompletions || _draft.Xai != _baseline.Xai || _model != _originalModel
             || (_draft.CapabilityOverrides ?? new()) != (_baseline.CapabilityOverrides ?? new()) || _callback.Length != 0
+            || !SameModelOverrides(_draft.ModelCapabilityOverrides, _baseline.ModelCapabilityOverrides)
             || UsesVertex && (_cacheBucket != (_baseline.Vertex?.CacheStaging?.Bucket ?? string.Empty)
                 || _cachePrefix != (_baseline.Vertex?.CacheStaging?.ObjectPrefix ?? string.Empty))
             || (UsesAws ? NormalizeAws(Credential.Aws) != NormalizeAws(LlmCredential.Parse(_baseline.Credential)?.Aws)
@@ -206,6 +215,11 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
                     };
                     _draft = _draft with { Credential = (Credential with { ApiKey = key }).Serialize() };
                 })));
+        }
+        if (_draft.Transport == LlmTransport.OpenAiResponses)
+        {
+            fields.Add(ServiceTiersField());
+            fields.Add(ContextLengthsField());
         }
         if (UsesVertex)
         {
@@ -293,6 +307,89 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             testStep
         ];
     }
+
+    /// <summary>The Service tiers checkbox. A value equal to the endpoint's default stores null, so the default follows a
+    /// later endpoint change (B13).</summary>
+    private SetupBooleanField ServiceTiersField()
+    {
+        bool defaultValue = OpenAiResponsesLlmClient.IsOpenAiEndpoint(_draft);
+        return new(new("service-tiers", "Service tiers")
+        {
+            HelpText = "Show the service-tier choice in the chat panel and send the chosen tier. OpenAI's own service offers tiers."
+        }, _draft.CapabilityOverrides?.SupportsServiceTiers is { } set ? set == InferenceSupport.Supported : defaultValue, defaultValue,
+            value => Edit(() => _draft = _draft with
+            {
+                CapabilityOverrides = (_draft.CapabilityOverrides ?? new()) with
+                {
+                    SupportsServiceTiers = value == OpenAiResponsesLlmClient.IsOpenAiEndpoint(_draft) ? null
+                        : value ? InferenceSupport.Supported : InferenceSupport.Unsupported
+                }
+            }));
+    }
+
+    /// <summary>The Context lengths rows. Each edit rewrites the model overrides from the complete rows (B6).</summary>
+    private SetupRepeatableGroupField ContextLengthsField() => new(new("context-lengths", "Context lengths")
+    {
+        HelpText = "A length set here is the model's limit on this connection. A model left out uses the listed, published or learned limit."
+    },
+        _contextRows.Select(row => new SetupFieldRow(row.Id,
+        [
+            new SetupChoiceField(new("context-model-" + row.Id, "Model"), row.ModelId ?? string.Empty, string.Empty,
+                value => Edit(() => SetContextRow(row.Id, current => current with
+                { ModelId = string.IsNullOrWhiteSpace(value) ? null : value.Trim() })),
+                true, SetupSideEffect.Network, SetupChoiceCapabilities.Searchable),
+            new SetupIntegerField(new("context-length-" + row.Id, "Context length (tokens)"), row.Length, null,
+                value =>
+                {
+                    if (value is < 1)
+                        return new(SetupEditState.Invalid, [new("context-length-invalid", "Enter a whole number of tokens of at least 1.", "context-length-" + row.Id)]);
+                    return Edit(() => SetContextRow(row.Id, current => current with { Length = value }));
+                }, 1)
+        ])).ToArray(),
+        () => Edit(() => _contextRows.Add(new(Guid.NewGuid().ToString("N"), null, null))),
+        rowId => Edit(() =>
+        {
+            if (_contextRows.RemoveAll(row => row.Id == rowId) > 0) WriteContextLengths();
+        }));
+
+    private void SetContextRow(string rowId, Func<ContextLengthRow, ContextLengthRow> change)
+    {
+        int index = _contextRows.FindIndex(row => row.Id == rowId);
+        if (index < 0) return;
+        _contextRows[index] = change(_contextRows[index]);
+        WriteContextLengths();
+    }
+
+    /// <summary>
+    /// Rewrites the model overrides from the complete rows: a row's model gets its length; a model whose row is gone or
+    /// incomplete loses its length, and an entry left with no value is removed (L11: the user removed that row).
+    /// </summary>
+    private void WriteContextLengths()
+    {
+        var overrides = new Dictionary<string, LlmCapabilityOverrides>(_draft.ModelCapabilityOverrides, StringComparer.Ordinal);
+        var lengths = new Dictionary<string, long>(StringComparer.Ordinal);
+        foreach (ContextLengthRow row in _contextRows)
+        {
+            if (row is { ModelId: { } model, Length: { } length }) lengths[model] = length;
+        }
+        foreach ((string model, LlmCapabilityOverrides value) in _draft.ModelCapabilityOverrides)
+        {
+            if (value.MaxContextTokens is null || lengths.ContainsKey(model)) continue;
+            LlmCapabilityOverrides cleared = value with { MaxContextTokens = null };
+            if (cleared == new LlmCapabilityOverrides()) overrides.Remove(model);
+            else overrides[model] = cleared;
+        }
+        foreach ((string model, long length) in lengths)
+        {
+            overrides[model] = (overrides.GetValueOrDefault(model) ?? new()) with { MaxContextTokens = length };
+        }
+        _draft = _draft with { ModelCapabilityOverrides = overrides };
+    }
+
+    private static bool SameModelOverrides(IReadOnlyDictionary<string, LlmCapabilityOverrides> first,
+        IReadOnlyDictionary<string, LlmCapabilityOverrides> second) =>
+        first.Count == second.Count
+        && first.All(pair => second.TryGetValue(pair.Key, out LlmCapabilityOverrides? other) && other == pair.Value);
 
     private SetupSection AdvancedCapabilities()
     {
@@ -581,6 +678,13 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             && _draft.Transport != LlmTransport.OpenAiResponses
             && string.IsNullOrWhiteSpace(Credential.ApiKey) && Credential.SecretHeaders.Count == 0)
         { issues.Add(new("key-required", "An API credential is required.", "api-key")); }
+        if (_draft.Transport == LlmTransport.OpenAiResponses)
+        {
+            if (_contextRows.Any(row => row.ModelId is null || row.Length is null))
+            { issues.Add(new("context-length-incomplete", "Enter a model and a context length, or remove the row.", "context-lengths")); }
+            if (_contextRows.Where(row => row.ModelId is not null).GroupBy(row => row.ModelId, StringComparer.Ordinal).Any(group => group.Count() > 1))
+            { issues.Add(new("context-length-duplicate", "Each model takes one context length.", "context-lengths")); }
+        }
         if (UsesAzure)
         {
             SetupIssue[] azureIssues = _azure!.Validate(_model);
@@ -635,6 +739,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             || UsesAzure && _azure!.HasCredentialEdits,
         _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != draft.Vertex || _original.Azure != draft.Azure || _original.Xai != _draft.Xai || _originalModel != _model
             || _original.ChatCompletions != _draft.ChatCompletions || _original.CapabilityOverrides != _draft.CapabilityOverrides
+            || !SameModelOverrides(_original.ModelCapabilityOverrides, _draft.ModelCapabilityOverrides)
             || (UsesAzure ? _azure!.HasCredentialEdits : _credentialChange != SetupSecretEditKind.Keep));
     }
 }
@@ -754,7 +859,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
                 var regions = await environment.GetRegionsAsync(settings.AwsProfile, cancellationToken).ConfigureAwait(false);
                 Fence(cancellationToken);
                 return InferenceSettings.Page(query, regions);
-            case "model":
+            case var modelField when modelField == "model" || modelField.StartsWith("context-model-", StringComparison.Ordinal):
                 {
                     await using LlmProviderService service = Service(settings, cancellationToken);
                     Fence(cancellationToken);

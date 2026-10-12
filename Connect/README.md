@@ -192,6 +192,24 @@ temperature or reasoning, the session records the value for that connection id a
 without it, and leaves it out of later requests on that connection and model. A refusal that names nothing new ends
 the turn with the provider's message. What refusals taught lives in memory for the process.
 
+**Service tiers.** A turn asks for a tier with `LlmAgentTurnRequest.ServiceTier` (`LlmServiceTier`: Auto, Economy,
+Standard, Fast; null is Auto). `LlmProviderCapabilities.ServiceTiers` lists the tiers the model offers. The request
+normalizer maps the requested tier to the nearest offered one: Auto stays Auto, an offered tier is itself, and a
+missing Economy or Fast becomes Standard when offered, else Auto. A model that offers no tier gets none. The
+Responses payload sends `service_tier` `flex` for Economy, `default` for Standard and `priority` for Fast, and nothing
+for Auto. Codex and Claude offer no tiers, so a requested tier is dropped and the turn runs. An OpenAI API connection
+has a Service tiers switch, `CapabilityOverrides.SupportsServiceTiers`, shown as the `Service tiers` checkbox in its
+editor. Unset, it is on for `api.openai.com` and off elsewhere; a checkbox value equal to the endpoint's default
+stores null, so the default follows a later endpoint change. With the switch on, OpenAI's endpoint offers the
+profile's tiers (the pricing page's) and another endpoint offers all four; with it off, the model offers none.
+
+**Context lengths in the editor.** An OpenAI API connection's editor shows `Context lengths` rows, none until
+`Add row` is pressed (the CommonDesign D6 exception recorded in `AGENTS.md`). Each row names a model, chosen from the
+connection's listing or entered by hand, and a length of at least 1 token. Each edit rewrites
+`ModelCapabilityOverrides` from the complete rows: a row's model gets `MaxContextTokens`, a removed or incomplete
+row clears only that model's length, and an entry left with no value is removed. A row without a model or a length,
+or two rows for one model, block the save.
+
 **Images out.** An `LlmImageGenerationTool` in `HostedTools` lets Codex and the OpenAI API generate images, and the session
 commits each finished image through `CallerServices.Resources` and reports it as an `LlmAgentImageOutputEvent`.
 A session that asks for images opens and runs on any model: the opening and each step drop the image tool when the
