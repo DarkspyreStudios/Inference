@@ -44,6 +44,20 @@ public sealed class ProviderStreamFailureTests
             LlmTransport.OpenAiResponses, null, "OpenAI Responses request", [], CancellationToken.None));
     }
 
+    /// <summary>The OpenAI API client has no client timeout: a busy local server answers a request after more than
+    /// HttpClient's default 100 seconds, and only the caller's cancellation ends it.</summary>
+    [Fact]
+    public void OpenAiApiClientHasNoClientTimeout()
+    {
+        var services = new ServiceCollection();
+        services.AddLlmConnect();
+        using ServiceProvider container = services.BuildServiceProvider();
+
+        using HttpClient client = container.GetRequiredService<SdkHttpGenerationPool>().CreateClient(nameof(OpenAiResponsesLlmClient));
+
+        Assert.Equal(Timeout.InfiniteTimeSpan, client.Timeout);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

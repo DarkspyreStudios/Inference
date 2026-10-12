@@ -55,7 +55,8 @@ public static class ServiceCollectionExtensions
         services.AddTransient<ILlmAgentClient>(provider => new ManagedResponsesAgentClient(
             provider.GetRequiredService<OpenAiCodexLlmClient>(), provider.GetRequiredService<LlmProviderService>(),
             provider.GetRequiredService<LearnedModelContext>()));
-        services.AddInferenceHttpClient<OpenAiResponsesLlmClient>();
+        services.AddInferenceHttpClient<OpenAiResponsesLlmClient>()
+            .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout);
         services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<OpenAiResponsesLlmClient>());
         services.AddTransient<ILlmAgentClient>(provider => new ManagedResponsesAgentClient(
             provider.GetRequiredService<OpenAiResponsesLlmClient>(), provider.GetRequiredService<LlmProviderService>(),
