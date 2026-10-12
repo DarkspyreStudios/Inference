@@ -656,8 +656,9 @@ They are included in the Connect product project, not separate NuGets. See
 The packages target .NET 11. Credentials
 for direct API transports remain owned by the host through `ILlmConnectionSource`; the connector
 never owns an application database or secret store. Wrapped CLI transports instead use the official
-CLI's existing login, which Darkspyre.Inference.Connect.LLM never reads or copies. Optional Claude catalog OAuth is a
-separate model-discovery credential; it never selects or enables the Claude CLI transport.
+CLI's existing login, which Darkspyre.Inference.Connect.LLM never reads or copies. A Claude subscription connection
+can instead be signed in to a Claude account: its credential then holds a one-year token, and every
+Claude CLI process for that connection runs as that account (see "Anthropic API-key and Claude CLI transports").
 
 `LlmCredential` and `LlmOAuthTokens` return constant redacted diagnostic strings. Formatting either
 record exposes no credential values or account metadata. Their properties, record copies and
@@ -3378,9 +3379,10 @@ if (settings.CanSave)
 For editing, supply the exact saved `LlmConnection`, its model selection and an Edit identity whose
 expected version matches that connection. The host's `ISetupCommitTarget<LlmSetupChanges>` must
 atomically compare that version over configuration and credentials. Authentication uses a draft-local
-`ILlmConnectionSource`; neither device completion nor catalog OAuth replaces saved credentials
-before commit. Normal runtime credential refresh still uses the existing host seam unchanged.
-CLI-owned authentication remains external; optional Claude catalog OAuth does not establish CLI login.
+`ILlmConnectionSource`; neither device completion nor the Claude account sign-in replaces saved
+credentials before commit. Normal runtime credential refresh still uses the existing host seam unchanged.
+A Claude connection that is not signed in uses the CLI's own login; signing in to a Claude account
+marks the draft authenticated.
 Claude and Antigravity executable fields accept blank values. Checks, discovery and Save resolve a
 blank executable to the provider's default through the same draft connection projection. The editor
 keeps the entered value unchanged. Executable inputs containing carriage returns, newlines or null
@@ -4616,33 +4618,47 @@ new LlmConnection
 
 For connections created by 0.9.0, migrate Claude subscriptions by changing `Transport` from
 `AnthropicMessages` to `AnthropicClaudeCli`, changing `Endpoint` from the Anthropic API URL to
-`claude` (or an absolute CLI path), and clearing `Credential` unless the host intentionally retains
-the optional model-catalog OAuth. Leaving the transport as `AnthropicMessages` now means direct
-API-key billing and will never launch the CLI.
+`claude` (or an absolute CLI path), and clearing `Credential`. Leaving the transport as
+`AnthropicMessages` now means direct API-key billing and will never launch the CLI.
 
-Install the official Claude CLI, ensure `claude` is on `PATH`, and complete its interactive sign-in once:
+Install the official Claude CLI and ensure `claude` is on `PATH`. A connection runs as one of two
+accounts:
+
+- **The machine's active Claude login**, when the connection has no credential. Complete the CLI's
+  interactive sign-in once:
 
 ```bash
 claude
 ```
+
+- **A Claude account the connection is signed in to.** The settings action "Sign in to a Claude
+  account" (`sign-in-claude`) shows a claude.com sign-in link; the person pastes back the `code#state`
+  text the callback page shows. Connect exchanges it for a `user:inference` token with a one-year
+  lifetime, the token `claude setup-token` creates, and saves it as the connection's
+  `LlmCredential.OAuth`. Every Claude CLI process for the connection (chat, streaming, agent sessions,
+  `auth status`, `/usage` and model discovery) then starts with `CLAUDE_CODE_OAUTH_TOKEN` set to that
+  token, and without `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_SCOPES`, which
+  the CLI would prefer to the token or read as its scopes. The machine's login is neither used nor
+  changed, so connections on different accounts run at the same time. The token is never refreshed;
+  signing in again replaces it.
 
 Subscription prompts run in an empty temporary workspace with safe mode, tools, slash commands,
 permission prompts, and session persistence disabled. Darkspyre.Inference.Connect.LLM sends the complete prompt as BOM-free
 UTF-8 stream JSON over standard input rather than exposing it in process arguments. It consumes output
 line by line and treats the terminal `result` event as authoritative, including when the CLI retries
 an intermediate refusal on a fallback model. `IsAuthenticatedAsync` checks only `claude auth status
---json` for a signed-in first-party account; it does not inspect or require a stored credential.
+--json` for a signed-in first-party account, run as the connection's account.
 
-Without optional catalog OAuth, model discovery reads the official CLI's `initialize` control
+For a connection that is not signed in, model discovery reads the official CLI's `initialize` control
 response. It preserves each model's native `value`, `displayName` and complete cloned catalog entry.
-It sends no generation prompt and does not read or copy CLI credentials. With optional catalog OAuth,
-discovery uses the Anthropic Models API; that credential never selects the generation transport.
+It sends no generation prompt and does not read or copy CLI credentials. For a signed-in connection,
+discovery uses the Anthropic Models API with the account token.
 The installed CLI 2.1.289 discovery path is qualified through the public Connect facade with 12 native
 choices. Other versions, refresh, generation and target-platform paths remain separate qualifications.
 
 Claude subscription account usage runs the CLI-owned `/usage` command separately and normalizes its
-quota windows plus approximate local request/session activity. It only needs the CLI login, not the
-separate model-catalog OAuth credential. API-key connections do not advertise account usage because
+quota windows plus approximate local request/session activity, for the connection's account.
+API-key connections do not advertise account usage because
 Anthropic does not expose the subscription report through the Messages API.
 The public account-usage path is live-qualified against source `0dacacd` and installed Claude CLI
 2.1.289 with its existing sign-in. The standalone `/usage` report returns three quota windows and
@@ -4938,9 +4954,8 @@ This qualifies the selected streaming schema route, not other models, refresh or
 `AnthropicClaudeCli` advertises model listing through a no-prompt initialize control exchange with
 the signed-in CLI. Selectable IDs and display names come from its actual `models` response;
 returned aliases stay aliases, and an empty list stays empty. The owned temporary process is
-retired before options are published. Manual model selection remains available. A host can
-explicitly attach the optional browser-authorized catalog OAuth credential to use the existing
-paged HTTP catalog instead. Prompts, CLI readiness, usage and agent tools ignore that credential.
+retired before options are published. Manual model selection remains available. A connection
+signed in to a Claude account uses the paged HTTP catalog with its account token instead.
 Installed Claude CLI 2.1.289 lists twelve native choices through the public tester with its existing
 sign-in, including `default`, `opus`, `fable`, `sonnet` and `haiku`. This qualifies native listing
 without a generation prompt or HTTP catalog credential. Refresh, generation on every returned model

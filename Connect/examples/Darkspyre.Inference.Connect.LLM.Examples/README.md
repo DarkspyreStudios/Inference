@@ -65,7 +65,7 @@ boundary and must preserve Darkspyre.Inference.Connect.LLM's versioned compare-a
 | AWS Bedrock Converse | Usually protected `LlmAwsCredentials` containing only profile and region | AWS SDK credential chain | No. The named profile, environment, workload identity, or other AWS SDK source owns the actual AWS credentials. |
 | AWS Bedrock AgentCore Harness | Usually protected `LlmAwsCredentials` containing only profile and region | AWS SDK credential chain | No. The connection endpoint is the deployed Harness ARN; AWS credentials still come from the standard SDK chain. |
 | ChatGPT Codex subscription | Protected ChatGPT OAuth credential | Host/vault | Device OAuth through `SignInAsync` is required for direct generation, models and usage. CLI login is not reused. |
-| Claude subscription | `null` | Official `claude` CLI | No OAuth is required for prompts, tools, usage, or CLI readiness. Optional catalog OAuth is used only when the host explicitly enables HTTP model discovery. |
+| Claude subscription | `null`, or a Claude account sign-in | Official `claude` CLI | Without a credential the CLI runs as the machine's active login. A Claude account sign-in stores a one-year token that runs every CLI process for the connection as that account and lists its models over HTTP. |
 | Antigravity subscription | `null` | Official `agy` CLI | No host OAuth. Run `agy` interactively; the CLI owns its Google session. |
 
 ### Why Claude has two authentication dependencies
@@ -74,13 +74,13 @@ A Claude subscription uses the distinct `AnthropicClaudeCli` transport. Its norm
 `Credential = null`; the CLI owns authentication for prompts, tools, usage, and readiness checks.
 It is never selected by inspecting a stored credential.
 
-There is one optional, independent integration:
+A Claude subscription connection can be signed in to a Claude account:
 
-1. Anthropic's `GET /v1/models` is authenticated HTTP and is not exposed anonymously or by the
-   Claude CLI. A host that wants that catalog can explicitly store a browser-authorized catalog OAuth
-   credential through `ILlmConnectionSource`.
-2. That catalog token affects only `SupportsModelListing` and `ListModelsAsync`. It never enables the
-   subscription transport, prompts, agent sessions, tools, usage, or `IsAuthenticatedAsync`.
+1. The settings action "Sign in to a Claude account" stores a one-year `user:inference` token as the
+   connection's credential through `ILlmConnectionSource`.
+2. Every Claude CLI process for that connection, including prompts, agent sessions, usage and
+   `IsAuthenticatedAsync`, runs with `CLAUDE_CODE_OAUTH_TOKEN` set to that token. Model listing uses
+   Anthropic's `GET /v1/models` with it.
 
 `AnthropicMessages` is a separate API-key transport. It never launches the CLI and cannot be used
 with `LlmAgentProviderService`. Conversely, `AnthropicClaudeCli` rejects API-key credentials and never
@@ -107,9 +107,9 @@ services.AddLlmConnect();
 services.AddLlmConnectBedrock(); // Bedrock is included in the Connect product package.
 ```
 
-`MySecureConnectionSource` owns application API keys, direct Codex device OAuth, optional Claude catalog OAuth, and optionally
-the Bedrock profile/region record. It still returns connection metadata for CLI connections, but
-their normal `Credential` is `null`. Use `SetApiKeyAsync`,
+`MySecureConnectionSource` owns application API keys, direct Codex device OAuth, Claude account sign-ins, and optionally
+the Bedrock profile/region record. It still returns connection metadata for CLI connections; their
+`Credential` is `null` unless a Claude connection is signed in to a Claude account. Use `SetApiKeyAsync`,
 `SetBedrockCredentialsAsync`, `SignInAsync` for Codex, or the optional Claude catalog sign-in APIs to save host-owned values through the
 source instead of placing secrets in source code. AgentCore uses the same AWS credential record; its
 connection endpoint is the deployed Harness ARN.
