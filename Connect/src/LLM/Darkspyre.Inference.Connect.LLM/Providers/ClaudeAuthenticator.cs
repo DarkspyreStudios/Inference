@@ -10,8 +10,9 @@ internal sealed class ClaudeAuthenticator(HttpClient http)
     : OAuthAuthenticatorBase(http), IClaudePkceLogin
 {
     private const string AuthorizeUrl = "https://claude.com/cai/oauth/authorize";
-    private const string Scopes =
-        "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload";
+    // The scope and lifetime claude setup-token requests: a token the CLI runs on through CLAUDE_CODE_OAUTH_TOKEN.
+    private const string Scopes = "user:inference";
+    private const int TokenLifetimeSeconds = 31536000;
 
     internal const string ManualRedirectUri =
         "https://console.anthropic.com/oauth/code/callback";
@@ -74,7 +75,8 @@ internal sealed class ClaudeAuthenticator(HttpClient http)
                     ["redirect_uri"] = session.RedirectUri,
                     ["client_id"] = ClientId,
                     ["code_verifier"] = session.CodeVerifier,
-                    ["state"] = state
+                    ["state"] = state,
+                    ["expires_in"] = TokenLifetimeSeconds
                 })
             };
             using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
