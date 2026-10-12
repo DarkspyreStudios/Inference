@@ -108,12 +108,15 @@ internal static class OpenAiResponsesTools
         return input;
     }
 
+    /// <summary>One history message as a Responses input item. The item names its type, because a service such as the
+    /// local llama.cpp server refuses a history item without one.</summary>
     public static JsonObject BuildMessage(LlmChatMessage message)
     {
         if (message.Attachments.Count == 0)
         {
             return new JsonObject
             {
+                ["type"] = "message",
                 ["role"] = message.Role,
                 ["content"] = message.Content
             };
@@ -138,6 +141,7 @@ internal static class OpenAiResponsesTools
 
         return new JsonObject
         {
+            ["type"] = "message",
             ["role"] = message.Role,
             ["content"] = content
         };

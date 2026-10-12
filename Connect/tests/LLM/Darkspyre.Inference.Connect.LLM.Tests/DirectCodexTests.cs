@@ -653,6 +653,26 @@ public sealed class DirectCodexTests
         Assert.True(JsonNode.DeepEquals(new JsonObject { ["effort"] = "high", ["summary"] = "auto" }, sent["reasoning"]));
     }
 
+    /// <summary>Every history message, with or without attachments, is sent as a typed message item; the local llama.cpp
+    /// server refuses an untyped one with "Cannot determine type of 'item'".</summary>
+    [Fact]
+    public async Task HistoryMessagesCarryTheMessageType()
+    {
+        using var handler = new Handler(_ => Sse(Completed));
+        var client = new OpenAiCodexLlmClient(new HttpClient(handler));
+        LlmChatRequest request = Request() with
+        {
+            Messages = [new("user", "first"), new("assistant", "answer"),
+                new("user", "look") { Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "a.png", MediaType = "image/png", Data = new byte[] { 1, 2, 3 } }] }]
+        };
+
+        _ = await Complete(client, Connection(), request);
+
+        JsonArray input = JsonNode.Parse(handler.Body!)!["input"]!.AsArray();
+        Assert.Equal(3, input.Count);
+        Assert.All(input, item => Assert.Equal("message", item!["type"]?.GetValue<string>()));
+    }
+
     /// <summary>A temperature refused as unsupported is dropped, the step sent once more, and the refusal remembered
     /// for that connection and model only (S3a).</summary>
     [Fact]
