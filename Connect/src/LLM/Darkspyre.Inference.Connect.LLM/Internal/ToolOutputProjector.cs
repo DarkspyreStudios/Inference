@@ -1,4 +1,5 @@
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
 
@@ -43,6 +44,9 @@ internal static class ToolOutputProjector
 {
     public const string ErrorMarker = "[Tool error]";
 
+    // Structured content sent as text escapes only what JSON requires, so the model reads quotes and non-ASCII as they are.
+    private static readonly JsonSerializerOptions Relaxed = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
     public static ProjectedToolOutput Project(
         LlmToolOutput output,
         LlmRichContentSupported route,
@@ -86,13 +90,16 @@ internal static class ToolOutputProjector
             }
         }
 
+        // A result with any text part sends its text only: the structured content repeats the text, and sending both
+        // doubles the result (Brandon, 2026-10-12).
         LlmToolPartProjection? structured = output.StructuredContent is not { } value ? null
+            : output.Parts.Any(part => part is LlmToolOutputText) ? new(LlmToolPartDelivery.Omitted)
             : value.ValueKind != JsonValueKind.Object
                 ? new(LlmToolPartDelivery.Omitted, LlmToolPartOmission.InvalidContent)
                 : model.StructuredContent switch
                 {
                     LlmRichContentCarriage.Native => Add(sent, new SentStructured(value.Clone()), LlmToolPartDelivery.Delivered),
-                    LlmRichContentCarriage.Text => Add(sent, new SentText(value.GetRawText()), LlmToolPartDelivery.Converted),
+                    LlmRichContentCarriage.Text => Add(sent, new SentText(JsonSerializer.Serialize(value, Relaxed)), LlmToolPartDelivery.Converted),
                     _ => Omit(route.StructuredContent)
                 };
 

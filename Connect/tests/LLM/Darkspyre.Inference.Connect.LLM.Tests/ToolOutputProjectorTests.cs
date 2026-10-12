@@ -80,11 +80,30 @@ public sealed class ToolOutputProjectorTests
         Assert.Equal("notes.txt", Assert.IsType<SentFile>(projected.Parts[3]).FileName);
         Assert.Equal(new SentResourceLink("https://example.test/spec", "spec", "text/html"), projected.Parts[4]);
         Assert.Equal(new SentEmbeddedText("file:///a.md", "text/markdown", "# A"), projected.Parts[5]);
-        Assert.Equal(1, Assert.IsType<SentStructured>(projected.Parts[6]).Value.GetProperty("a").GetInt32());
+        // The output has a text part, so its structured content is not sent.
+        Assert.Equal(6, projected.Parts.Count);
         Assert.True(projected.NativeErrorFlag);
         Assert.All(projected.Report.Parts, part => Assert.Equal(new LlmToolPartProjection(LlmToolPartDelivery.Delivered), part));
-        Assert.Equal(LlmToolPartDelivery.Delivered, projected.Report.StructuredContent!.Delivery);
+        Assert.Equal(LlmToolPartDelivery.Omitted, projected.Report.StructuredContent!.Delivery);
         Assert.Equal(LlmToolPartDelivery.Delivered, projected.Report.ErrorFlag.Delivery);
+    }
+
+    /// <summary>Structured content is sent only for a result with no text part, as JSON that escapes only what JSON
+    /// requires (Brandon, 2026-10-12).</summary>
+    [Fact]
+    public void StructuredContentIsSentOnlyWithoutText()
+    {
+        JsonElement structured = JsonElement.Parse("{\"note\":\"a+b <c> caf\u00e9\"}");
+
+        ProjectedToolOutput withText = ToolOutputProjector.Project(new LlmToolOutput
+        {
+            Parts = [new LlmToolOutputText("the result")], StructuredContent = structured
+        }, RichContentRoutes.Responses, RichContentRoutes.Responses);
+        ProjectedToolOutput alone = ToolOutputProjector.Project(new LlmToolOutput { StructuredContent = structured },
+            RichContentRoutes.Responses, RichContentRoutes.Responses);
+
+        Assert.Equal([new SentText("the result")], withText.Parts);
+        Assert.Equal([new SentText("{\"note\":\"a+b <c> café\"}")], alone.Parts);
     }
 
     [Fact]
