@@ -69,6 +69,10 @@ This boundary lets another operating system supply an implementation without cha
 
 **Check.** Audit source and package configuration for OS branches, native imports, platform paths and commands, filesystem assumptions, and platform-only dependencies. Trace each hit through its callers and registration. Every OS-specific operation must remain inside a platform implementation selected through an OS-agnostic contract. A filename, namespace, annotation, or `IsMacOS()` guard alone does not establish that boundary.
 
+### Exception: Connect's in-library OS switching
+
+Connect keeps its platform handling for macOS, Linux and Windows inside its own libraries, and picks the right OS commands at runtime. This includes the CLI process launch and termination (`Connect/src/LLM/Darkspyre.Inference.Connect.LLM/Providers/CliProcessLauncher.cs`, `CliProcessTermination.cs`), `AppleProcessRunner.cs`, the CLI clients and `LlmAgentRuntimeProfile.cs`. It is not split behind a separate OS capability contract. The reason: this code is battle-tested and works on all three platforms today. Brandon approved this exception on 2026-10-12 (DSA-942).
+
 ## Packages
 
 | Package | Holds |
