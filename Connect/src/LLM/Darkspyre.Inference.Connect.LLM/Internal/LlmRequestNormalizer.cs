@@ -24,6 +24,7 @@ internal static class LlmRequestNormalizer
         return request with
         {
             ReasoningLevel = level,
+            ServiceTier = NearestTier(request.ServiceTier, capabilities.ServiceTiers),
             Temperature = sampling ? Usable(request.Temperature, capabilities.SupportsTemperature, double.IsFinite) : null,
             TopP = sampling ? Usable(request.TopP, capabilities.SupportsTopP, value => double.IsFinite(value) && value is > 0 and <= 1) : null,
             TopK = Usable(request.TopK, capabilities.SupportsTopK, value => value > 0),
@@ -41,6 +42,18 @@ internal static class LlmRequestNormalizer
             AllowParallelToolCalls = tools.Length == 0 ? null : request.AllowParallelToolCalls,
             Messages = Messages(request.Messages, capabilities, request.Resources is not null)
         };
+    }
+
+    /// <summary>
+    /// Null or Auto is Auto. A model that offers no tier gets none. An offered tier is itself; a missing Economy or Fast
+    /// becomes Standard when offered, else Auto.
+    /// </summary>
+    private static LlmServiceTier? NearestTier(LlmServiceTier? requested, IReadOnlySet<LlmServiceTier> offered)
+    {
+        if (offered.Count == 0) return null;
+        LlmServiceTier tier = requested ?? LlmServiceTier.Auto;
+        if (tier == LlmServiceTier.Auto || offered.Contains(tier)) return tier;
+        return offered.Contains(LlmServiceTier.Standard) ? LlmServiceTier.Standard : LlmServiceTier.Auto;
     }
 
     private static T? Usable<T>(T? value, InferenceSupport support, Func<T, bool> valid) where T : struct =>

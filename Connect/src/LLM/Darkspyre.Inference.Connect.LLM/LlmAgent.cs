@@ -293,6 +293,9 @@ public sealed record LlmAgentTurnRequest
     /// <summary>The requested reasoning level; null leaves the provider's default in place.</summary>
     public Darkspyre.Inference.Common.LLM.LlmReasoningLevel? ReasoningLevel { get; init; }
 
+    /// <summary>The requested tier; null is Auto.</summary>
+    public LlmServiceTier? ServiceTier { get; init; }
+
     /// <summary>JSON Schema the final answer must match; null requests free-form output.</summary>
     public JsonElement? OutputSchema { get; init; }
 

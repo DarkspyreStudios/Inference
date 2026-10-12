@@ -40,12 +40,18 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
         RichContentSupported = RichContentRoutes.Responses
     };
 
+    private static readonly IReadOnlySet<LlmServiceTier> AllServiceTiers = Enum.GetValues<LlmServiceTier>().ToFrozenSet();
+
     /// <summary>The feature list for the connection's endpoint and the model's profile (B11, B12).</summary>
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
         EnsureTransport(connection);
-        LlmProviderCapabilities table = DefaultCapabilities;
-        if (IsOpenAiEndpoint(connection))
+        bool openAi = IsOpenAiEndpoint(connection);
+        // The connection's Service tiers switch; unset, it is on for OpenAI's endpoint only (B13, S11 step 4).
+        bool tiers = (connection.CapabilityOverrides?.SupportsServiceTiers
+            ?? (openAi ? InferenceSupport.Supported : InferenceSupport.Unsupported)) == InferenceSupport.Supported;
+        LlmProviderCapabilities table = DefaultCapabilities with { ServiceTiers = tiers ? AllServiceTiers : FrozenSet<LlmServiceTier>.Empty };
+        if (openAi)
         {
             OpenAiModelProfile profile = OpenAiModelProfiles.Get(modelId);
             InferenceSupport sampling = !profile.Verified ? InferenceSupport.Unknown
@@ -73,7 +79,8 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
                 SupportsTopP = sampling,
                 SamplingOnlyWithoutReasoning = profile.SamplingRequiresNoReasoning,
                 PromptCache = profile.SupportsPromptCacheOptions == InferenceSupport.Supported
-                    ? PromptCaching.OpenAi : PromptCaching.Automatic
+                    ? PromptCaching.OpenAi : PromptCaching.Automatic,
+                ServiceTiers = tiers ? profile.ServiceTiers ?? FrozenSet<LlmServiceTier>.Empty : FrozenSet<LlmServiceTier>.Empty
             };
         }
         return LlmCapabilityOverrideLookup.Apply(table, connection, modelId, OffersUsageDeltas);

@@ -192,14 +192,64 @@ public sealed class SupportStateTests
         Assert.Equal(reasons, sent.AsObject().ContainsKey("reasoning"));
     }
 
+    /// <summary>A requested tier is sent as the nearest tier the model offers; Auto and a model without tiers send none (B13, S11).</summary>
+    [Theory]
+    [InlineData("gpt-5.5", LlmServiceTier.Economy, "flex")]
+    [InlineData("gpt-5.5", LlmServiceTier.Standard, "default")]
+    [InlineData("gpt-5.5", LlmServiceTier.Fast, "priority")]
+    [InlineData("gpt-4o", LlmServiceTier.Economy, "default")]
+    [InlineData("gpt-5.5", LlmServiceTier.Auto, null)]
+    [InlineData("gpt-5.5", null, null)]
+    [InlineData("unlisted-model", LlmServiceTier.Fast, null)]
+    public async Task ServiceTierMapsToTheNearestOffered(string model, LlmServiceTier? tier, string? sent)
+    {
+        JsonNode payload = await SentAsync(OpenAiResponsesLlmClient.DefaultEndpoint, model, null, null, tier);
+
+        Assert.Equal(sent, payload["service_tier"]?.GetValue<string>());
+    }
+
+    /// <summary>Codex offers no tiers, so a requested tier is dropped and the turn runs (S11).</summary>
+    [Fact]
+    public async Task ServiceTierMapsToTheNearestOfferedOnCodex()
+    {
+        using var handler = new DirectCodexTests.Handler(_ => DirectCodexTests.Sse(DirectCodexTests.Completed));
+        var client = new OpenAiCodexLlmClient(new HttpClient(handler));
+
+        JsonNode payload = await SentAsync(client, handler, DirectCodexTests.Connection(), "model", null, null, LlmServiceTier.Fast);
+
+        Assert.False(payload.AsObject().ContainsKey("service_tier"));
+    }
+
+    /// <summary>The Service tiers switch is on for OpenAI's endpoint and off elsewhere unless set (B13, S11 step 4).</summary>
+    [Theory]
+    [InlineData(OpenAiResponsesLlmClient.DefaultEndpoint, null, 4)]
+    [InlineData(OpenAiResponsesLlmClient.DefaultEndpoint, InferenceSupport.Unsupported, 0)]
+    [InlineData("http://local.test/v1", null, 0)]
+    [InlineData("http://local.test/v1", InferenceSupport.Supported, 4)]
+    public void ServiceTiersSwitchFollowsTheEndpoint(string endpoint, InferenceSupport? setting, int offered)
+    {
+        var client = new OpenAiResponsesLlmClient(new HttpClient());
+        LlmConnection connection = DirectCodexTests.OpenAiConnection(endpoint) with
+        { CapabilityOverrides = new() { SupportsServiceTiers = setting } };
+
+        Assert.Equal(offered, client.GetCapabilities(connection, "gpt-5.5").ServiceTiers.Count);
+    }
+
     /// <summary>The payload the OpenAI API client sends for a normalized request.</summary>
-    private static async Task<JsonNode> SentAsync(string endpoint, string model, LlmReasoningLevel? level, double? temperature)
+    private static async Task<JsonNode> SentAsync(string endpoint, string model, LlmReasoningLevel? level, double? temperature,
+        LlmServiceTier? tier = null)
     {
         using var handler = new DirectCodexTests.Handler(_ => DirectCodexTests.Sse(DirectCodexTests.Completed));
         var client = new OpenAiResponsesLlmClient(new HttpClient(handler));
-        LlmConnection connection = DirectCodexTests.OpenAiConnection(endpoint);
+        return await SentAsync(client, handler, DirectCodexTests.OpenAiConnection(endpoint), model, level, temperature, tier);
+    }
+
+    /// <summary>The payload <paramref name="client"/> sends for a normalized request.</summary>
+    private static async Task<JsonNode> SentAsync(ResponsesLlmClientBase client, DirectCodexTests.Handler handler,
+        LlmConnection connection, string model, LlmReasoningLevel? level, double? temperature, LlmServiceTier? tier)
+    {
         LlmChatRequest request = LlmRequestNormalizer.Normalize(connection,
-            new() { ModelId = model, Messages = [new("user", "hello")], ReasoningLevel = level, Temperature = temperature },
+            new() { ModelId = model, Messages = [new("user", "hello")], ReasoningLevel = level, Temperature = temperature, ServiceTier = tier },
             client.GetCapabilities(connection, model));
         await foreach (LlmStreamEvent _ in client.StreamAsync(connection, request)) { }
         return JsonNode.Parse(handler.Body!)!;

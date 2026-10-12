@@ -65,6 +65,9 @@ internal sealed record LlmChatRequest
     /// <summary>The requested reasoning level; null leaves the provider's default in place.</summary>
     public Darkspyre.Inference.Common.LLM.LlmReasoningLevel? ReasoningLevel { get; init; }
 
+    /// <summary>The requested tier after normalization: one the model offers, or null when none is sent.</summary>
+    public LlmServiceTier? ServiceTier { get; init; }
+
     public LlmStructuredOutputRequest? StructuredOutput { get; init; }
 
     public IReadOnlyList<LlmClientToolDefinition> Tools { get; init; } = [];
@@ -106,11 +109,7 @@ internal sealed record LlmChatRequest
 public sealed record LlmProviderDiagnostics(
     int HttpStatusCode,
     string? RequestId,
-    string? RawFinalResponseJson)
-{
-    /// <summary>The applied service tier when the provider reports one.</summary>
-    public string? ServiceTier { get; init; }
-}
+    string? RawFinalResponseJson);
 
 internal sealed record LlmChatResult
 {

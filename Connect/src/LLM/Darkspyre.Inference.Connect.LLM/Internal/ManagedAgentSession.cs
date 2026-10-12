@@ -1109,6 +1109,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             ConversationKey = ThreadId,
             PromptCache = new LlmPromptCacheHint { Scope = LlmPromptCacheScope.Conversation },
             ReasoningLevel = turn.ReasoningLevel,
+            ServiceTier = turn.ServiceTier,
             Temperature = turn.Temperature,
             MaxOutputTokens = turn.MaxOutputTokens,
             ToolChoice = turn.ToolChoice is null || firstStep ? turn.ToolChoice : new LlmToolChoice { Mode = LlmToolChoiceMode.Auto },

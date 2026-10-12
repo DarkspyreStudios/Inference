@@ -610,6 +610,17 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         {
             payload["max_output_tokens"] = maxOutputTokens;
         }
+        string? serviceTier = request.ServiceTier switch
+        {
+            LlmServiceTier.Economy => "flex",
+            LlmServiceTier.Standard => "default",
+            LlmServiceTier.Fast => "priority",
+            _ => null
+        };
+        if (serviceTier is not null)
+        {
+            payload["service_tier"] = serviceTier;
+        }
 
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
         // An OpenAI API model that does not reason gets no reasoning object (B4). Codex accepts effort none from a

@@ -61,6 +61,9 @@ public sealed record LlmProviderCapabilities
     public InferenceSupport SupportsReasoning => ReasoningLevels.Count == 0 ? InferenceSupport.Unknown
         : ReasoningLevels.Any(static level => level > LlmReasoningLevel.None) ? InferenceSupport.Supported : InferenceSupport.Unsupported;
 
+    /// <summary>The tiers the model offers. Empty means the model offers none and a requested tier is not sent.</summary>
+    public IReadOnlySet<LlmServiceTier> ServiceTiers { get; init; } = FrozenSet<LlmServiceTier>.Empty;
+
     /// <summary>The route accepts a sampling temperature.</summary>
     public InferenceSupport SupportsTemperature { get; init; }
 
@@ -285,4 +288,8 @@ public sealed record LlmCapabilityOverrides
     /// <summary>The model's context length in tokens. Set, it is the model's limit, above the listed window, the published
     /// value and what refusals taught (B6). Meaningful only in ModelCapabilityOverrides.</summary>
     public long? MaxContextTokens { get; init; }
+
+    /// <summary>Supported offers the model's service tiers and sends the chosen tier; Unsupported offers none and sends
+    /// none. Null takes the transport's default (B13).</summary>
+    public InferenceSupport? SupportsServiceTiers { get; init; }
 }
