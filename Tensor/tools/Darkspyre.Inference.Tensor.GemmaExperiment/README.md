@@ -20,7 +20,7 @@ bash ../agent-ds/scripts/workspace-env.sh dotnet restore Tensor/tools/Darkspyre.
 ```
 
 ```bash
-bash ../agent-ds/scripts/workspace-env.sh dotnet build Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/Darkspyre.Inference.Tensor.GemmaExperiment.csproj --no-restore -maxcpucount:1
+bash ../agent-ds/scripts/workspace-env.sh dotnet build Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/Darkspyre.Inference.Tensor.GemmaExperiment.csproj -c Release --no-restore -maxcpucount:1
 ```
 
 ```bash
@@ -33,10 +33,10 @@ that catalog, hashes and ABI before selecting Metal. A missing driver fails; the
 download or compile one.
 
 ```bash
-bash ../agent-ds/scripts/workspace-env.sh dotnet Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/bin/Debug/net11.0/Darkspyre.Inference.Tensor.GemmaExperiment.dll cpu artifacts/gemma2/model artifacts/gemma2/cpu-128 128
+bash ../agent-ds/scripts/workspace-env.sh dotnet Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/bin/Release/net11.0/Darkspyre.Inference.Tensor.GemmaExperiment.dll cpu artifacts/gemma2/model artifacts/gemma2/cpu-128 128
 ```
 
-Replace `cpu` with `metal`, `coreml` or `webgpu`, and use a separate output directory for each
+Replace `cpu` with `metal`, `coreml`, `coreml-static` or `webgpu`, and use a separate output directory for each
 run. `providers` lists the ONNX providers available in the installed runtime. The Metal command
 does not initialize ONNX Runtime. Run one process at a time to avoid GPU contention.
 
@@ -44,13 +44,16 @@ The optional length defaults to 12. Each input consists of BOS, repeated frozen 
 IDs and EOS. All tokens participate in pooling. The 512-token maximum keeps the full and
 sliding masks equivalent. These synthetic sequences test execution; they are not a retrieval
 corpus. Each process records load time, one first call and five subsequent calls, a 768-value
-vector, and process peak working set. ONNX records its provider profile. TensorSharp reports
+vector, and process peak working set when the runtime supplies it (otherwise null). ONNX records its provider profile. TensorSharp reports
 actual Metal selection and releases model tensors before terminating the native runtime.
 
 Compare every vector against ONNX CPU for the same token count. Unit length alone does not
 establish agreement. Profile node placement separately from timings: selecting a GPU provider
 does not prove that all nodes execute there. Core ML uses `CPUAndGPU` and `MLProgram` with
 dynamic shapes admitted; the original graph can fail at compilation or inference.
+`coreml-static` binds the batch, token and absent-modality dimensions for that one session
+and admits only Core ML partitions with static input shapes. This measures whether shape
+specialization helps the same graph; it does not export another model.
 
 This is a loading and numerical feasibility experiment. TensorSharp's forward pass uses
 individual tensor operations without model-level fusion. Its timings do not measure a finished

@@ -7,7 +7,7 @@ using TsTensor = TensorSharp.Tensor;
 namespace Darkspyre.Inference.Tensor.GemmaExperiment;
 
 // Experimental forward pass for the pinned ONNX export's FP32 weights. This is not a
-// registered TsTensor engine. Frozen inputs isolate the runtime from tokenizer differences.
+// registered Tensor engine. Frozen inputs isolate the runtime from tokenizer differences.
 internal sealed class MetalText : IDisposable
 {
     private readonly GgmlContext context;
@@ -84,7 +84,7 @@ internal sealed class MetalText : IDisposable
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new
             {
                 provider = "TensorSharp Metal", inputIds = ids, loadMs, timesMs = times, vector,
-                peakWorkingSetBytes = Process.GetCurrentProcess().PeakWorkingSet64,
+                peakWorkingSetBytes = Program.PeakWorkingSet(),
                 nativeAbi = GgmlNativeLoader.NativeAbi,
                 note = "Experimental unfused FP32 text forward; no tokenizer or retrieval qualification."
             }));
@@ -210,6 +210,7 @@ internal sealed class MetalText : IDisposable
         Ops.RoPEEx(shaped, shaped, positions, dimension, 2, 0, dimension == 512 ? 1000000f : 10000f, 1f);
     }
 
+    /// <summary>Releases the model weights before the native context.</summary>
     public void Dispose()
     {
         foreach (TsTensor tensor in weights.Values) tensor.Dispose();
@@ -221,6 +222,7 @@ internal sealed class MetalText : IDisposable
     {
         private readonly List<TsTensor> values = [];
         internal TsTensor Add(TsTensor value) { values.Add(value); return value; }
+        /// <summary>Releases temporary views and tensors in reverse construction order.</summary>
         public void Dispose() { for (int i = values.Count - 1; i >= 0; i--) values[i].Dispose(); }
     }
 }

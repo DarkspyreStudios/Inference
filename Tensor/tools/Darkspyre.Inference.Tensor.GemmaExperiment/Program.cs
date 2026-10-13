@@ -16,8 +16,8 @@ internal static class Program
                 Console.WriteLine("ONNX providers: " + string.Join(", ", OrtEnv.Instance().GetAvailableProviders()));
                 return 0;
             }
-            if (args.Length is not (3 or 4) || args[0] is not ("cpu" or "coreml" or "webgpu" or "metal"))
-                throw new ArgumentException("Usage: <cpu|coreml|webgpu|metal> <prepared-directory> <output-directory> [tokens: 2..512], or providers");
+            if (args.Length is not (3 or 4) || args[0] is not ("cpu" or "coreml" or "coreml-static" or "webgpu" or "metal"))
+                throw new ArgumentException("Usage: <cpu|coreml|coreml-static|webgpu|metal> <prepared-directory> <output-directory> [tokens: 2..512], or providers");
             string root = Path.GetFullPath(args[1]);
             string output = Path.GetFullPath(args[2]);
             Directory.CreateDirectory(output);
@@ -35,12 +35,19 @@ internal static class Program
                 EnableProfiling = true,
                 GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
             };
-            if (args[0] == "coreml")
+            if (args[0] == "coreml-static")
+            {
+                options.AddFreeDimensionOverrideByName("batch_size", 1);
+                options.AddFreeDimensionOverrideByName("sequence_length", length);
+                foreach (string name in new[] { "num_image_tokens", "num_video_tokens", "num_audio_tokens" })
+                    options.AddFreeDimensionOverrideByName(name, 0);
+            }
+            if (args[0] is "coreml" or "coreml-static")
                 options.AppendExecutionProvider("CoreML", new Dictionary<string, string>
                 {
                     ["ModelFormat"] = "MLProgram",
                     ["MLComputeUnits"] = "CPUAndGPU",
-                    ["RequireStaticInputShapes"] = "0"
+                    ["RequireStaticInputShapes"] = args[0] == "coreml-static" ? "1" : "0"
                 });
             if (args[0] == "webgpu")
                 options.AppendExecutionProvider("WebGPU", new Dictionary<string, string>());
@@ -72,7 +79,7 @@ internal static class Program
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new
             {
                 provider = args[0], inputIds = ids, loadMs, timesMs = times, vector, profile,
-                peakWorkingSetBytes = Process.GetCurrentProcess().PeakWorkingSet64,
+                peakWorkingSetBytes = PeakWorkingSet(),
                 note = "Frozen token IDs isolate model execution; tokenizer and retrieval quality are not qualified."
             }));
             return 0;
@@ -82,5 +89,12 @@ internal static class Program
             Console.Error.WriteLine(error);
             return 1;
         }
+    }
+
+    internal static long? PeakWorkingSet()
+    {
+        using Process process = Process.GetCurrentProcess();
+        long peak = process.PeakWorkingSet64;
+        return peak > 0 ? peak : null;
     }
 }
