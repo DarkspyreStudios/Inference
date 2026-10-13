@@ -3,7 +3,8 @@
 Measurement date: 2026-10-12. Machine: Apple M4 Pro, 48 GiB unified memory,
 macOS 26.7.1 (25G241), arm64. The executable uses .NET 11 and a Release build.
 
-The executable source is Inference `3ef82f2a3bce462463d48044535dc51c04b7ac8c`.
+The initial table uses Inference `3ef82f2a3bce462463d48044535dc51c04b7ac8c`.
+Later sections name the diagnostic revisions used for their measurements.
 TensorSharp source is `0f6757935c5ed7c8a06c0387575c31804c7b9940`.
 The prebuilt Metal driver has native ABI
 `96f321c263a76984f6386b7cf7894789c4fc0de23c4ec8e5319c7f30e2f3504b`.
@@ -150,6 +151,128 @@ correctness failure; they do not establish a qualified TensorSharp embedding eng
 Host, Search, TensorSharp source and the shipped engine registry have no changes.
 No native compilation or production engine selection occurs. The intermittent
 TensorSharp output failure and within-process timing drift remain unresolved.
+
+## Correctness and optimized-path profiling, 2026-10-13
+
+This investigation uses the same pinned FP32 graph, token sequences, TensorSharp
+commit and verified prebuilt driver. Inference diagnostic commits are `d1bbaff8`,
+`1ca01b62`, `6c19e007`, `ee711ce9` and `f859d133`. Only the isolated executable and
+its documentation change. Host, TensorSharp source and native drivers are unchanged.
+The local `2.8.6.9-osx-arm64-metal-96f321c263a76984` driver supports Metal and CPU;
+its catalog and binary SHA-256 match the probe copy. No download or native build runs.
+
+### Numerical result: host copies require synchronization
+
+The unchanged execution-parity criteria apply to every final embedding. Controls
+retain FP32 weights, activations and the same computations.
+
+| Case | Processes | Calls passing / checked | Largest component error |
+| --- | ---: | ---: | ---: |
+| Untraced original/fused Metal, two rounds at 12/128/512 tokens | 12 | 54 / 72 | 0.022114 |
+| Barrier before probe host copies, fused/grouped at 12/128/512 tokens | 6 | 72 / 72 | 0.00006571 |
+| Existing synchronous-compute setting, fused/grouped at 12/128/512 tokens | 6 | 72 / 72 | 0.00006571 |
+
+The controls execute twelve calls per process, including the first call. Neither
+control requires new native code. The original/fused controls execute six calls
+per process. The barrier and synchronous controls also meet cosine >= 0.999999
+and norm error <= 1e-6. Their vectors repeat exactly within each process.
+
+The same TensorSharp forward on GGML CPU repeats exactly across six traced
+12-token calls. Its largest difference from ONNX CPU is 2.796e-5. The fused GGML
+CPU path repeats exactly across six 128-token calls, with largest difference
+3.003e-5. This supports the model mapping for those inputs; it does not qualify
+other lengths, preprocessing or media behavior.
+
+Capturing every intermediate tensor masks the intermittent failure in the measured
+Metal trace because host readback drains pending work. Single-checkpoint traces
+retain failures. At the first layer's attention checkpoint, one 128-token call
+has maximum output difference 11.9793 from an agreeing call in the same process.
+Capturing its Q/K/V inputs *after* completion shows identical query and value
+inputs but key differences up to 1.38160. The corresponding final embedding differs
+from ONNX CPU by 0.015981. This places that failure before attention consumes its
+key input. A later capture also records the original key, but no first-layer
+failure occurs in that particular run; it does not prove the exact first write.
+
+The relevant shared implementation is `TensorSharp.Backends.GGML/GgmlBasicOps.cs`:
+`Copy` at line 4304 uses CPU pointer copies, while `GetBufferStart` at line 5591
+returns `PtrAtElement` without `EnsureHostReadable`. The native bridge can enqueue
+an asynchronous output download (`TensorSharp.GGML.Native/ggml_ops_internal.h:537`).
+`GgmlStorage.CopyToStorage` and `TensorComputePrimitives.GetFloatPointer` already
+call `EnsureHostReadable`, but the managed `Ops.Copy` path does not. The probe
+uses that path to materialize slices, repeat K/V heads and create head-first layouts.
+
+`GEMMA_COPY_BARRIER=1` invokes the existing `HostReadBarrier` before those host
+copies. Its passing controls, the captured key corruption and the missing wait in
+source identify a host-copy visibility defect. The specific GPU write that races
+with the captured bad copy is not separately traced. These controls do not qualify
+every GGML caller, workload or platform, and no production fix is applied here.
+
+### Repeated-call latency: retained ownership registrations
+
+In the fused 128-token profile, the process ownership registry contains 662 entries
+after the first request and 7,141 after request twenty. Every request adds exactly
+341 entries. Only 3,236 entries still have live weak targets at the last observation;
+collected targets do not remove their registration cells. A second run reaches
+8,505 entries after twenty-four requests, with 1,817 live targets.
+
+At this TensorSharp baseline, `NativeQuarantineAuthority.ValidateRegistration`
+(`TensorSharp.Core/NativeQuarantineAuthority.cs:200`) calls `ValidateCells`, which
+scans every owner (`:147`). Tensor access invokes that path. The managed stack
+capture during request eleven lands in `ValidateCells` beneath `Tensor.View`.
+`GgmlNativeLoader.OwnedResourceLease.CompleteRelease`
+(`TensorSharp.Backends.GGML/GgmlCudaDependency.cs:214`) completes the quarantine
+registration only when `CudaAttached` is true. Metal and CPU disposal remove the
+runtime lease but leave the quarantine registration. This is metadata accumulation;
+it does not establish a retained GPU-allocation leak.
+
+The first profile measures request three at 346.9 ms and request twenty at 733.3 ms.
+The second measures request two at 269.5 ms and request twenty-four at 715.9 ms.
+Phase timing grows in attention preparation, QKV work and other tensor-heavy code.
+Managed allocation is approximately 4.3 MiB per request after the initial calls.
+The observations and stack/source evidence identify increasing registry-validation
+work. They do not assign an exact fraction of total runtime to it. Profilers and
+other workstation workloads also affect elapsed time. No lifecycle checks are
+removed or bypassed by the experiment.
+
+### Remaining fixed costs
+
+The first optimized native sample contains 2,253 main-thread samples. Metal
+`waitUntilCompleted` appears in 633 (28.1%), backend graph-buffer allocation in
+218 (9.7%), and `TSGgml_IndexSelectF32` in 388 (17.2%). These are inclusive,
+overlapping stack counts, not exclusive time shares or GPU utilization. Weight
+packing does not appear in this sample. The retained FP32 linear path avoids the
+original repeated matrix packing.
+
+Phase timing records the embedding lookup near 90 ms in this 128-token profile.
+The generic index-select graph constructs `ggml_cont` over the complete
+262,144-by-512 FP32 embedding table before gathering rows
+(`TensorSharp.GGML.Native/ggml_ops_elementwise.cpp:1440`). That table occupies
+512 MiB. The existing `GgmlBasicOps.GetRowsQuant` path (`GgmlBasicOps.cs:1371`)
+accepts an explicit GGML type; its native constructor accepts F32 and binds cached
+source weights directly before row selection (`ggml_ops_matmul.cpp:538`). Reuse
+of that operation is a smaller performance candidate than a whole-model graph.
+Its embedding parity and speed are not measured by this investigation.
+
+### Evidence and limits
+
+`artifacts/gemma2/correctness/correctness-profile-summary.json` consolidates 35
+processes and 360 calls, including failed controls and diagnostic traces. All
+processes report successful shutdown. Raw vectors, checkpoint arrays, phase
+measurements, native samples and managed stacks reside beside it. The diagnostic
+README describes each control. Trace/profile measurements are labeled separately.
+A first managed-stack attachment fails because the default diagnostic socket path
+is too long. A short isolated scratch directory permits the subsequent four
+captures; no software installation or machine setting changes.
+
+The later control timings vary substantially on this shared workstation and retain
+the growing-registry cost. They do not establish a performance ranking between
+barriers and synchronous execution, nor a new comparison with WebGPU. The existing
+WebGPU comparison remains the measured baseline. Whole-graph implementation,
+production lifecycle/copy fixes, native compilation and engine selection remain
+outside this investigation. The next smaller candidates are shared host-copy
+synchronization, correct ownership-registration release, and resident embedding
+row lookup. Images, tokenizer parity, retrieval quality and other platforms remain
+unqualified.
 
 ## Provider placement and limitations
 

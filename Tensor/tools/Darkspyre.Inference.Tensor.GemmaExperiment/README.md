@@ -116,3 +116,14 @@ Every mode retains all final vectors.
 ```bash
 GEMMA_DIAGNOSTIC=trace bash ../agent-ds/scripts/workspace-env.sh dotnet Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/bin/Release/net11.0/Darkspyre.Inference.Tensor.GemmaExperiment.dll ggml-cpu artifacts/gemma2/model artifacts/gemma2/correctness/cpu-trace-12 12
 ```
+
+The copy-barrier matrix uses the existing comparison runner and a separate output root:
+
+```bash
+GEMMA_COPY_BARRIER=1 GEMMA_RUNS=12 python3 Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/compare.py artifacts/gemma2/model artifacts/gemma2/copy-control cpu metal-fused metal-grouped
+```
+
+Replace `GEMMA_COPY_BARRIER=1` with `GEMMA_SYNCHRONOUS=1` and select another
+output root for the synchronous control. The ONNX reference retains six calls.
+The controls do not replace the default path; default runs continue to reproduce
+the defect. Measured diagnostic conclusions and limitations appear in RESULTS.md.
