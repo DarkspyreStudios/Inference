@@ -11,6 +11,7 @@ internal sealed class ForwardDiagnostic
     private readonly string output;
     private readonly int run;
     private readonly string? mode = Environment.GetEnvironmentVariable("GEMMA_DIAGNOSTIC");
+    private readonly string? tracePoint = Environment.GetEnvironmentVariable("GEMMA_TRACE_POINT");
     private readonly List<object> phases = [];
     private long previous = Stopwatch.GetTimestamp();
     private readonly long allocated = GC.GetTotalAllocatedBytes();
@@ -26,7 +27,7 @@ internal sealed class ForwardDiagnostic
 
     internal void Mark(string name, TsTensor tensor)
     {
-        if (mode == null) return;
+        if (mode == null || (mode == "trace" && tracePoint != null && tracePoint != name)) return;
         double elapsed = Stopwatch.GetElapsedTime(previous).TotalMilliseconds;
         if (mode == "trace")
         {
