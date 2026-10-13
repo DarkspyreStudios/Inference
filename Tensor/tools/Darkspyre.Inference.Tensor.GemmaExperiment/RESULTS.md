@@ -1,11 +1,14 @@
 # Mac text execution results
 
-Measurement date: 2026-10-12. Machine: Apple M4 Pro, 48 GiB unified memory,
+The [latest shared-fix and resident-row qualification](#shared-fixes-and-resident-row-qualification-2026-10-13)
+records the corrected path and fresh WebGPU comparison.
+
+Measurement dates: 2026-10-12–13. Machine: Apple M4 Pro, 48 GiB unified memory,
 macOS 26.7.1 (25G241), arm64. The executable uses .NET 11 and a Release build.
 
 The initial table uses Inference `3ef82f2a3bce462463d48044535dc51c04b7ac8c`.
 Later sections name the diagnostic revisions used for their measurements.
-TensorSharp source is `0f6757935c5ed7c8a06c0387575c31804c7b9940`.
+Initial TensorSharp source is `0f6757935c5ed7c8a06c0387575c31804c7b9940`.
 The prebuilt Metal driver has native ABI
 `96f321c263a76984f6386b7cf7894789c4fc0de23c4ec8e5319c7f30e2f3504b`.
 ONNX Runtime is 1.30.0. The graph and weights are the FP32 text artifacts at
@@ -433,34 +436,105 @@ Images and video frames, tokenizer parity, real retrieval, quantization, inputs 
 establishes a working Mac text experiment and makes ONNX WebGPU a viable GPU candidate.
 
 
-## Shared fixes and resident-row candidate, 2026-10-13
+## Shared fixes and resident-row qualification, 2026-10-13
 
-TensorSharp commit `8eb71550` adds the shared source/destination host-copy barriers
-and completes CPU/Metal ownership registrations after successful release. Unscoped
-completion checks exact owner identity, empty scopes and no active effects. CUDA
-and MLX retain their gated release paths. The resident-row experiment (`metal-rows`)
-uses the existing `GetRowsQuant` API with GGML type F32 and otherwise follows
-`metal-fused`. The probe-specific copy-barrier control is removed.
+The shared host-copy and ownership fixes pass the measured native and model checks.
+Resident FP32 row lookup returns exactly the fused control's embeddings. ONNX WebGPU
+remains faster on this Mac. Host and whole-graph code remain untouched.
 
-Both managed fixture projects and the Inference experiment build with zero warnings
-and errors. Eight focused managed authority cases pass: unattached-release, healthy,
-promotion, lease-negatives, mismatched-lease, race, constructor and lock-order.
-The new case rejects wrong owners, repeated release and bypasses for attached CUDA
-or MLX owners. The existing wildcard fixture fails because its independent MLX
-owner calls release without the required destructive reservation. That fixture
-path is unchanged and its failure is not a passing qualification.
+**Source and driver.** Inference `61da38bb` supplies the executable. TensorSharp
+`8eb71550` adds the source/destination host-copy barriers and unscoped owner completion;
+`a4f00448` refreshes the generated export inventory; `f1f4d0f1` completes storage
+registration when context lease acquisition fails before memory allocation. That last
+regression first fails with owner count changing from zero to one, then passes with
+zero remaining registrations. Unscoped completion requires the exact owner, empty
+scopes and zero active effects. CUDA/MLX retain their existing gated release paths.
 
-The real CPU fixture stops before its operation checks. TensorSharp fingerprints all
-top-level managed GGML source files as well as native sources. The fixes change its
-required identity from `96f321c263a76984f6386b7cf7894789c4fc0de23c4ec8e5319c7f30e2f3504b`
-to `82517e29f42154ff8b3ef2170e3c8ad6d2559ca4f0473032f0168783cf63aedd`.
-The existing prebuilt driver correctly refuses that mismatch. No native implementation,
-interop signature or pinned upstream revision changes, but that alone does not satisfy
-the loader's identity contract.
+The approved identity-only relink validates all 59 unchanged native object/archive
+inputs and recompiles the identity object. The 296 required exports, native source
+tree and pinned GGML revision remain unchanged. The final driver identifies source
+`f1f4d0f16b351cf2e53fa3e10f03cbe361df3519`, fingerprint
+`6dd126abcccee668a0b51406a4df3ec3d5fef638b3ab9e44eebbfe1c486431a5`, and binary SHA-256
+`be0af1000e34872f66b110cbfe8fec8e246035596ec7a056bfdaefb11a8f36a4`.
+The original shared driver retains its original bytes. A local test package supplies
+the checked catalog and runtime files to the probe output. Nothing is published.
+CMake configuration reports the existing optional OpenMP absence; the reused backend
+objects do not change. Managed builds have zero warnings/errors.
 
-The shared fixes' real native copy/cleanup checks, resident-row numerical checks and
-fresh WebGPU comparison remain unverified. No new performance result is reported.
-The existing Mac identity-only relink tool accepts the retained original objects and
-build evidence; it recompiles the identity object and verifies that all other 59
-link inputs remain unchanged. It requires separate native-compilation approval.
-Host and whole-graph code remain untouched.
+**Focused native checks.** Both actual CPU and Metal selections pass the existing
+runtime fixture. It checks contiguous/strided copy results with deferred writes on
+both source and destination, performs a real native addition, and verifies that
+context/storage, worker, refused-construction and native-allocation cleanup return
+ownership registrations to the original count. Both terminal shutdowns succeed.
+The copy regression uses real GGML pool storage and a deterministic pending-write
+stand-in at the storage barrier. The model runs below exercise default Metal async
+execution with the shared fix and no probe-only copy barrier.
+
+Eight managed authority cases pass: unattached-release, healthy, promotion,
+lease-negatives, mismatched-lease, race, constructor and lock-order. The existing
+wildcard fixture fails because its independent MLX owner calls release without the
+required destructive reservation. That unchanged path is not a passing qualification.
+
+**Numerical checks.** Two complete rounds measure six calls per provider at 12, 128
+and 512 tokens. The second reverses the candidate order. Two 24-call profiles at 128
+tokens exercise the fused and resident-row variants. All 192 outputs pass, including
+all first calls and all 120 TensorSharp calls. The largest component difference from
+ONNX CPU is 6.570906e-5, minimum cosine is 0.9999998994, and largest norm error is
+3.55e-7. Bounds remain 1e-4, 0.999999 and 1e-6 respectively. Every process repeats its
+vector exactly; every resident-row vector exactly matches the fused control for
+that input. All 14 TensorSharp processes report successful native shutdown.
+
+**Warm latency.** Values are medians of five calls after the first call, in milliseconds.
+Each provider/input combination uses its own process. ONNX profiling remains enabled;
+TensorSharp's timing rounds have no intermediate trace or phase profiling enabled.
+Every WebGPU profile identifies 1032 distinct node events on WebGPU and 37 on CPU;
+GPU selection does not imply that every node runs on the GPU.
+
+| Runtime | 12 tokens | 128 tokens | 512 tokens |
+| --- | ---: | ---: | ---: |
+| ONNX CPU | 12.75 | 29.99 | 124.51 |
+| TensorSharp fused, generic row lookup | 176.42 | 220.18 | 422.68 |
+| TensorSharp fused, resident FP32 rows | 102.37 | 135.92 | 301.27 |
+| ONNX WebGPU | 30.77 | 36.50 | 82.95 |
+
+| Reverse-order confirmation | 12 tokens | 128 tokens | 512 tokens |
+| --- | ---: | ---: | ---: |
+| ONNX CPU | 12.87 | 34.84 | 135.01 |
+| TensorSharp fused, generic row lookup | 171.29 | 219.20 | 405.57 |
+| TensorSharp fused, resident FP32 rows | 96.77 | 144.99 | 315.09 |
+| ONNX WebGPU | 30.63 | 30.31 | 87.71 |
+
+Resident rows reduce warm latency by 22–44% across these input lengths and rounds. WebGPU is about 3.2–4.8 times faster than the resident-row path.
+The shared workstation produces outliers and changing load times; these are measured
+ranges, not a throughput guarantee or a finished engine benchmark.
+
+At 512 tokens, main-round first inference is 545.25 ms for fused, 363.68 ms for rows,
+112.17 ms for WebGPU and 143.59 ms for CPU. Their respective load times are
+886.21, 865.58, 643.51 and 182.41 ms. Runtime initialization is outside the load timer.
+Peak RSS is 4416.50, 3950.36, 1201.28 and 862.25 MiB respectively. Resident rows lower
+that measured peak by 466 MiB. RSS includes loading/transient allocations and pools;
+it is not steady model memory or dedicated GPU memory. Reverse-round WebGPU peak
+RSS is 1548.94 MiB, illustrating process/run variation.
+
+**Ownership and phase profile.** Both 24-call profiles retain exactly 321 registrations
+and 321 live targets after every call. The old growth of 341 registrations per request
+is absent. First-five versus last-five warm medians are 219.67 to 210.48 ms for fused,
+and 135.10 to 129.76 ms for resident rows. No accumulating latency trend appears in
+these measured runs. The host-observed embedding phase falls from a warm median of
+82.08 ms to 0.282 ms. Phase boundaries add no intermediate readback, so that number
+is not an independently synchronized GPU kernel duration.
+
+**Evidence and limits.** The ignored `artifacts/gemma2/shared-fixes` directory contains
+all raw vectors, logs, provider profiles and `shared-fixes-summary.json`. The summary
+contains every call's parity measurements, both timing rounds and the ownership
+profiles. TensorSharp's `artifacts/dsa-993-shared-fixes` holds the native checks,
+constructor regression, relink proof and local test package. The shared source,
+export inventory and reports are committed; generated artifacts are not. Scoped
+format checks pass for the experiment, runtime fixture, storage and ownership files.
+A broader check reports existing whitespace findings in unchanged portions of
+`GgmlBasicOps.cs`; those unrelated lines remain unchanged.
+
+The result qualifies these synthetic, unpadded FP32 text sequences and focused
+lifetime checks on macOS arm64. Tokenization, retrieval quality, multimodal inputs,
+long contexts, cancellation, Linux/Windows execution and the unchanged failing MLX
+fixture remain outside this qualification. No shipping engine is selected or registered.
