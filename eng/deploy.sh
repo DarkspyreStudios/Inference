@@ -31,12 +31,12 @@ main() {
     local release_token release_login visibility existing cache package_lower artifact
     local feed='https://nuget.pkg.github.com/DarkspyreStudios/index.json'
     local stage='preflight'
-    local -a packages=(Common Connect Tensor UI.Settings)
+    local -a packages=(Common Connect Tensor.Common Tensor.Decision.Laya Tensor.Embedding Tensor.Embedding.Gemma Tensor.Ggml Tensor.Image.Supra Tensor.LLM.Qwen Tensor.Registry Tensor.STT.Whisper UI.Settings)
     local -a version_files=(Directory.Build.props README.md Common/README.md Connect/README.md Tensor/README.md UI/README.md)
     [[ "$mode" == major || "$mode" == minor ]] || fail 'Use deploy-major.sh or deploy-minor.sh.'
     if [[ "$option" == --help ]]; then
         printf 'Usage: deploy-%s.sh [--dry-run]\n' "$mode"
-        printf 'Bumps <net>.<release>.<minor>, preserving the suffix; validates and publishes all four private packages.\n'
+        printf 'Bumps <net>.<release>.<minor>, preserving the suffix; validates and publishes the private library packages.\n'
         printf 'Requires a clean master checkout, origin, the pinned .NET SDK, and an authorized gh login.\n'
         printf 'Commits the version update and pushes master plus the release tag after verification.\n'
         printf 'INFERENCE_GITHUB_USER optionally selects an existing gh account without switching the active login.\n'
@@ -117,7 +117,15 @@ main() {
     stage='pack and local consumer verification'
     dotnet pack ../Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj -c Release --no-build --no-restore
     dotnet pack src/Darkspyre.Inference.Connect/Darkspyre.Inference.Connect.csproj -c Release --no-build --no-restore
-    dotnet pack ../Tensor/src/Darkspyre.Inference.Tensor/Darkspyre.Inference.Tensor.csproj -c Release --no-build --no-restore
+    dotnet pack ../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj -c Release --no-build --no-restore
+    dotnet pack ../Tensor/src/Decision/Darkspyre.Inference.Tensor.Decision.Laya/Darkspyre.Inference.Tensor.Decision.Laya.csproj -c Release --no-build --no-restore
+    dotnet pack ../Tensor/src/Embedding/Darkspyre.Inference.Tensor.Embedding/Darkspyre.Inference.Tensor.Embedding.csproj -c Release --no-build --no-restore
+    dotnet pack ../Tensor/src/Embedding/Darkspyre.Inference.Tensor.Embedding.Gemma/Darkspyre.Inference.Tensor.Embedding.Gemma.csproj -c Release --no-build --no-restore
+    dotnet pack ../Tensor/src/Ggml/Darkspyre.Inference.Tensor.Ggml/Darkspyre.Inference.Tensor.Ggml.csproj -c Release --no-build --no-restore
+    dotnet pack ../Tensor/src/Image/Darkspyre.Inference.Tensor.Image.Supra/Darkspyre.Inference.Tensor.Image.Supra.csproj -c Release --no-build --no-restore
+    dotnet pack ../Tensor/src/LLM/Darkspyre.Inference.Tensor.LLM.Qwen/Darkspyre.Inference.Tensor.LLM.Qwen.csproj -c Release --no-build --no-restore
+    dotnet pack ../Tensor/src/Registry/Darkspyre.Inference.Tensor.Registry/Darkspyre.Inference.Tensor.Registry.csproj -c Release --no-build --no-restore
+    dotnet pack ../Tensor/src/STT/Darkspyre.Inference.Tensor.STT.Whisper/Darkspyre.Inference.Tensor.STT.Whisper.csproj -c Release --no-build --no-restore
     dotnet pack ../UI/src/Settings/Darkspyre.Inference.UI.Settings/Darkspyre.Inference.UI.Settings.csproj -c Release --no-build --no-restore
     dotnet restore ../eng/VerifyPackages
     dotnet run --project ../eng/VerifyPackages --no-restore -- ../artifacts/packages "$version" "$source_commit"
@@ -143,9 +151,9 @@ main() {
     done
     stage='tag and source push'
     [[ -z "$(git status --porcelain --untracked-files=normal)" && "$(git rev-parse HEAD)" == "$source_commit" ]] || fail 'Source changed during publication; inspect before tagging/pushing.'
-    git tag -a "v$version" "$source_commit" -m "Verified private four-package $version release"
+    git tag -a "v$version" "$source_commit" -m "Verified private library $version release"
     git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin HEAD:refs/heads/master "refs/tags/v$version"
-    printf 'Published all four packages at %s; source %s. Verification cache retained at %s.\n' "$version" "$source_commit" "$cache"
+    printf 'Published all library packages at %s; source %s. Verification cache retained at %s.\n' "$version" "$source_commit" "$cache"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

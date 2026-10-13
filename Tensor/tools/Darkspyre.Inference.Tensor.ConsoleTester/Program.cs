@@ -22,6 +22,12 @@ internal static class Program
             return args.Length == 0 ? 2 : 0;
         }
 
+        if (args[0] == "gemma")
+        {
+            try { return await GemmaSuite.RunAsync(args); }
+            catch (Exception error) { Console.Error.WriteLine(error); return 1; }
+        }
+
         if (args[0] == "registry")
         {
             try { return await RegistryListing.RunAsync(args, CancellationToken.None); }

@@ -28,10 +28,10 @@ public sealed record TextEmbeddingInput(string Text, string? Title = null) : Emb
 /// <param name="Media">The bytes and their media type. The model declares the media it accepts.</param>
 public sealed record MediaEmbeddingInput(BinaryMediaSource Media) : EmbeddingInput;
 
-/// <summary>What an input is for. The model's runtime formats a query; a document is embedded as given.</summary>
+/// <summary>What an input is for. The model owns document and query formatting.</summary>
 public enum EmbeddingInputKind
 {
-    /// <summary>Text to store and search; embedded as given.</summary>
+    /// <summary>Content to store and search, using the model's document format.</summary>
     Document,
     /// <summary>Search text; the model's runtime formats it with the request instruction.</summary>
     Query

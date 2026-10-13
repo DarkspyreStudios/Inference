@@ -8,7 +8,15 @@
   <ItemGroup>
     <PackageReference Include="Darkspyre.Inference.Common" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Connect" Version="[$(Version)]" />
-    <PackageReference Include="Darkspyre.Inference.Tensor" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.Tensor.Common" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.Tensor.Decision.Laya" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.Tensor.Embedding" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.Tensor.Embedding.Gemma" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.Tensor.Ggml" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.Tensor.Image.Supra" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.Tensor.LLM.Qwen" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.Tensor.Registry" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.Tensor.STT.Whisper" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.UI.Settings" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.TensorSharp.Backends.GGML.Native.osx-arm64"
                       Version="[$(VerifyGgmlNativeVersion)]" Condition="'$(VerifyGgmlNativeVersion)' != ''" />

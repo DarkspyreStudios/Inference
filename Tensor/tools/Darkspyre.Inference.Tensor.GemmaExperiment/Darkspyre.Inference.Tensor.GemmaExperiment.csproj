@@ -8,4 +8,7 @@
     <PackageReference Include="Microsoft.ML.OnnxRuntime.EP.WebGpu" />
     <PackageReference Include="Darkspyre.TensorSharp.Models" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Embedding/Darkspyre.Inference.Tensor.Embedding.Gemma/Darkspyre.Inference.Tensor.Embedding.Gemma.csproj" />
+  </ItemGroup>
 </Project>

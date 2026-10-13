@@ -743,3 +743,18 @@ the comparison exits zero. The earlier failed qualification remains separate.
 Host and the production Inference.Tensor engine have no changes. These results
 cover the three RGB fixtures and bounded model execution, not general tokenizer,
 retrieval quality, video decoding, long-context or concurrency qualification.
+
+
+## Production Gemma library and Connect path
+
+The production-library fixture uses the pinned FP32 graphs and tokenizer with the shared TensorSharp
+preprocessing. The Mac CPU and WebGPU runs match all 19 Hugging Face tokenizer cases, seven text
+inputs and three image inputs. Direct and Connect vectors match exactly on each backend. The largest
+CPU/WebGPU component difference is 4.21e-7; every cosine exceeds 0.99999999999. Three retrieval
+queries rank their expected document first. Oversized-batch rejection, cancellation followed by reuse,
+unload and pack removal pass. Results are in `artifacts/gemma2/engine/mac-{cpu,webgpu}/result.json`.
+
+On this M4 Pro run the subsequent Connect calls take 8–18 ms for short text on CPU and 17–25 ms on
+WebGPU. Images take 1,422–1,482 ms on CPU and 556–579 ms on WebGPU. These are fixture timings,
+not a general model throughput claim. Linux and Windows production-library qualification is not
+established by these Mac results.

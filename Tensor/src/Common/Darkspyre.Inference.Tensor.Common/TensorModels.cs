@@ -37,7 +37,9 @@ public enum TensorBackendKind
 /// <summary>Apple MLX.</summary>
     Mlx,
 /// <summary>Apple Core ML.</summary>
-    CoreMl
+    CoreMl,
+/// <summary>ONNX Runtime through the packaged WebGPU execution provider.</summary>
+    WebGpu
 }
 
 /// <summary>The identity of a model pack.</summary>

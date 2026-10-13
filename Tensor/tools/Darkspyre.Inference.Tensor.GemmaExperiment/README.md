@@ -195,3 +195,14 @@ compares the shared path against the existing CPU image reference. It requires s
 outputs per fixture from CPU and external WebGPU on Mac, Linux and Windows, successful
 process exits, and preprocessing parity on all three. A result from `images` cannot
 pass this matrix; every result must identify `sharedPreprocessing: true`.
+
+
+## Production-library fixture
+
+`prepare_engine.py <model-directory> <image-fixtures> <output-directory>` uses the pinned tokenizer
+through Python's `tokenizers` reference. It writes multilingual, code and whitespace token cases,
+text/image inputs and retrieval expectations. The existing Tensor ConsoleTester command
+`gemma <cpu|webgpu> <model-directory> <fixture-directory> <output-directory>` runs these through the
+production Gemma engine and the SelfHost embedding connection. Model artifacts are installed and
+verified through the real pack manager. The tester checks cancellation, reuse, unload and removal.
+The experiment's shared image path calls the production patch packer.

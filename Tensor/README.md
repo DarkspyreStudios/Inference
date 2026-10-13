@@ -4,9 +4,9 @@ Source package version **11.15.1-rc.1** uses the shared typed reasoning-level co
 It includes Laya's CPU/GPU-only Core ML update and retains the ONNX and user-selected
 model-location/import contracts introduced in 11.4.0-rc.1.
 
-In-process, first-class .NET inference built on TensorSharp, ONNX Runtime and Whisper.net and distributed as the
-`Darkspyre.Inference.Tensor` NuGet. The current package targets .NET 11 and references the synchronized
-`Darkspyre.Inference.Common` NuGet rather than embedding Common. Model weights are installed
+In-process .NET inference uses TensorSharp, ONNX Runtime and Whisper.net. Each Tensor library is
+independently consumable. Libraries target .NET 11 and reference their synchronized Common and
+Tensor dependencies. Each package owns one assembly and its XML documentation. Model weights are installed
 separately through Tensor's model-pack manager into a pack directory on the local file system;
 constructing a runtime or running inference never downloads weights. The pack directory defaults to
 `LocalApplicationData/Darkspyre Studios/Inference/Tensor`, and the host can supply another
@@ -18,14 +18,14 @@ leaves behind; a newer file may belong to another process's download. Each engin
 installed files as plain paths: Qwen and
 Supra pass them to TensorSharp, Laya creates its ONNX Runtime session from the model path,
 Whisper loads through `WhisperFactory.FromPath`, and the embedding engine loads through
-TensorSharp's `EmbeddingModelFactory.Load`.
+TensorSharp's `EmbeddingModelFactory.Load`. Gemma creates its ONNX text and vision sessions from verified pack paths.
 
-Assemblies included by the Tensor package:
+Library boundaries:
 
 - `Darkspyre.Inference.Tensor.Common` — the host-controlled model lifecycle, model packs,
-  verification, the local pack directory, and execution coordination.
-- `Darkspyre.Inference.Tensor.LLM`, `.Image`, and `.Decision` — interchangeable capability
-  interfaces using the typed requests and results from `Darkspyre.Inference.Common`.
+  verification, the local pack directory, execution coordination and all Tensor capability interfaces.
+  The capability namespaces remain `.Tensor.LLM`, `.Image`, `.Decision`, `.STT` and `.Embedding`;
+  they resolve from the Common assembly without loading a model implementation.
 - `Darkspyre.Inference.Tensor.Ggml` — `GgmlRuntimeOwner`, the one owner of the GGML native runtime
   that every engine running on GGML borrows.
 - `Darkspyre.Inference.Tensor.LLM.Qwen` — Qwen-compatible GGUF text inference.
@@ -39,8 +39,6 @@ Assemblies included by the Tensor package:
   through ONNX Runtime: the Core ML execution provider on macOS, the CPU provider elsewhere. The BPE
   tokenizer, sequence framing and calibration run in C#. Neither PyTorch nor a Python runtime is
   used.
-- `Darkspyre.Inference.Tensor.STT` — interchangeable typed PCM transcription and identified-window
-  streaming contracts, separate from capture, VAD and playback.
 - `Darkspyre.Inference.Tensor.STT.Whisper` — resident CPU Whisper inference through the public
   Whisper.net runtime. Whisper.net, Whisper.net.Runtime and NAudio.Core remain declared NuGet
   dependencies, not third-party DLLs embedded by the Darkspyre package.
@@ -65,8 +63,23 @@ Assemblies included by the Tensor package:
   stop can retry release. Concurrent and repeated disposal calls share the original cleanup outcome.
   The owning Embedding tests use verified local packs and a stand-in model loader; they cover load
   cancellation, metadata failure, retained cleanup failure and teardown drain without native execution.
+- `Darkspyre.Inference.Tensor.Embedding.Gemma` — FP32 EmbeddingGemma 2 text/image embeddings through
+  ONNX Runtime 1.30.0 and its external WebGPU 0.4.0 provider. Auto selects WebGPU; CPU is explicit.
+  The pinned pack includes text/vision graphs, their external weights and tokenizer.json. The adapter
+  uses TensorSharp's BPE tokenizer and shared Gemma image preprocessing. Queries use
+  `task: search result | query: {text}`; documents use `title: {title-or-none} | text: {text}`.
+  PNG/JPEG inputs carry caller-owned bytes. The output is 768-dimensional and unit length. The
+  fingerprint includes every artifact hash and the formatting/preprocessing/runtime recipe.
+  The full batch is admitted before any graph runs. The 8,192-token limit includes formatting and
+  BOS/EOS. Explicit truncation retains EOS and reports affected input indices. The graph supplies
+  pooling and projection. A cancelled ONNX call is joined before tensors, sessions or pack leases
+  are released. Tensor's existing lifecycle serializes calls and drains before unloading.
+  OrtEnv owns process-wide WebGPU registration; each engine owns two sessions. Explicit CPU input
+  memory uses the Default memory type required by the external WebGPU provider. GPU absence is
+  reported as BackendUnavailable. No implicit CPU fallback occurs.
 - `Darkspyre.Inference.Tensor.Registry` — `TensorEngineRegistry` and the `AddTensorEngines`
-  composition of the five shipped engines. It references the engine assemblies; neither
+  optional composition of the shipped engines. A caller can reference and construct a single
+  engine library without referencing Registry or loading another family. It references the engine assemblies; neither
   `.Tensor.Common` nor an engine assembly references it.
 
 Implementation names identify the model family they support, not a particular checkpoint or training
@@ -88,6 +101,12 @@ document/query vectors at 512 dimensions, unit length, matching-document ranking
 and provenance, and a result round-trip through `InferenceJson.EmbeddingResult`. A loaded GGML model
 must report Busy on runtime shutdown. The command disposes the model before terminal runtime cleanup.
 This qualification does not exercise over-limit inputs, truncation, native failures or other models.
+
+The console tester command `tensor gemma <cpu|webgpu> <model-directory> <fixture-directory> <output-directory>`
+installs the pinned local artifacts, checks reference token IDs, runs text/image inputs both directly and
+through Connect, checks retrieval fixtures, rejects an oversized batch, cancels an active request, checks
+reuse and unloads. Fixture preparation uses `prepare_engine.py` in the existing Gemma experiment.
+Only the tester owns the engine lifecycle. Connect borrows it through `ILlmSelfHost`.
 
 `Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment` is an isolated, non-packaged
 EmbeddingGemma 2 runtime probe. It references the native suppliers directly and runs outside
@@ -140,7 +159,7 @@ this development checkout uses the local-only GGUF fix described below. Both inc
 channels-last image group normalization. These fork packages retain the upstream
 assemblies and namespaces; consuming code remains first-class C# and does not load Python or PyTorch.
 
-Each capability assembly publishes its pack definition separately from installation. A desktop
+Each implementation library publishes its pack definition separately from installation. A desktop
 application composes the packs it supports into a `TensorModelCatalog`, constructs one
 `TensorModelPackManager` over its pack directory, and explicitly calls `InstallAsync` when
 the user chooses to download a model. Inference only acquires verified packs and never initiates a
@@ -290,7 +309,7 @@ by declared task. `TryGetProvider(id)` resolves the exact, case-sensitive implem
 returns false for an unregistered one. The registry holds no pack manager, store, credential or
 live instance.
 
-`services.AddTensorEngines()` registers the four shipped providers and the registry as singletons.
+`services.AddTensorEngines()` registers the six shipped providers and the registry as singletons.
 A repeated call adds nothing. A host that calls it receives an engine added in a later package
 release without its own engine list. A provider registered separately joins the same registry. A
 provider whose implementation ID or store key collides with another registration fails when the
@@ -453,7 +472,7 @@ Dispose a service provider that resolves these registrations asynchronously with
 `DisposeAsync`. Its factory-created GGML runtime owner has an asynchronous terminal lifetime.
 
 Qwen consumes the TensorSharp 2.8.6.9 managed loader APIs through ordinary PackageReferences.
-GGML is a direct Qwen and Tensor package dependency. Source restore and compilation do not substitute
+GGML is a direct Qwen and Ggml library dependency. Source restore and compilation do not substitute
 supplier project references. The actual private-generation test composes Qwen with the package's
 Chat/Models/GGML/Core/Runtime assemblies, checks an explicit empty plan, and retires owned metadata
 and zero-handle runtime state. It does not initialize a backend, resolve a catalog or load a model.
@@ -896,7 +915,7 @@ backend availability or successful model allocation.
 For the macOS ARM64 engine, explicitly reference
 `Darkspyre.TensorSharp.Backends.GGML.Native.osx-arm64` version **2.8.6.9** alongside Tensor.
 The native 2.8.6.8 package's catalog does not satisfy this managed wrapper's contract.
-The managed Tensor package does not select this native dependency. Local archives are not a claim
+The managed Tensor libraries do not select this native dependency. Local archives are not a claim
 of private-feed publication, native execution or full-model qualification.
 
 Use the root `NuGet.Config` and process-scoped private-feed credentials for normal restores when the

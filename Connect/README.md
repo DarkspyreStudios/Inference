@@ -757,7 +757,7 @@ change.
 
 ## Packages
 
-The coordinated release contains four NuGets. They always use the same version from the repository
+The coordinated release contains Common, Connect, independently consumable Tensor libraries and UI.Settings. They always use the same version from the repository
 `Directory.Build.props` and publish together. Version numbers use
 `<net>.<release>.<minor>`: .NET generation, breaking-contract release, and compatible tweak/fix.
 The direct Codex and host-owned managed-agent behavior from the former `Mathis.LlmConnect` 3.0.0 is

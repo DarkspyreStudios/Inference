@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
     <AssemblyName>Darkspyre.Inference.Tensor.Image.Supra</AssemblyName>
     <Description>Supra2-IMG in-process image generation through TensorSharp.</Description>
     <PackageTags>ai;inference;image;supra;dit;tensorsharp</PackageTags>
@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Darkspyre.Inference.Tensor.Image\Darkspyre.Inference.Tensor.Image.csproj" />
+    <ProjectReference Include="../../Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -23,5 +23,8 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 </Project>

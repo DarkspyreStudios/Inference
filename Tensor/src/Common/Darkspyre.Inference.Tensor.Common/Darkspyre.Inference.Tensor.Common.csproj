@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
     <AssemblyName>Darkspyre.Inference.Tensor.Common</AssemblyName>
     <Description>Shared model-pack, persistence, backend, and execution infrastructure for Darkspyre Tensor inference.</Description>
     <PackageTags>ai;inference;tensor;model-weights</PackageTags>
@@ -18,4 +18,7 @@
     <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.Common.Tests" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
 </Project>

@@ -3,11 +3,11 @@
        Published dependencies require -p:DarkspyreDependencyMode=Packages. -->
   <Import Project="$(TensorSharpSourceRoot)/eng/SourceReferences.targets" Condition="'$(TensorSharpSourceRoot)' != ''" />
   <!-- Source builds use project references; package consumers use the exact synchronized Common NuGet. -->
-  <Target Name="PinInferenceCommonPackageDependency" AfterTargets="_GetProjectReferenceVersions"
+  <Target Name="PinInferencePackageDependencies" AfterTargets="_GetProjectReferenceVersions"
           Condition="'$(IsPackable)' == 'true'">
     <ItemGroup>
       <_ProjectReferencesWithVersions Update="@(_ProjectReferencesWithVersions)"
-                                      Condition="'%(_ProjectReferencesWithVersions.Filename)' == 'Darkspyre.Inference.Common'">
+                                      Condition="$([System.String]::Copy('%(_ProjectReferencesWithVersions.Filename)').StartsWith('Darkspyre.Inference.'))">
         <ProjectVersion>[$(Version)]</ProjectVersion>
       </_ProjectReferencesWithVersions>
     </ItemGroup>
@@ -21,5 +21,12 @@
            Text="DarkspyreDependencyMode must be Source (workspace development) or Packages (release publishing/deployment)." />
     <Error Condition="'$(DarkspyreDependencyMode)' == 'Packages' and '$(TensorSharpSourceRoot)' != ''"
            Text="Package mode cannot use source-root overrides. Remove source-root properties from the release command." />
+  </Target>
+  <!-- Whisper's imported targets mark native output files Pack=true. They belong to its public
+       runtime NuGet, not this product archive. Preserve build output copying and the dependency. -->
+  <Target Name="DoNotRepackWhisperRuntime" BeforeTargets="_GetPackageFiles">
+    <ItemGroup>
+      <None Update="@(None)" Condition="'%(None.DefiningProjectName)' == 'Whisper.net.Runtime' Or '%(None.DefiningProjectName)' == 'Whisper.net.Runtime.Metal'" Pack="false" />
+    </ItemGroup>
   </Target>
 </Project>

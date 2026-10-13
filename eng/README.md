@@ -16,7 +16,7 @@ requiring credentials, changing files, compiling, committing or publishing. `--h
 
 - A clean `master` checkout (including no untracked files), with all intended implementation work
   already committed. The scripts never stage application changes or stash them.
-- `origin` must be `DarkspyreStudios/Inference`; the repository and four existing packages must be
+- `origin` must be `DarkspyreStudios/Inference`; the repository and library packages must be
   private. Local master must contain the fetched remote master. Existing target tags/versions abort.
 - Bash, Git, GitHub CLI, jq, the pinned .NET SDK, and standard shell utilities must be installed.
 - The selected GitHub identity needs private dependency access, package publication permission,
@@ -37,23 +37,23 @@ an explicit `-p:VerifyGgmlNativeVersion=<supplier-version>` during restore and b
 `Darkspyre.TensorSharp.Backends.GGML.Native.osx-arm64` package. The third argument `cpu`, `metal`, or
 `auto` then verifies its catalog/file identity, actual Qwen backend initialization and terminal shutdown.
 Each mode runs in a separate process. These checks load no model weights and do not qualify inference.
-The default two-argument consumer still restores exactly the four Inference package references without
+The default two-argument consumer still restores the declared Inference library references without
 a GGML native package. A native check uses the supplier version required by the selected Tensor package.
 
 ## Release sequence
 
-1. Check tooling, checkout, credentials, remote and all four target package versions.
+1. Check tooling, checkout, credentials, remote and all target library package versions.
 2. Update the shared `Directory.Build.props` version and matching references in the five product/root
    README files. Commit only those files. Historical design/release versions remain unchanged.
 3. Restore all three solutions; build and test Debug and Release; verify formatting and explicitly
    reject vulnerability findings from the transitive JSON audits.
-4. Pack exactly Common, Connect, Tensor and UI.Settings. `eng/VerifyPackages` checks owned assembly
-   boundaries, exact Common dependencies and release-source identity.
+4. Pack Common, Connect, every Tensor library and UI.Settings. `eng/VerifyPackages` checks owned assembly
+   boundaries, exact family dependencies and release-source identity.
 5. Restore/run `eng/VerifyConsumer` against the local archives. Its build rejects distinct package
    assets targeting the same copy-output path. Reject concurrent source changes.
-6. Push all four packages without overwrite/skip-duplicate switches.
+6. Push all library packages without overwrite/skip-duplicate switches.
 7. Use a new empty package cache and no HTTP cache to restore/run the consumer from normal feeds.
-   Compare all four downloaded archives byte-for-byte and check feed versions/private visibility.
+   Compare all downloaded library archives byte-for-byte and check feed versions/private visibility.
 8. Tag the release-source commit and push master plus that one release tag to origin. The annotated
    `v<version>` tag is the publication record. No other tag or branch is pushed.
 
@@ -64,23 +64,21 @@ system temporary directory and its exact path is printed on success.
 ## Package contents
 
 Every package includes a readable package README and the repository license. Pack verification
-confirms that the Common assembly appears only in the Common package, that Connect, Tensor and
-UI.Settings declare an exact synchronized dependency on Common, and that each product package
-contains every owned assembly plus its XML documentation. UI.Settings also includes its static web
+confirms that the Common assembly appears only in the Common package, that internal library dependencies use the exact synchronized version, and that each Tensor library
+contains only its own assembly plus XML documentation. Connect keeps its capability assemblies together. UI.Settings also includes its static web
 assets and `THIRD-PARTY-NOTICES.md` for its owned numeric control's Lumeo-derived
 layout/accessibility. Lumeo is an unmodified package dependency, not a fork.
 
-Source builds use project references. `Directory.Build.targets` pins the package dependency on
-Common to `[$(Version)]` when generating each consumer product's NuGet manifest. `eng/VerifyPackages`
+Source builds use project references. `Directory.Build.targets` pins internal library dependencies to `[$(Version)]` when generating each library's NuGet manifest. `eng/VerifyPackages`
 rejects foreign DLLs, native binaries and shader sources, local-only dependencies, missing owned
 assemblies or documentation, and mismatched Common versions.
 
 Whisper runtime build assets flow through its public NuGet dependency (`PrivateAssets="none"`).
-Tensor marks assets imported from both `Whisper.net.Runtime` and `Whisper.net.Runtime.Metal`
-non-packable without disabling consumer output copying. `ggml-metal.metal` must come only from the
+The shared build target marks assets imported from both `Whisper.net.Runtime` and `Whisper.net.Runtime.Metal`
+non-packable for Whisper and its consumers without disabling consumer output copying. `ggml-metal.metal` must come only from the
 public runtime dependency, never from Tensor's `content` or `contentFiles`.
 
-`eng/VerifyConsumer` is a non-packable release smoke test with four PackageReferences and no source
+`eng/VerifyConsumer` is a non-packable release smoke test with explicit library PackageReferences and no source
 project references. It checks loaded assembly source identities, the Settings contracts and Whisper's
 public native runtime. Before publication it restores against `eng/VerifyConsumer/NuGet.Preflight.Config`
 (local Inference archives plus normal dependency feeds). After publication it restores against the
@@ -92,7 +90,7 @@ creating archives.
 
 The first failing step stops deployment. Version commits, generated archives, and any successfully
 published packages remain in place; the script never resets source or deletes remote packages.
-Publication across four NuGets is not atomic. If a push, readback or Git push fails, inspect the
+Publication across the library NuGets is not atomic. If a push, readback or Git push fails, inspect the
 reported stage and complete that same release manually using its existing archives/source commit.
 **Do not blindly rerun a bump script:** another invocation chooses the next version. Do not overwrite
 an existing package. A failed preflight leaves version files unchanged; a later failure can leave a
@@ -143,7 +141,7 @@ presence for `osx-arm64`, `linux-x64`, `linux-arm64`, `win-x64` and `win-arm64`.
 
 ```bash
 dotnet run --project eng/VerifyRuntimeInventory -- \
-  Tensor/src/Darkspyre.Inference.Tensor/obj/project.assets.json \
+  eng/VerifyConsumer/obj/project.assets.json \
   tmp/tensor-runtime-inventory.json "$(git rev-parse HEAD)"
 ```
 

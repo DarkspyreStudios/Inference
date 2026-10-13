@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
     <AssemblyName>Darkspyre.Inference.Tensor.Embedding</AssemblyName>
     <Description>In-process text embeddings through TensorSharp GGUF sentence encoders.</Description>
     <PackageTags>ai;inference;embedding;tensorsharp</PackageTags>
@@ -11,5 +11,8 @@
     <ProjectReference Include="..\..\..\..\Common\src\Darkspyre.Inference.Common\Darkspyre.Inference.Common.csproj" />
     <ProjectReference Include="..\..\Ggml\Darkspyre.Inference.Tensor.Ggml\Darkspyre.Inference.Tensor.Ggml.csproj" />
     <PackageReference Include="Darkspyre.TensorSharp.Models" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 </Project>

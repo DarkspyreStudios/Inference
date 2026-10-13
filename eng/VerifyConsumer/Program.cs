@@ -31,7 +31,7 @@ if (typeof(InferenceSettings).GetProperty(nameof(InferenceSettings.HasUnsavedCha
 { throw new InvalidOperationException("Settings correction contracts are missing."); }
 if (TensorSpeechModels.Whisper.Count != 12) { throw new InvalidOperationException("Whisper variants missing."); }
 await using ServiceProvider services = new ServiceCollection().AddTensorEngines().BuildServiceProvider();
-if (services.GetRequiredService<TensorEngineRegistry>().Definitions.Count != 4) { throw new InvalidOperationException("Tensor engine registrations missing."); }
-Console.WriteLine("Four-package consumer loaded the release contracts, four Tensor engines and twelve Whisper variants.");
+if (services.GetRequiredService<TensorEngineRegistry>().Definitions.Count != 6) { throw new InvalidOperationException("Tensor engine registrations missing."); }
+Console.WriteLine("Library consumer loaded the release contracts, six Tensor engines and twelve Whisper variants.");
 Console.WriteLine("Whisper native runtime: " + Whisper.net.WhisperFactory.GetRuntimeInfo());
 if (args.Length == 3) { await GgmlRuntimeVerification.RunAsync(args[2]); }

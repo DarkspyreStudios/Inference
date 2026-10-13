@@ -2,7 +2,7 @@
 
 The GPU arbiter shares one Windows x64 NVIDIA GPU between llama.cpp and a user-launched
 ComfyUI instance. The app targets .NET 10. Its solution, version and dependencies live in
-`App/`. The four Inference NuGet packages have a separate release.
+`App/`. The Inference library packages have a separate release.
 
 The app listens on HTTP port 8080 for OpenAI-compatible inference and port 8189 for the
 ComfyUI proxy. The supervised llama.cpp router listens on loopback port 8081. ComfyUI

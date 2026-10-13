@@ -13,7 +13,7 @@ internal sealed class DependencyPolicy
     internal static readonly string[] TensorDependencies =
     [
         "Darkspyre.ML.Tokenizers", "Darkspyre.TensorSharp.Backends.Cuda", Ggml, "Darkspyre.TensorSharp.Chat",
-        "Darkspyre.TensorSharp.Models", "Darkspyre.TensorSharp.Runtime", "Microsoft.ML.OnnxRuntime",
+        "Darkspyre.TensorSharp.Models", "Darkspyre.TensorSharp.Runtime", "Microsoft.ML.OnnxRuntime", "Microsoft.ML.OnnxRuntime.EP.WebGpu",
         "Whisper.net", "Whisper.net.Runtime", "NAudio.Core"
     ];
     private readonly Dictionary<string, NuGetVersion> _versions;
@@ -63,9 +63,9 @@ internal sealed class DependencyPolicy
 
     private static bool IsTensorSharp(string id) => id.StartsWith("Darkspyre.TensorSharp.", StringComparison.OrdinalIgnoreCase);
 
-    internal void ValidateDeclarations(IReadOnlyDictionary<string, XElement> dependencies)
+    internal void ValidateDeclarations(IReadOnlyDictionary<string, XElement> dependencies, bool completeTensor = true)
     {
-        foreach (string id in TensorDependencies)
+        foreach (string id in completeTensor ? TensorDependencies : [])
             PackageVerification.Require(dependencies.ContainsKey(id), $"Tensor: missing declared dependency {id}.");
         foreach ((string id, XElement dependency) in dependencies)
         {
@@ -108,13 +108,15 @@ internal static class PackageVerification
             "Darkspyre.Inference.Connect.LLM",
             "Darkspyre.Inference.Connect.Image", "Darkspyre.Inference.Connect.TTS", "Darkspyre.Inference.Connect.Audio"
         ],
-        ["Darkspyre.Inference.Tensor"] =
-        [
-            "Darkspyre.Inference.Tensor.Common", "Darkspyre.Inference.Tensor.LLM", "Darkspyre.Inference.Tensor.LLM.Qwen",
-            "Darkspyre.Inference.Tensor.Image", "Darkspyre.Inference.Tensor.Image.Supra",
-            "Darkspyre.Inference.Tensor.Decision", "Darkspyre.Inference.Tensor.Decision.Laya",
-            "Darkspyre.Inference.Tensor.STT", "Darkspyre.Inference.Tensor.STT.Whisper", "Darkspyre.Inference.Tensor.Registry"
-        ],
+        ["Darkspyre.Inference.Tensor.Common"] = ["Darkspyre.Inference.Tensor.Common"],
+        ["Darkspyre.Inference.Tensor.Decision.Laya"] = ["Darkspyre.Inference.Tensor.Decision.Laya"],
+        ["Darkspyre.Inference.Tensor.Embedding"] = ["Darkspyre.Inference.Tensor.Embedding"],
+        ["Darkspyre.Inference.Tensor.Embedding.Gemma"] = ["Darkspyre.Inference.Tensor.Embedding.Gemma"],
+        ["Darkspyre.Inference.Tensor.Ggml"] = ["Darkspyre.Inference.Tensor.Ggml"],
+        ["Darkspyre.Inference.Tensor.Image.Supra"] = ["Darkspyre.Inference.Tensor.Image.Supra"],
+        ["Darkspyre.Inference.Tensor.LLM.Qwen"] = ["Darkspyre.Inference.Tensor.LLM.Qwen"],
+        ["Darkspyre.Inference.Tensor.Registry"] = ["Darkspyre.Inference.Tensor.Registry"],
+        ["Darkspyre.Inference.Tensor.STT.Whisper"] = ["Darkspyre.Inference.Tensor.STT.Whisper"],
         ["Darkspyre.Inference.UI.Settings"] = ["Darkspyre.Inference.UI.Settings"]
     };
 
@@ -149,9 +151,10 @@ internal static class PackageVerification
             Require((string?)metadata.Element(ns + "repository")?.Attribute("commit") == sourceCommit, $"{id}: source commit differs from release source");
         XElement[] declarations = metadata.Descendants(ns + "dependency").ToArray();
         XElement[] family = declarations.Where(dependency => ((string?)dependency.Attribute("id"))?.StartsWith("Darkspyre.Inference.", StringComparison.OrdinalIgnoreCase) == true).ToArray();
-        Require(id == Common ? family.Length == 0 : family.Length == 1
-            && (string?)family[0].Attribute("id") == Common
-            && (string?)family[0].Attribute("version") == $"[{version}]", $"{id}: expected only the exact synchronized Common NuGet dependency");
+        Require(id == Common ? family.Length == 0 : family.Length > 0
+            && family.All(dependency => Owned.ContainsKey((string)dependency.Attribute("id")!)
+                && (string?)dependency.Attribute("version") == $"[{version}]"),
+            $"{id}: expected exact synchronized library dependencies");
         var dependencies = new Dictionary<string, XElement>(StringComparer.OrdinalIgnoreCase);
         foreach (XElement dependency in declarations)
         {
@@ -173,10 +176,10 @@ internal static class PackageVerification
             Require(entries.Any(path => path.StartsWith("staticwebassets/", StringComparison.Ordinal) && path.EndsWith(".css", StringComparison.Ordinal)), $"{id}: missing scoped CSS");
             Require(entries.Contains("buildTransitive/" + id + ".targets", StringComparer.Ordinal), $"{id}: missing static asset import");
         }
-        if (id == "Darkspyre.Inference.Tensor")
+        if (id.StartsWith("Darkspyre.Inference.Tensor.", StringComparison.Ordinal))
         {
-            policy.ValidateDeclarations(dependencies);
-            Require((string?)dependencies["Whisper.net.Runtime"].Attribute("include") == "All", $"{id}: Whisper native build assets must reach the consuming application through NuGet");
+            policy.ValidateDeclarations(dependencies, completeTensor: false);
+            if (id == "Darkspyre.Inference.Tensor.STT.Whisper") Require((string?)dependencies["Whisper.net.Runtime"].Attribute("include") == "All", $"{id}: Whisper native build assets must reach the consuming application through NuGet");
         }
     }
 

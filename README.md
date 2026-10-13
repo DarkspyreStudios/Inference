@@ -14,13 +14,13 @@ Typed .NET inference libraries for applications that need external AI providers,
 models, or both. Darkspyre Inference separates **what an application asks a model to do** from
 **how a particular provider or engine performs it**.
 
-The four NuGet packages supply inference libraries. A Desktop application can call Tensor
+The NuGet libraries supply inference libraries. A Desktop application can call Tensor
 directly without an HTTP bridge. A web service can host the same libraries and translate its API
 into their typed contracts. In either case, the application owns startup, configuration, credentials,
 persistence, user consent, and shutdown.
 
 Current source and published package version: **11.15.1-rc.1**, targeting **.NET 11**.
-The four-package family is distributed through the private
+The library family is distributed through the private
 [DarkspyreStudios GitHub Packages feed](https://github.com/orgs/DarkspyreStudios/packages).
 The restore source is `https://nuget.pkg.github.com/DarkspyreStudios/index.json`.
 Unimplemented provider capabilities remain unavailable; publishing their contracts does not enable them.
@@ -34,7 +34,7 @@ a native driver and does not select the native package automatically.
 
 The repository also hosts the [GPU arbiter](App/README.md), an independent .NET 10 Windows
 x64 application under `App/` that shares a GPU between llama.cpp and ComfyUI. It owns its
-solution, version and deployment outside the four-package release.
+solution, version and deployment outside the coordinated library release.
 
 ## Goals
 
@@ -58,7 +58,8 @@ solution, version and deployment outside the four-package release.
 |---|---|
 | `Darkspyre.Inference.Common` | Genuinely shared typed inference and setup contracts, including LLM, image, and decision models |
 | `Darkspyre.Inference.Connect` | Connections to external inference providers, HTTP services, and supported official CLIs |
-| `Darkspyre.Inference.Tensor` | In-process engines, explicit model lifecycle, compatible model-pack discovery, installation, and import |
+| `Darkspyre.Inference.Tensor.Common` | Tensor capability contracts, model lifecycle and verified model packs |
+| `Darkspyre.Inference.Tensor.*` model libraries | Independently consumed in-process loaders and their runtime dependencies |
 | `Darkspyre.Inference.UI.Settings` | Optional host-placed Blazor/Lumeo editor for the shared setup contracts |
 
 Connect, Tensor, and UI.Settings reference the **exact same-version Common NuGet**; they do not
@@ -142,7 +143,7 @@ The commands below select the verified private-feed release.
 
 ```bash
 dotnet add package Darkspyre.Inference.Connect --version 11.15.1-rc.1
-dotnet add package Darkspyre.Inference.Tensor --version 11.15.1-rc.1
+dotnet add package Darkspyre.Inference.Tensor.Image.Supra --version 11.15.1-rc.1
 # Optional, for a Blazor host:
 dotnet add package Darkspyre.Inference.UI.Settings --version 11.15.1-rc.1
 ```
@@ -360,7 +361,7 @@ use controlled fixtures and doubles; paid provider calls and full model download
 Release checks also cover Debug/Release builds, vulnerability audits, package contents, synchronized
 dependencies, and a fresh package-only consumer.
 
-All four versions come from [Directory.Build.props](Directory.Build.props):
+All library versions come from [Directory.Build.props](Directory.Build.props):
 `<net>.<release>.<minor>` means .NET generation, breaking-contract release, and compatible tweak/fix.
 The current `-rc.1` suffix reflects .NET 11 RC dependencies. Releases are coordinated and immutable.
 
@@ -377,7 +378,7 @@ to the checkout.
 Consumers of these packages use [eng/SourceReferences.targets](eng/SourceReferences.targets) the same way. A consumer
 that sets `InferenceSourceRoot` imports it, and each `Darkspyre.Inference.*` PackageReference becomes ProjectReferences
 to the projects that package carries: Common and UI.Settings map to their one project, and Connect and Tensor to every
-project under `Connect/src` or `Tensor/src` except the packaging project, whose references hide the bundled projects.
+Connect library project except its packaging project. A Tensor reference selects its named library project.
 ExcludeAssets and PrivateAssets carry over. Connect.LLM references `Microsoft.Bcl.Memory` directly, because the central
 transitive pin that patches it does not reach a project-reference consumer.
 
@@ -390,7 +391,7 @@ To deploy from a clean `master` checkout:
 ./deploy-minor.sh           # 11.5.1 -> 11.5.2; retain the prerelease suffix.
 ```
 
-Each deployment commits the version change, runs the release checks, publishes all four packages
+Each deployment commits the version change, runs the release checks, publishes all library packages
 to the private feed, verifies fresh downloads, and pushes the release source and tag. See
 [deployment prerequisites and failure handling](eng/README.md) before running either command.
 

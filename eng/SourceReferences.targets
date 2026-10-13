@@ -6,7 +6,7 @@
 
       Darkspyre.Inference.Common       Common/src/Darkspyre.Inference.Common
       Darkspyre.Inference.Connect      every project under Connect/src except the packaging project
-      Darkspyre.Inference.Tensor       every project under Tensor/src except the packaging project
+      Darkspyre.Inference.Tensor.*     the named Tensor library project
       Darkspyre.Inference.UI.Settings  UI/src/Settings/Darkspyre.Inference.UI.Settings
 
     The packaging projects reference their bundled projects with PrivateAssets="all", so a reference to a packaging
@@ -31,12 +31,59 @@
         PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect')->'%(PrivateAssets)')" />
     <PackageReference Remove="Darkspyre.Inference.Connect" />
   </ItemGroup>
-  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor'))' != ''">
-    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Tensor/src/**/*.csproj"
-        Exclude="$(_InferenceSourceRoot)Tensor/src/Darkspyre.Inference.Tensor/**"
-        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor')->'%(ExcludeAssets)')"
-        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor')->'%(PrivateAssets)')" />
-    <PackageReference Remove="Darkspyre.Inference.Tensor" />
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Common'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Tensor/src/Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Common')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Common')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Tensor.Common" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Decision.Laya'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Tensor/src/Decision/Darkspyre.Inference.Tensor.Decision.Laya/Darkspyre.Inference.Tensor.Decision.Laya.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Decision.Laya')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Decision.Laya')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Tensor.Decision.Laya" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Embedding'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Tensor/src/Embedding/Darkspyre.Inference.Tensor.Embedding/Darkspyre.Inference.Tensor.Embedding.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Embedding')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Embedding')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Tensor.Embedding" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Embedding.Gemma'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Tensor/src/Embedding/Darkspyre.Inference.Tensor.Embedding.Gemma/Darkspyre.Inference.Tensor.Embedding.Gemma.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Embedding.Gemma')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Embedding.Gemma')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Tensor.Embedding.Gemma" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Ggml'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Tensor/src/Ggml/Darkspyre.Inference.Tensor.Ggml/Darkspyre.Inference.Tensor.Ggml.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Ggml')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Ggml')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Tensor.Ggml" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Image.Supra'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Tensor/src/Image/Darkspyre.Inference.Tensor.Image.Supra/Darkspyre.Inference.Tensor.Image.Supra.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Image.Supra')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Image.Supra')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Tensor.Image.Supra" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.LLM.Qwen'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Tensor/src/LLM/Darkspyre.Inference.Tensor.LLM.Qwen/Darkspyre.Inference.Tensor.LLM.Qwen.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.LLM.Qwen')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.LLM.Qwen')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Tensor.LLM.Qwen" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Registry'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Tensor/src/Registry/Darkspyre.Inference.Tensor.Registry/Darkspyre.Inference.Tensor.Registry.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Registry')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.Registry')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Tensor.Registry" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.STT.Whisper'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Tensor/src/STT/Darkspyre.Inference.Tensor.STT.Whisper/Darkspyre.Inference.Tensor.STT.Whisper.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.STT.Whisper')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.STT.Whisper')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Tensor.STT.Whisper" />
   </ItemGroup>
   <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings'))' != ''">
     <_InferenceSourceProject Include="$(_InferenceSourceRoot)UI/src/Settings/Darkspyre.Inference.UI.Settings/Darkspyre.Inference.UI.Settings.csproj"

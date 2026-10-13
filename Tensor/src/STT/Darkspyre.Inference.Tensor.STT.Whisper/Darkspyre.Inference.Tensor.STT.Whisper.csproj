@@ -1,12 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
     <Description>Resident CPU Whisper speech transcription with host-owned model storage and lifetime.</Description>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="../Darkspyre.Inference.Tensor.STT/Darkspyre.Inference.Tensor.STT.csproj" />
+    <ProjectReference Include="../../Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj" />
     <PackageReference Include="Whisper.net" />
-    <PackageReference Include="Whisper.net.Runtime" />
+    <PackageReference Include="Whisper.net.Runtime" PrivateAssets="none" />
     <PackageReference Include="NAudio.Core" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 </Project>

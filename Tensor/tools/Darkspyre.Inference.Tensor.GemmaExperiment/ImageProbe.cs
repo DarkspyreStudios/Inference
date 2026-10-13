@@ -4,7 +4,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
-using TensorSharp.Models;
+using Darkspyre.Inference.Tensor.Embedding.Gemma;
 
 namespace Darkspyre.Inference.Tensor.GemmaExperiment;
 
@@ -156,24 +156,8 @@ internal static class ImageProbe
 
     private static (float[] Patches, long[] Positions, int Width, int Height) PrepareShared(string fixtures, string name, JsonElement item)
     {
-        _ = Read<byte>(fixtures, name, "png", item);
-        var processor = new Gemma4ImageProcessor(imageMean: [0, 0, 0], imageStd: [1, 1, 1], referenceSizing: true);
-        var (pixels, width, height) = processor.ProcessImage(Path.Combine(fixtures, name + ".png"));
-        int ph = height / 16, pw = width / 16, plane = width * height;
-        float[] patches = new float[MaxPatches * PatchPixels];
-        long[] positions = Enumerable.Repeat(-1L, MaxPatches * 2).ToArray();
-        int index = 0;
-        for (int row = 0; row < ph; row++)
-            for (int col = 0; col < pw; col++)
-            {
-                positions[(row * pw + col) * 2] = col;
-                positions[(row * pw + col) * 2 + 1] = row;
-                for (int dy = 0; dy < 16; dy++)
-                    for (int dx = 0; dx < 16; dx++)
-                        for (int c = 0; c < 3; c++)
-                            patches[index++] = pixels[c * plane + (row * 16 + dy) * width + col * 16 + dx];
-            }
-        return (patches, positions, width, height);
+        GemmaImageInput image = GemmaImageInput.Prepare(Read<byte>(fixtures, name, "png", item));
+        return (image.Patches, image.Positions, image.Width, image.Height);
     }
 
     private static T[] Read<T>(string root, string name, string extension, JsonElement item) where T : unmanaged

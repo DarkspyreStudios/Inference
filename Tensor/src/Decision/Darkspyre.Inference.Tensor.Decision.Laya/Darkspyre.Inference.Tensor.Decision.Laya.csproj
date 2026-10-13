@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
+    <IsPackable>true</IsPackable>
     <AssemblyName>Darkspyre.Inference.Tensor.Decision.Laya</AssemblyName>
     <Description>Laya in-process typed-decision inference through ONNX Runtime.</Description>
     <PackageTags>ai;inference;decision;laya;modernbert;onnxruntime</PackageTags>
@@ -12,10 +12,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\Darkspyre.Inference.Tensor.Decision\Darkspyre.Inference.Tensor.Decision.csproj" />
+    <ProjectReference Include="../../Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.Decision.Laya.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <Description>Resident EmbeddingGemma text and image inference through ONNX Runtime CPU and WebGPU.</Description>
+    <PackageTags>ai;inference;embedding;gemma;onnx;webgpu</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.EP.WebGpu" />
+    <PackageReference Include="Darkspyre.TensorSharp.Models" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.Embedding.Tests" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.GemmaExperiment" />
+    <InternalsVisibleTo Include="tensor" />
+    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+</Project>

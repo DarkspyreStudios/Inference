@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Tensor.Embedding.Gemma;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Decision.Laya;
 using Darkspyre.Inference.Tensor.Embedding;
@@ -42,6 +43,7 @@ public static class ServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, WhisperEngineProvider>());
         services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, EmbeddingEngineProvider>(
             provider => new(provider.GetRequiredService<GgmlRuntimeOwner>())));
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ITensorEngineProvider, GemmaEmbeddingEngineProvider>());
         services.TryAddSingleton<TensorEngineRegistry>();
         return services;
     }
