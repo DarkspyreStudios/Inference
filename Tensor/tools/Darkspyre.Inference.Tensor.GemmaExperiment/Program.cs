@@ -119,9 +119,18 @@ internal static class Program
         environment.RegisterExecutionProviderLibrary("gemma_webgpu", WebGpuEp.GetLibraryPath());
         var device = environment.GetEpDevices().FirstOrDefault(d => d.EpName == WebGpuEp.GetEpName())
             ?? throw new InvalidOperationException("The WebGPU plugin found no compatible device.");
-        Console.WriteLine(JsonSerializer.Serialize(new { device.EpName, device.EpVendor, device.EpMetadata,
-            device.EpOptions, type = device.HardwareDevice.Type.ToString(), device.HardwareDevice.Vendor,
-            device.HardwareDevice.VendorId, device.HardwareDevice.DeviceId, device.HardwareDevice.Metadata }));
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            device.EpName,
+            device.EpVendor,
+            device.EpMetadata,
+            device.EpOptions,
+            type = device.HardwareDevice.Type.ToString(),
+            device.HardwareDevice.Vendor,
+            device.HardwareDevice.VendorId,
+            device.HardwareDevice.DeviceId,
+            device.HardwareDevice.Metadata
+        }));
         options.AppendExecutionProvider(environment, [device], new Dictionary<string, string>());
     }
 
