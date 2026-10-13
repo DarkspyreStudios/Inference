@@ -13,7 +13,7 @@ internal static class ImageProbe
     private const int MaxPatches = 2520;
     private const int PatchPixels = 768;
 
-    internal static int Run(string provider, string model, string fixtures, string output)
+    internal static int Run(string provider, string model, string fixtures, string output, bool sharedPreprocessing)
     {
         if (provider is not ("cpu" or "webgpu" or "webgpu-plugin"))
             throw new ArgumentException("Image provider must be cpu, webgpu or webgpu-plugin.");
@@ -49,6 +49,12 @@ internal static class ImageProbe
             Directory.CreateDirectory(caseOutput);
             float[] patches = Read<float>(fixtures, name, "f32", item);
             long[] positions = Read<long>(fixtures, name, "i64", item);
+            if (sharedPreprocessing)
+            {
+                var prepared = PrepareShared(fixtures, name, item);
+                patches = prepared.Patches;
+                positions = prepared.Positions;
+            }
             var inputs = new[]
             {
                 NamedOnnxValue.CreateFromTensor("pixel_values", new DenseTensor<float>(patches, [1, MaxPatches, PatchPixels])),
@@ -89,6 +95,7 @@ internal static class ImageProbe
                 provider,
                 separateContexts = separate,
                 defaultHostMemory = Environment.GetEnvironmentVariable("GEMMA_DEFAULT_HOST_MEMORY") == "1",
+                sharedPreprocessing,
                 name,
                 tokens,
                 inputIds = ids,
@@ -99,7 +106,9 @@ internal static class ImageProbe
                 vectors,
                 vector = vectors[^1],
                 peakWorkingSetBytes = Program.PeakWorkingSet(),
-                note = "Reference PIL patches isolate encoder execution; tokenizer and retrieval quality remain unqualified."
+                note = sharedPreprocessing
+                    ? "Shared Gemma4 preprocessing feeds both graphs; tokenizer and retrieval quality remain unqualified."
+                    : "Reference PIL patches isolate encoder execution; tokenizer and retrieval quality remain unqualified."
             }));
         }
         Console.WriteLine(vision.EndProfiling());
@@ -111,27 +120,12 @@ internal static class ImageProbe
     {
         Directory.CreateDirectory(output);
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(fixtures, "images.json")));
-        var processor = new Gemma4ImageProcessor(imageMean: [0, 0, 0], imageStd: [1, 1, 1], referenceSizing: true);
         var reports = new List<object>();
         bool passed = true;
         foreach (var item in manifest.RootElement.GetProperty("cases").EnumerateArray())
         {
             string name = item.GetProperty("name").GetString()!;
-            var (pixels, width, height) = processor.ProcessImage(Path.Combine(fixtures, name + ".png"));
-            int ph = height / 16, pw = width / 16, plane = width * height;
-            float[] patches = new float[MaxPatches * PatchPixels];
-            long[] positions = Enumerable.Repeat(-1L, MaxPatches * 2).ToArray();
-            int index = 0;
-            for (int row = 0; row < ph; row++)
-                for (int col = 0; col < pw; col++)
-                {
-                    positions[(row * pw + col) * 2] = col;
-                    positions[(row * pw + col) * 2 + 1] = row;
-                    for (int dy = 0; dy < 16; dy++)
-                        for (int dx = 0; dx < 16; dx++)
-                            for (int c = 0; c < 3; c++)
-                                patches[index++] = pixels[c * plane + (row * 16 + dy) * width + col * 16 + dx];
-                }
+            var (patches, positions, width, height) = PrepareShared(fixtures, name, item);
             float[] reference = Read<float>(fixtures, name, "f32", item);
             long[] referencePositions = Read<long>(fixtures, name, "i64", item);
             double maxAbs = patches.Zip(reference, (a, b) => Math.Abs((double)a - b)).Max();
@@ -158,6 +152,28 @@ internal static class ImageProbe
         File.WriteAllText(Path.Combine(output, "preprocessing.json"), report);
         Console.WriteLine(report);
         return passed ? 0 : 1;
+    }
+
+    private static (float[] Patches, long[] Positions, int Width, int Height) PrepareShared(string fixtures, string name, JsonElement item)
+    {
+        _ = Read<byte>(fixtures, name, "png", item);
+        var processor = new Gemma4ImageProcessor(imageMean: [0, 0, 0], imageStd: [1, 1, 1], referenceSizing: true);
+        var (pixels, width, height) = processor.ProcessImage(Path.Combine(fixtures, name + ".png"));
+        int ph = height / 16, pw = width / 16, plane = width * height;
+        float[] patches = new float[MaxPatches * PatchPixels];
+        long[] positions = Enumerable.Repeat(-1L, MaxPatches * 2).ToArray();
+        int index = 0;
+        for (int row = 0; row < ph; row++)
+            for (int col = 0; col < pw; col++)
+            {
+                positions[(row * pw + col) * 2] = col;
+                positions[(row * pw + col) * 2 + 1] = row;
+                for (int dy = 0; dy < 16; dy++)
+                    for (int dx = 0; dx < 16; dx++)
+                        for (int c = 0; c < 3; c++)
+                            patches[index++] = pixels[c * plane + (row * 16 + dy) * width + col * 16 + dx];
+            }
+        return (patches, positions, width, height);
     }
 
     private static T[] Read<T>(string root, string name, string extension, JsonElement item) where T : unmanaged

@@ -100,8 +100,8 @@ specialization helps the same graph; it does not export another model.
 This is a loading and numerical feasibility experiment. TensorSharp's baseline uses
 individual tensor operations; the cumulative variants measure existing native fusions.
 Its timings do not measure a finished Gemma engine. The FP32 ONNX text and reference-prepared
-image runs pass on Mac arm64, Linux x64 and Windows x64. Shared image resizing fails
-preprocessing parity. Video decoding, tokenizer parity, realistic retrieval, quantization,
+image runs pass on Mac arm64, Linux x64 and Windows x64. Shared image resizing uses
+Pillow RGB rounding and clipping in both passes. Video decoding, tokenizer parity, realistic retrieval, quantization,
 long contexts and cancellation remain unqualified. Google warns against FP16
 activations for this model; all probe activations and weights use FP32.
 
@@ -155,6 +155,11 @@ embedding, separate inference timings and both provider profiles. Inputs are the
 reference patches, independent of the preprocessing candidate. Image placeholders
 use the pinned model's BOS/BOI/image/EOI/EOS IDs. General tokenizer and retrieval
 quality are outside this execution check.
+
+`images-shared` accepts the same arguments as `images` and feeds the existing Gemma4
+processor's pixels into both graphs. The preprocessing check and this mode share patch
+packing. Each result identifies its preprocessing path, so a frozen-input control cannot
+stand in for the shared path's end-to-end check.
 
 The plugin mode selects only devices from the external provider library, excluding
 a built-in WebGPU provider with the same name. `GEMMA_GPU_VENDOR` optionally selects

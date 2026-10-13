@@ -51,8 +51,10 @@ def profile_counts(path):
 
 def main():
     """Summarize measured outputs without treating missing or crashed runs as passes."""
-    root = Path(sys.argv[1])
-    text_reference = Path(sys.argv[2])
+    images_only = sys.argv[1] == "images"
+    root = Path(sys.argv[2] if images_only else sys.argv[1])
+    text_reference = None if images_only else Path(sys.argv[2])
+    image_reference = (Path(sys.argv[3]) if images_only else root) / "mac/images/cpu"
     results = []
     for platform in ("mac", "linux", "windows"):
         for path in sorted((root / platform).rglob("result.json")):
@@ -60,8 +62,11 @@ def main():
             case = path.parent
             area = case.relative_to(root / platform).parts[0]
             if area == "images":
-                reference_case = root / "mac/images/cpu" / run["name"]
-                reference = json.loads((reference_case / "result.json").read_text())["vectors"][0]
+                reference_case = image_reference / run["name"]
+                baseline = json.loads((reference_case / "result.json").read_text())
+                if baseline["inputIds"] != run["inputIds"]:
+                    raise ValueError("Image token inputs do not match")
+                reference = baseline["vectors"][0]
             else:
                 length = len(run["inputIds"])
                 baseline = json.loads((text_reference / f"cpu-{length}/result.json").read_text())
@@ -72,6 +77,7 @@ def main():
                       **vector_summary(run["vectors"], reference),
                       "firstMs": run["timesMs"][0], "warmMedianMs": statistics.median(run["timesMs"][1:])}
             if area == "images":
+                result["sharedPreprocessing"] = run.get("sharedPreprocessing", False)
                 result["vision"] = feature_summary(case, reference_case)
                 result["visionWarmMedianMs"] = statistics.median(run["visionTimesMs"][1:])
             execution_path = (case.parent if area == "images" else case) / "execution.json"
@@ -81,30 +87,34 @@ def main():
                 if p.name.startswith(("ort_", "vision_", "text_", "onnxruntime_profile__"))]
     expected = []
     for platform in ("mac", "linux", "windows"):
-        expected.extend(f"{platform}/text/default-memory-plugin-{length}" for length in (12, 128, 512))
+        if not images_only:
+            expected.extend(f"{platform}/text/default-memory-plugin-{length}" for length in (12, 128, 512))
         for provider in ("cpu", "plugin-default-memory"):
             expected.extend(f"{platform}/images/{provider}/{name}" for name in ("square", "landscape", "portrait"))
-        if platform != "mac":  # Mac CPU text is the previously captured reference.
+        if not images_only and platform != "mac":  # Mac CPU text is the previously captured reference.
             expected.extend(f"{platform}/text/cpu-{length}" for length in (12, 128, 512))
     by_path = {result["path"]: result for result in results}
     missing = [path for path in expected if path not in by_path]
     qualified = [by_path[path] for path in expected if path in by_path]
     failed = [result["path"] for result in qualified
               if not result["parityPassed"] or result["calls"] != 6
+              or (images_only and not result.get("sharedPreprocessing"))
               or (result["execution"] or {}).get("exitCode") != 0
               or (result["execution"] or {}).get("invalidForPluginQualification")]
-    preprocessing = json.loads((root / "mac/preprocessing/preprocessing.json").read_text())
-    preprocessing_passed = ({case["name"] for case in preprocessing} == {"square", "landscape", "portrait"}
-                            and all(case["parityPassed"] for case in preprocessing))
+    preprocessing = {platform: json.loads((root / platform / "preprocessing/preprocessing.json").read_text())
+                     for platform in (("mac", "linux", "windows") if images_only else ("mac",))}
+    preprocessing_passed = all({case["name"] for case in cases} == {"square", "landscape", "portrait"}
+                              and all(case["parityPassed"] for case in cases) for cases in preprocessing.values())
     outcome = {"runtimePassed": not missing and not failed, "missingCases": missing, "failedCases": failed,
                "runtimeCalls": sum(result["calls"] for result in qualified),
                "preprocessingPassed": preprocessing_passed}
     summary = {"environment": json.loads((root / "environment.json").read_text()), "results": results,
-               "profiles": profiles, "outcome": outcome, "textReference": str(text_reference),
+               "profiles": profiles, "outcome": outcome,
+               "textReference": str(text_reference) if text_reference else None, "imageReference": str(image_reference),
                "executions": [{"path": str(p.parent.relative_to(root)), **json.loads(p.read_text())}
                               for p in root.rglob("execution.json")],
                "preprocessing": preprocessing,
-               "crashes": json.loads((root / "mac/crashes.json").read_text())}
+               "crashes": [] if images_only else json.loads((root / "mac/crashes.json").read_text())}
     (root / "qualification-summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     for result in results:
         print(json.dumps(result))

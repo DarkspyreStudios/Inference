@@ -12,8 +12,8 @@ internal static class Program
     {
         try
         {
-            if (args is ["images", var imageProvider, var model, var fixtures, var imageResult])
-                return ImageProbe.Run(imageProvider, Path.GetFullPath(model), Path.GetFullPath(fixtures), Path.GetFullPath(imageResult));
+            if (args is ["images" or "images-shared", var imageProvider, var model, var fixtures, var imageResult])
+                return ImageProbe.Run(imageProvider, Path.GetFullPath(model), Path.GetFullPath(fixtures), Path.GetFullPath(imageResult), args[0] == "images-shared");
             if (args is ["preprocess", var imageFixtures, var imageOutput])
                 return ImageProbe.Preprocess(Path.GetFullPath(imageFixtures), Path.GetFullPath(imageOutput));
             if (args is ["providers"])
