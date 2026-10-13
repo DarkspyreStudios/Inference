@@ -87,6 +87,14 @@ and provenance, and a result round-trip through `InferenceJson.EmbeddingResult`.
 must report Busy on runtime shutdown. The command disposes the model before terminal runtime cleanup.
 This qualification does not exercise over-limit inputs, truncation, native failures or other models.
 
+`Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment` is an isolated, non-packaged
+EmbeddingGemma 2 runtime probe. It references the native suppliers directly and runs outside
+Host. Its pinned FP32 ONNX graph consumes frozen token IDs, which separates execution
+comparison from tokenizer and retrieval qualification. It records session load time, the first
+inference and five subsequent calls, vectors, process peak working set and an ONNX provider
+profile. Core ML uses CPU and GPU compute units; the profile identifies any CPU partitions.
+The probe does not register an engine in the shipped Tensor catalog.
+
 Supra's publisher supplies the DiT as a PyTorch ZIP state dictionary rather than safetensors. The
 Darkspyre TensorSharp fork reads that file as data through a whitelist-only checkpoint reader. It
 accepts only the tensor rebuild, storage, and container forms required by the pinned checkpoint and
