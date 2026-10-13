@@ -45,6 +45,8 @@ Replace `cpu` with `metal`, `metal-resident`, `metal-fused`, `metal-grouped`, `m
 run. `webgpu-plugin` loads Microsoft.ML.OnnxRuntime.EP.WebGpu 0.4.0 with the same
 ORT 1.30.0 core. This packaged provider supplies native Linux and Windows GPU
 execution; the core package alone does not include WebGPU on every platform.
+Windows staging includes the package's `dxcompiler.dll` and `dxil.dll` dependencies
+alongside its ONNX libraries. Omitting them fails WebGPU device creation.
 It fails if the plugin finds no device. `providers` lists the ONNX providers available in the installed runtime. The Metal command
 does not initialize ONNX Runtime. Run one process at a time to avoid GPU contention.
 
@@ -187,3 +189,9 @@ The summary records runtime execution and preprocessing as separate outcomes; th
 returns failure if either fails or any expected case is missing. The Mac CPU text reference
 comes from the existing FP32 comparison directory. Raw inputs, outputs, profiles and the
 summary reside under the ignored `artifacts/gemma2/qualification/` directory.
+
+`summarize_qualification.py images <shared-run-root> <frozen-qualification-root>`
+compares the shared path against the existing CPU image reference. It requires six
+outputs per fixture from CPU and external WebGPU on Mac, Linux and Windows, successful
+process exits, and preprocessing parity on all three. A result from `images` cannot
+pass this matrix; every result must identify `sharedPreprocessing: true`.

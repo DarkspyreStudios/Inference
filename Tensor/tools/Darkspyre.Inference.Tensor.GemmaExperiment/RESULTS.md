@@ -684,3 +684,62 @@ syntax checks pass. No full suite runs. General tokenization, retrieval quality,
 quantization, video decoding, long contexts, cancellation and concurrent production
 loads remain unqualified. Shared preprocessing parity is the observed remaining
 failure. The source and results stay in the isolated probe.
+## Shared RGB resizer and image parity, 2026-10-13
+
+The shared resizer matches all reference preprocessing fixtures exactly on Mac,
+Linux and Windows. The complete shared-preprocessing image matrix passes all
+108 embeddings against the frozen Mac CPU reference. All six final CPU/WebGPU
+processes exit successfully; all three preprocessing processes also exit zero.
+
+TensorSharp `64532dc6` changes the existing bicubic helper to use 22-bit fixed-point
+coefficients, source-window rounding and byte clipping after each separable pass.
+Normalization follows the vertical pass. The existing white compositing helper
+supplies RGB bytes. The Gemma4 reference-sizing caller uses this shared correction;
+the letterboxed bilinear path retains its existing behavior. No second production
+preprocessor is introduced. The behavior follows
+[Pillow 12.1.1 RGB resizing](https://github.com/python-pillow/Pillow/blob/12.1.1/src/libImaging/Resample.c).
+
+The frozen Pillow regression first fails on the original upsample and downsample
+paths. All three regression cases pass with the correction, including unchanged
+size, and both existing Gemma4 image tests pass: five focused cases, no skips.
+Managed builds have zero warnings/errors. Scoped C# formatting, Python syntax and
+diff checks pass. No native compilation occurs.
+
+Inference `88cad369` adds `images-shared` to the existing isolated experiment.
+It feeds the existing Gemma4 processor and shared patch packing into both ONNX
+graphs. The image summary requires this mode, six outputs per case, complete
+CPU/WebGPU coverage on all three platforms and successful process cleanup.
+Frozen-input controls cannot substitute for the shared path.
+
+| Check | Result |
+| --- | --- |
+| Square, landscape and portrait preprocessing on all three platforms | Zero pixel error; shapes, positions and padding match |
+| CPU and external WebGPU image embeddings | 108/108 pass |
+| Largest normalized embedding component error | 4.5e-7 |
+| Minimum embedding cosine | 0.9999999999975431 |
+| Largest unit-norm error | 8.9946e-7 |
+| Within-process repeat error | Zero |
+| Final preprocessing and inference process exits | All zero |
+
+Mac CPU features and embeddings exactly match the frozen reference. Across all
+platforms, raw vision-feature maximum error is 0.000243187, relative L2 error is
+at most 1.02301e-5 and minimum token cosine is 0.999999997987366. GPU profiles
+retain 677 GPU/40 CPU vision events and 1032 GPU/37 CPU main-graph events.
+The reference model revision, FP32 precision, ORT 1.30.0 and external WebGPU 0.4.0
+remain the same as the preceding qualification.
+
+The first Windows GPU test copy omits packaged `dxcompiler.dll` and `dxil.dll` and
+fails during provider creation, before inference. Its failure evidence remains
+under `windows/controls/missing-dxc`. Including those existing package dependencies
+resolves startup. Both Windows GPU windows use gpu-arbiter's unload/load API; Qwen
+is restored successfully after each. The final state reports the same idle model
+loaded and 22,676 MiB used. Arbiter settings and ComfyUI have no changes.
+
+Evidence resides under ignored `artifacts/gemma2/resizer-fix/`: all patches,
+vectors, features, profiles, process exits, arbiter states and
+`qualification-summary.json`. The summary reports `runtimePassed: true`,
+`preprocessingPassed: true`, 108 calls and no missing or failed matrix cases;
+the comparison exits zero. The earlier failed qualification remains separate.
+Host and the production Inference.Tensor engine have no changes. These results
+cover the three RGB fixtures and bounded model execution, not general tokenizer,
+retrieval quality, video decoding, long-context or concurrency qualification.
