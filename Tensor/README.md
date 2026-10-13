@@ -92,8 +92,13 @@ EmbeddingGemma 2 runtime probe. It references the native suppliers directly and 
 Host. Its pinned FP32 ONNX graph consumes frozen token IDs, which separates execution
 comparison from tokenizer and retrieval qualification. It records session load time, the first
 inference and five subsequent calls, vectors, process peak working set and an ONNX provider
-profile. Core ML uses CPU and GPU compute units; the profile identifies any CPU partitions.
-The probe does not register an engine in the shipped Tensor catalog.
+profile. Core ML uses CPU and GPU compute units; WebGPU is a separate ONNX option.
+The profile identifies CPU partitions. The TensorSharp option loads the same export's FP32
+weights and runs its text forward pass through existing GGML tensor operations on Metal.
+Each option runs in its own process. The probe accepts 2–512 tokens, where the full and
+sliding attention masks coincide, and does not register an engine in the shipped Tensor catalog.
+The [probe instructions](tools/Darkspyre.Inference.Tensor.GemmaExperiment/README.md)
+describe reproducible runs and the remaining qualification limits.
 
 Supra's publisher supplies the DiT as a PyTorch ZIP state dictionary rather than safetensors. The
 Darkspyre TensorSharp fork reads that file as data through a whitelist-only checkpoint reader. It

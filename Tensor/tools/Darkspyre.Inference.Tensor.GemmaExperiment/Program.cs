@@ -11,17 +11,28 @@ internal static class Program
     {
         try
         {
-            Console.WriteLine("ONNX providers: " + string.Join(", ", OrtEnv.Instance().GetAvailableProviders()));
-            if (args is ["providers"]) return 0;
-            if (args.Length != 3 || args[0] is not ("cpu" or "coreml"))
-                throw new ArgumentException("Usage: <cpu|coreml> <prepared-directory> <output-directory>, or providers");
+            if (args is ["providers"])
+            {
+                Console.WriteLine("ONNX providers: " + string.Join(", ", OrtEnv.Instance().GetAvailableProviders()));
+                return 0;
+            }
+            if (args.Length is not (3 or 4) || args[0] is not ("cpu" or "coreml" or "webgpu" or "metal"))
+                throw new ArgumentException("Usage: <cpu|coreml|webgpu|metal> <prepared-directory> <output-directory> [tokens: 2..512], or providers");
             string root = Path.GetFullPath(args[1]);
             string output = Path.GetFullPath(args[2]);
             Directory.CreateDirectory(output);
+            int length = args.Length == 4 ? int.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture) : 12;
+            // Up to 512 tokens, the full and sliding attention masks both admit every token.
+            // Longer inputs require the sliding mask, which this text execution probe omits.
+            if (length is < 2 or > 512) throw new ArgumentException("The probe accepts 2..512 tokens.");
+            long[] interior = [3369, 236787, 3253, 1534, 865, 2336, 236787, 1212, 563, 1009];
+            long[] ids = [2, .. Enumerable.Range(0, length - 2).Select(i => interior[i % interior.Length]), 1];
+            if (args[0] == "metal") return MetalText.Run(root, output, ids);
+            Console.WriteLine("ONNX providers: " + string.Join(", ", OrtEnv.Instance().GetAvailableProviders()));
             using var options = new SessionOptions
             {
-                EnableProfiling = true,
                 ProfileOutputPathPrefix = Path.Combine(output, "ort"),
+                EnableProfiling = true,
                 GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
             };
             if (args[0] == "coreml")
@@ -31,11 +42,12 @@ internal static class Program
                     ["MLComputeUnits"] = "CPUAndGPU",
                     ["RequireStaticInputShapes"] = "0"
                 });
+            if (args[0] == "webgpu")
+                options.AppendExecutionProvider("WebGPU", new Dictionary<string, string>());
             Stopwatch watch = Stopwatch.StartNew();
             using var session = new InferenceSession(Path.Combine(root, "model.onnx"), options);
             double loadMs = watch.Elapsed.TotalMilliseconds;
             Console.WriteLine($"Loaded {args[0]} in {loadMs:F1} ms");
-            long[] ids = [2, 3369, 236787, 3253, 1534, 865, 2336, 236787, 1212, 563, 1009, 1];
             var inputs = new List<NamedOnnxValue>
             {
                 NamedOnnxValue.CreateFromTensor("input_ids", new DenseTensor<long>(ids, [1, ids.Length])),
