@@ -158,3 +158,13 @@ a built-in WebGPU provider with the same name. `GEMMA_GPU_VENDOR` optionally sel
 a reported numeric hardware vendor for qualification on a multi-vendor machine.
 Device metadata appears in the run log. Provider assignment and hardware inventory
 must accompany GPU timing claims. These controls belong to the isolated probe.
+
+`GEMMA_DEFAULT_HOST_MEMORY=1` uses explicit CPU/default `OrtMemoryInfo` and the
+`OrtValue` API for inputs. The control retains C#'s ordinary named-value API.
+This tests the external provider's rejection of the default C# CPU-output memory
+tag (-1); it changes no tensor values and applies to both text and vision inputs.
+
+`GEMMA_SEPARATE_WEBGPU_CONTEXTS=1` assigns the built-in WebGPU text session
+to context 1 and retains vision on context 0. It tests teardown with independent
+Dawn contexts after the shared-context image run crashes during buffer release.
+The control uses context 0 for both sessions. Both paths dispose their sessions.

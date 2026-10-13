@@ -30,11 +30,15 @@ internal static class ImageProbe
         var watch = Stopwatch.StartNew();
         using var vision = new InferenceSession(Path.Combine(model, "vision_encoder.onnx"), options);
         double visionLoadMs = watch.Elapsed.TotalMilliseconds;
-        options.EnableProfiling = false;
-        options.ProfileOutputPathPrefix = Path.Combine(output, "text");
-        options.EnableProfiling = true;
+        bool separate = provider == "webgpu" && Environment.GetEnvironmentVariable("GEMMA_SEPARATE_WEBGPU_CONTEXTS") == "1";
+        using var textOptions = separate ? new SessionOptions() : options.Clone();
+        textOptions.EnableProfiling = false;
+        textOptions.ProfileOutputPathPrefix = Path.Combine(output, "text");
+        textOptions.EnableProfiling = true;
+        if (separate)
+            textOptions.AppendExecutionProvider("WebGPU", new Dictionary<string, string> { ["deviceId"] = "1" });
         watch.Restart();
-        using var text = new InferenceSession(Path.Combine(model, "model.onnx"), options);
+        using var text = new InferenceSession(Path.Combine(model, "model.onnx"), textOptions);
         double textLoadMs = watch.Elapsed.TotalMilliseconds;
         foreach (var item in manifest.RootElement.GetProperty("cases").EnumerateArray())
         {
@@ -57,8 +61,7 @@ internal static class ImageProbe
             for (int run = 0; run < 6; run++)
             {
                 watch.Restart();
-                using var encoded = vision.Run(inputs, ["image_features"]);
-                var featureTensor = encoded.Single().AsTensor<float>();
+                var featureTensor = Program.RunFloat(vision, inputs, "image_features");
                 float[] features = featureTensor.ToArray();
                 visionTimes.Add(watch.Elapsed.TotalMilliseconds);
                 if (!featureTensor.Dimensions.SequenceEqual([tokens, 512]) || features.Any(v => !float.IsFinite(v)))
@@ -73,8 +76,7 @@ internal static class ImageProbe
                     NamedOnnxValue.CreateFromTensor("audio_features", new DenseTensor<float>([0, 512]))
                 };
                 watch.Restart();
-                using var embedded = text.Run(textInputs, ["sentence_embedding"]);
-                float[] vector = embedded.Single().AsTensor<float>().ToArray();
+                float[] vector = Program.RunFloat(text, textInputs, "sentence_embedding").ToArray();
                 textTimes.Add(watch.Elapsed.TotalMilliseconds);
                 if (vector.Length != 768 || vector.Any(v => !float.IsFinite(v)))
                     throw new InvalidDataException("Image embedding did not return 768 finite values.");
@@ -84,6 +86,8 @@ internal static class ImageProbe
             File.WriteAllText(Path.Combine(caseOutput, "result.json"), JsonSerializer.Serialize(new
             {
                 provider,
+                separateContexts = separate,
+                defaultHostMemory = Environment.GetEnvironmentVariable("GEMMA_DEFAULT_HOST_MEMORY") == "1",
                 name,
                 tokens,
                 inputIds = ids,

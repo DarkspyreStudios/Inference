@@ -97,6 +97,8 @@ The `webgpu-plugin` option loads Microsoft's packaged WebGPU provider for native
 The image mode executes the pinned vision graph and then the main embedding graph using
 verified PIL-reference patches and positions. A separate preprocessing check compares the
 existing Gemma4 processor with those reference inputs, including patch padding and position order.
+A separate-context control tests WebGPU cleanup with independent vision/text contexts.
+An explicit host-memory diagnostic compares ONNX input binding APIs without changing tensor values.
 The profile identifies CPU partitions. The TensorSharp option loads the same export's FP32
 weights and runs its text forward pass through existing GGML tensor operations on Metal.
 Its resident-weight variant packs FP32 matrices once during loading and uses the existing

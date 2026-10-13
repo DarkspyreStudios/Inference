@@ -86,8 +86,7 @@ internal static class Program
             for (int i = 0; i < 6; i++)
             {
                 watch.Restart();
-                using var result = session.Run(inputs, ["sentence_embedding"]);
-                vector = result.Single().AsTensor<float>().ToArray();
+                vector = RunFloat(session, inputs, "sentence_embedding").ToArray();
                 double elapsed = watch.Elapsed.TotalMilliseconds;
                 if (vector.Length != 768 || vector.Any(value => !float.IsFinite(value)))
                     throw new InvalidDataException("The model did not return 768 finite values.");
@@ -114,6 +113,38 @@ internal static class Program
         {
             Console.Error.WriteLine(error);
             return 1;
+        }
+    }
+
+    internal static DenseTensor<float> RunFloat(InferenceSession session, IReadOnlyCollection<NamedOnnxValue> inputs, string outputName)
+    {
+        if (Environment.GetEnvironmentVariable("GEMMA_DEFAULT_HOST_MEMORY") != "1")
+        {
+            using var result = session.Run(inputs, [outputName]);
+            var tensor = result.Single().AsTensor<float>();
+            return new DenseTensor<float>(tensor.ToArray(), tensor.Dimensions);
+        }
+        // Explicit CPU/default memory is valid host input. The 0.4 plugin adapter
+        // rejects the -1 memory tag used by C#'s default CPU-output memory info.
+        using var memory = new OrtMemoryInfo("Cpu", OrtAllocatorType.DeviceAllocator, 0, OrtMemType.Default);
+        var values = new List<OrtValue>();
+        try
+        {
+            foreach (var input in inputs)
+                values.Add(input.Value switch
+                {
+                    Microsoft.ML.OnnxRuntime.Tensors.Tensor<float> t => OrtValue.CreateTensorValueFromMemory<float>(memory, t.ToArray(), t.Dimensions.ToArray().Select(d => (long)d).ToArray()),
+                    Microsoft.ML.OnnxRuntime.Tensors.Tensor<long> t => OrtValue.CreateTensorValueFromMemory<long>(memory, t.ToArray(), t.Dimensions.ToArray().Select(d => (long)d).ToArray()),
+                    _ => throw new InvalidDataException("The probe accepts FP32 and int64 inputs.")
+                });
+            using var run = new RunOptions();
+            using var result = session.Run(run, inputs.Select(i => i.Name).ToArray(), values, [outputName]);
+            var shape = result[0].GetTensorTypeAndShape().Shape.Select(d => checked((int)d)).ToArray();
+            return new DenseTensor<float>(result[0].GetTensorDataAsSpan<float>().ToArray(), shape);
+        }
+        finally
+        {
+            foreach (var value in values) value.Dispose();
         }
     }
 
