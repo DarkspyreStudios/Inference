@@ -98,6 +98,8 @@ weights and runs its text forward pass through existing GGML tensor operations o
 Its resident-weight variant packs FP32 matrices once during loading and uses the existing
 GGML resident matrix operation. The Mac comparison script records every call's vector
 and checks execution parity against ONNX CPU and the preceding measured variant.
+The resident-row variant combines the fused path with `GetRowsQuant` using FP32
+weights. It avoids materializing the full embedding table before row selection.
 The fused variant also uses the existing Gemma norm/projection, feed-forward,
 post-norm/residual and PLE graphs while retaining the generic attention path.
 The grouped variant adds the existing FP32 grouped attention graph with an all-visible
@@ -105,7 +107,7 @@ mask for the probe's bounded inputs and replaces repeated K/V copies with layout
 The `ggml-cpu` and `ggml-cpu-fused` options run the same TensorSharp forward on CPU.
 Optional diagnostic modes capture intermediate FP32 tensors or phase timings and managed
 allocation counts and inspect runtime ownership growth. An explicit diagnostic control
-disables GGML async compute; another drains work before the probe’s host copies. Trace reads synchronize execution and are excluded from performance claims.
+disables GGML async compute. Host copies use the shared storage barrier. Trace reads synchronize execution and are excluded from performance claims.
 Each option runs in its own process. The probe accepts 2–512 tokens, where the full and
 sliding attention masks coincide, and does not register an engine in the shipped Tensor catalog.
 The [probe instructions](tools/Darkspyre.Inference.Tensor.GemmaExperiment/README.md)

@@ -32,13 +32,14 @@ python3 Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/prepare.py artif
 Metal requires the matching prebuilt native driver in the executable output, with its
 `ggml/baseline.artifact.json` and `runtimes/<rid>/native` files. The existing GGML loader verifies
 that catalog, hashes and ABI before selecting Metal. A missing driver fails; the probe does not
-download or compile one.
+download or compile one. The driver fingerprint covers managed GGML source too;
+managed backend changes require a correspondingly identified driver.
 
 ```bash
 bash ../agent-ds/scripts/workspace-env.sh dotnet Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/bin/Release/net11.0/Darkspyre.Inference.Tensor.GemmaExperiment.dll cpu artifacts/gemma2/model artifacts/gemma2/cpu-128 128
 ```
 
-Replace `cpu` with `metal`, `metal-resident`, `metal-fused`, `metal-grouped`, `coreml`, `coreml-static` or `webgpu`, and use a separate output directory for each
+Replace `cpu` with `metal`, `metal-resident`, `metal-fused`, `metal-grouped`, `metal-rows`, `coreml`, `coreml-static` or `webgpu`, and use a separate output directory for each
 run. `providers` lists the ONNX providers available in the installed runtime. The Metal command
 does not initialize ONNX Runtime. Run one process at a time to avoid GPU contention.
 
@@ -57,6 +58,10 @@ head-first FP32 inputs, exact sequence extents and an all-visible mask for this
 unpadded 2–512-token experiment. It replaces eight K/V head copies per layer with
 three head-first layout conversions. It retains the Gemma block fusions.
 
+`metal-rows` uses the fused path with the existing resident `GetRowsQuant` operation
+and GGML type F32. The same contiguous FP32 embedding table supplies the selected rows;
+no quantization or whole-model graph is involved. Its A/B control is `metal-fused`.
+
 The Mac comparison script runs one process at a time for each provider at 12, 128
 and 512 tokens, records `/usr/bin/time -l` peak RSS, and compares all six vectors
 with the CPU reference in the same output root. Run `cpu` before the other providers.
@@ -69,7 +74,7 @@ then exits with failure and names every failing case. First-call vectors partici
 in parity checks even though warm latency excludes the first call.
 
 ```bash
-python3 Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/compare.py artifacts/gemma2/model artifacts/gemma2/ab cpu metal metal-resident metal-fused metal-grouped webgpu
+python3 Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/compare.py artifacts/gemma2/model artifacts/gemma2/ab cpu metal-fused metal-rows webgpu
 ```
 
 The optional length defaults to 12. Each input consists of BOS, repeated frozen ordinary token
@@ -108,22 +113,18 @@ Trace-mode timings do not measure the undisturbed inference path.
 without reading intermediate tensor data. It also reads the pinned runtime ownership
 registry count under its metadata lock, without mutating it. `GEMMA_SYNCHRONOUS=1`
 disables the existing GGML async-compute setting as a diagnostic control. Its default
-retains the backend setting. `GEMMA_COPY_BARRIER=1` drains pending GPU work before
-the probe copies slices, repeats K/V heads or creates head-first layouts on the CPU.
-This diagnoses host-copy visibility without changing the native driver or library.
-Every mode retains all final vectors.
+retains the backend setting. CPU copies use the shared `GgmlBasicOps.Copy` storage
+barrier. Every mode retains all final vectors.
 
 ```bash
 GEMMA_DIAGNOSTIC=trace bash ../agent-ds/scripts/workspace-env.sh dotnet Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/bin/Release/net11.0/Darkspyre.Inference.Tensor.GemmaExperiment.dll ggml-cpu artifacts/gemma2/model artifacts/gemma2/correctness/cpu-trace-12 12
 ```
 
-The copy-barrier matrix uses the existing comparison runner and a separate output root:
+The synchronous control uses the existing comparison runner and a separate output root:
 
 ```bash
-GEMMA_COPY_BARRIER=1 GEMMA_RUNS=12 python3 Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/compare.py artifacts/gemma2/model artifacts/gemma2/copy-control cpu metal-fused metal-grouped
+GEMMA_SYNCHRONOUS=1 GEMMA_RUNS=12 python3 Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/compare.py artifacts/gemma2/model artifacts/gemma2/sync-control cpu metal-fused metal-rows
 ```
 
-Replace `GEMMA_COPY_BARRIER=1` with `GEMMA_SYNCHRONOUS=1` and select another
-output root for the synchronous control. The ONNX reference retains six calls.
-The controls do not replace the default path; default runs continue to reproduce
-the defect. Measured diagnostic conclusions and limitations appear in RESULTS.md.
+The ONNX reference retains six calls. Default comparisons leave `GEMMA_SYNCHRONOUS`
+unset. Measured diagnostic conclusions and limitations appear in RESULTS.md.

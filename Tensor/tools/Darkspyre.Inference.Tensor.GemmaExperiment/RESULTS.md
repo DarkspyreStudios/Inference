@@ -431,3 +431,36 @@ No native compilation occurs. No production engine is selected.
 Images and video frames, tokenizer parity, real retrieval, quantization, inputs beyond
 512 tokens, cancellation, Linux and Windows are unqualified. The present evidence
 establishes a working Mac text experiment and makes ONNX WebGPU a viable GPU candidate.
+
+
+## Shared fixes and resident-row candidate, 2026-10-13
+
+TensorSharp commit `8eb71550` adds the shared source/destination host-copy barriers
+and completes CPU/Metal ownership registrations after successful release. Unscoped
+completion checks exact owner identity, empty scopes and no active effects. CUDA
+and MLX retain their gated release paths. The resident-row experiment (`metal-rows`)
+uses the existing `GetRowsQuant` API with GGML type F32 and otherwise follows
+`metal-fused`. The probe-specific copy-barrier control is removed.
+
+Both managed fixture projects and the Inference experiment build with zero warnings
+and errors. Eight focused managed authority cases pass: unattached-release, healthy,
+promotion, lease-negatives, mismatched-lease, race, constructor and lock-order.
+The new case rejects wrong owners, repeated release and bypasses for attached CUDA
+or MLX owners. The existing wildcard fixture fails because its independent MLX
+owner calls release without the required destructive reservation. That fixture
+path is unchanged and its failure is not a passing qualification.
+
+The real CPU fixture stops before its operation checks. TensorSharp fingerprints all
+top-level managed GGML source files as well as native sources. The fixes change its
+required identity from `96f321c263a76984f6386b7cf7894789c4fc0de23c4ec8e5319c7f30e2f3504b`
+to `82517e29f42154ff8b3ef2170e3c8ad6d2559ca4f0473032f0168783cf63aedd`.
+The existing prebuilt driver correctly refuses that mismatch. No native implementation,
+interop signature or pinned upstream revision changes, but that alone does not satisfy
+the loader's identity contract.
+
+The shared fixes' real native copy/cleanup checks, resident-row numerical checks and
+fresh WebGPU comparison remain unverified. No new performance result is reported.
+The existing Mac identity-only relink tool accepts the retained original objects and
+build evidence; it recompiles the identity object and verifies that all other 59
+link inputs remain unchanged. It requires separate native-compilation approval.
+Host and whole-graph code remain untouched.

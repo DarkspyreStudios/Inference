@@ -6,7 +6,7 @@ using TsTensor = TensorSharp.Tensor;
 
 namespace Darkspyre.Inference.Tensor.GemmaExperiment;
 
-internal enum MetalVariant { Baseline, Resident, Fused, Grouped }
+internal enum MetalVariant { Baseline, Resident, Fused, Grouped, Rows }
 
 // Experimental forward pass for the pinned ONNX export's FP32 weights. This is not a
 // registered Tensor engine. Frozen inputs isolate the runtime from tokenizer differences.
@@ -16,9 +16,8 @@ internal sealed class MetalText : IDisposable
     private readonly GgmlAllocator allocator;
     private readonly Dictionary<string, TsTensor> weights = new(StringComparer.Ordinal);
     private readonly MetalVariant variant;
-    private static readonly bool CopyBarrier = Environment.GetEnvironmentVariable("GEMMA_COPY_BARRIER") == "1";
     private bool ResidentWeights => variant != MetalVariant.Baseline;
-    private bool Fused => variant is MetalVariant.Fused or MetalVariant.Grouped;
+    private bool Fused => variant is MetalVariant.Fused or MetalVariant.Grouped or MetalVariant.Rows;
 
     private MetalText(string root, MetalVariant variant, GgmlBackendType backend)
     {
@@ -113,7 +112,6 @@ internal sealed class MetalText : IDisposable
                 provider = $"TensorSharp {backend}",
                 variant = variant.ToString(),
                 synchronous,
-                copyBarrier = CopyBarrier,
                 inputIds = ids,
                 loadMs,
                 timesMs = times,
@@ -139,7 +137,7 @@ internal sealed class MetalText : IDisposable
         using var request = new Tensors();
         var indices = request.Add(new TsTensor(allocator, DType.Int32, count));
         indices.CopyFrom(ids.Select(value => checked((int)value)).ToArray());
-        TsTensor hidden = Ops.IndexSelect(null!, W("embed_tokens.weight"), indices);
+        TsTensor hidden = EmbeddingRows(indices);
         diagnostic.Mark("embedding", hidden);
         try
         {
@@ -249,6 +247,21 @@ internal sealed class MetalText : IDisposable
         finally { hidden.Dispose(); }
     }
 
+    private TsTensor EmbeddingRows(TsTensor indices)
+    {
+        TsTensor weight = W("embed_tokens.weight");
+        if (variant != MetalVariant.Rows) return Ops.IndexSelect(null!, weight, indices);
+        var result = new TsTensor(allocator, DType.Float32, indices.ElementCount(), weight.Sizes[1]);
+        try
+        {
+            // GGML_TYPE_F32 selects FP32 resident rows despite the API's Quant suffix.
+            GgmlBasicOps.GetRowsQuant(result, weight.Storage.PtrAtElement(weight.StorageOffset),
+                ggmlType: 0, ne0: weight.Sizes[1], ne1: weight.Sizes[0], rawBytes: weight.Storage.ByteLength, indices);
+            return result;
+        }
+        catch { result.Dispose(); throw; }
+    }
+
     private TsTensor W(string name) => weights["model." + name];
     private TsTensor Linear(Tensors tensors, TsTensor input, string name)
     {
@@ -297,7 +310,6 @@ internal sealed class MetalText : IDisposable
     private static TsTensor Slice(Tensors tensors, TsTensor input, int start, int length)
     {
         TsTensor view = tensors.Add(input.Narrow(1, start, length));
-        if (CopyBarrier) GgmlBasicOps.HostReadBarrier();
         return tensors.Add(Ops.NewContiguous(view));
     }
 
@@ -305,7 +317,6 @@ internal sealed class MetalText : IDisposable
     {
         TsTensor source = tensors.Add(input.View(count, heads, dimension));
         TsTensor target = tensors.Add(new TsTensor(allocator, DType.Float32, count, 4, dimension));
-        if (CopyBarrier) GgmlBasicOps.HostReadBarrier();
         for (int i = 0; i < 4; i++)
         {
             using TsTensor from = source.Narrow(1, i / (4 / heads), 1);
@@ -319,7 +330,6 @@ internal sealed class MetalText : IDisposable
     {
         TsTensor shaped = tensors.Add(input.View(count, heads, dimension));
         TsTensor transposed = tensors.Add(shaped.Transpose(0, 1));
-        if (CopyBarrier) GgmlBasicOps.HostReadBarrier();
         return tensors.Add(Ops.NewContiguous(transposed));
     }
 

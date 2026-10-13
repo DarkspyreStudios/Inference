@@ -32,7 +32,7 @@ def main():
     model = Path(sys.argv[1]).resolve()
     output = Path(sys.argv[2]).resolve()
     executable = Path(__file__).resolve().parent / "bin/Release/net11.0/Darkspyre.Inference.Tensor.GemmaExperiment.dll"
-    previous = {"metal-resident": "metal", "metal-fused": "metal-resident", "metal-grouped": "metal-fused"}
+    previous = {"metal-resident": "metal", "metal-fused": "metal-resident", "metal-grouped": "metal-fused", "metal-rows": "metal-fused"}
     failures = []
     for provider in sys.argv[3:]:
         for length in (12, 128, 512):
