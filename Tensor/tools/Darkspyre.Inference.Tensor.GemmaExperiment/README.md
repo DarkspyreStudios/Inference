@@ -206,3 +206,12 @@ text/image inputs and retrieval expectations. The existing Tensor ConsoleTester 
 production Gemma engine and the SelfHost embedding connection. Model artifacts are installed and
 verified through the real pack manager. The tester checks cancellation, reuse, unload and removal.
 The experiment's shared image path calls the production patch packer.
+
+`summarize_engine.py <run-root> <frozen-image-reference>` compares all ten embeddings from
+`mac-cpu`, `mac-webgpu`, `linux-cpu`, `linux-webgpu`, `windows-cpu` and `windows-webgpu`.
+Each directory contains the tester's `result.json`. The frozen image reference contains
+the prior CPU results for square, portrait and landscape. Missing runs fail the summary.
+The report checks the existing parity bounds, identical fingerprints and direct/Connect
+agreement. The Christmas recall fixture requires its related document to reach the agreed
+0.60 cosine threshold and the three unrelated documents to remain below it. This bounded
+fixture does not establish relevance accuracy for an arbitrary corpus.

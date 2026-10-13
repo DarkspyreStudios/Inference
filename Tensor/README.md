@@ -147,6 +147,11 @@ sliding attention masks coincide, and does not register an engine in the shipped
 The [probe instructions](tools/Darkspyre.Inference.Tensor.GemmaExperiment/README.md)
 describe reproducible runs and the remaining qualification limits.
 
+The production-library tester covers tokenizer parity, direct/Connect text and image agreement,
+retrieval, cancellation, reuse and pack release. Its summary compares CPU and WebGPU outputs
+across Mac, Linux and Windows with the frozen CPU image reference. The SelfHost tool fixture
+checks the supplied time tool alongside the universal conversation path's built-in tools.
+
 Supra's publisher supplies the DiT as a PyTorch ZIP state dictionary rather than safetensors. The
 Darkspyre TensorSharp fork reads that file as data through a whitelist-only checkpoint reader. It
 accepts only the tensor rebuild, storage, and container forms required by the pinned checkpoint and

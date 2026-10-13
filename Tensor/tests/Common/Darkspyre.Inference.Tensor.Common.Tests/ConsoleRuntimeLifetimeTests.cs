@@ -16,7 +16,7 @@ public sealed class ConsoleRuntimeLifetimeTests
 
         Assert.True(await SelfHostSuite.RunAsync(engine, "model", CancellationToken.None));
         Assert.Equal(2, engine.Requests.Count);
-        LlmToolDefinition tool = Assert.IsType<LlmToolDefinition>(Assert.Single(engine.Requests[0].Tools));
+        LlmToolDefinition tool = Assert.Single(engine.Requests[0].Tools.OfType<LlmToolDefinition>(), tool => tool.Name == "get_time");
         Assert.Equal("get_time", tool.Name);
         Assert.Equal("object", tool.InputSchema.GetProperty("type").GetString());
         Assert.Empty(tool.InputSchema.GetProperty("properties").EnumerateObject());
