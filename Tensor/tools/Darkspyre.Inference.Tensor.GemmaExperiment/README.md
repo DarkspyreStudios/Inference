@@ -5,6 +5,8 @@ ONNX CPU, ONNX Core ML and ONNX WebGPU. It runs outside Host and registers no sh
 The existing Tensor ConsoleTester supplies the standalone ownership pattern. RightSize's
 export validation supplies the numerical comparison pattern.
 
+[Measured Mac results](RESULTS.md) record numerical agreement, placement and timing limits.
+
 The pinned export is
 [`onnx-community/embeddinggemma-2-ONNX`, daa72c51](https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/tree/daa72c51243991dfcaf9f9137d2c573d8f7790c0).
 `prepare.py` verifies artifact lengths and SHA-256 hashes. It reads the graph's initializer

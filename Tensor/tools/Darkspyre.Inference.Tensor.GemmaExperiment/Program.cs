@@ -78,7 +78,12 @@ internal static class Program
             string profile = session.EndProfiling();
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new
             {
-                provider = args[0], inputIds = ids, loadMs, timesMs = times, vector, profile,
+                provider = args[0],
+                inputIds = ids,
+                loadMs,
+                timesMs = times,
+                vector,
+                profile,
                 peakWorkingSetBytes = PeakWorkingSet(),
                 note = "Frozen token IDs isolate model execution; tokenizer and retrieval quality are not qualified."
             }));

@@ -83,7 +83,11 @@ internal sealed class MetalText : IDisposable
             }
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new
             {
-                provider = "TensorSharp Metal", inputIds = ids, loadMs, timesMs = times, vector,
+                provider = "TensorSharp Metal",
+                inputIds = ids,
+                loadMs,
+                timesMs = times,
+                vector,
                 peakWorkingSetBytes = Program.PeakWorkingSet(),
                 nativeAbi = GgmlNativeLoader.NativeAbi,
                 note = "Experimental unfused FP32 text forward; no tokenizer or retrieval qualification."
