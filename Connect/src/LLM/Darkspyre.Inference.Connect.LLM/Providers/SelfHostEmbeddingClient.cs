@@ -32,7 +32,7 @@ internal sealed class SelfHostEmbeddingClient(ILlmSelfHost host) : ILlmEmbedding
         EmbeddingResult result = await engine.EmbedAsync(new()
         {
             ModelId = request.ModelId,
-            Inputs = request.Inputs,
+            Inputs = request.Inputs.Select(text => (EmbeddingInput)new TextEmbeddingInput(text)).ToArray(),
             Kind = request.Kind,
             Instruction = request.Instruction,
             Dimensions = request.Dimensions,

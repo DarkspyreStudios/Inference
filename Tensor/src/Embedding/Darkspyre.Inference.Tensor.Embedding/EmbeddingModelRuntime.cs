@@ -26,8 +26,9 @@ internal static class EmbeddingModelRuntime
         for (int index = 0; index < request.Inputs.Count; index++)
         {
             token.ThrowIfCancellationRequested();
+            string content = ((TextEmbeddingInput)request.Inputs[index]).Text;
             string text = request.Kind == EmbeddingInputKind.Query
-                ? architecture.FormatQuery(request.Inputs[index], request.Instruction) : request.Inputs[index];
+                ? architecture.FormatQuery(content, request.Instruction) : content;
             if (Tokenize(model, text) is { } whole) { tokens[index] = whole; continue; }
             // The tokenizer refuses an input over the limit without reporting its length.
             tokens[index] = TokenizeCut(model, text);
@@ -58,7 +59,11 @@ internal static class EmbeddingModelRuntime
     private static int Validate(IEmbeddingModel model, TensorEmbeddingArchitecture architecture, EmbeddingRequest request)
     {
         static InferenceException Invalid(string message) => new(InferenceFailureCode.InvalidRequest, message);
-        if (request.Inputs is null || request.Inputs.Count == 0 || request.Inputs.Any(string.IsNullOrWhiteSpace))
+        if (request.Inputs is null || request.Inputs.Count == 0 || request.Inputs.Any(input => input is null))
+            throw Invalid("An embedding request needs at least one input, and no input may be empty.");
+        if (request.Inputs.Any(input => input is not TextEmbeddingInput))
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "This embedding model accepts text only.");
+        if (request.Inputs.Cast<TextEmbeddingInput>().Any(input => string.IsNullOrWhiteSpace(input.Text)))
             throw Invalid("An embedding request needs at least one input, and no input may be empty.");
         if (!Enum.IsDefined(request.Kind)) throw Invalid("The embedding input kind is not defined.");
         if (request.Instruction is not null && (request.Kind != EmbeddingInputKind.Query || !architecture.TakesInstruction))

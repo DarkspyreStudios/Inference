@@ -51,7 +51,9 @@ Assemblies included by the Tensor package:
   On Auto and the GGML backends the engine borrows the shared `GgmlRuntimeOwner`, so it runs on the
   backend the process's other GGML engines use; a pack that does not support that backend fails to
   load. The runtime formats queries itself: callers state whether inputs are queries or documents,
-  and documents are embedded as given. Qwen3 queries carry an instruction, by default the codebase
+  using Common's `TextEmbeddingInput`. Capabilities declare text support; a batch containing
+  `MediaEmbeddingInput` fails with `UnsupportedFeature` before the model runs.
+  Documents are embedded as given. Qwen3 queries carry an instruction, by default the codebase
   retrieval task; Arctic queries take the `query: ` prefix. The runtime counts every input before
   embedding any; an input over the limit fails the request with `EmbeddingInputTooLongException`,
   which names each over-limit input, unless the request permits truncation, in which case the

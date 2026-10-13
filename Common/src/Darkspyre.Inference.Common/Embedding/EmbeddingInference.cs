@@ -1,4 +1,32 @@
+using System.Text.Json.Serialization;
+using Darkspyre.Inference.Common.Media;
+
 namespace Darkspyre.Inference.Common.Embedding;
+
+/// <summary>A kind of content an embedding model accepts.</summary>
+public enum EmbeddingModality
+{
+    /// <summary>Text, including source code and supplied transcripts.</summary>
+    Text,
+    /// <summary>An encoded image.</summary>
+    Image
+}
+
+/// <summary>One item to embed. Content supplies no permission to access an original file.</summary>
+[JsonPolymorphic(TypeDiscriminatorPropertyName = "type",
+    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization)]
+[JsonDerivedType(typeof(TextEmbeddingInput), "text")]
+[JsonDerivedType(typeof(MediaEmbeddingInput), "media")]
+public abstract record EmbeddingInput;
+
+/// <summary>Text and an optional document title. The model owns task formatting.</summary>
+/// <param name="Text">The content to embed.</param>
+/// <param name="Title">The document title, when available.</param>
+public sealed record TextEmbeddingInput(string Text, string? Title = null) : EmbeddingInput;
+
+/// <summary>Caller-owned encoded media, borrowed for the duration of the request.</summary>
+/// <param name="Media">The bytes and their media type. The model declares the media it accepts.</param>
+public sealed record MediaEmbeddingInput(BinaryMediaSource Media) : EmbeddingInput;
 
 /// <summary>What an input is for. The model's runtime formats a query; a document is embedded as given.</summary>
 public enum EmbeddingInputKind
@@ -9,14 +37,14 @@ public enum EmbeddingInputKind
     Query
 }
 
-/// <summary>A batch of texts to embed with one model.</summary>
+/// <summary>A batch of content items to embed with one model.</summary>
 public sealed record EmbeddingRequest
 {
     /// <summary>The model that embeds the inputs.</summary>
     public required string ModelId { get; init; }
 
-    /// <summary>The texts to embed; the result holds one vector per input, in this order.</summary>
-    public required IReadOnlyList<string> Inputs { get; init; }
+    /// <summary>The content to embed; the result holds one vector per input, in this order.</summary>
+    public required IReadOnlyList<EmbeddingInput> Inputs { get; init; }
 
     /// <summary>Whether every input is a document or a query.</summary>
     public EmbeddingInputKind Kind { get; init; } = EmbeddingInputKind.Document;
@@ -63,6 +91,9 @@ public sealed record EmbeddingResult
 /// <summary>What an embedding model accepts and produces.</summary>
 public sealed record EmbeddingCapabilities
 {
+    /// <summary>The kinds of content this model accepts.</summary>
+    public required IReadOnlySet<EmbeddingModality> Modalities { get; init; }
+
     /// <summary>The vector size the model produces when a request names none.</summary>
     public required int NativeDimensions { get; init; }
 
@@ -102,7 +133,7 @@ public sealed class EmbeddingInputTooLongException : Exception
     public int MaximumInputTokens { get; }
 }
 
-/// <summary>Turns text into unit-length vectors for similarity search.</summary>
+/// <summary>Turns supported content into unit-length vectors for similarity search.</summary>
 public interface IEmbeddingInference
 {
     /// <summary>The implementation that serves the embeddings.</summary>

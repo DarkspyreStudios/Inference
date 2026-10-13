@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Collections.Frozen;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Embedding;
 using Darkspyre.Inference.Tensor.Common;
@@ -96,6 +97,7 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
         TensorEmbeddingArchitecture architecture = Architecture(definition);
         return new()
         {
+            Modalities = new[] { EmbeddingModality.Text }.ToFrozenSet(),
             NativeDimensions = architecture.NativeDimensions,
             SupportedDimensions = architecture.SupportedDimensions,
             MaximumInputTokens = architecture.MaximumInputTokens,

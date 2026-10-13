@@ -69,8 +69,12 @@ service without falling back to untyped dictionaries. An implementation that can
 request without deciding it implements `IDecisionInputMeasurement`: `MeasureAsync` returns the
 tokens the request's state encodes to and, per question, the most state tokens that question's input
 keeps. A question truncates the state when the first exceeds the second. `IEmbeddingInference`
-turns text into unit-length vectors. A request states whether its inputs are queries or documents;
-the model's runtime formats queries, and a document request takes no instruction. `Truncate`
+turns supported content into unit-length vectors. Its ordered input union carries `TextEmbeddingInput`
+with an optional document title or `MediaEmbeddingInput` with the existing `BinaryMediaSource`.
+Model capabilities declare accepted text/image modalities. Text-only engines reject a batch containing
+media before embedding any input. The JSON contract preserves the input kinds, order and content.
+A request states whether its inputs are queries or documents; the model's runtime owns formatting,
+and a document request takes no instruction. `Truncate`
 decides an over-limit input: false fails the whole request with `EmbeddingInputTooLongException`
 before any input is embedded, true cuts the input and lists it in the result. `Dimensions` asks for
 one of the model's `SupportedDimensions`. `ModelFingerprint` identifies the weights, architecture

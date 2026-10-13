@@ -11,6 +11,32 @@ public sealed class EmbeddingCleanupTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "embedding-cleanup-" + Guid.NewGuid().ToString("N"));
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
 
+    [Fact]
+    public async Task TextOnlyModelRejectsAMixedBatchBeforeEmbeddingAndRemainsUsable()
+    {
+        var model = new Model();
+        using TensorModelPackManager packs = await InstalledAsync();
+        await using var engine = Engine(packs, model);
+        await engine.LoadAndWaitAsync(Key);
+        EmbeddingCapabilities capabilities = await engine.GetCapabilitiesAsync();
+        Assert.Equal(EmbeddingModality.Text, Assert.Single(capabilities.Modalities));
+
+        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => engine.EmbedAsync(new()
+        {
+            ModelId = Key.ModelId,
+            Inputs = [new TextEmbeddingInput("reference"), new MediaEmbeddingInput(new("image/png", new byte[] { 1 }))]
+        }));
+        Assert.Equal(InferenceFailureCode.UnsupportedFeature, error.Code);
+        Assert.False(model.Entered.Task.IsCompleted);
+
+        EmbeddingResult result = await engine.EmbedAsync(new()
+        {
+            ModelId = Key.ModelId, Inputs = [new TextEmbeddingInput("reference")]
+        });
+        Assert.Single(result.Vectors);
+        Assert.Equal(1024, result.Dimensions);
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
@@ -85,7 +111,7 @@ public sealed class EmbeddingCleanupTests : IDisposable
         var engine = Engine(packs, model);
         await engine.LoadAndWaitAsync(Key);
         using var urgency = new CancellationTokenSource();
-        Task<EmbeddingResult> embedding = engine.EmbedAsync(new() { ModelId = Key.ModelId, Inputs = ["reference"] });
+        Task<EmbeddingResult> embedding = engine.EmbedAsync(new() { ModelId = Key.ModelId, Inputs = [new TextEmbeddingInput("reference")] });
         await model.Entered.Task.WaitAsync(Timeout);
         try
         {

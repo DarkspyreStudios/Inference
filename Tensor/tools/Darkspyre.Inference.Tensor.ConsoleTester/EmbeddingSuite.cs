@@ -47,14 +47,14 @@ internal static class EmbeddingSuite
             EmbeddingResult documents = await engine.EmbedAsync(new()
             {
                 ModelId = definition.Key.ModelId,
-                Inputs = ["Dispose the loaded model before shutting down the native runtime.",
-                    "The invoice lists the purchased items and their prices."],
+                Inputs = [new TextEmbeddingInput("Dispose the loaded model before shutting down the native runtime."),
+                    new TextEmbeddingInput("The invoice lists the purchased items and their prices.")],
                 Dimensions = 512
             }, token);
             EmbeddingResult query = await engine.EmbedAsync(new()
             {
                 ModelId = definition.Key.ModelId,
-                Inputs = ["How do I release the native model and runtime?"],
+                Inputs = [new TextEmbeddingInput("How do I release the native model and runtime?")],
                 Kind = EmbeddingInputKind.Query,
                 Dimensions = 512
             }, token);
