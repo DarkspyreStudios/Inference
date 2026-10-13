@@ -22,7 +22,7 @@ internal static class SelfHostSuite
         services.AddSingleton<ILlmConnectionSource>(new TesterConnections());
         services.AddSingleton<ILlmSelfHost>(new TesterHost(engine, capabilities));
         services.AddLlmConnect();
-        services.AddLlmConnectSelfHost();
+
         await using ServiceProvider provider = services.BuildServiceProvider();
         LlmAgentProviderService agents = provider.GetRequiredService<LlmAgentProviderService>();
 

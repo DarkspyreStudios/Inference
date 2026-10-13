@@ -110,13 +110,17 @@ public sealed class CollectibleSerializationTests
             Assert.IsAssignableFrom(sourceContract, source);
             IServiceCollection services = new ServiceCollection();
             services.Add(ServiceDescriptor.Singleton(sourceContract, source));
+            Type hostContract = assembly.GetType(typeof(ILlmSelfHost).FullName!, throwOnError: true)!;
+            object host = Activator.CreateInstance(fixtures.GetType(
+                typeof(CollectibleSerializationTests).FullName + "+UnusedSelfHost", throwOnError: true)!, nonPublic: true)!;
+            services.Add(ServiceDescriptor.Singleton(hostContract, host));
             register.Invoke(null, [services]);
             container = services.BuildServiceProvider();
             Type clientType = assembly.GetType(typeof(ILlmClient).FullName!, throwOnError: true)!;
             var clients = (System.Collections.IEnumerable)container.GetRequiredService(typeof(IEnumerable<>).MakeGenericType(clientType));
             object[] resolved = clients.Cast<object>().ToArray();
-            Assert.Equal(3, resolved.Length);
-            Assert.All(resolved, client => Assert.Same(assembly, client.GetType().Assembly));
+            Assert.Equal(4, resolved.Length);
+            Assert.All(resolved, client => Assert.Same(context, AssemblyLoadContext.GetLoadContext(client.GetType().Assembly)));
             object pool = container.GetRequiredService(assembly.GetType(
                 "Darkspyre.Inference.Connect.LLM.Internal.SdkHttpGenerationPool", throwOnError: true)!);
             Assert.Same(assembly, pool.GetType().Assembly);
@@ -216,6 +220,17 @@ public sealed class CollectibleSerializationTests
             references.Add(new(typeInfo.Options));
         }
         return roots.Length;
+    }
+
+    private sealed class UnusedSelfHost : ILlmSelfHost
+    {
+        public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<Common.Embedding.IEmbeddingInference> GetEmbeddingInferenceAsync(string engineId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public LlmCapabilities? GetCapabilities(string engineId, string? modelId) => throw new NotSupportedException();
     }
 
     private sealed class SerializationGeneration(string directory) : AssemblyLoadContext("ConnectJsonGeneration", isCollectible: true)

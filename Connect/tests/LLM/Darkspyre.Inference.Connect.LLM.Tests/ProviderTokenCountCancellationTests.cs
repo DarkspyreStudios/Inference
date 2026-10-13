@@ -152,7 +152,7 @@ public sealed class ProviderTokenCountCancellationTests
         : ILlmClient, ILlmProviderTokenCounter, ILlmTextTokenizerClient
     {
         public LlmTransport Transport => LlmTransport.OpenAiResponses;
-        public LlmProviderDefinition ProviderDefinition => ProviderDefinitions.OpenAiApiKey;
+        public LlmProviderDefinition ProviderDefinition => OpenAiApiDefinition.Value;
         public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => new();
 
         public Task<LlmProviderInputTokenCount> CountInputTokensAsync(LlmConnection connection, LlmChatRequest request,

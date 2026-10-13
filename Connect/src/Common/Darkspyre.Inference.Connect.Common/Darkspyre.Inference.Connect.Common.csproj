@@ -4,7 +4,7 @@
     <!-- LibraryImport generates unsafe marshalling code for the process-group kill in CliProcessTermination. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>Darkspyre.Inference.Connect.Common</AssemblyName>
-    <Description>Provider-neutral .NET client for OpenAI, compatible chat APIs, Anthropic, direct ChatGPT subscriptions, Claude and Antigravity CLIs, host-executed tools, managed and native agent sessions, structured output, streaming, model discovery, account usage, and embeddings.</Description>
+    <Description>Universal conversation and embedding contracts, shared provider infrastructure and automatic Connect discovery.</Description>
     <PackageTags>llm;ai;openai;anthropic;claude;codex;gemini;antigravity;tool-use;structured-output</PackageTags>
   </PropertyGroup>
 
@@ -30,7 +30,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- The build has only the Codex, Claude CLI and OpenAI API providers. Excluded source stays in the repository. -->
+    <!-- Inactive providers remain excluded. Active providers live in their own library projects. -->
     <Compile Remove="Providers/Anthropic*.cs;Providers/ManagedAnthropicAgentClient.cs" />
     <Compile Remove="Providers/Antigravity*.cs;Providers/IAntigravityCliRunner.cs" />
     <Compile Remove="Providers/Apple*.cs;Providers/ManagedAppleAgentClient.cs" />

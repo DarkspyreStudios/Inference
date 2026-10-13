@@ -988,4 +988,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             ? LlmContextOverflow.OpenAiApi(code, LlmJson.GetString(error, "type"), LlmJson.GetString(error, "message"))
             : LlmContextOverflow.Responses(code);
     }
+    /// <summary>True when the endpoint's host is api.openai.com.</summary>
+    internal static bool IsOpenAiEndpoint(LlmConnection connection) =>
+        Uri.TryCreate(connection.Endpoint, UriKind.Absolute, out Uri? endpoint)
+        && string.Equals(endpoint.Host, "api.openai.com", StringComparison.OrdinalIgnoreCase);
 }

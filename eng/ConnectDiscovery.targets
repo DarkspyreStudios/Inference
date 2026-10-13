@@ -1,0 +1,15 @@
+<Project>
+  <!-- Source-mode consumers receive no NuGet buildTransitive imports. Preserve the same
+       provider roots after references resolve, including transitive provider references. -->
+  <Target Name="RootConnectDiscoveryProviders" BeforeTargets="PrepareForILLink" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <_ConnectDiscoveryAssembly Include="@(ReferenceCopyLocalPaths)"
+          Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll' and
+            ('%(ReferenceCopyLocalPaths.Filename)' == 'Darkspyre.Inference.Connect.Codex' or
+             '%(ReferenceCopyLocalPaths.Filename)' == 'Darkspyre.Inference.Connect.Claude' or
+             '%(ReferenceCopyLocalPaths.Filename)' == 'Darkspyre.Inference.Connect.OpenAiApi' or
+             '%(ReferenceCopyLocalPaths.Filename)' == 'Darkspyre.Inference.Connect.SelfHost')" />
+      <TrimmerRootAssembly Include="@(_ConnectDiscoveryAssembly->'%(Filename)')" />
+    </ItemGroup>
+  </Target>
+</Project>

@@ -13,7 +13,7 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
 
     public override LlmTransport Transport => LlmTransport.OpenAiResponses;
 
-    public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.OpenAiApiKey;
+    public override LlmProviderDefinition ProviderDefinition => OpenAiApiDefinition.Value;
 
     protected override bool SupportsResourcePreparation => true;
 
@@ -111,8 +111,4 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
     protected override bool ReasonsByDefault(LlmConnection connection, string modelId) =>
         IsOpenAiEndpoint(connection) && OpenAiModelProfiles.Get(modelId) is { Verified: true, IsReasoning: true };
 
-    /// <summary>True when the endpoint's host is api.openai.com.</summary>
-    internal static bool IsOpenAiEndpoint(LlmConnection connection) =>
-        Uri.TryCreate(connection.Endpoint, UriKind.Absolute, out Uri? endpoint)
-        && string.Equals(endpoint.Host, "api.openai.com", StringComparison.OrdinalIgnoreCase);
 }

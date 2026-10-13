@@ -31,7 +31,7 @@ main() {
     local release_token release_login visibility existing cache package_lower artifact
     local feed='https://nuget.pkg.github.com/DarkspyreStudios/index.json'
     local stage='preflight'
-    local -a packages=(Common Connect Tensor.Common Tensor.Decision.Laya Tensor.Embedding Tensor.Embedding.Gemma Tensor.Ggml Tensor.Image.Supra Tensor.LLM.Qwen Tensor.Registry Tensor.STT.Whisper UI.Settings)
+    local -a packages=(Common Connect Connect.Common Connect.Codex Connect.Claude Connect.OpenAiApi Connect.SelfHost Tensor.Common Tensor.Decision.Laya Tensor.Embedding Tensor.Embedding.Gemma Tensor.Ggml Tensor.Image.Supra Tensor.LLM.Qwen Tensor.Registry Tensor.STT.Whisper UI.Settings)
     local -a version_files=(Directory.Build.props README.md Common/README.md Connect/README.md Tensor/README.md UI/README.md)
     [[ "$mode" == major || "$mode" == minor ]] || fail 'Use deploy-major.sh or deploy-minor.sh.'
     if [[ "$option" == --help ]]; then
@@ -117,6 +117,11 @@ main() {
     stage='pack and local consumer verification'
     dotnet pack ../Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj -c Release --no-build --no-restore
     dotnet pack src/Darkspyre.Inference.Connect/Darkspyre.Inference.Connect.csproj -c Release --no-build --no-restore
+    dotnet pack src/Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj -c Release --no-build --no-restore
+    dotnet pack src/Codex/Darkspyre.Inference.Connect.Codex/Darkspyre.Inference.Connect.Codex.csproj -c Release --no-build --no-restore
+    dotnet pack src/Claude/Darkspyre.Inference.Connect.Claude/Darkspyre.Inference.Connect.Claude.csproj -c Release --no-build --no-restore
+    dotnet pack src/OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi.csproj -c Release --no-build --no-restore
+    dotnet pack src/SelfHost/Darkspyre.Inference.Connect.SelfHost/Darkspyre.Inference.Connect.SelfHost.csproj -c Release --no-build --no-restore
     dotnet pack ../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj -c Release --no-build --no-restore
     dotnet pack ../Tensor/src/Decision/Darkspyre.Inference.Tensor.Decision.Laya/Darkspyre.Inference.Tensor.Decision.Laya.csproj -c Release --no-build --no-restore
     dotnet pack ../Tensor/src/Embedding/Darkspyre.Inference.Tensor.Embedding/Darkspyre.Inference.Tensor.Embedding.csproj -c Release --no-build --no-restore

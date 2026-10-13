@@ -24,7 +24,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
     protected override LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
         CodexRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
 
-    public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.ChatGptSubscription;
+    public override LlmProviderDefinition ProviderDefinition => CodexDefinition.Value;
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {

@@ -5,7 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
-    <ProjectReference Include="../Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
+    <ProjectReference Include="../../Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
     <PackageReference Include="Google.Apis.Auth" />
   </ItemGroup>
 </Project>

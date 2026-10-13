@@ -74,7 +74,7 @@ public sealed class LlmSettingsTests
     public async Task BlankCliExecutableUsesProviderDefaultForChecksAndSave(LlmTransport transport)
     {
         LlmProviderDefinition definition = transport == LlmTransport.AnthropicClaudeCli
-            ? ProviderDefinitions.ClaudeSubscription : ProviderDefinitions.GeminiSubscription;
+            ? ClaudeDefinition.Value : ProviderDefinitions.GeminiSubscription;
         using var provider = new LlmProviderService(new UnusedSource(), [new Client(definition)]);
         var target = new Target();
         var (manager, settings) = await OpenAsync(provider, transport,
@@ -98,8 +98,8 @@ public sealed class LlmSettingsTests
     [Fact]
     public async Task DirectCodexHasNoEndpointFieldAndReplacesAFormerEndpointOnSave()
     {
-        var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.ChatGptSubscription)], [new DeviceAuth()]);
-        string official = ProviderDefinitions.ChatGptSubscription.DefaultEndpoint;
+        var provider = new LlmProviderService(new UnusedSource(), [new Client(CodexDefinition.Value)], [new DeviceAuth()]);
+        string official = CodexDefinition.Value.DefaultEndpoint;
         var created = new Target();
         var (createManager, create) = await OpenAsync(provider, LlmTransport.OpenAiCodex,
             new(SetupChangeIntent.Create, "id", null), created, modelId: "model");
@@ -137,7 +137,7 @@ public sealed class LlmSettingsTests
     [Fact]
     public async Task OpenAiApiConnectionSavesWithoutKey()
     {
-        using var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiApiKey)]);
+        using var provider = new LlmProviderService(new UnusedSource(), [new Client(OpenAiApiDefinition.Value)]);
         var target = new Target();
         var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiResponses,
             new(SetupChangeIntent.Create, "id", null), target, modelId: "model");
@@ -156,7 +156,7 @@ public sealed class LlmSettingsTests
     [Fact]
     public async Task ContextLengthRowsWriteModelOverrides()
     {
-        using var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiApiKey)]);
+        using var provider = new LlmProviderService(new UnusedSource(), [new Client(OpenAiApiDefinition.Value)]);
         var target = new Target();
         LlmConnection existing = new()
         {
@@ -245,7 +245,7 @@ public sealed class LlmSettingsTests
     [Fact]
     public async Task CallbackRestartChangesIdentityAndNeverEchoesEnteredCode()
     {
-        var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.ClaudeSubscription)], [new BrowserAuth()]);
+        var provider = new LlmProviderService(new UnusedSource(), [new Client(ClaudeDefinition.Value)], [new BrowserAuth()]);
         var (manager, settings) = await OpenAsync(provider, LlmTransport.AnthropicClaudeCli,
             new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
         await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Authenticate).Id);
@@ -261,7 +261,7 @@ public sealed class LlmSettingsTests
     [Fact]
     public async Task ClaudeSignInSavesTheTokenAsTheConnectionCredentialAndMarksItAuthenticated()
     {
-        var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.ClaudeSubscription)], [new BrowserAuth()]);
+        var provider = new LlmProviderService(new UnusedSource(), [new Client(ClaudeDefinition.Value)], [new BrowserAuth()]);
         var created = new Target();
         var (manager, settings) = await OpenAsync(provider, LlmTransport.AnthropicClaudeCli,
             new(SetupChangeIntent.Create, "id", null), created, modelId: "model");

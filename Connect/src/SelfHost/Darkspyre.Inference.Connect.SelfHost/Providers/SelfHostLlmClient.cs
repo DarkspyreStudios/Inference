@@ -16,7 +16,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
 {
     public LlmTransport Transport => LlmTransport.SelfHost;
 
-    public LlmProviderDefinition ProviderDefinition => ProviderDefinitions.SelfHost;
+    public LlmProviderDefinition ProviderDefinition => SelfHostDefinition.Value;
 
     public string? EstimateDiagnostic => LocalTokenCount.CliDiagnostic;
 

@@ -15,7 +15,7 @@
     <ProjectReference Include="..\..\src\Ggml\Darkspyre.Inference.Tensor.Ggml\Darkspyre.Inference.Tensor.Ggml.csproj" />
     <ProjectReference Include="..\..\src\Embedding\Darkspyre.Inference.Tensor.Embedding\Darkspyre.Inference.Tensor.Embedding.csproj" />
     <!-- Runs the loaded engine through Connect's SelfHost transport and managed agent lane. -->
-    <ProjectReference Include="..\..\..\Connect\src\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" />
+    <ProjectReference Include="../../../Connect/src/Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../../Connect/src/SelfHost/Darkspyre.Inference.Connect.SelfHost/Darkspyre.Inference.Connect.SelfHost.csproj" />

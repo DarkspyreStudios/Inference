@@ -57,14 +57,16 @@ solution, version and deployment outside the coordinated library release.
 | NuGet package | Responsibility |
 |---|---|
 | `Darkspyre.Inference.Common` | Genuinely shared typed inference and setup contracts, including LLM, image, and decision models |
-| `Darkspyre.Inference.Connect` | Connections to external inference providers, HTTP services, and supported official CLIs |
+| `Darkspyre.Inference.Connect.Common` | Universal conversation and embedding contracts, shared services and automatic provider discovery |
+| `Darkspyre.Inference.Connect.Codex`, `.Claude`, `.OpenAiApi`, `.SelfHost` | Independently selected providers through the universal contract |
+| `Darkspyre.Inference.Connect` | Existing Image, TTS and Audio capability assemblies |
 | `Darkspyre.Inference.Tensor.Common` | Tensor capability contracts, model lifecycle and verified model packs |
 | `Darkspyre.Inference.Tensor.*` model libraries | Independently consumed in-process loaders and their runtime dependencies |
 | `Darkspyre.Inference.UI.Settings` | Optional host-placed Blazor/Lumeo editor for the shared setup contracts |
 
 Connect, Tensor, and UI.Settings reference the **exact same-version Common NuGet**; they do not
-embed its DLL. UI.Settings does not depend on Connect or Tensor. Capability-specific assemblies
-ship inside their owning product package, not as additional independently versioned NuGets.
+embed its DLL. UI.Settings does not depend on Connect or Tensor. Connect provider and Tensor model libraries are independent packages at the synchronized family version.
+The media Connect package retains its Image, TTS and Audio assemblies.
 Third-party runtimes are declared package dependencies rather than copied into these archives.
 
 Shared contracts do not imply identical provider capabilities. Query what the selected model
@@ -379,7 +381,7 @@ Consumers of these packages use [eng/SourceReferences.targets](eng/SourceReferen
 that sets `InferenceSourceRoot` imports it, and each `Darkspyre.Inference.*` PackageReference becomes ProjectReferences
 to the projects that package carries: Common and UI.Settings map to their one project, and Connect and Tensor to every
 Connect library project except its packaging project. A Tensor reference selects its named library project.
-ExcludeAssets and PrivateAssets carry over. Connect.LLM references `Microsoft.Bcl.Memory` directly, because the central
+ExcludeAssets and PrivateAssets carry over. Connect.Common references `Microsoft.Bcl.Memory` directly, because the central
 transitive pin that patches it does not reach a project-reference consumer.
 
 To deploy from a clean `master` checkout:

@@ -73,7 +73,7 @@ public sealed class SelfHostCatalogTests
         services.AddSingleton<ILlmConnectionSource>(new Source());
         services.AddSingleton<ILlmSelfHost>(new Host(engine));
         services.AddLlmConnect();
-        services.AddLlmConnectSelfHost();
+
         return services.BuildServiceProvider();
     }
 

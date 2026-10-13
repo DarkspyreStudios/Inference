@@ -47,7 +47,7 @@ internal static class GemmaSuite
         Console.WriteLine($"Loaded {backend} in {loadMs:F1} ms.");
         var services = new ServiceCollection();
         services.AddLlmConnect();
-        services.AddLlmConnectSelfHost();
+
         services.AddSingleton<ILlmSelfHost>(new Engines(engine));
         services.AddSingleton<ILlmConnectionSource>(new Connections());
         await using ServiceProvider provider = services.BuildServiceProvider();

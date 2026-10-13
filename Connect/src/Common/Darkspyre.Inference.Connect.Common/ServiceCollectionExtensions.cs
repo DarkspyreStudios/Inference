@@ -1,5 +1,4 @@
 using Darkspyre.Inference.Connect.LLM.Internal;
-using Darkspyre.Inference.Connect.LLM.Providers;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM;
@@ -27,51 +26,17 @@ public static class ServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers transport clients and the provider facade. The host must separately register an
+    /// Discovers deployed provider libraries and registers their clients and the shared facades. The caller supplies an
     /// <see cref="ILlmConnectionSource"/> implementation.
     /// </summary>
+    /// <gotcha>Call once per service collection. SelfHost requires caller-owned ILlmSelfHost when included.</gotcha>
     public static IServiceCollection AddLlmConnect(this IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        services.AddSingleton(ProviderDefinitions.ClaudeSubscription);
-        services.AddSingleton(ProviderDefinitions.ChatGptSubscription);
-        services.AddSingleton(ProviderDefinitions.OpenAiApiKey);
         services.AddSingleton<LlmProviderCatalog>();
-        // What reported counts and refusals taught about each model on each connection, shared by its sessions.
         services.AddSingleton<LearnedModelContext>();
-        services.AddInferenceHttpClient<ClaudeCliLlmClient>();
-        services.AddInferenceHttpClient<OpenAiEmbeddingClient>();
         services.AddLogging();
-        // The container's disposal waits for every Claude CLI still finishing in the background.
-        services.AddSingleton<ClaudeCliExits>();
-        services.AddSingleton<IClaudeCliRunner, ClaudeCliProcessRunner>();
-        services.AddSingleton<IClaudeCliSessionProcessFactory, ClaudeCliSessionProcessFactory>();
-        services.AddTransient<ILlmClient>(provider =>
-            provider.GetRequiredService<ClaudeCliLlmClient>());
-        services.AddInferenceHttpClient<OpenAiCodexLlmClient>();
-        services.AddTransient<ILlmClient>(provider =>
-            provider.GetRequiredService<OpenAiCodexLlmClient>());
-        services.AddTransient<ILlmAgentClient>(provider => new ManagedLlmAgentClient<OpenAiCodexLlmClient>(
-            provider.GetRequiredService<OpenAiCodexLlmClient>(), provider.GetRequiredService<LlmProviderService>(),
-            provider.GetRequiredService<LearnedModelContext>()));
-        services.AddInferenceHttpClient<OpenAiResponsesLlmClient>()
-            .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout);
-        services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<OpenAiResponsesLlmClient>());
-        services.AddTransient<ILlmAgentClient>(provider => new ManagedLlmAgentClient<OpenAiResponsesLlmClient>(
-            provider.GetRequiredService<OpenAiResponsesLlmClient>(), provider.GetRequiredService<LlmProviderService>(),
-            provider.GetRequiredService<LearnedModelContext>()));
-        services.AddTransient<ClaudeAgentClient>();
-        services.AddTransient<ILlmAgentClient>(provider =>
-            provider.GetRequiredService<ClaudeAgentClient>());
-        services.AddInferenceHttpClient<CodexAuthenticator>();
-        services.AddInferenceHttpClient<ClaudeAuthenticator>();
-        services.AddTransient<ILlmAuthenticator>(provider =>
-            provider.GetRequiredService<CodexAuthenticator>());
-        services.AddTransient<ILlmAuthenticator>(provider =>
-            provider.GetRequiredService<ClaudeAuthenticator>());
-        services.AddTransient<ILlmEmbeddingClient>(provider =>
-            provider.GetRequiredService<OpenAiEmbeddingClient>());
         services.AddSingleton<LlmModelListCache>();
         services.AddSingleton<LlmAccountUsageObservations>();
         // Reflection-based activation sees only public constructors, and these take internal adapter interfaces.
@@ -89,24 +54,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped(provider => new LlmEmbeddingProviderService(
             provider.GetRequiredService<ILlmConnectionSource>(), provider.GetServices<ILlmEmbeddingClient>(),
             provider.GetServices<ILlmAuthenticator>(), provider.GetRequiredService<LlmConnectionAccess>()));
-        return services;
-    }
-
-    /// <summary>
-    /// Adds conversations and text/image embeddings through caller-owned in-process engines.
-    /// Call <see cref="AddLlmConnect(IServiceCollection)"/> and register <see cref="ILlmSelfHost"/> separately.
-    /// This registration neither loads engines nor owns their lifetime.
-    /// </summary>
-    public static IServiceCollection AddLlmConnectSelfHost(this IServiceCollection services)
-    {
-        ArgumentNullException.ThrowIfNull(services);
-        services.AddSingleton(ProviderDefinitions.SelfHost);
-        services.AddTransient<SelfHostLlmClient>();
-        services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<SelfHostLlmClient>());
-        services.AddTransient<ILlmAgentClient>(provider => new ManagedLlmAgentClient<SelfHostLlmClient>(
-            provider.GetRequiredService<SelfHostLlmClient>(), provider.GetRequiredService<LlmProviderService>(),
-            provider.GetRequiredService<LearnedModelContext>()));
-        services.AddTransient<ILlmEmbeddingClient, SelfHostEmbeddingClient>();
+        LlmConnectDiscovery.RegisterServices(services);
         return services;
     }
 

@@ -312,7 +312,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     /// later endpoint change (B13).</summary>
     private SetupBooleanField ServiceTiersField()
     {
-        bool defaultValue = OpenAiResponsesLlmClient.IsOpenAiEndpoint(_draft);
+        bool defaultValue = ResponsesLlmClientBase.IsOpenAiEndpoint(_draft);
         return new(new("service-tiers", "Service tiers")
         {
             HelpText = "Show the service-tier choice in the chat panel and send the chosen tier. OpenAI's own service offers tiers."
@@ -321,7 +321,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             {
                 CapabilityOverrides = (_draft.CapabilityOverrides ?? new()) with
                 {
-                    SupportsServiceTiers = value == OpenAiResponsesLlmClient.IsOpenAiEndpoint(_draft) ? null
+                    SupportsServiceTiers = value == ResponsesLlmClientBase.IsOpenAiEndpoint(_draft) ? null
                         : value ? InferenceSupport.Supported : InferenceSupport.Unsupported
                 }
             }));

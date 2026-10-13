@@ -6,7 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="Darkspyre.SecureStore" />
-    <ProjectReference Include="..\..\src\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" />
+    <ProjectReference Include="../../src/Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
     <ProjectReference Include="..\..\src\TTS\Darkspyre.Inference.Connect.TTS\Darkspyre.Inference.Connect.TTS.csproj" />
   </ItemGroup>
 

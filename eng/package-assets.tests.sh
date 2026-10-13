@@ -17,9 +17,20 @@ dotnet msbuild "$project" -t:DoNotRepackWhisperRuntime -getItem:None -nologo |
     jq -e '[.Items.None[] | select(.DefiningProjectName == "Whisper.net.Runtime")] |
         length > 0 and all(.[]; .Pack == "false")' >/dev/null
 # _GetPackageFiles collects archive inputs without packing or publishing.
-for project in ../Tensor/src/*/*/*.csproj; do
+for project in ../Tensor/src/*/*/*.csproj ../Connect/src/{Common,Codex,Claude,OpenAiApi,SelfHost}/*/*.csproj; do
     dotnet msbuild "$project" -t:_GetPackageFiles -getItem:_PackageFiles -p:Configuration=Release -nologo |
         jq -e '(.Items._PackageFiles | length > 0) and
             ([.Items._PackageFiles[] | select(.Identity | test("\\.(dll|metal|metallib|dylib|so|a)$"; "i"))] | length == 0)' >/dev/null
 done
+# A provider selected only through discovery retains its assembly attribute in trimmed builds.
+for provider in Codex Claude OpenAiApi SelfHost; do
+    project="src/$provider/Darkspyre.Inference.Connect.$provider/Darkspyre.Inference.Connect.$provider.csproj"
+    dotnet msbuild "$project" -t:_GetPackageFiles -getItem:_PackageFiles -nologo |
+        jq -e --arg target "Darkspyre.Inference.Connect.$provider.targets" \
+            '[.Items._PackageFiles[] | select(.Filename + .Extension == $target and .PackagePath == "buildTransitive/")] | length == 1' >/dev/null
+done
+dotnet msbuild tests/LLM/Darkspyre.Inference.Connect.LLM.Tests/Darkspyre.Inference.Connect.LLM.Tests.csproj \
+    -t:RootConnectDiscoveryProviders -getItem:TrimmerRootAssembly -nologo |
+    jq -e '[.Items.TrimmerRootAssembly[].Identity] | sort ==
+        ["Darkspyre.Inference.Connect.Claude", "Darkspyre.Inference.Connect.Codex", "Darkspyre.Inference.Connect.OpenAiApi", "Darkspyre.Inference.Connect.SelfHost"]' >/dev/null
 printf 'Package asset checks passed: independently packed libraries; no repacked native assets; output collisions rejected.\n'

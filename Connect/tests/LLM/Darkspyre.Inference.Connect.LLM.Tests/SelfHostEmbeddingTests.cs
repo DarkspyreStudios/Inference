@@ -36,7 +36,7 @@ public sealed class SelfHostEmbeddingTests
         var engine = new Embeddings();
         var services = new ServiceCollection();
         services.AddLlmConnect();
-        services.AddLlmConnectSelfHost();
+
         services.AddSingleton<ILlmConnectionSource>(new Source(new() { Version = "1", Transport = LlmTransport.SelfHost, Endpoint = "engine" }));
         services.AddSingleton<ILlmSelfHost>(new Host(engine));
         await using var provider = services.BuildServiceProvider();

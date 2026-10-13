@@ -2,15 +2,43 @@
 
 ## Phase-1 build
 
-This build compiles three LLM providers: the native Codex client (`OpenAiCodexLlmClient`), the OpenAI API
-(`OpenAiResponsesLlmClient`), both opened by `ManagedLlmAgentClient<TClient>`, and the Claude CLI
-(`ClaudeCliLlmClient` and `ClaudeAgentClient`). `AddLlmConnect` registers only these clients, their
-authenticators, the Claude subscription, ChatGPT subscription and OpenAI API Key setup definitions and
-`OpenAiEmbeddingClient`. Setup offers only those three providers.
+The conversation libraries are independently consumable:
 
-`AddLlmConnectSelfHost` adds in-process conversations and text/image embeddings when the caller registers `ILlmSelfHost`. Connect borrows those engines through Common contracts. It neither loads nor disposes them.
+| Package | Contents |
+|---|---|
+| `Darkspyre.Inference.Connect.Common` | Universal conversation and embedding contracts, facades, shared protocol code and discovery |
+| `Darkspyre.Inference.Connect.Codex` | Native Codex client and authentication |
+| `Darkspyre.Inference.Connect.Claude` | Official Claude CLI conversations and authentication |
+| `Darkspyre.Inference.Connect.OpenAiApi` | OpenAI Responses conversations and text embeddings |
+| `Darkspyre.Inference.Connect.SelfHost` | Conversations and text/image embeddings through caller-owned engines |
 
-Every other LLM provider is out of the build. `Darkspyre.Inference.Connect.LLM.csproj` excludes the
+Each provider depends on the exact matching Connect.Common version. Common depends on
+Inference.Common. Providers reference neither another provider nor a Tensor implementation.
+The public `Darkspyre.Inference.Connect.LLM` namespace remains the universal contract.
+The `Darkspyre.Inference.Connect` package contains the existing Image, TTS and Audio assemblies
+and depends on Common; it includes no conversation provider.
+
+Applications reference the provider libraries they use, then call `services.AddLlmConnect()` once
+per service collection. Common inspects `Darkspyre.Inference.Connect.*.dll` beside its own assembly
+and invokes each library's `LlmConnectProviderAttribute`. Discovery loads candidates through
+Common's own assembly load context, including providers not previously loaded. Registration holds
+no process-global assembly registry, so a collectible plugin generation can retire with its container.
+Common alone registers no provider. The catalog lists only the discovered provider definitions.
+
+Discovery registers services without reading credentials, calling providers or loading engines.
+The caller supplies `ILlmConnectionSource`. Including SelfHost also requires caller-owned
+`ILlmSelfHost` when resolving its clients. Connect borrows those engines through Common contracts;
+the caller owns their loading and disposal. Codex, OpenAiApi and SelfHost use the shared managed
+conversation implementation. Claude uses its native universal conversation implementation.
+
+Every library is one managed artifact for Mac, Linux and Windows. Existing runtime OS handling
+stays inside the libraries. Discovery requires deployed assembly files. A deployment without a
+Common assembly location fails with `Connect discovery requires its libraries to be deployed as
+assembly files.` Filesystem, loading and registration failures surface during composition.
+Provider package buildTransitive targets and source-mode targets preserve provider assemblies for
+trimming. This rooting does not establish full application trimming or NativeAOT compatibility.
+
+Every other LLM provider is out of the build. `Darkspyre.Inference.Connect.Common.csproj` excludes the
 Anthropic API, Antigravity, Apple, OpenAI-compatible chat, Gemini API and xAI files with
 `Compile Remove`. The Image project excludes the xAI image transport and the TTS project
 excludes the xAI speech transport. The Bedrock, Vertex, Azure, STT, Realtime, Video, Resources and examples
@@ -1880,7 +1908,7 @@ Non-xAI embedding calls retain their existing construction without a catalog fac
 facades are runtime composition, not portable data: owned options preserve null and refuse non-null
 values without serializing their collaborators. No runtime facade getter is exported.
 
-`AddLlmConnectSelfHost` registers the SelfHost embedding client. It embeds through the host's
+`AddLlmConnect` registers the SelfHost embedding client. It embeds through the host's
 `ILlmSelfHost.GetEmbeddingInferenceAsync(engineId)`, where the connection's endpoint names the
 engine. It shares chat's connection refusal policy for provider options, HTTP headers and capability
 overrides, and refuses request provider options before acquiring the engine.

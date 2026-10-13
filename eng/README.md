@@ -47,7 +47,7 @@ a GGML native package. A native check uses the supplier version required by the 
    README files. Commit only those files. Historical design/release versions remain unchanged.
 3. Restore all three solutions; build and test Debug and Release; verify formatting and explicitly
    reject vulnerability findings from the transitive JSON audits.
-4. Pack Common, Connect, every Tensor library and UI.Settings. `eng/VerifyPackages` checks owned assembly
+4. Pack Common, the media Connect package, every Connect provider/Common and Tensor library, and UI.Settings. `eng/VerifyPackages` checks owned assembly
    boundaries, exact family dependencies and release-source identity.
 5. Restore/run `eng/VerifyConsumer` against the local archives. Its build rejects distinct package
    assets targeting the same copy-output path. Reject concurrent source changes.
@@ -65,7 +65,8 @@ system temporary directory and its exact path is printed on success.
 
 Every package includes a readable package README and the repository license. Pack verification
 confirms that the Common assembly appears only in the Common package, that internal library dependencies use the exact synchronized version, and that each Tensor library
-contains only its own assembly plus XML documentation. Connect keeps its capability assemblies together. UI.Settings also includes its static web
+contains only its own assembly plus XML documentation. Connect.Common and each provider own one assembly.
+The media Connect package keeps Image, TTS and Audio together and depends on Connect.Common. UI.Settings also includes its static web
 assets and `THIRD-PARTY-NOTICES.md` for its owned numeric control's Lumeo-derived
 layout/accessibility. Lumeo is an unmodified package dependency, not a fork.
 
@@ -170,3 +171,11 @@ remain separate inventory entries, not a claim that the entire Tensor graph is n
 The OpenCV Windows ARM64 runtime is absent. The OpenCV Windows x64 runtime includes an x86
 `opencv_videoio_ffmpeg.dll`; the inventory reports the mismatch. Asset inventory does not qualify
 execution on any of the five RIDs.
+
+## Connect provider discovery assets
+
+Each provider package carries a buildTransitive target that roots its assembly during trimming.
+Source-mode consumers use `ConnectDiscovery.targets`, imported by the source map and repository
+build, to root the included provider outputs after reference resolution. This keeps automatic
+registration reachable when an application uses only the Common facade. The package-input audit
+checks the roots and the separate library boundaries without creating archives.

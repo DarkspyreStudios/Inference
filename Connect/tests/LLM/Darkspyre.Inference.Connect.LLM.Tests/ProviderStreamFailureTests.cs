@@ -296,7 +296,7 @@ public sealed class ProviderStreamFailureTests
     private sealed class FailingClient(IAsyncEnumerable<LlmStreamEvent> stream) : ILlmClient
     {
         public LlmTransport Transport => LlmTransport.OpenAiResponses;
-        public LlmProviderDefinition ProviderDefinition => ProviderDefinitions.OpenAiApiKey;
+        public LlmProviderDefinition ProviderDefinition => OpenAiApiDefinition.Value;
         public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => new();
         public Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection,
             CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<LlmModel>>([]);

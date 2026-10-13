@@ -5,7 +5,7 @@
     PackageReference then becomes ProjectReferences to the projects that package carries:
 
       Darkspyre.Inference.Common       Common/src/Darkspyre.Inference.Common
-      Darkspyre.Inference.Connect      every project under Connect/src except the packaging project
+      Darkspyre.Inference.Connect      the retained Image, TTS and Audio projects
       Darkspyre.Inference.Tensor.*     the named Tensor library project
       Darkspyre.Inference.UI.Settings  UI/src/Settings/Darkspyre.Inference.UI.Settings
 
@@ -25,8 +25,7 @@
     <PackageReference Remove="Darkspyre.Inference.Common" />
   </ItemGroup>
   <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect'))' != ''">
-    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Connect/src/**/*.csproj"
-        Exclude="$(_InferenceSourceRoot)Connect/src/Darkspyre.Inference.Connect/**;$(_InferenceSourceRoot)Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure/**;$(_InferenceSourceRoot)Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock/**;$(_InferenceSourceRoot)Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex/**;$(_InferenceSourceRoot)Connect/src/STT/**;$(_InferenceSourceRoot)Connect/src/Realtime/**;$(_InferenceSourceRoot)Connect/src/Video/**;$(_InferenceSourceRoot)Connect/src/Resources/**"
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Connect/src/Image/Darkspyre.Inference.Connect.Image/Darkspyre.Inference.Connect.Image.csproj;$(_InferenceSourceRoot)Connect/src/TTS/Darkspyre.Inference.Connect.TTS/Darkspyre.Inference.Connect.TTS.csproj;$(_InferenceSourceRoot)Connect/src/Audio/Darkspyre.Inference.Connect.Audio/Darkspyre.Inference.Connect.Audio.csproj"
         ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect')->'%(ExcludeAssets)')"
         PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect')->'%(PrivateAssets)')" />
     <PackageReference Remove="Darkspyre.Inference.Connect" />
@@ -92,10 +91,42 @@
     <PackageReference Remove="Darkspyre.Inference.UI.Settings" />
   </ItemGroup>
 
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Common'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Connect/src/Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Common')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Common')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Connect.Common" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Codex'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Connect/src/Codex/Darkspyre.Inference.Connect.Codex/Darkspyre.Inference.Connect.Codex.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Codex')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Codex')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Connect.Codex" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Claude'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Connect/src/Claude/Darkspyre.Inference.Connect.Claude/Darkspyre.Inference.Connect.Claude.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Claude')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Claude')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Connect.Claude" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.OpenAiApi'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Connect/src/OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.OpenAiApi')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.OpenAiApi')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Connect.OpenAiApi" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.SelfHost'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Connect/src/SelfHost/Darkspyre.Inference.Connect.SelfHost/Darkspyre.Inference.Connect.SelfHost.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.SelfHost')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.SelfHost')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Connect.SelfHost" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="@(_InferenceSourceProject)">
       <Private Condition="'%(ExcludeAssets)' == 'runtime' or '%(ExcludeAssets)' == 'all'">false</Private>
       <ReferenceOutputAssembly Condition="'%(ExcludeAssets)' == 'all'">false</ReferenceOutputAssembly>
     </ProjectReference>
   </ItemGroup>
+  <Import Project="$(MSBuildThisFileDirectory)ConnectDiscovery.targets" />
 </Project>

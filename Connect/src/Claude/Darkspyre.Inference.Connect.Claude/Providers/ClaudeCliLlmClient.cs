@@ -34,7 +34,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     public override LlmTransport Transport => LlmTransport.AnthropicClaudeCli;
 
-    public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.ClaudeSubscription;
+    public override LlmProviderDefinition ProviderDefinition => ClaudeDefinition.Value;
 
     protected override bool SupportsResourcePreparation => true;
 

@@ -29,4 +29,5 @@
       <None Update="@(None)" Condition="'%(None.DefiningProjectName)' == 'Whisper.net.Runtime' Or '%(None.DefiningProjectName)' == 'Whisper.net.Runtime.Metal'" Pack="false" />
     </ItemGroup>
   </Target>
+  <Import Project="$(MSBuildThisFileDirectory)eng/ConnectDiscovery.targets" />
 </Project>
