@@ -12,6 +12,10 @@ internal static class Program
     {
         try
         {
+            if (args is ["images", var imageProvider, var model, var fixtures, var imageResult])
+                return ImageProbe.Run(imageProvider, Path.GetFullPath(model), Path.GetFullPath(fixtures), Path.GetFullPath(imageResult));
+            if (args is ["preprocess", var imageFixtures, var imageOutput])
+                return ImageProbe.Preprocess(Path.GetFullPath(imageFixtures), Path.GetFullPath(imageOutput));
             if (args is ["providers"])
             {
                 Console.WriteLine("ONNX providers: " + string.Join(", ", OrtEnv.Instance().GetAvailableProviders()));
@@ -117,8 +121,12 @@ internal static class Program
     {
         var environment = OrtEnv.Instance();
         environment.RegisterExecutionProviderLibrary("gemma_webgpu", WebGpuEp.GetLibraryPath());
-        var device = environment.GetEpDevices().FirstOrDefault(d => d.EpName == WebGpuEp.GetEpName())
-            ?? throw new InvalidOperationException("The WebGPU plugin found no compatible device.");
+        string? vendor = Environment.GetEnvironmentVariable("GEMMA_GPU_VENDOR");
+        var devices = environment.GetEpDevices().Where(d => d.EpName == WebGpuEp.GetEpName()
+            && d.EpMetadata.Entries.ContainsKey("library_path")).ToArray();
+        var device = devices.FirstOrDefault(d => vendor is null
+            || d.HardwareDevice.VendorId.ToString(System.Globalization.CultureInfo.InvariantCulture) == vendor)
+            ?? throw new InvalidOperationException("The packaged WebGPU provider found no matching device.");
         Console.WriteLine(JsonSerializer.Serialize(new
         {
             device.EpName,

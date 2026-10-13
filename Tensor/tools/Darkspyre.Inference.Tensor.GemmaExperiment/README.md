@@ -132,3 +132,29 @@ GEMMA_SYNCHRONOUS=1 GEMMA_RUNS=12 python3 Tensor/tools/Darkspyre.Inference.Tenso
 
 The ONNX reference retains six calls. Default comparisons leave `GEMMA_SYNCHRONOUS`
 unset. Measured diagnostic conclusions and limitations appear in RESULTS.md.
+
+## Image and native platform qualification
+
+`prepare_images.py <directory>` creates square, landscape and portrait RGB fixtures.
+It uses installed Pillow and NumPy and follows the pinned Hugging Face Gemma4 PIL
+recipe named in its manifest: bicubic resize, [0,1] scaling, 16x16 RGB patches,
+zero padding to 2,520 patches and [column,row] positions padded with -1.
+The square is already at the target size. The other cases exercise downsampling
+and upsampling. Generated inputs carry SHA-256 hashes; inference checks the hashes.
+
+`preprocess <fixtures> <output>` compares the existing TensorSharp Gemma4 processor
+and the probe's ONNX patch packing with the reference. It checks dimensions,
+positions and pixel error at 1e-6 and returns failure on any mismatch.
+
+`images <cpu|webgpu|webgpu-plugin> <model> <fixtures> <output>` runs six vision
+and full image-embedding calls per fixture. It writes each vision output, every
+embedding, separate inference timings and both provider profiles. Inputs are the
+reference patches, independent of the preprocessing candidate. Image placeholders
+use the pinned model's BOS/BOI/image/EOI/EOS IDs. General tokenizer and retrieval
+quality are outside this execution check.
+
+The plugin mode selects only devices from the external provider library, excluding
+a built-in WebGPU provider with the same name. `GEMMA_GPU_VENDOR` optionally selects
+a reported numeric hardware vendor for qualification on a multi-vendor machine.
+Device metadata appears in the run log. Provider assignment and hardware inventory
+must accompany GPU timing claims. These controls belong to the isolated probe.

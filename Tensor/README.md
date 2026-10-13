@@ -94,6 +94,9 @@ comparison from tokenizer and retrieval qualification. It records session load t
 inference and five subsequent calls, vectors, process peak working set and an ONNX provider
 profile. Core ML uses CPU and GPU compute units; WebGPU is a separate ONNX option.
 The `webgpu-plugin` option loads Microsoft's packaged WebGPU provider for native cross-platform qualification.
+The image mode executes the pinned vision graph and then the main embedding graph using
+verified PIL-reference patches and positions. A separate preprocessing check compares the
+existing Gemma4 processor with those reference inputs, including patch padding and position order.
 The profile identifies CPU partitions. The TensorSharp option loads the same export's FP32
 weights and runs its text forward pass through existing GGML tensor operations on Metal.
 Its resident-weight variant packs FP32 matrices once during loading and uses the existing
