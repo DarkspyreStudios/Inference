@@ -420,12 +420,11 @@ isolated Metal runs pass. The underlying mixed-runtime shutdown cause is unverif
 
 ## Harness fit
 
-Inference's existing Tensor ConsoleTester has the useful embedding and lifetime
-patterns, but its current build fails in `SelfHostSuite.cs` because Connect excludes
-`AddLlmConnectSelfHost`. The experiment has its own small executable in `Tensor/tools`
-and directly references the existing runtime libraries. The RightSize console and
-export script supply local-checkpoint and numerical-comparison patterns; RightSize
-is otherwise specific to Laya decisions. Neither existing app receives a refactor fix.
+Inference's Tensor ConsoleTester exercises production embeddings and model lifetime.
+Its SelfHost path uses `AddLlmConnect` discovery with the independent SelfHost library.
+The isolated experiment has its own executable in `Tensor/tools` and directly references
+the runtime libraries. The RightSize console and export script supply local-checkpoint
+and numerical-comparison patterns; RightSize is otherwise specific to Laya decisions.
 
 The isolated project builds without warnings in Debug and Release. Host, Search,
 the shipping Tensor registry and production engine contracts have no changes.
@@ -779,3 +778,21 @@ These timings measure one direct call followed by one Connect call per fixture, 
 The four existing console/serialization checks pass with JSON reflection defaults disabled. Fourteen SelfHost/embedding checks, forty managed-conversation checks and nine embedding/lifetime checks pass. Package-input checks pass without creating archives; the package verifier builds with zero warnings. No package is published. The checks use no Harness Host process or source changes.
 
 The captured vectors and machine-readable comparison are under `artifacts/gemma2/engine/`. `summarize_engine.py` requires all six platform/backend results and fails on a missing run.
+
+## Automatic Connect discovery integration
+
+The production Tensor tester at source `13c74b96` passes the Mac CPU Gemma qualification
+through automatic `AddLlmConnect` discovery. Its deployed Connect libraries are Common
+and SelfHost only. The ten text/image inputs produce twenty direct/Connect calls with
+zero vector difference. All nineteen tokenizer fixtures, the three retrieval rankings,
+oversized-batch rejection, cancellation/reuse and model unload/pack removal pass.
+The report is `artifacts/gemma2/engine/connect-discovery-mac-cpu/result.json`.
+
+The existing conversation tester and serialization/lifetime fixtures pass four focused
+checks after rebinding to the independent libraries. Connect's focused checks pass 122
+cases, including Common-only, each single provider and combined discovery, collectible
+registration retirement, managed conversations, embeddings, settings, HTTP and CLI behavior.
+Connect's solution and the package verifier build with zero warnings. Package-input
+checks confirm separate assembly ownership and preserved provider discovery roots without
+creating archives. The existing platform implementation bodies match the pre-split
+baseline. This integration run does not repeat the Linux/Windows engine matrix above.

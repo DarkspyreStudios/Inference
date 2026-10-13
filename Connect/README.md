@@ -1908,7 +1908,7 @@ Non-xAI embedding calls retain their existing construction without a catalog fac
 facades are runtime composition, not portable data: owned options preserve null and refuse non-null
 values without serializing their collaborators. No runtime facade getter is exported.
 
-`AddLlmConnect` registers the SelfHost embedding client. It embeds through the host's
+`AddLlmConnect` discovers the SelfHost embedding client when its library is included. It embeds through the host's
 `ILlmSelfHost.GetEmbeddingInferenceAsync(engineId)`, where the connection's endpoint names the
 engine. It shares chat's connection refusal policy for provider options, HTTP headers and capability
 overrides, and refuses request provider options before acquiring the engine.
@@ -5280,11 +5280,11 @@ included in the Connect NuGet.
 ## SelfHost transport: in-process engines
 
 `LlmTransport.SelfHost` runs a model that the host loads in its own process, such as a Tensor Qwen
-engine. The host implements `ILlmSelfHost` and registers it with `AddLlmConnectSelfHost()`:
+engine. The application references `Darkspyre.Inference.Connect.SelfHost` and supplies `ILlmSelfHost`.
+`AddLlmConnect()` discovers the included provider:
 
 ```csharp
 services.AddLlmConnect();
-services.AddLlmConnectSelfHost();
 services.AddSingleton<ILlmSelfHost, MyEngineHost>(); // the host's engine map
 ```
 

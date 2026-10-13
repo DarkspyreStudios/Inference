@@ -77,8 +77,8 @@ back from Connect to Tensor.
 
 ### Connect: out-of-process providers
 
-- **Text and agents:** direct ChatGPT subscription access through the native Codex client, and the
-  official Claude CLI. The phase-1 build excludes every other provider; see
+- **Text and agents:** native Codex, the official Claude CLI, OpenAI Responses and caller-owned
+  SelfHost engines. Applications select these providers through library references; see
   [Connect's phase-1 build](Connect/README.md#phase-1-build).
 - **Capability-dependent LLM features:** streaming, model discovery, structured output, attachments,
   embeddings, host-executed tools, managed-agent sessions, and account-usage reporting.
@@ -141,12 +141,19 @@ Provide credentials through your approved local credential mechanism; never comm
 The projects currently use the .NET 11 RC SDK pinned in each product's `global.json`.
 
 Install only the products your application needs, keeping their versions synchronized:
-The commands below select the verified private-feed release.
+Workspace builds consume sibling source projects. Package installation uses the synchronized family version.
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect --version 11.15.1-rc.1
+dotnet add package Darkspyre.Inference.Connect.OpenAiApi --version 11.15.1-rc.1
+```
+
+```bash
 dotnet add package Darkspyre.Inference.Tensor.Image.Supra --version 11.15.1-rc.1
-# Optional, for a Blazor host:
+```
+
+Optional, for a Blazor host:
+
+```bash
 dotnet add package Darkspyre.Inference.UI.Settings --version 11.15.1-rc.1
 ```
 
@@ -161,7 +168,7 @@ services or storage from the caller so they do not invent a database or credenti
 
 ### Ask a configured text provider
 
-Register `AddLlmConnect()` and a host implementation of `ILlmConnectionSource` with dependency
+Reference the chosen Connect provider libraries. Register `AddLlmConnect()` and a host implementation of `ILlmConnectionSource` with dependency
 injection, then resolve `LlmAgentProviderService`. The connection source supplies versioned connection metadata and protected
 credentials; credential replacement must be atomic. See [host integration](Connect/README.md#host-integration).
 
