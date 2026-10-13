@@ -43,6 +43,113 @@ unit length. Numerical differences against ONNX CPU over the three input lengths
 
 These comparisons establish agreement for the tested synthetic sequences. They do
 not establish parity with Google's preprocessing or retrieval quality.
+The numerical comparison above covers each process's final vector. The all-call
+A/B check below exposes intermittent failures that this final-vector comparison misses.
+
+## Cumulative Mac A/B comparison
+
+The cumulative variants retain the pinned FP32 weights, activation precision,
+token IDs, pooling and 2–512-token scope. Each process executes six calls. The
+comparison script checks every vector, including the first call, against ONNX CPU.
+It also compares each optimization with the preceding variant's final vector.
+The criteria are maximum component error at most 1e-4, cosine similarity at least
+0.999999 and unit-norm error at most 1e-6. The component and cosine limits admit
+the original final-vector rounding difference. They are execution checks, not
+retrieval-quality qualification. Failing cases remain failures; no warmup vector
+is discarded from the parity check.
+
+Source commits are `17c7fa75` for resident weights, `6a533663` for Gemma fusions,
+and `806f0673` for grouped attention. TensorSharp and the prebuilt driver retain
+the baseline revisions above. The variants make these cumulative changes:
+
+1. `metal-resident` packs each linear matrix once into contiguous `[output, input]`
+   FP32 storage during loading and uses the existing `AddmmQuant` F32 path.
+2. `metal-fused` adds `FusedRmsNormMatMulQuant`, `FusedFFNActProjectQuant` with
+   GELU, `RmsNormResidualAdd` and `FusedPleBlockQuant`. It retains generic attention.
+3. `metal-grouped` adds the exact-extent FP32 grouped attention operation. It uses
+   an all-visible mask for these bounded inputs and replaces eight K/V head copies
+   per layer with three head-first layout conversions.
+
+Observed warm medians in the complete comparison round (`ab-repeat`):
+
+| Variant | 12 tokens | 128 tokens | 512 tokens | Peak RSS at 512 tokens | All-call parity |
+| --- | ---: | ---: | ---: | ---: | --- |
+| ONNX CPU | 21.7 ms | 61.1 ms | 168.8 ms | 862 MiB | Pass at all three lengths |
+| ONNX WebGPU | 31.4 ms | 31.1 ms | 86.0 ms | 1,534 MiB | Pass at all three lengths |
+| Original Metal | 933.5 ms | 1,005.0 ms | 1,276.6 ms | 3,946 MiB | Fail at all three lengths |
+| Resident FP32 | 472.3 ms | 539.7 ms | 806.0 ms | 4,455 MiB | Fail at all three lengths |
+| Resident + Gemma fusions | 249.0 ms | 303.3 ms | 491.5 ms | 4,417 MiB | Fail at all three lengths |
+| Resident + fusions + grouped attention | 296.9 ms | 350.2 ms | 545.0 ms | 4,413 MiB | Pass at 128; fail at 12 and 512 |
+
+These timings include calls that fail output parity. They do not qualify a correct
+implementation's performance. Resident weights remove a substantial observed cost;
+the Gemma fusions remove another substantial cost. Combined, their observed warm
+medians are about 2.6–3.7 times faster than the original prototype in this round.
+They remain slower than ONNX WebGPU. Resident packing increases loading time from
+about 330–450 ms to about 850–940 ms in this round and increases peak process memory.
+RSS includes transient loading arrays, pooled buffers and runtime caches; it does
+not establish steady resident model memory.
+
+A confirmation round reverses the fused/grouped ordering. Its warm medians are:
+
+| Variant | 12 tokens | 128 tokens | 512 tokens |
+| --- | ---: | ---: | ---: |
+| Gemma fusions | 257.4 ms | 312.6 ms | 600.6 ms |
+| Gemma fusions + grouped attention | 412.5 ms | 306.4 ms | 478.3 ms |
+
+Grouped attention has no consistent additional latency gain across the two rounds.
+It is faster at 512 tokens in the confirmation round, while the first round shows
+the opposite result. The workstation is shared, individual calls vary and some
+within-process timings rise. A precise throughput ranking between the two variants
+is not established. The earlier CPU round also measures 12.8 / 37.4 / 127.8 ms,
+which shows the variability in these short process runs.
+
+### Parity failure exposed by checking every call
+
+All 34 measured processes across the staged, complete, confirmation and diagnostic
+rounds exit 0 and return finite normalized vectors. Every Metal process reports
+successful native shutdown. The comparison script nevertheless rejects 18 cases
+because at least one vector exceeds the parity limits. Unit length and successful
+shutdown do not detect this failure.
+
+Failures occur in both the first call and later calls. Examples in the complete round:
+
+- Original Metal at 128 tokens: the first call agrees within 5.182e-5, but call 2
+  differs by 0.012058795. Subsequent calls return to the smaller difference.
+- Fused Metal at 128 tokens: the largest component difference is 0.02738989, with
+  cosine 0.97877521. Several later calls agree within 4.756e-5.
+- Grouped Metal at 512 tokens: calls 1–4 agree within 6.571e-5, but the final call
+  differs by 0.019058593. Discarding only the first call cannot hide this example.
+
+Call numbers above are zero-based, matching the executable output. The confirmation
+round also produces failures in both fused and grouped variants. The operations'
+algebraic match and several agreeing calls do not establish reliable execution.
+The failure exists in the original unfused path as well as the new variants.
+Its cause is not isolated to a particular operation, lifetime or native mechanism.
+
+The existing `GGML_METAL_CONCURRENCY_DISABLE=1` switch is exercised only in three
+diagnostic grouped-attention processes. Their logs confirm concurrency is disabled.
+The 12- and 512-token cases pass, but a warm 128-token call differs by 0.004182157
+and fails. This switch is not a sufficient remedy. No production setting changes.
+
+ONNX CPU repeats exactly in the measured runs. WebGPU also repeats exactly within
+each tested process and differs from CPU by at most 2.7e-7 across the three lengths.
+This evidence covers the synthetic text inputs only.
+
+### Reproduction and qualification boundary
+
+`compare.py` and the probe README contain the commands and parity limits.
+`artifacts/gemma2/ab-summary.json` consolidates every measured case, every call's
+CPU comparison, native shutdown outcome and the diagnostic environment. Raw results
+and logs remain in `ab`, `ab-repeat`, `ab-confirm` and `ab-no-concurrency` below
+`artifacts/gemma2/`. The initial failing measurements remain available.
+
+Every cumulative variant builds in Release with zero warnings and errors. Formatting
+verification passes. The runs establish the latency reductions above and expose a
+correctness failure; they do not establish a qualified TensorSharp embedding engine.
+Host, Search, TensorSharp source and the shipped engine registry have no changes.
+No native compilation or production engine selection occurs. The intermittent
+TensorSharp output failure and within-process timing drift remain unresolved.
 
 ## Provider placement and limitations
 
