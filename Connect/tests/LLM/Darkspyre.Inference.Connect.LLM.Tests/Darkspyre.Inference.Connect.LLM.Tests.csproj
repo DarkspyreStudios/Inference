@@ -17,7 +17,7 @@
     <Using Include="Xunit" />
     <Compile Include="..\..\..\examples\Darkspyre.Inference.Connect.LLM.Examples\WeatherTool.cs" Link="Examples\WeatherTool.cs" />
     <!-- Phase 1 builds only the Codex and Claude CLI providers. These files test excluded providers and stay in the repository. -->
-    <Compile Remove="AnthropicAdmissionTests.cs;AnthropicUsageStreamTests.cs;AntigravityCliLlmClientTests.cs;ContentFilteredStructuredOutputTests.cs;ContextCacheLifetimeTests.cs;DocumentSearchJsonTests.cs;GeminiAdmissionTests.cs;GeminiArgumentStreamTests.cs;ProviderTokenCountCancellationTests.cs;SelfHostCatalogTests.cs;SelfHostEmbeddingTests.cs;XaiReasoningTests.cs" />
+    <Compile Remove="AnthropicAdmissionTests.cs;AnthropicUsageStreamTests.cs;AntigravityCliLlmClientTests.cs;ContentFilteredStructuredOutputTests.cs;ContextCacheLifetimeTests.cs;DocumentSearchJsonTests.cs;GeminiAdmissionTests.cs;GeminiArgumentStreamTests.cs;ProviderTokenCountCancellationTests.cs;XaiReasoningTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

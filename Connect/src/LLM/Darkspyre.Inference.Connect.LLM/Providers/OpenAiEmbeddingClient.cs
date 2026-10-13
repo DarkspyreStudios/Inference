@@ -1,3 +1,5 @@
+using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.Embedding;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Connect.LLM.Internal;
@@ -21,8 +23,10 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
         if (string.IsNullOrWhiteSpace(request.ModelId))
             throw new ArgumentException("An embedding model is required.", nameof(request));
         ArgumentNullException.ThrowIfNull(request.Inputs);
-        if (request.Inputs.Count == 0 || request.Inputs.Any(string.IsNullOrWhiteSpace))
+        if (request.Inputs.Count == 0 || request.Inputs.OfType<TextEmbeddingInput>().Any(input => string.IsNullOrWhiteSpace(input.Text)))
             throw new ArgumentException("At least one non-empty embedding input is required.", nameof(request));
+        if (request.Inputs.Any(input => input is not TextEmbeddingInput))
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "This embedding provider accepts text inputs only.");
         if (request.Dimensions is <= 0)
             throw new ArgumentOutOfRangeException(nameof(request), "Embedding dimensions must be positive.");
         ValidateOptions(connection.ProviderOptions);
@@ -41,7 +45,7 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
         var payload = new JsonObject
         {
             ["model"] = request.ModelId,
-            ["input"] = new JsonArray(request.Inputs.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray())
+            ["input"] = new JsonArray(request.Inputs.Select(value => (JsonNode?)JsonValue.Create(((TextEmbeddingInput)value).Text)).ToArray())
         };
         if (request.Dimensions is { } dimensions) payload["dimensions"] = dimensions;
         ApplyOptions(payload, connection.ProviderOptions);

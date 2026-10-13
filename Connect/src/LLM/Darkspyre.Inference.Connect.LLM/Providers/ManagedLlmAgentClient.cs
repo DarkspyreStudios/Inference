@@ -3,9 +3,9 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-/// <summary>The managed opening of every Responses client: Codex and the OpenAI API.</summary>
-internal sealed class ManagedResponsesAgentClient(ResponsesLlmClientBase client, LlmProviderService providers,
-    LearnedModelContext learned) : ILlmAgentClient
+/// <summary>The common conversation opening for managed provider adapters and in-process engines.</summary>
+internal sealed class ManagedLlmAgentClient<TClient>(TClient client, LlmProviderService providers,
+    LearnedModelContext learned) : ILlmAgentClient where TClient : ILlmClient, ILlmContextEstimator
 {
     public LlmTransport Transport => client.Transport;
 

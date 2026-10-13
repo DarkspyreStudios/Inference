@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common.Embedding;
 using System.Net;
 using System.Text.Json;
 using System.Text.Json.Nodes;
@@ -18,7 +19,7 @@ public sealed class EmbeddingModelIdentityTests
         LlmEmbeddingResult result = await service.EmbedAsync("connection", new()
         {
             ModelId = "requested-alias",
-            Inputs = ["reference"]
+            Inputs = [new TextEmbeddingInput("reference")]
         });
         byte[] json = JsonSerializer.SerializeToUtf8Bytes(result, ConnectLlmJson.LlmEmbeddingResult);
         LlmEmbeddingResult restored = JsonSerializer.Deserialize(json, ConnectLlmJson.LlmEmbeddingResult)!;
@@ -42,7 +43,7 @@ public sealed class EmbeddingModelIdentityTests
         await using var service = new LlmEmbeddingProviderService(new Source(), [new OpenAiEmbeddingClient(http)]);
 
         LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() =>
-            service.EmbedAsync("connection", new() { ModelId = "requested-alias", Inputs = ["reference"] }));
+            service.EmbedAsync("connection", new() { ModelId = "requested-alias", Inputs = [new TextEmbeddingInput("reference")] }));
 
         Assert.Equal("invalid_embedding_response", failure.ProviderCode);
         Assert.DoesNotContain("test-key", failure.ToString(), StringComparison.Ordinal);
@@ -69,7 +70,7 @@ public sealed class EmbeddingModelIdentityTests
             AdditionalHeaders = new Dictionary<string, string> { ["X-Trace"] = "header-value" }
         };
         var client = new OpenAiEmbeddingClient(http);
-        var request = new LlmEmbeddingRequest { ModelId = "requested-alias", Inputs = ["reference"] };
+        var request = new LlmEmbeddingRequest { ModelId = "requested-alias", Inputs = [new TextEmbeddingInput("reference")] };
         string diagnostics;
         if (malformed)
         {

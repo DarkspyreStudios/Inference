@@ -52,13 +52,13 @@ public static class ServiceCollectionExtensions
         services.AddInferenceHttpClient<OpenAiCodexLlmClient>();
         services.AddTransient<ILlmClient>(provider =>
             provider.GetRequiredService<OpenAiCodexLlmClient>());
-        services.AddTransient<ILlmAgentClient>(provider => new ManagedResponsesAgentClient(
+        services.AddTransient<ILlmAgentClient>(provider => new ManagedLlmAgentClient<OpenAiCodexLlmClient>(
             provider.GetRequiredService<OpenAiCodexLlmClient>(), provider.GetRequiredService<LlmProviderService>(),
             provider.GetRequiredService<LearnedModelContext>()));
         services.AddInferenceHttpClient<OpenAiResponsesLlmClient>()
             .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout);
         services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<OpenAiResponsesLlmClient>());
-        services.AddTransient<ILlmAgentClient>(provider => new ManagedResponsesAgentClient(
+        services.AddTransient<ILlmAgentClient>(provider => new ManagedLlmAgentClient<OpenAiResponsesLlmClient>(
             provider.GetRequiredService<OpenAiResponsesLlmClient>(), provider.GetRequiredService<LlmProviderService>(),
             provider.GetRequiredService<LearnedModelContext>()));
         services.AddTransient<ClaudeAgentClient>();
@@ -91,4 +91,23 @@ public static class ServiceCollectionExtensions
             provider.GetServices<ILlmAuthenticator>(), provider.GetRequiredService<LlmConnectionAccess>()));
         return services;
     }
+
+    /// <summary>
+    /// Adds conversations and text/image embeddings through caller-owned in-process engines.
+    /// Call <see cref="AddLlmConnect(IServiceCollection)"/> and register <see cref="ILlmSelfHost"/> separately.
+    /// This registration neither loads engines nor owns their lifetime.
+    /// </summary>
+    public static IServiceCollection AddLlmConnectSelfHost(this IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        services.AddSingleton(ProviderDefinitions.SelfHost);
+        services.AddTransient<SelfHostLlmClient>();
+        services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<SelfHostLlmClient>());
+        services.AddTransient<ILlmAgentClient>(provider => new ManagedLlmAgentClient<SelfHostLlmClient>(
+            provider.GetRequiredService<SelfHostLlmClient>(), provider.GetRequiredService<LlmProviderService>(),
+            provider.GetRequiredService<LearnedModelContext>()));
+        services.AddTransient<ILlmEmbeddingClient, SelfHostEmbeddingClient>();
+        return services;
+    }
+
 }

@@ -37,7 +37,6 @@
     <Compile Remove="Providers/Apple*.cs;Providers/ManagedAppleAgentClient.cs" />
     <Compile Remove="Providers/ChatCompletionsLlmClientBase.cs;Providers/OpenAiCompatibleChatLlmClient.cs;Providers/ManagedOpenAiCompatibleAgentClient.cs" />
     <Compile Remove="Providers/GeminiApiLlmClient*.cs;Providers/ManagedGeminiApiAgentClient.cs" />
-    <Compile Remove="Providers/SelfHost*.cs;Providers/ManagedSelfHostAgentClient.cs" />
     <Compile Remove="Providers/Xai*.cs;Providers/ManagedXaiAgentClient.cs" />
     <Compile Remove="Internal/AnthropicContentStream.cs;Internal/AnthropicProgrammaticSchemas.cs;Internal/AnthropicPromptCache.cs;Internal/AnthropicSchemas.cs;Internal/AnthropicToolContinuation.cs;Internal/AnthropicTools.cs" />
     <Compile Remove="Internal/ChatReasoning.cs;Internal/OpenAiCompatibleChatContinuationCodec.cs;Internal/OpenRouter*.cs;Internal/ProviderTokenCounting.cs" />

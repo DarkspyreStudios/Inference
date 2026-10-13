@@ -3,18 +3,19 @@
 ## Phase-1 build
 
 This build compiles three LLM providers: the native Codex client (`OpenAiCodexLlmClient`), the OpenAI API
-(`OpenAiResponsesLlmClient`), both opened by `ManagedResponsesAgentClient`, and the Claude CLI
+(`OpenAiResponsesLlmClient`), both opened by `ManagedLlmAgentClient<TClient>`, and the Claude CLI
 (`ClaudeCliLlmClient` and `ClaudeAgentClient`). `AddLlmConnect` registers only these clients, their
 authenticators, the Claude subscription, ChatGPT subscription and OpenAI API Key setup definitions and
 `OpenAiEmbeddingClient`. Setup offers only those three providers.
 
+`AddLlmConnectSelfHost` adds in-process conversations and text/image embeddings when the caller registers `ILlmSelfHost`. Connect borrows those engines through Common contracts. It neither loads nor disposes them.
+
 Every other LLM provider is out of the build. `Darkspyre.Inference.Connect.LLM.csproj` excludes the
-Anthropic API, Antigravity, Apple, OpenAI-compatible chat, Gemini API, SelfHost and xAI files with
+Anthropic API, Antigravity, Apple, OpenAI-compatible chat, Gemini API and xAI files with
 `Compile Remove`. The Image project excludes the xAI image transport and the TTS project
 excludes the xAI speech transport. The Bedrock, Vertex, Azure, STT, Realtime, Video, Resources and examples
 projects are out of the solution, the `Darkspyre.Inference.Connect` package and the source references in
-`eng/SourceReferences.targets`. The Tensor ConsoleTester is out of the Tensor solution because it uses the
-excluded SelfHost registration. The excluded source stays in the repository under the L2 exception in
+`eng/SourceReferences.targets`. The excluded source stays in the repository under the L2 exception in
 `Inference/AGENTS.md`. Sections of this page that describe an excluded provider, transport or project
 describe that kept source, which this build does not compile.
 
@@ -25,7 +26,7 @@ registered for those transports, so a request through one fails with the existin
 The phase-1 build removes these public surfaces: `ILlmFileClient`, `IXaiFilePublicUrlClient`,
 `IXaiSkillClient`, `IDocumentSearchClient` and their request and result types; `LlmProviderCapabilities.Skills`;
 `LlmProviderService.CreatePublicUrlAsync`, `RevokePublicUrlAsync`, `StartXaiLoginAsync` and
-`CompleteXaiLoginAsync`; `AddLlmConnectXai` and `AddLlmConnectSelfHost`;
+`CompleteXaiLoginAsync`; `AddLlmConnectXai`;
 `LlmEmbeddingProviderService.ListModelsAsync` and its `providerService` constructor parameter; the `xai`
 parameters of `IImageTransport`, `ImageProviderService` and `ITtsProvider`; `ImageConnection.Xai`,
 `ImageSetupConfiguration.Xai`, `TtsConnection.Xai`, `TtsConnection.XaiDefaults`, `TtsRequest.Xai`,
@@ -1860,7 +1861,7 @@ dispatch. Every `ILlmEmbeddingClient` supplies an effect-free `ValidateRequest`;
 before refresh, and the direct adapter validates before HTTP. `LlmEmbeddingRequest.Dimensions` is
 nullable and positive when supplied. Raw `dimensions`, `model` and `input` are reserved in both
 connection and request options. Unknown model-specific limits remain provider decisions. Requests
-snapshot inputs and JSON options before asynchronous work; connections snapshot embedding options
+snapshot typed `EmbeddingInput` lists and JSON options before asynchronous work; media bytes remain borrowed until completion; connections snapshot embedding options
 and headers before refresh. OpenAI-compatible responses require one unique in-range index per input,
 finite nonempty vectors and the requested dimensions. Results retain the reported model ID when
 present; an absent ID stays null and is not replaced by the requested alias. Protected values in
@@ -1883,7 +1884,8 @@ values without serializing their collaborators. No runtime facade getter is expo
 `ILlmSelfHost.GetEmbeddingInferenceAsync(engineId)`, where the connection's endpoint names the
 engine. It shares chat's connection refusal policy for provider options, HTTP headers and capability
 overrides, and refuses request provider options before acquiring the engine.
-The engine formats queries: `LlmEmbeddingRequest.Kind` states
+`LlmEmbeddingRequest.Inputs` uses Common's `TextEmbeddingInput` and `MediaEmbeddingInput`. The latter carries encoded bytes through `BinaryMediaSource`. Text-only remote adapters reject media before HTTP.
+The engine formats inputs: `LlmEmbeddingRequest.Kind` states
 whether inputs are queries or documents, `Instruction` states a query's task, and `Truncate` decides
 whether an over-limit input is cut or fails the request with `EmbeddingInputTooLongException`. The
 result reports `ModelId`, `ModelFingerprint` and `TruncatedInputs`. Remote adapters send inputs as
@@ -4790,7 +4792,7 @@ Nonstandard extension options retain request-over-connection precedence.
 | Apple Foundation Models | Top-p or top-k random mode with optional seed; seed alone selects top-p 1; no stops or penalties |
 | Codex | Temperature and top-p use the existing Responses fields with Unknown support; top-k, seed and penalties have no adapter mapping |
 | Claude CLI and Antigravity CLI | All six controls rejected; capability overrides cannot enable an unmapped control |
-| SelfHost | All six controls and support flags pass to the selected Common engine; unsupported engine controls fail before its stream starts |
+| SelfHost | The universal normalizer applies the loaded engine capabilities before sending typed controls to Common |
 
 Claude Opus 4.7 and newer non-sampling profiles reject custom temperature/top-p and all top-k.
 First-party Messages accepts the documented defaults described under Sampling Defaults.
@@ -5271,28 +5273,15 @@ retain the engine's image/document capability gates. An unloaded engine declares
 Connect keeps the connection's catalog in its shared model cache. A provider listing refreshes the
 selected engine's catalog, so explicit Connect refresh also replaces any list the engine keeps.
 
-Generation and request accounting reject nonempty connection or request `ProviderOptions`, connection
-`AdditionalHeaders`, and connection or model capability overrides. SelfHost passes only typed Common
-request controls to the engine. An engine owns its capabilities; connection overrides do not change
-them. Settings cannot save these unsupported options. Model and capability discovery remain available
-so an invalid saved connection can be inspected and repaired.
-Generation validates the requested reasoning level against the selected engine's asynchronous
-capability result before enumerating its stream. Nonmutating accounting validates the same control
-against one synchronous host capability snapshot without acquiring or running an engine.
-An unsupported explicit level fails with `InvalidRequest`; accepted and omitted levels retain their
-original values in the Common request. Both paths use the shared reasoning admission validator.
-The shared sampling validator checks temperature support and finiteness for both SelfHost paths.
-Accounting reports an unsupported temperature request as unsupported instead of producing a text
-estimate. Generation uses the same output-limit validator as the HTTP adapters before calling the
-engine stream. `Unsupported` refuses an explicit cap; `Unknown` permits an attempt without changing
-the enforcement fact. Accepted temperature and output-cap values pass unchanged to Common.
-One private SelfHost request validator also uses the shared prompt-attachment, tool-use and
-structured-output checks for generation and accounting. Unsupported tools, declared unsupported
-strict input schemas, unsupported prompt media and an unavailable requested schema guarantee refuse
-before calling the engine stream. Accounting reports these requests as unsupported, not measurable.
-Explicit structured-output fallback uses the existing enforcement resolver; the original schema and
-request are not rewritten. Supported media that the local tokenizer cannot measure still report
-unknown occupancy. This admission does not qualify an engine's native enforcement or media handling.
+Generation and embeddings reject nonempty connection or request `ProviderOptions`, connection
+`AdditionalHeaders`, and connection or model capability overrides. SelfHost passes typed Common
+inputs to the engine. An engine owns its capabilities; connection overrides do not change them.
+
+Conversations open through `LlmAgentProviderService` and use the same `ManagedLlmAgentClient<TClient>`
+opening, request normalization, context accounting and tool loop as Codex and the OpenAI API.
+Unsupported sampling and output limits are omitted. Reasoning maps to an offered level. Unsupported
+attachments leave the standard notice in the outgoing request. These operations never load an engine.
+The caller owns model installation, loading and retirement through Tensor's separate lifecycle contracts.
 
 Agent sessions run on the managed agent lane, which executes host tools; context estimates count the
 request text with Connect's local tokenizer. Binary prompt attachments, structured tool content,

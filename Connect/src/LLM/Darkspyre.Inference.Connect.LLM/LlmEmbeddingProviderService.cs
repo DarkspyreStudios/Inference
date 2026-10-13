@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common.Embedding;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
@@ -46,7 +47,12 @@ public sealed class LlmEmbeddingProviderService : IDisposable, IAsyncDisposable
         {
             request = EmbeddingRequestData.Snapshot(request);
             ThrowIfRequestCanceled(cancellationToken);
-            if (request.Inputs.Count == 0 || request.Inputs.Any(string.IsNullOrWhiteSpace))
+            if (request.Inputs.Count == 0 || request.Inputs.Any(input => input switch
+            {
+                TextEmbeddingInput text => string.IsNullOrWhiteSpace(text.Text),
+                MediaEmbeddingInput media => media.Media is null || media.Media.Data.IsEmpty,
+                _ => true
+            }))
                 throw new ArgumentException("At least one non-empty embedding input is required.", nameof(request));
 
             LlmConnection connection = await ResolveAsync(connectionId, cancellationToken).ConfigureAwait(false);

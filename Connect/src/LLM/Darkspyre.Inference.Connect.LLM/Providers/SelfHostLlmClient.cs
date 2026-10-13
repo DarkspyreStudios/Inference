@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Common;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -74,7 +75,8 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
     }
 
     /// <summary>Counts the request's text locally. The engine's own tokenizer can differ.</summary>
-    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
     {
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(request);
@@ -107,14 +109,9 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
 
     private static void ValidateEngineRequest(LlmChatRequest request, LlmProviderCapabilities capabilities)
     {
-        LlmClientBase.ValidateSampling(request, capabilities);
-        LlmReasoningEffort.Validate(request.ReasoningLevel, capabilities);
-        LlmClientBase.ValidateOutputLimit(request, capabilities);
         HostedTools.Validate(request, capabilities);
         ClientTools.Validate(request, (capabilities.SupportsShellTools != InferenceSupport.Unsupported));
-        LlmClientBase.ValidatePromptAttachments(request, capabilities);
         LlmClientBase.ValidateToolUse(request, capabilities);
-        StructuredOutput.ValidateRequest(request);
         if (request.StructuredOutput is { } structured)
             _ = StructuredOutput.ResolveEnforcement(structured, capabilities);
     }
@@ -128,7 +125,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
     {
         try { RuntimeInputAdmission.Validate(connection); }
         catch (NotSupportedException error) { return ("self-host-runtime-inputs", error.Message); }
-        if ((request?.ProviderControls ?? connection.Xai?.MultiAgent) is not null)
+        if (connection.Xai?.MultiAgent is not null)
         { return ("self-host-provider-controls", "SelfHost does not forward connector-owned provider controls."); }
         if (request?.ExplicitCache is not null)
         { return ("self-host-explicit-cache", "SelfHost does not forward native provider cache receipts."); }
@@ -177,7 +174,6 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         ConversationKey = request.ConversationKey,
         PromptCache = request.PromptCache,
         ExplicitCache = request.ExplicitCache,
-        ProviderControls = request.ProviderControls,
         Resources = request.Resources
     };
 

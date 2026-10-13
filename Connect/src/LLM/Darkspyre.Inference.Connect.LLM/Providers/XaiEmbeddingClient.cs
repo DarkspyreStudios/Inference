@@ -1,3 +1,5 @@
+using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.Embedding;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
@@ -25,8 +27,10 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
         if (string.IsNullOrWhiteSpace(request.ModelId))
             throw new ArgumentException("An embedding model is required.", nameof(request));
         ArgumentNullException.ThrowIfNull(request.Inputs);
-        if (request.Inputs.Count is < 1 or > 128 || request.Inputs.Any(string.IsNullOrWhiteSpace))
+        if (request.Inputs.Count is < 1 or > 128 || request.Inputs.OfType<TextEmbeddingInput>().Any(input => string.IsNullOrWhiteSpace(input.Text)))
             throw new ArgumentException("Supply between one and 128 non-empty embedding inputs.", nameof(request));
+        if (request.Inputs.Any(input => input is not TextEmbeddingInput))
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "This embedding provider accepts text inputs only.");
         if (request.Dimensions is <= 0)
             throw new ArgumentOutOfRangeException(nameof(request), "Embedding dimensions must be positive.");
         ValidateOptions(connection.ProviderOptions);
@@ -115,7 +119,7 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
         var payload = new JsonObject
         {
             ["model"] = request.ModelId,
-            ["input"] = new JsonArray(request.Inputs.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray()),
+            ["input"] = new JsonArray(request.Inputs.Select(value => (JsonNode?)JsonValue.Create(((TextEmbeddingInput)value).Text)).ToArray()),
             ["encoding_format"] = "float"
         };
         if (request.Dimensions is { } dimensions) payload["dimensions"] = dimensions;

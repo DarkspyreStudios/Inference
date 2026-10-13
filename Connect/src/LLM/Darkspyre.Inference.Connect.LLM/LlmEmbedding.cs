@@ -3,14 +3,14 @@ using Darkspyre.Inference.Common.Embedding;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
-/// <summary>A request to embed text inputs.</summary>
+/// <summary>A request to embed typed text or image inputs.</summary>
 public sealed record LlmEmbeddingRequest
 {
     /// <summary>The identifier of the embedding model.</summary>
     public required string ModelId { get; init; }
 
-    /// <summary>The texts to embed, in order.</summary>
-    public required IReadOnlyList<string> Inputs { get; init; }
+    /// <summary>The inputs to embed, in order. Media bytes remain owned by the caller until the call completes.</summary>
+    public required IReadOnlyList<EmbeddingInput> Inputs { get; init; }
 
     /// <summary>Requested vector size; null preserves the model default.</summary>
     public int? Dimensions { get; init; }
