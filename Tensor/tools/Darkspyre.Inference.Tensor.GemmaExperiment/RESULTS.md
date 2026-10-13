@@ -538,3 +538,149 @@ The result qualifies these synthetic, unpadded FP32 text sequences and focused
 lifetime checks on macOS arm64. Tokenization, retrieval quality, multimodal inputs,
 long contexts, cancellation, Linux/Windows execution and the unchanged failing MLX
 fixture remain outside this qualification. No shipping engine is selected or registered.
+## ONNX native platform and image qualification, 2026-10-13
+
+The FP32 text and reference-prepared image paths pass on macOS arm64, Linux x64 and
+Windows x64 with ORT 1.30.0 and the external WebGPU provider 0.4.0. Explicit
+CPU/default input memory fixes the measured plugin binding failure. All final CPU
+and plugin processes exit successfully. The shared image-preprocessing candidate
+fails resized-image parity, so the complete qualification is not a pass.
+No shipping engine is registered. Host has no changes.
+
+**Runtime and inputs.** Inference `9b6fff59` supplies the final explicit-memory
+executable. `e507e3cc` supplies the initial packaged provider experiment and
+`2998e7d6` supplies the image probe. The pinned model revision remains
+`daa72c51243991dfcaf9f9137d2c573d8f7790c0`. `prepare.py --vision` verifies the FP32
+vision graph and its 671,026,176-byte external weights; the text weights contain
+1,084,170,240 bytes. No model conversion or native compilation is involved.
+
+| Platform | Hardware and runtime |
+| --- | --- |
+| macOS 26.7.1 arm64 | Apple M4 Pro; .NET SDK 11.0.100-rc.1.26425.128 |
+| Ubuntu 24.04 x64 | Two Tesla P40 GPUs; NVIDIA 580.178.04; same .NET SDK |
+| Windows 11 Enterprise 10.0.26200 x64 | RTX 3090 Ti; NVIDIA 32.0.15.9597; same .NET SDK |
+
+The Linux core NuGet runtime exposes CPU only. The Windows core exposes Azure and
+CPU providers. The Mac core also includes WebGPU. The external package supplies
+the measured GPU path on all three platforms. Mac device enumeration contains both
+built-in 1.30.0 and external 0.4.0 providers under the same name. The probe selects
+external devices by their `library_path` metadata. Linux and Windows runs select
+reported NVIDIA vendor 4318; logs retain device and library metadata. The Windows
+entry names the RTX 3090 Ti. The Windows Intel UHD 770 is not qualified.
+
+**Input memory and cleanup.** The ordinary C# named-value input API creates CPU
+memory with `OrtMemType.Cpu`, value -1. The external provider's tensor adapter
+rejects that value as a device memory type. Mac and Linux controls abort before
+inference completes. The Linux control reproduces on the NVIDIA selection too.
+Explicit `OrtMemoryInfo("Cpu", DeviceAllocator, 0, Default)` with the `OrtValue`
+input API avoids the failure without changing tensor values. The qualified plugin
+runs set `GEMMA_DEFAULT_HOST_MEMORY=1`. The probe owns and disposes the pinned inputs,
+run options, outputs and sessions. It does not patch native code.
+
+Source evidence: [C# memory defaults](https://github.com/microsoft/onnxruntime/blob/v1.30.0/csharp/src/Microsoft.ML.OnnxRuntime/OrtAllocator.shared.cs)
+and [external-provider tensor conversion](https://github.com/microsoft/onnxruntime/blob/f2c39fe/include/onnxruntime/ep/adapter/tensor_helper.h).
+
+The built-in Mac image control computes all 18 vectors, then crashes during session
+teardown in `BufferManager::Release`, below GPU tensor and session destruction.
+Its vectors pass parity; its process does not pass. A separate-context control fails
+because nonzero context IDs require an explicit native WebGPU instance/device.
+The external provider with explicit default host memory completes both sessions and
+teardown on all three platforms. No custom native-context implementation is added.
+
+**Numerical coverage.** The final matrix contains 198 embeddings: 108 external
+WebGPU outputs and 90 CPU outputs. It covers six calls per case, including the first,
+text lengths 12/128/512 and three image fixtures. Mac CPU text comes from the existing
+FP32 reference round; this matrix adds Linux/Windows CPU text and CPU images on all
+three machines. All 198 embeddings pass the existing bounds: maximum component
+error 1e-4, cosine at least 0.999999 and unit-norm error at most 1e-6.
+
+The largest measured component error is 4.5e-7, minimum cosine is
+0.9999999999975431 and largest norm error is 8.9946e-7. Every case repeats its
+embedding exactly within its process. Raw, unnormalized vision features have maximum
+component difference 0.000243187, relative L2 error at most 1.02301e-5 and minimum
+per-token cosine 0.999999997987366. These feature measurements remain separate from
+the bounds for normalized 768-component embeddings.
+
+The summary retains 222 captured vectors including 18 from the failed built-in Mac
+cleanup control and six from an initial Mac run that selects the built-in provider.
+Those 24 vectors do not count toward the final external-provider qualification.
+Aborted controls and the rejected separate-context run remain explicit failures in
+its execution list. The summary verifies the expected final case list, six calls
+per case and successful process exits. It reports `runtimePassed: true` and
+`preprocessingPassed: false`, and returns exit code 1 for the remaining failure.
+
+**Image contract.** The deterministic square, landscape and portrait fixtures use
+RGB gradients and sharp checker boundaries. The pinned
+[PIL reference recipe](https://github.com/huggingface/transformers/blob/e880ddc57baa4e642c357e7c0a8e77b8d7f1b3f0/src/transformers/models/gemma4/image_processing_pil_gemma4.py)
+produces 16x16 RGB patches, float32 values in [0,1], zero padding to 2,520 patches,
+and int64 [column,row] positions padded with -1. Vision emits [tokens,512]. The
+main graph receives BOS, BOI, one image placeholder per vision token, EOI and EOS,
+plus empty [0,512] audio/video features. The square emits 256 tokens; the two resized
+cases emit 253. The reference files carry SHA-256 hashes checked by the executable.
+
+The existing `Gemma4ImageProcessor` with reference sizing and [0,1] normalization
+matches target dimensions, patch order, padding and positions. The unresized square
+matches all pixel values exactly. Resized inputs fail:
+
+| Fixture | Original → target size | Maximum pixel error | Candidate pixel range |
+| --- | --- | ---: | --- |
+| Square | 768x768 → 768x768 | 0 | 0 to 1 |
+| Landscape | 1200x600 → 1104x528 | 0.141823649 | -0.141824 to 1.141824 |
+| Portrait | 201x401 → 528x1104 | 0.159111992 | -0.159112 to 1.159079 |
+
+The shared float bicubic path retains overshoot and floating-point intermediates.
+PIL resizes RGB byte images with clipping and quantization. Clamping only the final
+float output does not reproduce the intermediate rounding. These tests establish
+a preprocessing reuse gap; they do not establish the retrieval impact. Encoder
+execution uses the independently prepared reference inputs. No shared resizer change
+or second production preprocessing system is part of this experiment.
+
+**Warm timings.** Values are medians of five calls after the first, in milliseconds.
+ORT profiling remains enabled. Machines are shared and CPU/GPU runs occur at different
+times; these values describe the measured processes, not an isolated hardware ranking.
+
+| Platform/provider | Text 12 | Text 128 | Text 512 |
+| --- | ---: | ---: | ---: |
+| Mac external WebGPU | 17.11 | 25.63 | 76.08 |
+| Linux CPU | 72.63 | 161.41 | 785.77 |
+| Linux external WebGPU | 42.20 | 36.54 | 66.23 |
+| Windows CPU | 35.75 | 78.36 | 259.10 |
+| Windows external WebGPU | 25.58 | 25.86 | 26.84 |
+
+Each image cell shows vision encoding / main embedding, in milliseconds. Feature
+readback is included; file serialization and general image preprocessing are outside
+these timers. They are not end-to-end indexing latencies.
+
+| Platform/provider | Square | Landscape | Portrait |
+| --- | ---: | ---: | ---: |
+| Mac CPU | 1518.00 / 93.00 | 1503.26 / 75.43 | 1455.51 / 67.69 |
+| Mac external WebGPU | 508.38 / 40.69 | 510.11 / 43.34 | 520.28 / 44.73 |
+| Linux CPU | 2980.16 / 273.18 | 2900.90 / 268.59 | 2881.26 / 280.96 |
+| Linux external WebGPU | 490.58 / 87.86 | 488.32 / 88.30 | 488.95 / 88.62 |
+| Windows CPU | 10577.40 / 3035.87 | 10683.31 / 3022.62 | 10618.26 / 3096.50 |
+| Windows external WebGPU | 119.93 / 30.55 | 135.99 / 100.40 | 137.96 / 103.61 |
+
+Every final plugin text profile identifies 1,032 distinct GPU node events and 37 CPU
+events. Vision profiles identify 677 GPU events and 40 CPU events. CPU shape/index
+partitions remain; selecting WebGPU does not move every node to the GPU.
+
+**Environment and coexistence.** Windows has an isolated .NET 11 SDK at
+`C:\Users\Public\Darkspyre\agent\dotnet`. The SDK archive matches Microsoft's
+published SHA-512; no PATH or machine-wide installation change is involved. The SSH
+account is WSL `agent`, while native Windows execution reports `azuread\brandon`.
+Linux uses its existing SDK. Both GPU arbiters remain running with unchanged settings.
+Linux has about 24 GB free per GPU and requires no model unload. The Windows model
+unload/load API provides the test window: reported GPU usage falls from about
+22.7 GB to 886 MiB, then returns to 22,696 MiB with the same model loaded after tests.
+The restore runs while the arbiter is idle with no waiters. ComfyUI reports unreachable;
+no ComfyUI action occurs. These manual checks do not implement arbiter integration
+or qualify simultaneous production workload scheduling.
+
+**Evidence and limits.** `artifacts/gemma2/qualification/` retains reference inputs,
+every output, process exit records, native failure summaries, provider profiles,
+hardware metadata, arbiter operation results and `qualification-summary.json`.
+The executable builds with zero warnings/errors; scoped C# formatting and Python
+syntax checks pass. No full suite runs. General tokenization, retrieval quality,
+quantization, video decoding, long contexts, cancellation and concurrent production
+loads remain unqualified. Shared preprocessing parity is the observed remaining
+failure. The source and results stay in the isolated probe.

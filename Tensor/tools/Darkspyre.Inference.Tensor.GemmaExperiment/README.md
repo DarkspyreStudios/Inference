@@ -5,7 +5,8 @@ ONNX CPU, ONNX Core ML and ONNX WebGPU. It runs outside Host and registers no sh
 The existing Tensor ConsoleTester supplies the standalone ownership pattern. RightSize's
 export validation supplies the numerical comparison pattern.
 
-[Measured Mac results](RESULTS.md) record numerical agreement, placement and timing limits.
+[Measured results](RESULTS.md) record Mac, Linux and Windows execution, numerical agreement,
+provider placement and timing limits.
 
 The pinned export is
 [`onnx-community/embeddinggemma-2-ONNX`, daa72c51](https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/tree/daa72c51243991dfcaf9f9137d2c573d8f7790c0).
@@ -98,8 +99,10 @@ specialization helps the same graph; it does not export another model.
 
 This is a loading and numerical feasibility experiment. TensorSharp's baseline uses
 individual tensor operations; the cumulative variants measure existing native fusions.
-Its timings do not measure a finished Gemma engine. Images, video frames, tokenizer parity, realistic retrieval, quantization, long
-contexts, cancellation, Linux and Windows remain unqualified. Google warns against FP16
+Its timings do not measure a finished Gemma engine. The FP32 ONNX text and reference-prepared
+image runs pass on Mac arm64, Linux x64 and Windows x64. Shared image resizing fails
+preprocessing parity. Video decoding, tokenizer parity, realistic retrieval, quantization,
+long contexts and cancellation remain unqualified. Google warns against FP16
 activations for this model; all probe activations and weights use FP32.
 
 ## Correctness and optimized-path diagnostics
@@ -168,3 +171,14 @@ tag (-1); it changes no tensor values and applies to both text and vision inputs
 to context 1 and retains vision on context 0. It tests teardown with independent
 Dawn contexts after the shared-context image run crashes during buffer release.
 The control uses context 0 for both sessions. Both paths dispose their sessions.
+The separate-context control fails because a nonzero context ID requires an explicit
+native WebGPU instance/device. The external provider with default host memory completes
+the measured two-session image runs and cleanup on all three platforms.
+
+`summarize_qualification.py <qualification> <text-reference>` checks every captured vector
+and records raw vision-feature error separately. Its explicit run matrix requires six calls
+and successful process exit for each CPU/plugin case. Diagnostic failures stay in the report.
+The summary records runtime execution and preprocessing as separate outcomes; the command
+returns failure if either fails or any expected case is missing. The Mac CPU text reference
+comes from the existing FP32 comparison directory. Raw inputs, outputs, profiles and the
+summary reside under the ignored `artifacts/gemma2/qualification/` directory.

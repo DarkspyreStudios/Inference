@@ -99,6 +99,11 @@ verified PIL-reference patches and positions. A separate preprocessing check com
 existing Gemma4 processor with those reference inputs, including patch padding and position order.
 A separate-context control tests WebGPU cleanup with independent vision/text contexts.
 An explicit host-memory diagnostic compares ONNX input binding APIs without changing tensor values.
+The qualification summary checks the complete CPU/plugin run matrix, process cleanup and every
+embedding, and reports image preprocessing separately. External WebGPU 0.4.0 with explicit
+CPU/default input memory passes the measured text/image runs on Mac, Linux and Windows.
+The existing shared resizer differs from the pinned PIL reference for resized inputs; those
+preprocessing failures remain visible and prevent an overall passing qualification result.
 The profile identifies CPU partitions. The TensorSharp option loads the same export's FP32
 weights and runs its text forward pass through existing GGML tensor operations on Metal.
 Its resident-weight variant packs FP32 matrices once during loading and uses the existing
