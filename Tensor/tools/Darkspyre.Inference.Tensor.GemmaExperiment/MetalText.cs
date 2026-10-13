@@ -6,6 +6,8 @@ using TsTensor = TensorSharp.Tensor;
 
 namespace Darkspyre.Inference.Tensor.GemmaExperiment;
 
+internal enum MetalVariant { Baseline, Resident, Fused }
+
 // Experimental forward pass for the pinned ONNX export's FP32 weights. This is not a
 // registered Tensor engine. Frozen inputs isolate the runtime from tokenizer differences.
 internal sealed class MetalText : IDisposable
@@ -13,11 +15,13 @@ internal sealed class MetalText : IDisposable
     private readonly GgmlContext context;
     private readonly GgmlAllocator allocator;
     private readonly Dictionary<string, TsTensor> weights = new(StringComparer.Ordinal);
-    private readonly bool residentWeights;
+    private readonly MetalVariant variant;
+    private bool ResidentWeights => variant != MetalVariant.Baseline;
+    private bool Fused => variant == MetalVariant.Fused;
 
-    private MetalText(string root, bool residentWeights)
+    private MetalText(string root, MetalVariant variant)
     {
-        this.residentWeights = residentWeights;
+        this.variant = variant;
         context = new GgmlContext([0], GgmlBackendType.Metal);
         allocator = new GgmlAllocator(context, 0);
         try
@@ -47,7 +51,7 @@ internal sealed class MetalText : IDisposable
                 }
                 float[] values = new float[count];
                 Buffer.BlockCopy(bytes, 0, values, 0, bytes.Length);
-                if (residentWeights && property.Name.EndsWith(".MatMul.weight", StringComparison.Ordinal))
+                if (ResidentWeights && property.Name.EndsWith(".MatMul.weight", StringComparison.Ordinal))
                 {
                     // GGML consumes contiguous [output, input] weights. Pack once during
                     // loading so AddmmQuant(F32) can retain the same native binding.
@@ -67,7 +71,7 @@ internal sealed class MetalText : IDisposable
         catch { Dispose(); throw; }
     }
 
-    internal static int Run(string root, string output, long[] ids, bool residentWeights)
+    internal static int Run(string root, string output, long[] ids, MetalVariant variant)
     {
         IReadOnlyList<GgmlNativeCandidate> candidates = GgmlNativeLoader.ResolvePackageCandidatesAsync().GetAwaiter().GetResult();
         GgmlNativeLoader.Configure(new GgmlRuntimePlan(GgmlNativeLoader.TensorSharpBuild,
@@ -81,7 +85,7 @@ internal sealed class MetalText : IDisposable
         try
         {
             Stopwatch watch = Stopwatch.StartNew();
-            using var model = new MetalText(root, residentWeights);
+            using var model = new MetalText(root, variant);
             double loadMs = watch.Elapsed.TotalMilliseconds;
             Console.WriteLine($"Loaded Metal weights in {loadMs:F1} ms");
             var times = new List<double>();
@@ -100,7 +104,7 @@ internal sealed class MetalText : IDisposable
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new
             {
                 provider = "TensorSharp Metal",
-                variant = residentWeights ? "resident" : "baseline",
+                variant = variant.ToString(),
                 inputIds = ids,
                 loadMs,
                 timesMs = times,
@@ -142,8 +146,7 @@ internal sealed class MetalText : IDisposable
                 int dimension = layer % 6 == 5 ? 512 : 256;
                 int kvHeads = layer % 6 == 5 ? 1 : 2;
                 int width = dimension * (4 + 2 * kvHeads);
-                TsTensor normalized = Norm(tensors, hidden, prefix + "input_layernorm.weight");
-                TsTensor qkv = Linear(tensors, normalized, prefix + "attn.qkv_proj.MatMul.weight");
+                TsTensor qkv = NormLinear(tensors, hidden, prefix + "input_layernorm.weight", prefix + "attn.qkv_proj.MatMul.weight");
                 TsTensor qkvRows = tensors.Add(qkv.View(count * (4 + 2 * kvHeads), dimension));
                 TsTensor unitHeads = Norm(tensors, qkvRows, $"ones_{dimension}");
                 TsTensor unitPacked = tensors.Add(unitHeads.View(count, width));
@@ -161,29 +164,38 @@ internal sealed class MetalText : IDisposable
                 TsTensor attention = tensors.Add(Ops.ScaledDotProductAttention(null!, queries, keys, values, null!, 1.0f));
                 TsTensor flatAttention = tensors.Add(attention.View(count, 4 * dimension));
                 TsTensor projected = Linear(tensors, flatAttention, prefix + "attn.o_proj.MatMul.weight");
-                TsTensor postAttention = Norm(tensors, projected, prefix + "post_attention_layernorm.weight");
-                TsTensor residual = tensors.Add(Ops.Add(null!, hidden, postAttention));
-                TsTensor preMlp = Norm(tensors, residual, prefix + "pre_feedforward_layernorm.weight");
-                TsTensor gateUp = Linear(tensors, preMlp, prefix + "mlp.gate_up_proj.MatMul.weight");
-                TsTensor gate = Slice(tensors, gateUp, 0, 2048);
-                TsTensor up = Slice(tensors, gateUp, 2048, 2048);
-                TsTensor gated = tensors.Add(Ops.GELUMul(null!, gate, up));
-                TsTensor down = Linear(tensors, gated, prefix + "mlp.down_proj.MatMul.weight");
-                TsTensor postMlp = Norm(tensors, down, prefix + "post_feedforward_layernorm.weight");
-                TsTensor afterMlp = tensors.Add(Ops.Add(null!, residual, postMlp));
-                TsTensor pleGate = Linear(tensors, afterMlp, prefix + "ple.per_layer_input_gate.MatMul.weight");
-                TsTensor layerPle = Slice(tensors, pleLayers, layer * 512, 512);
-                TsTensor gatedPle = tensors.Add(Ops.GELUMul(null!, pleGate, layerPle));
-                TsTensor projectedPle = Linear(tensors, gatedPle, prefix + "ple.per_layer_projection.MatMul.weight");
-                TsTensor postPle = Norm(tensors, projectedPle, prefix + "ple.post_per_layer_input_norm.weight");
-                TsTensor next = Ops.Add(null!, afterMlp, postPle);
-                hidden.Dispose();
-                hidden = next;
+                if (Fused)
+                {
+                    GgmlBasicOps.RmsNormResidualAdd(hidden, projected, W(prefix + "post_attention_layernorm.weight"), 1e-6f);
+                    FusedFeedForward(tensors, hidden, prefix);
+                    TsTensor layerPle = Slice(tensors, pleLayers, layer * 512, 512);
+                    FusedPle(hidden, layerPle, prefix);
+                }
+                else
+                {
+                    TsTensor postAttention = Norm(tensors, projected, prefix + "post_attention_layernorm.weight");
+                    TsTensor residual = tensors.Add(Ops.Add(null!, hidden, postAttention));
+                    TsTensor preMlp = Norm(tensors, residual, prefix + "pre_feedforward_layernorm.weight");
+                    TsTensor gateUp = Linear(tensors, preMlp, prefix + "mlp.gate_up_proj.MatMul.weight");
+                    TsTensor gate = Slice(tensors, gateUp, 0, 2048);
+                    TsTensor up = Slice(tensors, gateUp, 2048, 2048);
+                    TsTensor gated = tensors.Add(Ops.GELUMul(null!, gate, up));
+                    TsTensor down = Linear(tensors, gated, prefix + "mlp.down_proj.MatMul.weight");
+                    TsTensor postMlp = Norm(tensors, down, prefix + "post_feedforward_layernorm.weight");
+                    TsTensor afterMlp = tensors.Add(Ops.Add(null!, residual, postMlp));
+                    TsTensor pleGate = Linear(tensors, afterMlp, prefix + "ple.per_layer_input_gate.MatMul.weight");
+                    TsTensor layerPle = Slice(tensors, pleLayers, layer * 512, 512);
+                    TsTensor gatedPle = tensors.Add(Ops.GELUMul(null!, pleGate, layerPle));
+                    TsTensor projectedPle = Linear(tensors, gatedPle, prefix + "ple.per_layer_projection.MatMul.weight");
+                    TsTensor postPle = Norm(tensors, projectedPle, prefix + "ple.post_per_layer_input_norm.weight");
+                    TsTensor next = Ops.Add(null!, afterMlp, postPle);
+                    hidden.Dispose();
+                    hidden = next;
+                }
                 // The export absorbs the final layer scalar into the final RMS epsilon.
                 if (layer < 23) Ops.Mul(hidden, hidden, W(prefix + "layer_scalar").GetElementsAsFloat(1)[0]);
             }
-            TsTensor final = Norm(request, hidden, "norm.weight", 7.59493705118075e-05f);
-            TsTensor projectedOutput = Linear(request, final, "embedding_projection.MatMul.weight");
+            TsTensor projectedOutput = NormLinear(request, hidden, "norm.weight", "embedding_projection.MatMul.weight", 7.59493705118075e-05f);
             float[] rows = projectedOutput.GetElementsAsFloat(count * 768);
             float[] result = new float[768];
             for (int token = 0; token < count; token++)
@@ -199,12 +211,44 @@ internal sealed class MetalText : IDisposable
     private TsTensor Linear(Tensors tensors, TsTensor input, string name)
     {
         TsTensor weight = W(name);
-        TsTensor result = tensors.Add(new TsTensor(allocator, DType.Float32, input.Sizes[0], weight.Sizes[residentWeights ? 0 : 1]));
-        if (!residentWeights) return Ops.Addmm(result, 0f, result, 1f, input, weight);
+        TsTensor result = tensors.Add(new TsTensor(allocator, DType.Float32, input.Sizes[0], weight.Sizes[ResidentWeights ? 0 : 1]));
+        if (!ResidentWeights) return Ops.Addmm(result, 0f, result, 1f, input, weight);
         GgmlBasicOps.AddmmQuant(result, input, weight.Storage.PtrAtElement(weight.StorageOffset),
             0, weight.Sizes[1], weight.Sizes[0], weight.ElementCount() * sizeof(float));
         return result;
     }
+    private TsTensor NormLinear(Tensors tensors, TsTensor input, string norm, string matrix, float epsilon = 1e-6f)
+    {
+        if (!Fused) return Linear(tensors, Norm(tensors, input, norm, epsilon), matrix);
+        TsTensor weight = W(matrix);
+        TsTensor result = tensors.Add(new TsTensor(allocator, DType.Float32, input.Sizes[0], weight.Sizes[0]));
+        GgmlBasicOps.FusedRmsNormMatMulQuant(result, input, W(norm), epsilon,
+            weight.Storage.PtrAtElement(weight.StorageOffset), 0, weight.Sizes[1], weight.Sizes[0], weight.ElementCount() * sizeof(float));
+        return result;
+    }
+
+    private void FusedFeedForward(Tensors tensors, TsTensor hidden, string prefix)
+    {
+        TsTensor gateUp = W(prefix + "mlp.gate_up_proj.MatMul.weight");
+        TsTensor down = W(prefix + "mlp.down_proj.MatMul.weight");
+        TsTensor projected = tensors.Add(new TsTensor(allocator, DType.Float32, hidden.Sizes));
+        GgmlBasicOps.FusedFFNActProjectQuant(projected, hidden, W(prefix + "pre_feedforward_layernorm.weight"), 1e-6f,
+            gateUp.Storage.PtrAtElement(gateUp.StorageOffset), 0, gateUp.Sizes[1], gateUp.Sizes[0], gateUp.ElementCount() * sizeof(float),
+            down.Storage.PtrAtElement(down.StorageOffset), 0, down.Sizes[1], down.Sizes[0], down.ElementCount() * sizeof(float),
+            halfDim: 2048, actType: 1);
+        GgmlBasicOps.RmsNormResidualAdd(hidden, projected, W(prefix + "post_feedforward_layernorm.weight"), 1e-6f);
+    }
+
+    private void FusedPle(TsTensor hidden, TsTensor layerPle, string prefix)
+    {
+        TsTensor gate = W(prefix + "ple.per_layer_input_gate.MatMul.weight");
+        TsTensor projection = W(prefix + "ple.per_layer_projection.MatMul.weight");
+        GgmlBasicOps.FusedPleBlockQuant(hidden, layerPle,
+            gate.Storage.PtrAtElement(gate.StorageOffset), 0, gate.Sizes[1], gate.Sizes[0], gate.ElementCount() * sizeof(float),
+            projection.Storage.PtrAtElement(projection.StorageOffset), 0, projection.Sizes[1], projection.Sizes[0], projection.ElementCount() * sizeof(float),
+            W(prefix + "ple.post_per_layer_input_norm.weight"), 1e-6f);
+    }
+
     private TsTensor Norm(Tensors tensors, TsTensor input, string name, float epsilon = 1e-6f) =>
         tensors.Add(Ops.RMSNorm(null!, input, W(name), null!, epsilon));
 
@@ -240,7 +284,7 @@ internal sealed class MetalText : IDisposable
     {
         foreach (TsTensor tensor in weights.Values)
         {
-            if (residentWeights) GgmlBasicOps.InvalidateTensorHostBuffer(tensor);
+            if (ResidentWeights) GgmlBasicOps.InvalidateTensorHostBuffer(tensor);
             tensor.Dispose();
         }
         weights.Clear();

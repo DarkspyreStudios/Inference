@@ -33,6 +33,7 @@ def main():
     output = Path(sys.argv[2]).resolve()
     executable = Path(__file__).resolve().parent / "bin/Release/net11.0/Darkspyre.Inference.Tensor.GemmaExperiment.dll"
     previous = {"metal-resident": "metal", "metal-fused": "metal-resident", "metal-grouped": "metal-fused"}
+    failures = []
     for provider in sys.argv[3:]:
         for length in (12, 128, 512):
             case = output / f"{provider}-{length}"
@@ -75,7 +76,9 @@ def main():
             (case / "measurement.json").write_text(json.dumps(summary, indent=2) + "\n")
             print(json.dumps({key: value for key, value in summary.items() if key != "command"}), flush=True)
             if not summary["parityPassed"]:
-                raise SystemExit(f"Parity failed for {provider}/{length}; see {case / 'measurement.json'}")
+                failures.append(f"{provider}/{length}")
+    if failures:
+        raise SystemExit("Parity failed: " + ", ".join(failures))
 
 
 if __name__ == "__main__":

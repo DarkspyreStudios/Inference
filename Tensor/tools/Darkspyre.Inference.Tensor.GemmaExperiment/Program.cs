@@ -16,8 +16,8 @@ internal static class Program
                 Console.WriteLine("ONNX providers: " + string.Join(", ", OrtEnv.Instance().GetAvailableProviders()));
                 return 0;
             }
-            if (args.Length is not (3 or 4) || args[0] is not ("cpu" or "coreml" or "coreml-static" or "webgpu" or "metal" or "metal-resident"))
-                throw new ArgumentException("Usage: <cpu|coreml|coreml-static|webgpu|metal|metal-resident> <prepared-directory> <output-directory> [tokens: 2..512], or providers");
+            if (args.Length is not (3 or 4) || args[0] is not ("cpu" or "coreml" or "coreml-static" or "webgpu" or "metal" or "metal-resident" or "metal-fused"))
+                throw new ArgumentException("Usage: <cpu|coreml|coreml-static|webgpu|metal|metal-resident|metal-fused> <prepared-directory> <output-directory> [tokens: 2..512], or providers");
             string root = Path.GetFullPath(args[1]);
             string output = Path.GetFullPath(args[2]);
             Directory.CreateDirectory(output);
@@ -27,7 +27,16 @@ internal static class Program
             if (length is < 2 or > 512) throw new ArgumentException("The probe accepts 2..512 tokens.");
             long[] interior = [3369, 236787, 3253, 1534, 865, 2336, 236787, 1212, 563, 1009];
             long[] ids = [2, .. Enumerable.Range(0, length - 2).Select(i => interior[i % interior.Length]), 1];
-            if (args[0] is "metal" or "metal-resident") return MetalText.Run(root, output, ids, args[0] == "metal-resident");
+            if (args[0] is "metal" or "metal-resident" or "metal-fused")
+            {
+                MetalVariant variant = args[0] switch
+                {
+                    "metal-resident" => MetalVariant.Resident,
+                    "metal-fused" => MetalVariant.Fused,
+                    _ => MetalVariant.Baseline
+                };
+                return MetalText.Run(root, output, ids, variant);
+            }
             Console.WriteLine("ONNX providers: " + string.Join(", ", OrtEnv.Instance().GetAvailableProviders()));
             using var options = new SessionOptions
             {

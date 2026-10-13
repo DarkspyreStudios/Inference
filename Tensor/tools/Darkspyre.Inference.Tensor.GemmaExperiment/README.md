@@ -38,7 +38,7 @@ download or compile one.
 bash ../agent-ds/scripts/workspace-env.sh dotnet Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/bin/Release/net11.0/Darkspyre.Inference.Tensor.GemmaExperiment.dll cpu artifacts/gemma2/model artifacts/gemma2/cpu-128 128
 ```
 
-Replace `cpu` with `metal`, `metal-resident`, `coreml`, `coreml-static` or `webgpu`, and use a separate output directory for each
+Replace `cpu` with `metal`, `metal-resident`, `metal-fused`, `coreml`, `coreml-static` or `webgpu`, and use a separate output directory for each
 run. `providers` lists the ONNX providers available in the installed runtime. The Metal command
 does not initialize ONNX Runtime. Run one process at a time to avoid GPU contention.
 
@@ -48,6 +48,10 @@ and calls the existing resident `AddmmQuant` operation with GGML type F32. Its o
 operations match `metal`. Neither variant quantizes weights. Each result records all
 six output vectors as well as the final vector.
 
+`metal-fused` adds the existing GGML norm/projection, GELU feed-forward,
+post-norm/residual and PLE fusions to resident weights. It retains the generic
+attention path and its repeated K/V heads. All weights and activations remain FP32.
+
 The Mac comparison script runs one process at a time for each provider at 12, 128
 and 512 tokens, records `/usr/bin/time -l` peak RSS, and compares all six vectors
 with the CPU reference in the same output root. Run `cpu` before the other providers.
@@ -55,9 +59,12 @@ It also compares each optimization with its preceding variant when that result e
 The execution-parity bounds are maximum component error 1e-4, cosine at least
 0.999999 and norm error at most 1e-6. The bounds admit the measured original Metal
 baseline; they do not qualify retrieval quality.
+Every requested case runs even when another case fails numerical parity; the script
+then exits with failure and names every failing case. First-call vectors participate
+in parity checks even though warm latency excludes the first call.
 
 ```bash
-python3 Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/compare.py artifacts/gemma2/model artifacts/gemma2/ab cpu metal metal-resident webgpu
+python3 Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/compare.py artifacts/gemma2/model artifacts/gemma2/ab cpu metal metal-resident metal-fused webgpu
 ```
 
 The optional length defaults to 12. Each input consists of BOS, repeated frozen ordinary token

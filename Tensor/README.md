@@ -98,6 +98,8 @@ weights and runs its text forward pass through existing GGML tensor operations o
 Its resident-weight variant packs FP32 matrices once during loading and uses the existing
 GGML resident matrix operation. The Mac comparison script records every call's vector
 and checks execution parity against ONNX CPU and the preceding measured variant.
+The fused variant also uses the existing Gemma norm/projection, feed-forward,
+post-norm/residual and PLE graphs while retaining the generic attention path.
 Each option runs in its own process. The probe accepts 2–512 tokens, where the full and
 sliding attention masks coincide, and does not register an engine in the shipped Tensor catalog.
 The [probe instructions](tools/Darkspyre.Inference.Tensor.GemmaExperiment/README.md)
