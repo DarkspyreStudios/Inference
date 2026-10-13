@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
+using Microsoft.ML.OnnxRuntime.EP.WebGpu;
 
 namespace Darkspyre.Inference.Tensor.GemmaExperiment;
 
@@ -16,8 +17,8 @@ internal static class Program
                 Console.WriteLine("ONNX providers: " + string.Join(", ", OrtEnv.Instance().GetAvailableProviders()));
                 return 0;
             }
-            if (args.Length is not (3 or 4) || args[0] is not ("cpu" or "coreml" or "coreml-static" or "webgpu" or "metal" or "metal-resident" or "metal-fused" or "metal-grouped" or "metal-rows" or "ggml-cpu" or "ggml-cpu-fused"))
-                throw new ArgumentException("Usage: <cpu|coreml|coreml-static|webgpu|metal|metal-resident|metal-fused|metal-grouped|metal-rows|ggml-cpu|ggml-cpu-fused> <prepared-directory> <output-directory> [tokens: 2..512], or providers");
+            if (args.Length is not (3 or 4) || args[0] is not ("cpu" or "webgpu-plugin" or "coreml" or "coreml-static" or "webgpu" or "metal" or "metal-resident" or "metal-fused" or "metal-grouped" or "metal-rows" or "ggml-cpu" or "ggml-cpu-fused"))
+                throw new ArgumentException("Usage: <cpu|webgpu-plugin|coreml|coreml-static|webgpu|metal|metal-resident|metal-fused|metal-grouped|metal-rows|ggml-cpu|ggml-cpu-fused> <prepared-directory> <output-directory> [tokens: 2..512], or providers");
             string root = Path.GetFullPath(args[1]);
             string output = Path.GetFullPath(args[2]);
             Directory.CreateDirectory(output);
@@ -63,6 +64,7 @@ internal static class Program
                 });
             if (args[0] == "webgpu")
                 options.AppendExecutionProvider("WebGPU", new Dictionary<string, string>());
+            if (args[0] == "webgpu-plugin") AppendWebGpuPlugin(options);
             Stopwatch watch = Stopwatch.StartNew();
             using var session = new InferenceSession(Path.Combine(root, "model.onnx"), options);
             double loadMs = watch.Elapsed.TotalMilliseconds;
@@ -109,6 +111,18 @@ internal static class Program
             Console.Error.WriteLine(error);
             return 1;
         }
+    }
+
+    internal static void AppendWebGpuPlugin(SessionOptions options)
+    {
+        var environment = OrtEnv.Instance();
+        environment.RegisterExecutionProviderLibrary("gemma_webgpu", WebGpuEp.GetLibraryPath());
+        var device = environment.GetEpDevices().FirstOrDefault(d => d.EpName == WebGpuEp.GetEpName())
+            ?? throw new InvalidOperationException("The WebGPU plugin found no compatible device.");
+        Console.WriteLine(JsonSerializer.Serialize(new { device.EpName, device.EpVendor, device.EpMetadata,
+            device.EpOptions, type = device.HardwareDevice.Type.ToString(), device.HardwareDevice.Vendor,
+            device.HardwareDevice.VendorId, device.HardwareDevice.DeviceId, device.HardwareDevice.Metadata }));
+        options.AppendExecutionProvider(environment, [device], new Dictionary<string, string>());
     }
 
     internal static long? PeakWorkingSet()

@@ -1,4 +1,4 @@
-"""Fetch the pinned FP32 text graph and expose its initializer offsets for the probe."""
+"""Fetch the pinned FP32 graphs and expose its initializer offsets for the probe."""
 
 import argparse
 import hashlib
@@ -11,6 +11,10 @@ BASE = f"https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/resolve/{RE
 ARTIFACTS = {
     "model.onnx": (421421, "bc47de15f81208a5c99e5ab10f746d5e33b51ea228b7dc0bef9c133a94f1c1c3"),
     "model.onnx_data": (1084170240, "9fd452bfc6916e5a92f080f8dada35598ca4512b21c65897d4c5974d5f9630a2"),
+}
+VISION_ARTIFACTS = {
+    "vision_encoder.onnx": (121253, "a3fb44f8b5b152cfee6afe16e2cd69e774b7e1d3b822d1db1190ddf7b08b575e"),
+    "vision_encoder.onnx_data": (671026176, "ca8d28c99feb8129618f141978a27adae25090e0dadb68a30c235e191c01e37e"),
 }
 
 
@@ -47,9 +51,11 @@ def main():
     """Verify downloads and write the exact graph's initializer metadata."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("directory", type=Path)
+    parser.add_argument("--vision", action="store_true", help="Also fetch the pinned FP32 image encoder")
     args = parser.parse_args()
     args.directory.mkdir(parents=True, exist_ok=True)
-    for name, (length, expected) in ARTIFACTS.items():
+    artifacts = ARTIFACTS | (VISION_ARTIFACTS if args.vision else {})
+    for name, (length, expected) in artifacts.items():
         path = args.directory / name
         if not path.exists():
             print(f"Downloading {name}: {length} bytes", flush=True)

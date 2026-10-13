@@ -5,6 +5,7 @@
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.ML.OnnxRuntime" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.EP.WebGpu" />
     <PackageReference Include="Darkspyre.TensorSharp.Models" />
   </ItemGroup>
 </Project>

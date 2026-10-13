@@ -9,7 +9,8 @@ export validation supplies the numerical comparison pattern.
 
 The pinned export is
 [`onnx-community/embeddinggemma-2-ONNX`, daa72c51](https://huggingface.co/onnx-community/embeddinggemma-2-ONNX/tree/daa72c51243991dfcaf9f9137d2c573d8f7790c0).
-`prepare.py` verifies artifact lengths and SHA-256 hashes. It reads the graph's initializer
+`prepare.py` verifies artifact lengths and SHA-256 hashes. Its `--vision` option also
+fetches the pinned FP32 vision graph and external weights. It reads the graph's initializer
 metadata without executing external model code. Both runtimes consume those exact weights.
 TensorSharp uses their exported layout, including the folded embedding scale and normalization
 epsilon adjustments. This probe does not load arbitrary architectures or export new models.
@@ -40,7 +41,10 @@ bash ../agent-ds/scripts/workspace-env.sh dotnet Tensor/tools/Darkspyre.Inferenc
 ```
 
 Replace `cpu` with `metal`, `metal-resident`, `metal-fused`, `metal-grouped`, `metal-rows`, `coreml`, `coreml-static` or `webgpu`, and use a separate output directory for each
-run. `providers` lists the ONNX providers available in the installed runtime. The Metal command
+run. `webgpu-plugin` loads Microsoft.ML.OnnxRuntime.EP.WebGpu 0.4.0 with the same
+ORT 1.30.0 core. This packaged provider supplies native Linux and Windows GPU
+execution; the core package alone does not include WebGPU on every platform.
+It fails if the plugin finds no device. `providers` lists the ONNX providers available in the installed runtime. The Metal command
 does not initialize ONNX Runtime. Run one process at a time to avoid GPU contention.
 
 `metal` retains the original generic matrix path for A/B measurement. `metal-resident`
