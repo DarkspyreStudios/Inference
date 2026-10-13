@@ -102,7 +102,10 @@ through the CPU backend in the matching prebuilt driver. They do not initialize 
 and their names/shapes in `diagnostic-NN.json`. These host reads synchronize execution.
 Trace-mode timings do not measure the undisturbed inference path.
 `GEMMA_DIAGNOSTIC=profile` records elapsed phases and managed allocation/GC counts
-without reading intermediate tensor data. Every mode retains all final vectors.
+without reading intermediate tensor data. It also reads the pinned runtime ownership
+registry count under its metadata lock, without mutating it. `GEMMA_SYNCHRONOUS=1`
+disables the existing GGML async-compute setting as a diagnostic control. Its default
+retains the backend setting. Every mode retains all final vectors.
 
 ```bash
 GEMMA_DIAGNOSTIC=trace bash ../agent-ds/scripts/workspace-env.sh dotnet Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/bin/Release/net11.0/Darkspyre.Inference.Tensor.GemmaExperiment.dll ggml-cpu artifacts/gemma2/model artifacts/gemma2/correctness/cpu-trace-12 12

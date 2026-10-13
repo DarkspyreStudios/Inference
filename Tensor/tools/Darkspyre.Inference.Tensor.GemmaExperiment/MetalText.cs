@@ -81,11 +81,13 @@ internal sealed class MetalText : IDisposable
         Console.WriteLine($"GGML: {initialized.State}, actual backend {initialized.ActualBackend}");
         if (initialized.State != GgmlInitializationState.Ready || initialized.ActualBackend != backend)
             throw new InvalidOperationException(initialized.Diagnostic ?? $"{backend} was not selected.");
+        bool synchronous = Environment.GetEnvironmentVariable("GEMMA_SYNCHRONOUS") == "1";
         bool released;
         try
         {
             Stopwatch watch = Stopwatch.StartNew();
             using var model = new MetalText(root, variant, backend);
+            if (synchronous) GgmlBasicOps.SetAsyncCompute(false);
             double loadMs = watch.Elapsed.TotalMilliseconds;
             Console.WriteLine($"Loaded {backend} weights in {loadMs:F1} ms");
             var times = new List<double>();
@@ -109,6 +111,7 @@ internal sealed class MetalText : IDisposable
             {
                 provider = $"TensorSharp {backend}",
                 variant = variant.ToString(),
+                synchronous,
                 inputIds = ids,
                 loadMs,
                 timesMs = times,

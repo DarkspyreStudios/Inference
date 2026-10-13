@@ -38,6 +38,22 @@ internal sealed class ForwardDiagnostic
         previous = Stopwatch.GetTimestamp();
     }
 
+    // Read-only debugger-style inspection of the pinned runtime's BCL process slot.
+    // No shipped consumer uses this private representation or mutates its registry.
+    private static object InspectOwnership()
+    {
+        var state = (object[])AppDomain.CurrentDomain.GetData("Darkspyre.TensorSharp.NativeQuarantine")!;
+        lock (state[1])
+        {
+            var owners = (Dictionary<Guid, object[]>)state[4];
+            return new
+            {
+                count = owners.Count,
+                liveTargets = owners.Values.Count(cell => ((WeakReference<object>)cell[2]).TryGetTarget(out _))
+            };
+        }
+    }
+
     internal void Write()
     {
         if (mode == null) return;
@@ -45,6 +61,7 @@ internal sealed class ForwardDiagnostic
         {
             mode,
             run,
+            ownership = InspectOwnership(),
             phases,
             allocatedBytes = GC.GetTotalAllocatedBytes() - allocated,
             collections = Enumerable.Range(0, 3).Select(i => GC.CollectionCount(i) - collections[i]).ToArray(),
