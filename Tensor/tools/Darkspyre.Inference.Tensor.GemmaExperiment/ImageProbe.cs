@@ -31,7 +31,8 @@ internal static class ImageProbe
         using var vision = new InferenceSession(Path.Combine(model, "vision_encoder.onnx"), options);
         double visionLoadMs = watch.Elapsed.TotalMilliseconds;
         bool separate = provider == "webgpu" && Environment.GetEnvironmentVariable("GEMMA_SEPARATE_WEBGPU_CONTEXTS") == "1";
-        using var textOptions = separate ? new SessionOptions() : options.Clone();
+        using var separateOptions = separate ? new SessionOptions() : null;
+        var textOptions = separateOptions ?? options;
         textOptions.EnableProfiling = false;
         textOptions.ProfileOutputPathPrefix = Path.Combine(output, "text");
         textOptions.EnableProfiling = true;
