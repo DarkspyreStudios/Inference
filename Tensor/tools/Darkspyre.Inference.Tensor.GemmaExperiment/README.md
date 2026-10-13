@@ -101,7 +101,8 @@ through the CPU backend in the matching prebuilt driver. They do not initialize 
 `GEMMA_DIAGNOSTIC=trace` writes contiguous intermediate FP32 arrays as `.f32` files
 and their names/shapes in `diagnostic-NN.json`. These host reads synchronize execution.
 `GEMMA_TRACE_POINT` restricts readback to one named checkpoint, such as
-`layer-11-output`, to localize a failure without synchronizing earlier checkpoints.
+`layer-11-output`, to localize a failure without synchronizing earlier checkpoints. An attention checkpoint also captures its Q/K/V inputs after
+reading the completed result, so those reads do not precede that invocation.
 Trace-mode timings do not measure the undisturbed inference path.
 `GEMMA_DIAGNOSTIC=profile` records elapsed phases and managed allocation/GC counts
 without reading intermediate tensor data. It also reads the pinned runtime ownership

@@ -171,11 +171,12 @@ internal sealed class MetalText : IDisposable
                 diagnostic.Mark($"layer-{layer:D2}-key", key);
                 diagnostic.Mark($"layer-{layer:D2}-value", value);
                 TsTensor flatAttention;
+                TsTensor attentionQueries, attentionKeys, attentionValues;
                 if (variant == MetalVariant.Grouped)
                 {
-                    TsTensor queries = HeadFirst(tensors, query, count, 4, dimension);
-                    TsTensor keys = HeadFirst(tensors, key, count, kvHeads, dimension);
-                    TsTensor values = HeadFirst(tensors, value, count, kvHeads, dimension);
+                    TsTensor queries = attentionQueries = HeadFirst(tensors, query, count, 4, dimension);
+                    TsTensor keys = attentionKeys = HeadFirst(tensors, key, count, kvHeads, dimension);
+                    TsTensor values = attentionValues = HeadFirst(tensors, value, count, kvHeads, dimension);
                     flatAttention = tensors.Add(new TsTensor(allocator, DType.Float32, count, 4 * dimension));
                     // Exact extents and head-first FP32 inputs avoid padding and F16 flash
                     // conversion. Every key is visible for this <=512-token unpadded probe.
@@ -186,13 +187,14 @@ internal sealed class MetalText : IDisposable
                 else
                 {
                     // Generic SDPA requires equal Q/K/V head counts.
-                    TsTensor keys = RepeatHeads(tensors, key, count, kvHeads, dimension);
-                    TsTensor values = RepeatHeads(tensors, value, count, kvHeads, dimension);
-                    TsTensor queries = tensors.Add(query.View(1, count, 4, dimension));
+                    TsTensor keys = attentionKeys = RepeatHeads(tensors, key, count, kvHeads, dimension);
+                    TsTensor values = attentionValues = RepeatHeads(tensors, value, count, kvHeads, dimension);
+                    TsTensor queries = attentionQueries = tensors.Add(query.View(1, count, 4, dimension));
                     TsTensor attention = tensors.Add(Ops.ScaledDotProductAttention(null!, queries, keys, values, null!, 1.0f));
                     flatAttention = tensors.Add(attention.View(count, 4 * dimension));
                 }
                 diagnostic.Mark($"layer-{layer:D2}-attention", flatAttention);
+                diagnostic.AttentionInputs($"layer-{layer:D2}-attention", attentionQueries, attentionKeys, attentionValues);
                 TsTensor projected = Linear(tensors, flatAttention, prefix + "attn.o_proj.MatMul.weight");
                 diagnostic.Mark($"layer-{layer:D2}-projected", projected);
                 if (Fused)

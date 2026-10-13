@@ -31,12 +31,27 @@ internal sealed class ForwardDiagnostic
         double elapsed = Stopwatch.GetElapsedTime(previous).TotalMilliseconds;
         if (mode == "trace")
         {
-            float[] values = tensor.GetElementsAsFloat(checked((int)tensor.ElementCount()));
-            using var stream = File.Create(Path.Combine(output, $"run-{run:D2}-{name}.f32"));
-            stream.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(values.AsSpan()));
+            WriteTensor(name, tensor);
         }
         phases.Add(new { name, elapsedMs = elapsed, shape = tensor.Sizes.ToArray() });
         previous = Stopwatch.GetTimestamp();
+    }
+
+    private void WriteTensor(string name, TsTensor tensor)
+    {
+        float[] values = tensor.GetElementsAsFloat(checked((int)tensor.ElementCount()));
+        using var stream = File.Create(Path.Combine(output, $"run-{run:D2}-{name}.f32"));
+        stream.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(values.AsSpan()));
+    }
+
+    internal void AttentionInputs(string name, TsTensor query, TsTensor key, TsTensor value)
+    {
+        if (mode != "trace" || tracePoint != name) return;
+        // Read inputs only after the attention result has completed. This preserves
+        // the failing invocation's schedule before its result checkpoint.
+        WriteTensor(name + "-input-query", query);
+        WriteTensor(name + "-input-key", key);
+        WriteTensor(name + "-input-value", value);
     }
 
     // Read-only debugger-style inspection of the pinned runtime's BCL process slot.
