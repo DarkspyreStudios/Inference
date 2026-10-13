@@ -44,7 +44,7 @@ internal sealed class ForwardDiagnostic
         stream.Write(System.Runtime.InteropServices.MemoryMarshal.AsBytes(values.AsSpan()));
     }
 
-    internal void AttentionInputs(string name, TsTensor query, TsTensor key, TsTensor value)
+    internal void AttentionInputs(string name, TsTensor query, TsTensor key, TsTensor value, TsTensor originalKey)
     {
         if (mode != "trace" || tracePoint != name) return;
         // Read inputs only after the attention result has completed. This preserves
@@ -52,6 +52,7 @@ internal sealed class ForwardDiagnostic
         WriteTensor(name + "-input-query", query);
         WriteTensor(name + "-input-key", key);
         WriteTensor(name + "-input-value", value);
+        WriteTensor(name + "-original-key", originalKey);
     }
 
     // Read-only debugger-style inspection of the pinned runtime's BCL process slot.

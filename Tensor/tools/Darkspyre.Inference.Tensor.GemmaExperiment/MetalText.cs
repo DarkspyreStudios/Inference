@@ -16,6 +16,7 @@ internal sealed class MetalText : IDisposable
     private readonly GgmlAllocator allocator;
     private readonly Dictionary<string, TsTensor> weights = new(StringComparer.Ordinal);
     private readonly MetalVariant variant;
+    private static readonly bool CopyBarrier = Environment.GetEnvironmentVariable("GEMMA_COPY_BARRIER") == "1";
     private bool ResidentWeights => variant != MetalVariant.Baseline;
     private bool Fused => variant is MetalVariant.Fused or MetalVariant.Grouped;
 
@@ -112,6 +113,7 @@ internal sealed class MetalText : IDisposable
                 provider = $"TensorSharp {backend}",
                 variant = variant.ToString(),
                 synchronous,
+                copyBarrier = CopyBarrier,
                 inputIds = ids,
                 loadMs,
                 timesMs = times,
@@ -194,7 +196,7 @@ internal sealed class MetalText : IDisposable
                     flatAttention = tensors.Add(attention.View(count, 4 * dimension));
                 }
                 diagnostic.Mark($"layer-{layer:D2}-attention", flatAttention);
-                diagnostic.AttentionInputs($"layer-{layer:D2}-attention", attentionQueries, attentionKeys, attentionValues);
+                diagnostic.AttentionInputs($"layer-{layer:D2}-attention", attentionQueries, attentionKeys, attentionValues, key);
                 TsTensor projected = Linear(tensors, flatAttention, prefix + "attn.o_proj.MatMul.weight");
                 diagnostic.Mark($"layer-{layer:D2}-projected", projected);
                 if (Fused)
@@ -295,6 +297,7 @@ internal sealed class MetalText : IDisposable
     private static TsTensor Slice(Tensors tensors, TsTensor input, int start, int length)
     {
         TsTensor view = tensors.Add(input.Narrow(1, start, length));
+        if (CopyBarrier) GgmlBasicOps.HostReadBarrier();
         return tensors.Add(Ops.NewContiguous(view));
     }
 
@@ -302,6 +305,7 @@ internal sealed class MetalText : IDisposable
     {
         TsTensor source = tensors.Add(input.View(count, heads, dimension));
         TsTensor target = tensors.Add(new TsTensor(allocator, DType.Float32, count, 4, dimension));
+        if (CopyBarrier) GgmlBasicOps.HostReadBarrier();
         for (int i = 0; i < 4; i++)
         {
             using TsTensor from = source.Narrow(1, i / (4 / heads), 1);
@@ -315,6 +319,7 @@ internal sealed class MetalText : IDisposable
     {
         TsTensor shaped = tensors.Add(input.View(count, heads, dimension));
         TsTensor transposed = tensors.Add(shaped.Transpose(0, 1));
+        if (CopyBarrier) GgmlBasicOps.HostReadBarrier();
         return tensors.Add(Ops.NewContiguous(transposed));
     }
 

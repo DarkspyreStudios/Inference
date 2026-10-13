@@ -108,7 +108,10 @@ Trace-mode timings do not measure the undisturbed inference path.
 without reading intermediate tensor data. It also reads the pinned runtime ownership
 registry count under its metadata lock, without mutating it. `GEMMA_SYNCHRONOUS=1`
 disables the existing GGML async-compute setting as a diagnostic control. Its default
-retains the backend setting. Every mode retains all final vectors.
+retains the backend setting. `GEMMA_COPY_BARRIER=1` drains pending GPU work before
+the probe copies slices, repeats K/V heads or creates head-first layouts on the CPU.
+This diagnoses host-copy visibility without changing the native driver or library.
+Every mode retains all final vectors.
 
 ```bash
 GEMMA_DIAGNOSTIC=trace bash ../agent-ds/scripts/workspace-env.sh dotnet Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/bin/Release/net11.0/Darkspyre.Inference.Tensor.GemmaExperiment.dll ggml-cpu artifacts/gemma2/model artifacts/gemma2/correctness/cpu-trace-12 12
