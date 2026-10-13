@@ -758,3 +758,24 @@ On this M4 Pro run the subsequent Connect calls take 8–18 ms for short text on
 WebGPU. Images take 1,422–1,482 ms on CPU and 556–579 ms on WebGPU. These are fixture timings,
 not a general model throughput claim. Linux and Windows production-library qualification is not
 established by these Mac results.
+
+## Production ONNX engine and Connect route
+
+The independent Gemma library passes CPU and external WebGPU qualification on Mac arm64, Linux x64 and Windows x64. The same managed tester binary runs on all three. Each run checks 19 reference token sequences, seven text inputs and three image inputs. Every input runs directly and through SelfHost Connect. All 120 measured calls agree within the existing execution bounds; direct/Connect vectors match exactly.
+
+The maximum component difference from Mac CPU is `4.425e-7`. Image outputs also agree with the prior frozen CPU reference. All runs pass three retrieval rankings, whole-batch over-limit rejection, active cancellation, reuse, unload and model-pack removal. The fixed Christmas recall case scores about 0.704 for the related document and 0.507–0.572 for the three unrelated documents at the agreed 0.60 threshold. This fixture does not establish general corpus relevance.
+
+| Platform/backend | Load ms | Median subsequent text call ms | Median subsequent image call ms |
+|---|---:|---:|---:|
+| mac-cpu | 4135 | 10.1 | 1442.7 |
+| mac-webgpu | 4961 | 19.0 | 562.7 |
+| linux-cpu | 8023 | 45.9 | 3337.7 |
+| linux-webgpu | 11593 | 44.7 | 631.2 |
+| windows-cpu | 5124 | 341.6 | 13555.7 |
+| windows-webgpu | 5515 | 25.6 | 241.4 |
+
+These timings measure one direct call followed by one Connect call per fixture, including preparation. They are bounded qualification observations, not sustained-throughput benchmarks. Hardware is Apple M4 Pro, Linux Tesla P40 and Windows RTX 3090 Ti. The Windows GPU run temporarily unloads the idle qwen3.8-27b model through gpu-arbiter and restores it afterward. The arbiter returns to the same loaded/idle state.
+
+The four existing console/serialization checks pass with JSON reflection defaults disabled. Fourteen SelfHost/embedding checks, forty managed-conversation checks and nine embedding/lifetime checks pass. Package-input checks pass without creating archives; the package verifier builds with zero warnings. No package is published. The checks use no Harness Host process or source changes.
+
+The captured vectors and machine-readable comparison are under `artifacts/gemma2/engine/`. `summarize_engine.py` requires all six platform/backend results and fails on a missing run.
