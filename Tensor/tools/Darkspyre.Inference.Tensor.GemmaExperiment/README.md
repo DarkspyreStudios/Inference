@@ -38,7 +38,7 @@ download or compile one.
 bash ../agent-ds/scripts/workspace-env.sh dotnet Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/bin/Release/net11.0/Darkspyre.Inference.Tensor.GemmaExperiment.dll cpu artifacts/gemma2/model artifacts/gemma2/cpu-128 128
 ```
 
-Replace `cpu` with `metal`, `metal-resident`, `metal-fused`, `coreml`, `coreml-static` or `webgpu`, and use a separate output directory for each
+Replace `cpu` with `metal`, `metal-resident`, `metal-fused`, `metal-grouped`, `coreml`, `coreml-static` or `webgpu`, and use a separate output directory for each
 run. `providers` lists the ONNX providers available in the installed runtime. The Metal command
 does not initialize ONNX Runtime. Run one process at a time to avoid GPU contention.
 
@@ -52,6 +52,11 @@ six output vectors as well as the final vector.
 post-norm/residual and PLE fusions to resident weights. It retains the generic
 attention path and its repeated K/V heads. All weights and activations remain FP32.
 
+`metal-grouped` adds the existing grouped prefill attention operation with contiguous
+head-first FP32 inputs, exact sequence extents and an all-visible mask for this
+unpadded 2–512-token experiment. It replaces eight K/V head copies per layer with
+three head-first layout conversions. It retains the Gemma block fusions.
+
 The Mac comparison script runs one process at a time for each provider at 12, 128
 and 512 tokens, records `/usr/bin/time -l` peak RSS, and compares all six vectors
 with the CPU reference in the same output root. Run `cpu` before the other providers.
@@ -64,7 +69,7 @@ then exits with failure and names every failing case. First-call vectors partici
 in parity checks even though warm latency excludes the first call.
 
 ```bash
-python3 Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/compare.py artifacts/gemma2/model artifacts/gemma2/ab cpu metal metal-resident metal-fused webgpu
+python3 Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/compare.py artifacts/gemma2/model artifacts/gemma2/ab cpu metal metal-resident metal-fused metal-grouped webgpu
 ```
 
 The optional length defaults to 12. Each input consists of BOS, repeated frozen ordinary token
@@ -82,8 +87,8 @@ dynamic shapes admitted; the original graph can fail at compilation or inference
 and admits only Core ML partitions with static input shapes. This measures whether shape
 specialization helps the same graph; it does not export another model.
 
-This is a loading and numerical feasibility experiment. TensorSharp's forward pass uses
-individual tensor operations without model-level fusion. Its timings do not measure a finished
-Gemma engine. Images, video frames, tokenizer parity, realistic retrieval, quantization, long
+This is a loading and numerical feasibility experiment. TensorSharp's baseline uses
+individual tensor operations; the cumulative variants measure existing native fusions.
+Its timings do not measure a finished Gemma engine. Images, video frames, tokenizer parity, realistic retrieval, quantization, long
 contexts, cancellation, Linux and Windows remain unqualified. Google warns against FP16
 activations for this model; all probe activations and weights use FP32.

@@ -6,7 +6,7 @@ using TsTensor = TensorSharp.Tensor;
 
 namespace Darkspyre.Inference.Tensor.GemmaExperiment;
 
-internal enum MetalVariant { Baseline, Resident, Fused }
+internal enum MetalVariant { Baseline, Resident, Fused, Grouped }
 
 // Experimental forward pass for the pinned ONNX export's FP32 weights. This is not a
 // registered Tensor engine. Frozen inputs isolate the runtime from tokenizer differences.
@@ -17,7 +17,7 @@ internal sealed class MetalText : IDisposable
     private readonly Dictionary<string, TsTensor> weights = new(StringComparer.Ordinal);
     private readonly MetalVariant variant;
     private bool ResidentWeights => variant != MetalVariant.Baseline;
-    private bool Fused => variant == MetalVariant.Fused;
+    private bool Fused => variant is MetalVariant.Fused or MetalVariant.Grouped;
 
     private MetalText(string root, MetalVariant variant)
     {
@@ -156,13 +156,28 @@ internal sealed class MetalText : IDisposable
                 TsTensor value = Slice(tensors, qkvWeighted, (4 + kvHeads) * dimension, kvHeads * dimension);
                 Rotate(tensors, query, count, 4, dimension);
                 Rotate(tensors, key, count, kvHeads, dimension);
-                // The existing SDPA surface expects equal head counts. Repeat only the KV
-                // heads; all attention arithmetic remains on the selected GGML backend.
-                TsTensor keys = RepeatHeads(tensors, key, count, kvHeads, dimension);
-                TsTensor values = RepeatHeads(tensors, value, count, kvHeads, dimension);
-                TsTensor queries = tensors.Add(query.View(1, count, 4, dimension));
-                TsTensor attention = tensors.Add(Ops.ScaledDotProductAttention(null!, queries, keys, values, null!, 1.0f));
-                TsTensor flatAttention = tensors.Add(attention.View(count, 4 * dimension));
+                TsTensor flatAttention;
+                if (variant == MetalVariant.Grouped)
+                {
+                    TsTensor queries = HeadFirst(tensors, query, count, 4, dimension);
+                    TsTensor keys = HeadFirst(tensors, key, count, kvHeads, dimension);
+                    TsTensor values = HeadFirst(tensors, value, count, kvHeads, dimension);
+                    flatAttention = tensors.Add(new TsTensor(allocator, DType.Float32, count, 4 * dimension));
+                    // Exact extents and head-first FP32 inputs avoid padding and F16 flash
+                    // conversion. Every key is visible for this <=512-token unpadded probe.
+                    GgmlBasicOps.FusedPrefillAttention(queries, keys, values, flatAttention,
+                        4, kvHeads, dimension, count, count, maskStartPos: count - 1,
+                        slidingWindow: 0, scale: 1f, inputFormat: 0, matchPerOpPrecision: true);
+                }
+                else
+                {
+                    // Generic SDPA requires equal Q/K/V head counts.
+                    TsTensor keys = RepeatHeads(tensors, key, count, kvHeads, dimension);
+                    TsTensor values = RepeatHeads(tensors, value, count, kvHeads, dimension);
+                    TsTensor queries = tensors.Add(query.View(1, count, 4, dimension));
+                    TsTensor attention = tensors.Add(Ops.ScaledDotProductAttention(null!, queries, keys, values, null!, 1.0f));
+                    flatAttention = tensors.Add(attention.View(count, 4 * dimension));
+                }
                 TsTensor projected = Linear(tensors, flatAttention, prefix + "attn.o_proj.MatMul.weight");
                 if (Fused)
                 {
@@ -269,6 +284,13 @@ internal sealed class MetalText : IDisposable
             Ops.Copy(to, from);
         }
         return tensors.Add(target.View(1, count, 4, dimension));
+    }
+
+    private static TsTensor HeadFirst(Tensors tensors, TsTensor input, int count, int heads, int dimension)
+    {
+        TsTensor shaped = tensors.Add(input.View(count, heads, dimension));
+        TsTensor transposed = tensors.Add(shaped.Transpose(0, 1));
+        return tensors.Add(Ops.NewContiguous(transposed));
     }
 
     private void Rotate(Tensors tensors, TsTensor input, int count, int heads, int dimension)

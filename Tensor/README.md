@@ -100,6 +100,8 @@ GGML resident matrix operation. The Mac comparison script records every call's v
 and checks execution parity against ONNX CPU and the preceding measured variant.
 The fused variant also uses the existing Gemma norm/projection, feed-forward,
 post-norm/residual and PLE graphs while retaining the generic attention path.
+The grouped variant adds the existing FP32 grouped attention graph with an all-visible
+mask for the probe's bounded inputs and replaces repeated K/V copies with layout conversions.
 Each option runs in its own process. The probe accepts 2–512 tokens, where the full and
 sliding attention masks coincide, and does not register an engine in the shipped Tensor catalog.
 The [probe instructions](tools/Darkspyre.Inference.Tensor.GemmaExperiment/README.md)
