@@ -21,8 +21,8 @@ internal static class ImageProbe
         using var manifest = JsonDocument.Parse(File.ReadAllText(Path.Combine(fixtures, "images.json")));
         using var options = new SessionOptions
         {
-            EnableProfiling = true,
             ProfileOutputPathPrefix = Path.Combine(output, "vision"),
+            EnableProfiling = true,
             GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL
         };
         if (provider == "webgpu") options.AppendExecutionProvider("WebGPU", new Dictionary<string, string>());
@@ -30,7 +30,9 @@ internal static class ImageProbe
         var watch = Stopwatch.StartNew();
         using var vision = new InferenceSession(Path.Combine(model, "vision_encoder.onnx"), options);
         double visionLoadMs = watch.Elapsed.TotalMilliseconds;
+        options.EnableProfiling = false;
         options.ProfileOutputPathPrefix = Path.Combine(output, "text");
+        options.EnableProfiling = true;
         watch.Restart();
         using var text = new InferenceSession(Path.Combine(model, "model.onnx"), options);
         double textLoadMs = watch.Elapsed.TotalMilliseconds;
