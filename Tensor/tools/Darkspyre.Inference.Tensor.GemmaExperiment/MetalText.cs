@@ -19,10 +19,10 @@ internal sealed class MetalText : IDisposable
     private bool ResidentWeights => variant != MetalVariant.Baseline;
     private bool Fused => variant is MetalVariant.Fused or MetalVariant.Grouped;
 
-    private MetalText(string root, MetalVariant variant)
+    private MetalText(string root, MetalVariant variant, GgmlBackendType backend)
     {
         this.variant = variant;
-        context = new GgmlContext([0], GgmlBackendType.Metal);
+        context = new GgmlContext([0], backend);
         allocator = new GgmlAllocator(context, 0);
         try
         {
@@ -71,39 +71,43 @@ internal sealed class MetalText : IDisposable
         catch { Dispose(); throw; }
     }
 
-    internal static int Run(string root, string output, long[] ids, MetalVariant variant)
+    internal static int Run(string root, string output, long[] ids, MetalVariant variant, GgmlBackendType backend)
     {
         IReadOnlyList<GgmlNativeCandidate> candidates = GgmlNativeLoader.ResolvePackageCandidatesAsync().GetAwaiter().GetResult();
         GgmlNativeLoader.Configure(new GgmlRuntimePlan(GgmlNativeLoader.TensorSharpBuild,
             GgmlNativeLoader.NativeAbi, GgmlNativeLoader.RuntimeIdentifier, candidates,
-            RequestedBackend: GgmlBackendType.Metal));
+            RequestedBackend: backend));
         var initialized = GgmlNativeLoader.InitializeAsync().GetAwaiter().GetResult();
         Console.WriteLine($"GGML: {initialized.State}, actual backend {initialized.ActualBackend}");
-        if (initialized.State != GgmlInitializationState.Ready || initialized.ActualBackend != GgmlBackendType.Metal)
-            throw new InvalidOperationException(initialized.Diagnostic ?? "Metal was not selected.");
+        if (initialized.State != GgmlInitializationState.Ready || initialized.ActualBackend != backend)
+            throw new InvalidOperationException(initialized.Diagnostic ?? $"{backend} was not selected.");
         bool released;
         try
         {
             Stopwatch watch = Stopwatch.StartNew();
-            using var model = new MetalText(root, variant);
+            using var model = new MetalText(root, variant, backend);
             double loadMs = watch.Elapsed.TotalMilliseconds;
-            Console.WriteLine($"Loaded Metal weights in {loadMs:F1} ms");
+            Console.WriteLine($"Loaded {backend} weights in {loadMs:F1} ms");
             var times = new List<double>();
             var vectors = new List<float[]>();
             float[] vector = [];
-            for (int i = 0; i < 6; i++)
+            int runs = int.Parse(Environment.GetEnvironmentVariable("GEMMA_RUNS") ?? "6", System.Globalization.CultureInfo.InvariantCulture);
+            if (runs < 1) throw new ArgumentException("GEMMA_RUNS must be positive.");
+            for (int i = 0; i < runs; i++)
             {
                 watch.Restart();
-                vector = model.Forward(ids);
+                var diagnostic = new ForwardDiagnostic(output, i);
+                vector = model.Forward(ids, diagnostic);
                 times.Add(watch.Elapsed.TotalMilliseconds);
                 vectors.Add(vector);
+                diagnostic.Write();
                 if (vector.Length != 768 || vector.Any(value => !float.IsFinite(value)))
                     throw new InvalidDataException("Metal did not return 768 finite values.");
                 Console.WriteLine($"Run {i}: {times[^1]:F1} ms; norm {Math.Sqrt(vector.Sum(value => (double)value * value)):F6}");
             }
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new
             {
-                provider = "TensorSharp Metal",
+                provider = $"TensorSharp {backend}",
                 variant = variant.ToString(),
                 inputIds = ids,
                 loadMs,
@@ -124,13 +128,14 @@ internal sealed class MetalText : IDisposable
         return released ? 0 : 1;
     }
 
-    private float[] Forward(long[] ids)
+    private float[] Forward(long[] ids, ForwardDiagnostic diagnostic)
     {
         int count = ids.Length;
         using var request = new Tensors();
         var indices = request.Add(new TsTensor(allocator, DType.Int32, count));
         indices.CopyFrom(ids.Select(value => checked((int)value)).ToArray());
         TsTensor hidden = Ops.IndexSelect(null!, W("embed_tokens.weight"), indices);
+        diagnostic.Mark("embedding", hidden);
         try
         {
             // The export folds sqrt(hidden_size) into the embedding table and the PLE
@@ -139,6 +144,7 @@ internal sealed class MetalText : IDisposable
             TsTensor pleRows = request.Add(ple.View(count * 24, 512));
             TsTensor pleNormalized = Norm(request, pleRows, "ple.per_layer_projection_norm.weight", 0.000512f);
             TsTensor pleLayers = request.Add(pleNormalized.View(count, 24 * 512));
+            diagnostic.Mark("ple", pleLayers);
             for (int layer = 0; layer < 24; layer++)
             {
                 using var tensors = new Tensors();
@@ -147,15 +153,20 @@ internal sealed class MetalText : IDisposable
                 int kvHeads = layer % 6 == 5 ? 1 : 2;
                 int width = dimension * (4 + 2 * kvHeads);
                 TsTensor qkv = NormLinear(tensors, hidden, prefix + "input_layernorm.weight", prefix + "attn.qkv_proj.MatMul.weight");
+                diagnostic.Mark($"layer-{layer:D2}-qkv", qkv);
                 TsTensor qkvRows = tensors.Add(qkv.View(count * (4 + 2 * kvHeads), dimension));
                 TsTensor unitHeads = Norm(tensors, qkvRows, $"ones_{dimension}");
                 TsTensor unitPacked = tensors.Add(unitHeads.View(count, width));
                 TsTensor qkvWeighted = tensors.Add(Ops.Mul(null!, unitPacked, W(prefix + "attn.qkv_norm.weight")));
+                diagnostic.Mark($"layer-{layer:D2}-qkv-norm", qkvWeighted);
                 TsTensor query = Slice(tensors, qkvWeighted, 0, 4 * dimension);
                 TsTensor key = Slice(tensors, qkvWeighted, 4 * dimension, kvHeads * dimension);
                 TsTensor value = Slice(tensors, qkvWeighted, (4 + kvHeads) * dimension, kvHeads * dimension);
                 Rotate(tensors, query, count, 4, dimension);
                 Rotate(tensors, key, count, kvHeads, dimension);
+                diagnostic.Mark($"layer-{layer:D2}-query", query);
+                diagnostic.Mark($"layer-{layer:D2}-key", key);
+                diagnostic.Mark($"layer-{layer:D2}-value", value);
                 TsTensor flatAttention;
                 if (variant == MetalVariant.Grouped)
                 {
@@ -178,11 +189,15 @@ internal sealed class MetalText : IDisposable
                     TsTensor attention = tensors.Add(Ops.ScaledDotProductAttention(null!, queries, keys, values, null!, 1.0f));
                     flatAttention = tensors.Add(attention.View(count, 4 * dimension));
                 }
+                diagnostic.Mark($"layer-{layer:D2}-attention", flatAttention);
                 TsTensor projected = Linear(tensors, flatAttention, prefix + "attn.o_proj.MatMul.weight");
+                diagnostic.Mark($"layer-{layer:D2}-projected", projected);
                 if (Fused)
                 {
                     GgmlBasicOps.RmsNormResidualAdd(hidden, projected, W(prefix + "post_attention_layernorm.weight"), 1e-6f);
+                    diagnostic.Mark($"layer-{layer:D2}-residual", hidden);
                     FusedFeedForward(tensors, hidden, prefix);
+                    diagnostic.Mark($"layer-{layer:D2}-mlp", hidden);
                     TsTensor layerPle = Slice(tensors, pleLayers, layer * 512, 512);
                     FusedPle(hidden, layerPle, prefix);
                 }
@@ -190,6 +205,7 @@ internal sealed class MetalText : IDisposable
                 {
                     TsTensor postAttention = Norm(tensors, projected, prefix + "post_attention_layernorm.weight");
                     TsTensor residual = tensors.Add(Ops.Add(null!, hidden, postAttention));
+                    diagnostic.Mark($"layer-{layer:D2}-residual", residual);
                     TsTensor preMlp = Norm(tensors, residual, prefix + "pre_feedforward_layernorm.weight");
                     TsTensor gateUp = Linear(tensors, preMlp, prefix + "mlp.gate_up_proj.MatMul.weight");
                     TsTensor gate = Slice(tensors, gateUp, 0, 2048);
@@ -198,6 +214,7 @@ internal sealed class MetalText : IDisposable
                     TsTensor down = Linear(tensors, gated, prefix + "mlp.down_proj.MatMul.weight");
                     TsTensor postMlp = Norm(tensors, down, prefix + "post_feedforward_layernorm.weight");
                     TsTensor afterMlp = tensors.Add(Ops.Add(null!, residual, postMlp));
+                    diagnostic.Mark($"layer-{layer:D2}-mlp", afterMlp);
                     TsTensor pleGate = Linear(tensors, afterMlp, prefix + "ple.per_layer_input_gate.MatMul.weight");
                     TsTensor layerPle = Slice(tensors, pleLayers, layer * 512, 512);
                     TsTensor gatedPle = tensors.Add(Ops.GELUMul(null!, pleGate, layerPle));
@@ -207,10 +224,13 @@ internal sealed class MetalText : IDisposable
                     hidden.Dispose();
                     hidden = next;
                 }
+                diagnostic.Mark($"layer-{layer:D2}-ple", hidden);
                 // The export absorbs the final layer scalar into the final RMS epsilon.
                 if (layer < 23) Ops.Mul(hidden, hidden, W(prefix + "layer_scalar").GetElementsAsFloat(1)[0]);
+                diagnostic.Mark($"layer-{layer:D2}-output", hidden);
             }
             TsTensor projectedOutput = NormLinear(request, hidden, "norm.weight", "embedding_projection.MatMul.weight", 7.59493705118075e-05f);
+            diagnostic.Mark("projected-output", projectedOutput);
             float[] rows = projectedOutput.GetElementsAsFloat(count * 768);
             float[] result = new float[768];
             for (int token = 0; token < count; token++)

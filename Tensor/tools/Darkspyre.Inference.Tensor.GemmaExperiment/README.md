@@ -92,3 +92,18 @@ individual tensor operations; the cumulative variants measure existing native fu
 Its timings do not measure a finished Gemma engine. Images, video frames, tokenizer parity, realistic retrieval, quantization, long
 contexts, cancellation, Linux and Windows remain unqualified. Google warns against FP16
 activations for this model; all probe activations and weights use FP32.
+
+## Correctness and optimized-path diagnostics
+
+`ggml-cpu` and `ggml-cpu-fused` execute the same TensorSharp forward and FP32 weights
+through the CPU backend in the matching prebuilt driver. They do not initialize ONNX.
+`GEMMA_RUNS` changes the number of measured calls; its default is six.
+`GEMMA_DIAGNOSTIC=trace` writes contiguous intermediate FP32 arrays as `.f32` files
+and their names/shapes in `diagnostic-NN.json`. These host reads synchronize execution.
+Trace-mode timings do not measure the undisturbed inference path.
+`GEMMA_DIAGNOSTIC=profile` records elapsed phases and managed allocation/GC counts
+without reading intermediate tensor data. Every mode retains all final vectors.
+
+```bash
+GEMMA_DIAGNOSTIC=trace bash ../agent-ds/scripts/workspace-env.sh dotnet Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/bin/Release/net11.0/Darkspyre.Inference.Tensor.GemmaExperiment.dll ggml-cpu artifacts/gemma2/model artifacts/gemma2/correctness/cpu-trace-12 12
+```

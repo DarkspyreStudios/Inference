@@ -102,6 +102,9 @@ The fused variant also uses the existing Gemma norm/projection, feed-forward,
 post-norm/residual and PLE graphs while retaining the generic attention path.
 The grouped variant adds the existing FP32 grouped attention graph with an all-visible
 mask for the probe's bounded inputs and replaces repeated K/V copies with layout conversions.
+The `ggml-cpu` and `ggml-cpu-fused` options run the same TensorSharp forward on CPU.
+Optional diagnostic modes capture intermediate FP32 tensors or phase timings and managed
+allocation counts. Trace reads synchronize execution and are excluded from performance claims.
 Each option runs in its own process. The probe accepts 2–512 tokens, where the full and
 sliding attention masks coincide, and does not register an engine in the shipped Tensor catalog.
 The [probe instructions](tools/Darkspyre.Inference.Tensor.GemmaExperiment/README.md)
