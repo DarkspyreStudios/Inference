@@ -13,9 +13,11 @@ internal sealed class MetalText : IDisposable
     private readonly GgmlContext context;
     private readonly GgmlAllocator allocator;
     private readonly Dictionary<string, TsTensor> weights = new(StringComparer.Ordinal);
+    private readonly bool residentWeights;
 
-    private MetalText(string root)
+    private MetalText(string root, bool residentWeights)
     {
+        this.residentWeights = residentWeights;
         context = new GgmlContext([0], GgmlBackendType.Metal);
         allocator = new GgmlAllocator(context, 0);
         try
@@ -45,6 +47,18 @@ internal sealed class MetalText : IDisposable
                 }
                 float[] values = new float[count];
                 Buffer.BlockCopy(bytes, 0, values, 0, bytes.Length);
+                if (residentWeights && property.Name.EndsWith(".MatMul.weight", StringComparison.Ordinal))
+                {
+                    // GGML consumes contiguous [output, input] weights. Pack once during
+                    // loading so AddmmQuant(F32) can retain the same native binding.
+                    int input = checked((int)shape[0]);
+                    int output = checked((int)shape[1]);
+                    float[] packed = new float[count];
+                    for (int i = 0; i < input; i++)
+                        for (int o = 0; o < output; o++) packed[o * input + i] = values[i * output + o];
+                    values = packed;
+                    shape = [output, input];
+                }
                 var tensor = new TsTensor(allocator, DType.Float32, shape);
                 weights.Add(property.Name, tensor);
                 tensor.CopyFrom(values);
@@ -53,7 +67,7 @@ internal sealed class MetalText : IDisposable
         catch { Dispose(); throw; }
     }
 
-    internal static int Run(string root, string output, long[] ids)
+    internal static int Run(string root, string output, long[] ids, bool residentWeights)
     {
         IReadOnlyList<GgmlNativeCandidate> candidates = GgmlNativeLoader.ResolvePackageCandidatesAsync().GetAwaiter().GetResult();
         GgmlNativeLoader.Configure(new GgmlRuntimePlan(GgmlNativeLoader.TensorSharpBuild,
@@ -67,16 +81,18 @@ internal sealed class MetalText : IDisposable
         try
         {
             Stopwatch watch = Stopwatch.StartNew();
-            using var model = new MetalText(root);
+            using var model = new MetalText(root, residentWeights);
             double loadMs = watch.Elapsed.TotalMilliseconds;
             Console.WriteLine($"Loaded Metal weights in {loadMs:F1} ms");
             var times = new List<double>();
+            var vectors = new List<float[]>();
             float[] vector = [];
             for (int i = 0; i < 6; i++)
             {
                 watch.Restart();
                 vector = model.Forward(ids);
                 times.Add(watch.Elapsed.TotalMilliseconds);
+                vectors.Add(vector);
                 if (vector.Length != 768 || vector.Any(value => !float.IsFinite(value)))
                     throw new InvalidDataException("Metal did not return 768 finite values.");
                 Console.WriteLine($"Run {i}: {times[^1]:F1} ms; norm {Math.Sqrt(vector.Sum(value => (double)value * value)):F6}");
@@ -84,13 +100,15 @@ internal sealed class MetalText : IDisposable
             File.WriteAllText(Path.Combine(output, "result.json"), JsonSerializer.Serialize(new
             {
                 provider = "TensorSharp Metal",
+                variant = residentWeights ? "resident" : "baseline",
                 inputIds = ids,
                 loadMs,
                 timesMs = times,
                 vector,
+                vectors,
                 peakWorkingSetBytes = Program.PeakWorkingSet(),
                 nativeAbi = GgmlNativeLoader.NativeAbi,
-                note = "Experimental unfused FP32 text forward; no tokenizer or retrieval qualification."
+                note = "Experimental FP32 text forward; no tokenizer or retrieval qualification."
             }));
         }
         finally
@@ -181,8 +199,11 @@ internal sealed class MetalText : IDisposable
     private TsTensor Linear(Tensors tensors, TsTensor input, string name)
     {
         TsTensor weight = W(name);
-        TsTensor result = tensors.Add(new TsTensor(allocator, DType.Float32, input.Sizes[0], weight.Sizes[1]));
-        return Ops.Addmm(result, 0f, result, 1f, input, weight);
+        TsTensor result = tensors.Add(new TsTensor(allocator, DType.Float32, input.Sizes[0], weight.Sizes[residentWeights ? 0 : 1]));
+        if (!residentWeights) return Ops.Addmm(result, 0f, result, 1f, input, weight);
+        GgmlBasicOps.AddmmQuant(result, input, weight.Storage.PtrAtElement(weight.StorageOffset),
+            0, weight.Sizes[1], weight.Sizes[0], weight.ElementCount() * sizeof(float));
+        return result;
     }
     private TsTensor Norm(Tensors tensors, TsTensor input, string name, float epsilon = 1e-6f) =>
         tensors.Add(Ops.RMSNorm(null!, input, W(name), null!, epsilon));
@@ -217,7 +238,11 @@ internal sealed class MetalText : IDisposable
     /// <summary>Releases the model weights before the native context.</summary>
     public void Dispose()
     {
-        foreach (TsTensor tensor in weights.Values) tensor.Dispose();
+        foreach (TsTensor tensor in weights.Values)
+        {
+            if (residentWeights) GgmlBasicOps.InvalidateTensorHostBuffer(tensor);
+            tensor.Dispose();
+        }
         weights.Clear();
         context.Dispose();
     }

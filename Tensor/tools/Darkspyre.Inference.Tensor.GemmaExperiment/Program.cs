@@ -16,8 +16,8 @@ internal static class Program
                 Console.WriteLine("ONNX providers: " + string.Join(", ", OrtEnv.Instance().GetAvailableProviders()));
                 return 0;
             }
-            if (args.Length is not (3 or 4) || args[0] is not ("cpu" or "coreml" or "coreml-static" or "webgpu" or "metal"))
-                throw new ArgumentException("Usage: <cpu|coreml|coreml-static|webgpu|metal> <prepared-directory> <output-directory> [tokens: 2..512], or providers");
+            if (args.Length is not (3 or 4) || args[0] is not ("cpu" or "coreml" or "coreml-static" or "webgpu" or "metal" or "metal-resident"))
+                throw new ArgumentException("Usage: <cpu|coreml|coreml-static|webgpu|metal|metal-resident> <prepared-directory> <output-directory> [tokens: 2..512], or providers");
             string root = Path.GetFullPath(args[1]);
             string output = Path.GetFullPath(args[2]);
             Directory.CreateDirectory(output);
@@ -27,7 +27,7 @@ internal static class Program
             if (length is < 2 or > 512) throw new ArgumentException("The probe accepts 2..512 tokens.");
             long[] interior = [3369, 236787, 3253, 1534, 865, 2336, 236787, 1212, 563, 1009];
             long[] ids = [2, .. Enumerable.Range(0, length - 2).Select(i => interior[i % interior.Length]), 1];
-            if (args[0] == "metal") return MetalText.Run(root, output, ids);
+            if (args[0] is "metal" or "metal-resident") return MetalText.Run(root, output, ids, args[0] == "metal-resident");
             Console.WriteLine("ONNX providers: " + string.Join(", ", OrtEnv.Instance().GetAvailableProviders()));
             using var options = new SessionOptions
             {
@@ -63,6 +63,7 @@ internal static class Program
             foreach (string name in new[] { "image_features", "video_features", "audio_features" })
                 inputs.Add(NamedOnnxValue.CreateFromTensor(name, new DenseTensor<float>([0, 512])));
             var times = new List<double>();
+            var vectors = new List<float[]>();
             float[] vector = [];
             for (int i = 0; i < 6; i++)
             {
@@ -73,6 +74,7 @@ internal static class Program
                 if (vector.Length != 768 || vector.Any(value => !float.IsFinite(value)))
                     throw new InvalidDataException("The model did not return 768 finite values.");
                 times.Add(elapsed);
+                vectors.Add(vector);
                 Console.WriteLine($"Run {i}: {elapsed:F1} ms; norm {Math.Sqrt(vector.Sum(value => (double)value * value)):F6}");
             }
             string profile = session.EndProfiling();
@@ -83,6 +85,7 @@ internal static class Program
                 loadMs,
                 timesMs = times,
                 vector,
+                vectors,
                 profile,
                 peakWorkingSetBytes = PeakWorkingSet(),
                 note = "Frozen token IDs isolate model execution; tokenizer and retrieval quality are not qualified."

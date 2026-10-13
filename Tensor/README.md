@@ -95,6 +95,9 @@ inference and five subsequent calls, vectors, process peak working set and an ON
 profile. Core ML uses CPU and GPU compute units; WebGPU is a separate ONNX option.
 The profile identifies CPU partitions. The TensorSharp option loads the same export's FP32
 weights and runs its text forward pass through existing GGML tensor operations on Metal.
+Its resident-weight variant packs FP32 matrices once during loading and uses the existing
+GGML resident matrix operation. The Mac comparison script records every call's vector
+and checks execution parity against ONNX CPU and the preceding measured variant.
 Each option runs in its own process. The probe accepts 2–512 tokens, where the full and
 sliding attention masks coincide, and does not register an engine in the shipped Tensor catalog.
 The [probe instructions](tools/Darkspyre.Inference.Tensor.GemmaExperiment/README.md)
