@@ -14,9 +14,6 @@ internal sealed class ClaudeAuthenticator(HttpClient http)
     private const string Scopes = "user:inference";
     private const int TokenLifetimeSeconds = 31536000;
 
-    internal const string ManualRedirectUri =
-        "https://console.anthropic.com/oauth/code/callback";
-
     public override LlmTransport Transport => LlmTransport.AnthropicClaudeCli;
 
     protected override string ClientId => "9d1c250a-e61b-44d9-88ed-5944d1962f5e";

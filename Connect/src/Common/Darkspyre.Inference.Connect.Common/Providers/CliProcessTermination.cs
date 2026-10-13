@@ -10,7 +10,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// <summary>
 /// Contains wrapped CLI processes and ends them without the runtime's tree kill. On macOS and Linux a wrapped
 /// process leads its own session and process group. Termination sends SIGKILL to that group, or SIGTERM where a
-/// CLI must be allowed to finish on its own (see <see cref="ClaudeCliExits"/>).
+/// CLI must be allowed to finish on its own.
 /// </summary>
 /// <remarks>
 /// Every wrapped process in Connect starts through <see cref="Isolate"/> and ends through this type.

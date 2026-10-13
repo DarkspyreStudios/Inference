@@ -7,7 +7,7 @@
     <Project Path="../Common/examples/Darkspyre.Inference.Setup.Examples/Darkspyre.Inference.Setup.Examples.csproj" />
   </Folder>
   <Folder Name="/src/LLM/">
-    <Project Path="src/LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj" />
+    <Project Path="src/Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Darkspyre.Inference.Connect/Darkspyre.Inference.Connect.csproj" />
@@ -29,5 +29,17 @@
   </Folder>
   <Folder Name="/tools/">
     <Project Path="tools/Darkspyre.Inference.Connect.ConsoleTester/Darkspyre.Inference.Connect.ConsoleTester.csproj" />
+  </Folder>
+  <Folder Name="/src/Codex/">
+    <Project Path="src/Codex/Darkspyre.Inference.Connect.Codex/Darkspyre.Inference.Connect.Codex.csproj" />
+  </Folder>
+  <Folder Name="/src/Claude/">
+    <Project Path="src/Claude/Darkspyre.Inference.Connect.Claude/Darkspyre.Inference.Connect.Claude.csproj" />
+  </Folder>
+  <Folder Name="/src/OpenAiApi/">
+    <Project Path="src/OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi.csproj" />
+  </Folder>
+  <Folder Name="/src/SelfHost/">
+    <Project Path="src/SelfHost/Darkspyre.Inference.Connect.SelfHost/Darkspyre.Inference.Connect.SelfHost.csproj" />
   </Folder>
 </Solution>

@@ -39,7 +39,7 @@ internal static class ProviderDefinitions
         ]
     };
 
-    private static readonly SetupStep SelectModel = new()
+    internal static readonly SetupStep SelectModel = new()
     {
         Id = "select-model",
         Title = "Choose a model",
@@ -48,7 +48,7 @@ internal static class ProviderDefinitions
         Troubleshooting = "Reload the provider model list. If the provider does not support discovery, enter a model ID manually."
     };
 
-    private static readonly SetupStep TestConnection = new()
+    internal static readonly SetupStep TestConnection = new()
     {
         Id = "test-connection",
         Title = "Optional model test",
@@ -57,51 +57,7 @@ internal static class ProviderDefinitions
         Troubleshooting = "Verify the credential, account entitlement, model access, endpoint, and network connection, then retry."
     };
 
-    public static LlmProviderDefinition SelfHost { get; } = new()
-    {
-        Id = "self-host",
-        DisplayName = "In-process model",
-        Description = "Run a model that this application loads in its own process, such as a Tensor engine.",
-        Transport = LlmTransport.SelfHost,
-        DefaultEndpoint = string.Empty,
-        DisplayOrder = 95,
-        SetupSteps =
-        [
-            new SetupStep
-            {
-                Id = "select-engine",
-                Title = "Choose an engine",
-                Instructions = "Choose one of the engines this application runs. The application configures and loads each engine.",
-                CompletionRequirement = "An engine must be selected.",
-                Troubleshooting = "If no engine is listed, add and load one in the application's model settings."
-            },
-            SelectModel,
-            TestConnection
-        ]
-    };
 
-    public static LlmProviderDefinition OpenAiApiKey { get; } = new()
-    {
-        Id = "openai-api-key",
-        DisplayName = "OpenAI API Key",
-        Description = "Connect to the OpenAI API, or to another service that serves the same API at its own endpoint.",
-        Transport = LlmTransport.OpenAiResponses,
-        DefaultEndpoint = "https://api.openai.com/v1",
-        DisplayOrder = 10,
-        SetupSteps =
-        [
-            new SetupStep
-            {
-                Id = "enter-api-key",
-                Title = "Enter an API key",
-                Instructions = "Paste an API key for the endpoint. An OpenAI API key comes from your OpenAI platform account and is billed separately from a ChatGPT subscription. Leave it blank for a service that takes no key, such as a local model server.",
-                CompletionRequirement = "The model list loads from the endpoint.",
-                Troubleshooting = "Check the endpoint and the key. A ChatGPT subscription alone is not an OpenAI API key."
-            },
-            SelectModel,
-            TestConnection
-        ]
-    };
 
     public static LlmProviderDefinition OpenAiCompatible { get; } = new()
     {
@@ -150,51 +106,7 @@ internal static class ProviderDefinitions
         ]
     };
 
-    public static LlmProviderDefinition ClaudeSubscription { get; } = new()
-    {
-        Id = "claude-subscription",
-        DisplayName = "Claude Subscription",
-        Description = "Use a Claude subscription through the separately authenticated official Claude CLI.",
-        Transport = LlmTransport.AnthropicClaudeCli,
-        DefaultEndpoint = "claude",
-        DisplayOrder = 30,
-        SetupSteps =
-        [
-            new SetupStep
-            {
-                Id = "verify-claude-cli",
-                Title = "Sign in to Claude CLI",
-                Instructions = "Install the official Claude CLI, ensure claude is available on PATH, then run claude in a terminal and complete sign-in with the Claude subscription used for prompts.",
-                CompletionRequirement = "The claude auth status --json command must report a signed-in first-party Claude account.",
-                Troubleshooting = "Run claude auth status in a terminal. If it is signed out or uses a different provider, run claude and complete Claude sign-in."
-            },
-            SelectModel,
-            TestConnection
-        ]
-    };
 
-    public static LlmProviderDefinition ChatGptSubscription { get; } = new()
-    {
-        Id = "chatgpt-subscription",
-        DisplayName = "ChatGPT Subscription",
-        Description = "Use an eligible ChatGPT subscription directly, with host-owned OAuth and managed agent execution.",
-        Transport = LlmTransport.OpenAiCodex,
-        DefaultEndpoint = OpenAiCodexLlmClient.DefaultEndpoint,
-        DisplayOrder = 20,
-        SetupSteps =
-        [
-            new SetupStep
-            {
-                Id = "authorize-chatgpt",
-                Title = "Sign in with ChatGPT",
-                Instructions = "Run the sign-in action, open the displayed authorization link, and continue after entering the device code. Authorization updates this draft; Save commits it through the host.",
-                CompletionRequirement = "The draft contains a ChatGPT OAuth access token and account ID before saving an authenticated connection.",
-                Troubleshooting = "An existing Codex CLI login is separate and is not used. Run the ChatGPT sign-in action here."
-            },
-            SelectModel,
-            TestConnection
-        ]
-    };
 
     public static LlmProviderDefinition GrokSubscription { get; } = new()
     {

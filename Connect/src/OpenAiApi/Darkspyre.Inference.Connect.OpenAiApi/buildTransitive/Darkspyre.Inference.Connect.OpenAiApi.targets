@@ -1,0 +1,6 @@
+<Project>
+  <!-- Discovery reaches the assembly attribute without a static reference from the consumer. -->
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Darkspyre.Inference.Connect.OpenAiApi" />
+  </ItemGroup>
+</Project>

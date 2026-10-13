@@ -25,4 +25,10 @@
     <ProjectReference Include="..\..\..\src\Audio\Darkspyre.Inference.Connect.Audio\Darkspyre.Inference.Connect.Audio.csproj" />
     <ProjectReference Include="..\..\..\src\TTS\Darkspyre.Inference.Connect.TTS\Darkspyre.Inference.Connect.TTS.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Codex/Darkspyre.Inference.Connect.Codex/Darkspyre.Inference.Connect.Codex.csproj" />
+    <ProjectReference Include="../../../src/Claude/Darkspyre.Inference.Connect.Claude/Darkspyre.Inference.Connect.Claude.csproj" />
+    <ProjectReference Include="../../../src/OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi.csproj" />
+    <ProjectReference Include="../../../src/SelfHost/Darkspyre.Inference.Connect.SelfHost/Darkspyre.Inference.Connect.SelfHost.csproj" />
+  </ItemGroup>
 </Project>

@@ -17,4 +17,7 @@
     <!-- Runs the loaded engine through Connect's SelfHost transport and managed agent lane. -->
     <ProjectReference Include="..\..\..\Connect\src\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../Connect/src/SelfHost/Darkspyre.Inference.Connect.SelfHost/Darkspyre.Inference.Connect.SelfHost.csproj" />
+  </ItemGroup>
 </Project>

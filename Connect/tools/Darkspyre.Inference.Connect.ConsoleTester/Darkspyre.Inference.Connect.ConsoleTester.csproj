@@ -14,4 +14,9 @@
     <!-- Phase 1 leaves the xAI provider out of the build. Its probe stays in the repository. -->
     <Compile Remove="GrokProbe.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Codex/Darkspyre.Inference.Connect.Codex/Darkspyre.Inference.Connect.Codex.csproj" />
+    <ProjectReference Include="../../src/Claude/Darkspyre.Inference.Connect.Claude/Darkspyre.Inference.Connect.Claude.csproj" />
+    <ProjectReference Include="../../src/OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi.csproj" />
+  </ItemGroup>
 </Project>

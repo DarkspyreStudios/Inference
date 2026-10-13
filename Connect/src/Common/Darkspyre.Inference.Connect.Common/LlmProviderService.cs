@@ -141,7 +141,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
 
     /// <summary>The redirect URI for a Claude sign-in whose code the person pastes back by hand.</summary>
     public const string ClaudeManualRedirectUri =
-        Providers.ClaudeAuthenticator.ManualRedirectUri;
+        "https://console.anthropic.com/oauth/code/callback";
 
     /// <summary>
     /// Binds the portable inference contract to one explicitly selected Connect connection. The

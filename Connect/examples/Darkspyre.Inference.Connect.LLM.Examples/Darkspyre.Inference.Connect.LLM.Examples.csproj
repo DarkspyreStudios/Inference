@@ -9,4 +9,9 @@
     <ProjectReference Include="..\..\src\LLM\Darkspyre.Inference.Connect.LLM\Darkspyre.Inference.Connect.LLM.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <ProjectReference Include="../../src/Codex/Darkspyre.Inference.Connect.Codex/Darkspyre.Inference.Connect.Codex.csproj" />
+    <ProjectReference Include="../../src/Claude/Darkspyre.Inference.Connect.Claude/Darkspyre.Inference.Connect.Claude.csproj" />
+    <ProjectReference Include="../../src/OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi.csproj" />
+  </ItemGroup>
 </Project>

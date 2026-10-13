@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Universal conversations and embeddings through the Codex provider.</Description>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.ConsoleTester" />
+    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
+    <None Include="buildTransitive/Darkspyre.Inference.Connect.Codex.targets" Pack="true" PackagePath="buildTransitive/" />
+  </ItemGroup>
+</Project>

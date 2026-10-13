@@ -1,10 +1,9 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <IsPackable>false</IsPackable>
     <!-- LibraryImport generates unsafe marshalling code for the process-group kill in CliProcessTermination. -->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
-    <AssemblyName>Darkspyre.Inference.Connect.LLM</AssemblyName>
+    <AssemblyName>Darkspyre.Inference.Connect.Common</AssemblyName>
     <Description>Provider-neutral .NET client for OpenAI, compatible chat APIs, Anthropic, direct ChatGPT subscriptions, Claude and Antigravity CLIs, host-executed tools, managed and native agent sessions, structured output, streaming, model discovery, account usage, and embeddings.</Description>
     <PackageTags>llm;ai;openai;anthropic;claude;codex;gemini;antigravity;tool-use;structured-output</PackageTags>
   </PropertyGroup>
@@ -46,4 +45,11 @@
     <Compile Remove="DocumentSearch.cs;XaiFamilyBinding.cs;XaiFileStorageOptions.cs;XaiHostedTools.cs;XaiSkills.cs;LlmProviderService.Xai.cs" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Codex" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Claude" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.OpenAiApi" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.SelfHost" />
+  </ItemGroup>
 </Project>
