@@ -66,6 +66,121 @@ tensor operations individually. The five warm 512-token calls range from 1,178 t
 1,640 ms and rise across the run. This drift and dispatch overhead remain unqualified.
 The figures do not predict an optimized, fused Gemma implementation.
 
+## TensorSharp path investigation
+
+The source references below use TensorSharp `0f675793` and this experiment's
+`MetalText.cs` at Inference `af1dfe4c`. The experiment executes the generic tensor
+path; it does not execute TensorSharp's existing resident-weight model path.
+
+macOS `sample` observes two separate 512-token processes at a 1 ms sampling
+interval. The first capture lasts four seconds and starts about one second after
+launch. The second capture lasts three seconds and starts after `Run 0` completes.
+The second capture contains 2,369 main-thread samples:
+
+| Function in the sampled stack | Samples | Share of main-thread samples |
+| --- | ---: | ---: |
+| `TSGgml_AddmmF32` | 1,086 | 45.8% |
+| `create_packed_m2_binding` | 665 | 28.1% |
+| Metal `waitUntilCompleted` | 513 | 21.7% |
+| `ggml_backend_alloc_ctx_tensors` | 354 | 14.9% |
+
+These are inclusive stack counts. Categories overlap, and they do not sum to a
+latency breakdown or measure GPU utilization. Managed frames lack symbols in this
+capture. The first capture also contains substantial weight packing (30.7%) and
+Metal waits (21.6%). Both processes exit 0 and return the same vector as the earlier
+512-token Metal run: maximum component difference from ONNX CPU is 7.31154e-5,
+with cosine similarity 0.9999998257584505. Their five-call warm medians are
+1,270.0 ms and 1,373.6 ms. Profiling perturbs execution; these timings establish
+that the sampled runs reproduce the slow path, not a new ranking of engines.
+
+### Weight layout and repeated copies
+
+`MetalText.cs:183` sends the exported contiguous `[input, output]` matrix to
+`Ops.Addmm` on every linear operation. GGML's direct matrix binding requires
+`stride0 == 1` (`TensorSharp.GGML.Native/ggml_ops_core.cpp:1038`). The export's
+row-major layout fails that condition. The generic operation transposes the matrix
+into a new CPU vector, allocates backend tensors, uploads inputs and weights, then
+copies the result back (`ggml_ops_matmul.cpp:120`, `:184`, `:252`, `:259`;
+`ggml_ops_core.cpp:2098`). These copies remain copies on unified memory.
+
+The pinned initializer metadata contains 146 linear matrices totaling 546,832,384
+bytes (521.5 MiB), excluding the embedding table. Each matrix is used once per
+forward pass. The prototype therefore repacks and uploads that entire matrix set
+per request, independent of token count. This provides a concrete source of its
+large latency even at 12 tokens.
+
+TensorSharp already has a resident FP32 path:
+`TensorSharp.Models/ModelBase.cs:1554`, `TryGgmlF32LinearResident`. It accepts
+contiguous `[output, input]` weights and calls `GgmlBasicOps.AddmmQuant` with
+`GGML_TYPE_F32` (0). The native operation caches weight bindings and reuses its
+compute buffer (`ggml_ops_matmul.cpp:401`, `:481`). Its `Quant` name does not require
+quantizing the weights. A one-time layout conversion and stable weight ownership
+fit this existing path. A transpose view of the original ONNX storage alone does
+not provide the required contiguous weight storage.
+
+### Existing fused operations
+
+These operations exist in `TensorSharp.Backends.GGML/GgmlBasicOps.cs`. Native
+symbol inspection confirms that the installed matching driver exports all of them.
+Their use with this model is source-verified but not execution-qualified.
+
+| Existing operation | Matching portion of this experiment | Reuse limits |
+| --- | --- | --- |
+| `FusedRmsNormMatMulQuant`, line 700 | Input norm plus QKV projection; final norm plus embedding projection | The native descriptor accepts F32 weights in GGML layout. The export's epsilon adjustments remain part of the computation. |
+| `FusedFFNActProjectQuant`, line 851, `actType: 1` | Pre-FFN norm, packed gate/up projection, GELU multiplication and down projection | Produces a separate projection for Gemma's post-FFN norm. The native graph uses a persistent liveness allocator. The model helper currently selects only `_quantWeights`; it does not automatically select this path for the probe's FP32 tensors. |
+| `RmsNormResidualAdd`, line 756 | Post-attention, post-FFN and post-PLE normalization plus residual addition | Residual and input are distinct FP32 tensors. The PLE fusion below already includes its norm and add. |
+| `FusedPleBlockQuant`, line 780 | PLE gate projection, GELU multiplication, projection, post-norm and residual addition | Native descriptors accept F32; the existing model-level helper selects only `_quantWeights`. The native graph still allocates an intermediate buffer per call. |
+
+The FP32 acceptance follows the supplied `ggml_type` in the native constructors
+(`ggml_ops_fused.cpp:108`, `:1071`, `:2885`), without a quantized-type-only check.
+Resident FP32 linear use also exists in the model code. Full-model numerical parity
+for the fused combinations remains unmeasured. Each fused operation submits a
+GGML graph; this does not imply one GPU kernel.
+
+`GELUMul` already executes in the prototype. SwiGLU has a different activation,
+and plain matrix-plus-residual fusion omits Gemma's intervening post-norm. Those
+operations do not replace the corresponding Gemma blocks. The full generation
+decode blocks also carry KV-cache and causal-attention behavior that this embedding
+pass does not use.
+
+### Attention and synchronization
+
+The generic SDPA operation already groups its attention arithmetic in one native
+graph (`ggml_ops_norm_attn.cpp:1264`). Its managed contract requires equal Q/K/V
+head counts (`GgmlBasicOps.cs:5992`). The prototype consequently performs eight
+K/V head-copy calls per layer, or 192 per request (`MetalText.cs:198`).
+
+`FusedPrefillAttention` already accepts unequal head counts. Its precision-preserving
+overload uses exact sequence extents and avoids the F16 flash path
+(`GgmlBasicOps.cs:2820`, `GgmlNative.cs:5802`, `ggml_ops_norm_attn.cpp:2931`). It
+requires contiguous head-first inputs. For this unpadded, at-most-512-token probe,
+`maskStartPos = kvLen - 1`, `slidingWindow = 0` and `scale = 1` yield an all-zero
+mask: every valid key index is at or below every query threshold
+(`ggml_ops_norm_attn.cpp:2791`). This makes grouped attention a reuse candidate
+without physically repeating K/V heads, but introduces input-layout conversion.
+Its net cost and output parity are unmeasured. These mask parameters do not implement
+long-context bidirectional sliding attention. The ordinary cached causal path also
+pads K/V extents; it is not an interchangeable choice for this mask construction.
+
+Metal async mode is already enabled by default (`GgmlContext.cs:223`). However,
+the operations above call `tsg::compute_graph`, which calls the synchronous
+`ggml_backend_graph_compute` (`ggml_ops_internal.h:476`). The profiles confirm
+waits beneath that call. Skipping the later `finalize_compute` synchronization does
+not remove a wait that has already occurred. Turning on the existing async flag
+alone therefore does not make this execution path asynchronous. Fewer graph calls
+avoid some waits without changing the native synchronization contract.
+
+The probe also reads 23 invariant layer scalars through a host-read barrier per
+request and recreates position tensors for Q and K in every layer. It copies all
+token projections to managed memory for pooling (1.5 MiB at 512 tokens). These
+costs are visible in the source but have no separate timing attribution. The cause
+of repeated-call timing drift remains unresolved.
+
+Raw profiles and vectors reside in the ignored
+`artifacts/gemma2/performance-investigation/` directory. The investigation changes
+no executable code or native driver. It identifies reusable mechanisms and measured
+overhead; it establishes no optimized TensorSharp speedup or engine selection.
+
 The runtimes use separate processes. A diagnostic that initializes ONNX Runtime
 before running Metal produces a native process-exit failure in an earlier run. The
 isolated Metal runs pass. The underlying mixed-runtime shutdown cause is unverified.
