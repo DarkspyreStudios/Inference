@@ -14,12 +14,15 @@
     }
     @IntroContent
 
-    <div class="inference-settings-editor__status" aria-live="polite">
-        @foreach (var item in StatusItems())
-        {
-            <span class="inference-settings-editor__status-item">@item.Label: @Describe(item.Observation)</span>
-        }
-    </div>
+    @if (StatusItems().Any())
+    {
+        <div class="inference-settings-editor__status" aria-live="polite">
+            @foreach (var item in StatusItems())
+            {
+                <span class="inference-settings-editor__status-item">@item.Label: @Describe(item.Observation)</span>
+            }
+        </div>
+    }
 
     @if (Steps.Count > 1)
     {
@@ -48,11 +51,7 @@
                         <summary>@section.Title</summary>
                         <div class="inference-settings-editor__fields">
                             @foreach (var field in section.Fields.Where(value => value.Description.IsVisible))
-                            {
-                                <SetupFieldInput @key="(Settings, field.Description.Id)" Field="field" Settings="Settings" Manager="Manager"
-                                                 EditVersion="_editVersion" Host="Host" Issues="AllIssues" Disabled="@Busy"
-                                                 Edited="OnFieldEditedAsync" />
-                            }
+                            { @FieldView(field) }
                         </div>
                     </details>
                 }
@@ -62,11 +61,7 @@
                         <h4>@section.Title</h4>
                         <div class="inference-settings-editor__fields">
                             @foreach (var field in section.Fields.Where(value => value.Description.IsVisible))
-                            {
-                                <SetupFieldInput @key="(Settings, field.Description.Id)" Field="field" Settings="Settings" Manager="Manager"
-                                                 EditVersion="_editVersion" Host="Host" Issues="AllIssues" Disabled="@Busy"
-                                                 Edited="OnFieldEditedAsync" />
-                            }
+                            { @FieldView(field) }
                         </div>
                     </section>
                 }
@@ -225,7 +220,7 @@
         await PublishStateAsync();
     }
 
-    // A running engine changed; the editor reads the new state and renders it.
+    // The provider reported a change, such as a running engine or its model list; the editor reads the new state and renders it.
     private void OnStatusChanged(object? sender, EventArgs args)
     {
         if (_disposed) { return; }
@@ -237,10 +232,21 @@
             try { await source.RefreshStatusAsync(settings); }
             catch (Exception) { return; }
             if (_disposed || !ReferenceEquals(settings, Settings)) { return; }
+            // A refresh can change the fields, such as a model choice's install chips; the choices reload as after an action.
+            _editVersion++;
+            _inputs.Reconcile(Settings);
             StateHasChanged();
             await PublishStateAsync();
         });
     }
+
+    // An install status field shows as its card; every other field shows its input.
+    private RenderFragment FieldView(SetupField field) => field is SetupInstallStatusField install
+        ? @<SetupInstallStatusCard @key="(Settings, field.Description.Id)" Status="@install.Status" Label="@install.Description.DisplayName"
+                                   Disabled="@Busy" Run="RunActionAsync" />
+        : @<SetupFieldInput @key="(Settings, field.Description.Id)" Field="field" Settings="Settings" Manager="Manager"
+                            EditVersion="_editVersion" Host="Host" Issues="AllIssues" Disabled="@Busy"
+                            Edited="OnFieldEditedAsync" />;
 
     private async Task OnFieldEditedAsync(SetupEditResult result)
     {

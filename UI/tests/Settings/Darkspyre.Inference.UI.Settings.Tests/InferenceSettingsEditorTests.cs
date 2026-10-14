@@ -50,6 +50,125 @@ public sealed class InferenceSettingsEditorTests : BunitContext
         Assert.DoesNotContain("Select a model.", editor.Markup, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(SetupInstallState.Installed)]
+    [InlineData(SetupInstallState.NotDownloaded)]
+    [InlineData(SetupInstallState.FilesMissing)]
+    public void InstallCardShowsEachStateWithTheMockupTextAndButtons(SetupInstallState state)
+    {
+        var settings = new InstallSettings("small", state).Unobserved();
+        IRenderedComponent<InferenceSettingsEditor> editor = RenderInstallEditor(settings, new InstallManager());
+
+        AngleSharp.Dom.IElement card = editor.Find(".inference-install-card");
+        Assert.Equal("Install state", card.GetAttribute("aria-label"));
+        Assert.Contains("small", card.TextContent, StringComparison.Ordinal);
+        string text = Squash(card.TextContent);
+        string[] buttons = card.QuerySelectorAll("button").Select(button => button.TextContent.Trim()).ToArray();
+        switch (state)
+        {
+            case SetupInstallState.Installed:
+                Assert.Contains("Installed in /models", text, StringComparison.Ordinal);
+                Assert.Contains("Ready to load. 1 file, 465 MB, MIT.", text, StringComparison.Ordinal);
+                Assert.Empty(buttons);
+                break;
+            case SetupInstallState.NotDownloaded:
+                Assert.Contains("Not downloaded", text, StringComparison.Ordinal);
+                Assert.Contains("This model is not in /models. The engine cannot load it until it is downloaded.", text, StringComparison.Ordinal);
+                Assert.Equal(["Download (465 MB)"], buttons);
+                break;
+            default:
+                Assert.Contains("Files missing", text, StringComparison.Ordinal);
+                Assert.Contains("ggml-small.bin is missing from the model store.", text, StringComparison.Ordinal);
+                Assert.Equal(["Download again", "Remove"], buttons);
+                break;
+        }
+        Assert.Empty(editor.FindAll(".inference-settings-editor__status")); // No observation applies, so no status line.
+    }
+
+    [Fact]
+    public void ClickingDownloadRunsTheDownloadActionThroughTheHost()
+    {
+        var settings = new InstallSettings("small", SetupInstallState.NotDownloaded);
+        var manager = new InstallManager();
+        var host = new FakeHost();
+        IRenderedComponent<InferenceSettingsEditor> editor = RenderInstallEditor(settings, manager, host);
+
+        editor.Find(".inference-install-card button").Click();
+
+        editor.WaitForAssertion(() => Assert.Equal(["download"], manager.Runs));
+        Assert.Equal(1, host.ExecutionCount);
+    }
+
+    [Fact]
+    public async Task ChoiceItemsShowInstallChipsAndFollowAStatusChange()
+    {
+        var settings = new InstallSettings("small", SetupInstallState.Installed);
+        var manager = new InstallManager();
+        IRenderedComponent<InferenceSettingsEditor> editor = RenderInstallEditor(settings, manager);
+        IRenderedComponent<SetupFieldInput> model = await OpenModelChoiceAsync(editor);
+
+        Assert.Equal("Installed", Squash(Item(model, "small").Find(".inference-install-chip").TextContent));
+        Assert.Equal("Not downloaded · 465 MB", Squash(Item(model, "tiny").Find(".inference-install-chip").TextContent));
+
+        manager.Next = SetupInstallState.NotDownloaded;
+        await editor.InvokeAsync(manager.RaiseStatusChanged);
+
+        editor.WaitForAssertion(() => Assert.Equal("Not downloaded · 465 MB",
+            Squash(Item(Field(editor, "model"), "small").Find(".inference-install-chip").TextContent)));
+        Assert.Equal(1, manager.RefreshCount);
+    }
+
+    [Theory]
+    [InlineData(SetupInstallState.NotDownloaded)]
+    [InlineData(SetupInstallState.FilesMissing)]
+    public async Task AModelThatIsNotInstalledIsNeverTheRenderedSelection(SetupInstallState state)
+    {
+        var settings = new InstallSettings("small", state);
+        IRenderedComponent<InferenceSettingsEditor> editor = RenderInstallEditor(settings, new InstallManager());
+        IRenderedComponent<SetupFieldInput> model = await OpenModelChoiceAsync(editor);
+
+        Assert.Equal(string.Empty, model.FindComponent<Combobox>().Instance.Value ?? string.Empty);
+        Assert.Empty(model.FindAll("[aria-selected=\"true\"]"));
+        Assert.Empty(Item(model, "small").FindAll(CheckMark)); // Neither the library's selection mark nor an Installed chip.
+        Assert.Contains("small", editor.Find(".inference-install-card").TextContent, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnInstalledSelectionIsTheRenderedChoiceValue()
+    {
+        var settings = new InstallSettings("small", SetupInstallState.Installed);
+        IRenderedComponent<InferenceSettingsEditor> editor = RenderInstallEditor(settings, new InstallManager());
+        IRenderedComponent<SetupFieldInput> model = await OpenModelChoiceAsync(editor);
+
+        Assert.Equal("small", model.FindComponent<Combobox>().Instance.Value);
+        Assert.Equal("true", Item(model, "small").Find("[role=option]").GetAttribute("aria-selected"));
+        Assert.NotEmpty(Item(model, "small").FindAll(CheckMark));
+    }
+
+    private IRenderedComponent<InferenceSettingsEditor> RenderInstallEditor(InstallSettings settings, InstallManager manager, FakeHost? host = null) =>
+        Render<InferenceSettingsEditor>(parameters => parameters
+            .Add(value => value.Settings, settings).Add(value => value.Manager, manager).Add(value => value.Host, host ?? new FakeHost()));
+
+    private static IRenderedComponent<SetupFieldInput> Field(IRenderedComponent<InferenceSettingsEditor> editor, string id) =>
+        editor.FindComponents<SetupFieldInput>().Single(field => field.Instance.Field.Description.Id == id);
+
+    private static async Task<IRenderedComponent<SetupFieldInput>> OpenModelChoiceAsync(IRenderedComponent<InferenceSettingsEditor> editor)
+    {
+        IRenderedComponent<SetupFieldInput> model = Field(editor, "model");
+        model.WaitForAssertion(() => Assert.Single(model.FindComponents<Combobox>()));
+        await model.InvokeAsync(() => model.FindComponent<Combobox>().Instance.OpenChanged.InvokeAsync(true));
+        model.WaitForAssertion(() => Assert.Equal(2, model.FindComponents<ComboboxItem>().Count));
+        return model;
+    }
+
+    private static IRenderedComponent<ComboboxItem> Item(IRenderedComponent<SetupFieldInput> model, string value) =>
+        model.FindComponents<ComboboxItem>().Single(item => item.Instance.Value == value);
+
+    // The check glyph both the library's selected item and the Installed chip draw.
+    private const string CheckMark = "path[d=\"M20 6 9 17l-5-5\"]";
+
+    private static string Squash(string text) => string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+
     private IRenderedComponent<InferenceSettingsEditor> RenderEditor(FakeSettings settings, FakeManager manager, FakeHost? host = null) =>
         Render<InferenceSettingsEditor>(parameters => parameters
             .Add(value => value.Settings, settings).Add(value => value.Manager, manager).Add(value => value.Host, host ?? new FakeHost()));
@@ -126,6 +245,70 @@ public sealed class InferenceSettingsEditorTests : BunitContext
             RefreshCount++;
             settings.Status = settings.Status with { Ready = SetupObservation.Known(true) };
             return Task.CompletedTask;
+        }
+    }
+
+    // A model choice of two 465 MB models and the install card of the selected one, like the Tensor engine editor.
+    private sealed class InstallSettings(string model, SetupInstallState state) : InferenceSettings<string>(
+        new(new("tensor", "Tensor engine", InferenceImplementationKind.Tensor, InferenceTask.SpeechTranscription), "Example engine"),
+        new(SetupChangeIntent.Create, "entry", null))
+    {
+        private const long Size = 487_601_967;
+        private static readonly string[] Keys = ["small", "tiny"];
+        private string _model = model;
+        public SetupInstallState State { get; set; } = state;
+        public InstallSettings Unobserved()
+        {
+            Status = new() { Configured = SetupObservation.NotApplicable, Verified = SetupObservation.NotApplicable, Ready = SetupObservation.NotApplicable };
+            return this;
+        }
+        private SetupInstallState StateOf(string key) => key == "small" ? State : SetupInstallState.NotDownloaded;
+
+        protected override IReadOnlyList<SetupStep> CreateSteps() =>
+        [new("model", "Model", "Choose a model", [new("selection", "Selection",
+        [
+            new SetupChoiceField(new("model", "Model pack") { IsRequired = true }, _model, string.Empty, value => Edit(() => _model = value), false,
+                capabilities: new(InferenceSupport.Supported, InferenceSupport.Supported), showValue: StateOf(_model) == SetupInstallState.Installed),
+            new SetupInstallStatusField(new("install-status", "Install state") { IsReadOnly = true }, new(StateOf(_model), _model, "/models", 1, Size, "MIT",
+                StateOf(_model) == SetupInstallState.FilesMissing ? "ggml-small.bin" : null, StateOf(_model) switch
+                {
+                    SetupInstallState.NotDownloaded => [new("download", $"Download ({SetupByteSize.Format(Size)})", SetupActionPurpose.Install, SetupSideEffect.Download)],
+                    SetupInstallState.FilesMissing =>
+                    [
+                        new("download", "Download again", SetupActionPurpose.Install, SetupSideEffect.Download),
+                        new("remove", "Remove", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles)
+                    ],
+                    _ => []
+                }))
+        ])])];
+        protected override IReadOnlyList<SetupActionDescriptor> CreateActions() => [];
+        protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query) => fieldId == "model"
+            ? new(Keys.Select(key => new SetupChoice(key, key, Install: new(StateOf(key) == SetupInstallState.Installed, Size))).ToArray())
+            : null;
+        protected override SetupValidation ValidateDraft() => SetupValidation.Valid;
+        protected override string CreateChanges() => _model;
+        protected override bool IsDraftDirty => false;
+    }
+
+    private sealed class InstallManager() : InferenceSettingsManager<InstallSettings, string>(new FakeTarget()), IInferenceSettingsStatusSource
+    {
+        private EventHandler? _statusChanged;
+        public List<string> Runs { get; } = [];
+        public SetupInstallState? Next { get; set; }
+        public int RefreshCount { get; private set; }
+        public event EventHandler? StatusChanged { add => _statusChanged += value; remove => _statusChanged -= value; }
+        public void RaiseStatusChanged() => _statusChanged?.Invoke(this, EventArgs.Empty);
+        public Task RefreshStatusAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
+        {
+            RefreshCount++;
+            if (Next is { } next) { ((InstallSettings)settings).State = next; }
+            return Task.CompletedTask;
+        }
+        protected override Task<SetupActionResult> RunCoreAsync(InstallSettings settings, SetupActionDescriptor action,
+            IProgress<SetupProgress>? progress, CancellationToken cancellationToken)
+        {
+            Runs.Add(action.Id);
+            return Task.FromResult(SetupActionResult.Completed);
         }
     }
 

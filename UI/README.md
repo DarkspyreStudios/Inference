@@ -37,9 +37,19 @@ in `settings`. Only Save reaches the host. A Committed `CommitCompleted` result 
 the dialog and refresh its own list. Closing without Save discards the object. The editor exposes
 `SaveAsync()` for a host-owned Save control; set `ShowSaveButton="false"` when using that option.
 When the manager implements `IInferenceSettingsStatusSource`, the editor listens to `StatusChanged`
-while it is shown and renders the refreshed status.
-The **Authentication checked** label renders the actual authentication observation as Unknown,
-Stale, Yes or No; stored sign-in configuration or a successful Save does not establish a fresh check.
+while it is shown. After each refresh it renders the new status and reloads its choice fields, so
+install chips follow the change.
+The status line shows only the applicable `SetupStatus` observations and is absent when none
+applies. The **Authentication checked** label renders the actual authentication observation as
+Unknown, Stale, Yes or No; stored sign-in configuration or a successful Save does not establish a
+fresh check.
+A `SetupInstallStatusField` renders as a status card under the choice it follows: Installed in the
+store, with the file count, size and licence; Not downloaded, with a Download button; or Files
+missing, naming the missing file, with Download again and Remove. The card's buttons run through
+the manager like any other action, with the editor's progress and Cancel. A choice whose
+`SetupChoice.Install` is set shows a chip: "Installed", or "Not downloaded" with its download size.
+Only an Installed chip carries a check mark. A `SetupChoiceField` with `ShowValue` false keeps its
+value but renders no selection; the status card shows the value instead.
 `IntroContent` and `SupplementaryContent` accept optional host guidance without changing the
 provider-owned fields or actions.
 

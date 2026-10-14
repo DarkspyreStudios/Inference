@@ -1,0 +1,31 @@
+@* One install-state chip: Installed (success, check), Not downloaded (warning, download) or Files missing (destructive). *@
+<Badge Variant="@Variant" IconContent="@Icon" Class="inference-install-chip">@Text</Badge>
+
+@code {
+    /// <summary>The install state the chip shows; it picks the colour and the icon.</summary>
+    [Parameter, EditorRequired] public SetupInstallState State { get; set; }
+    /// <summary>The chip's text. It carries the meaning; the icon is decoration.</summary>
+    [Parameter, EditorRequired] public string Text { get; set; } = string.Empty;
+
+    private Badge.BadgeVariant Variant => State switch
+    {
+        SetupInstallState.Installed => Badge.BadgeVariant.Success,
+        SetupInstallState.NotDownloaded => Badge.BadgeVariant.Warning,
+        _ => Badge.BadgeVariant.Destructive
+    };
+
+    private RenderFragment? Icon => State switch
+    {
+        SetupInstallState.Installed => CheckIcon,
+        SetupInstallState.NotDownloaded => DownloadIcon,
+        _ => null
+    };
+
+    private static readonly RenderFragment CheckIcon =
+        @<svg class="inference-install-chip__icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5" /></svg>;
+
+    private static readonly RenderFragment DownloadIcon =
+        @<svg class="inference-install-chip__icon" aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12" /><path d="m7 10 5 5 5-5" /><path d="M5 21h14" /></svg>;
+}

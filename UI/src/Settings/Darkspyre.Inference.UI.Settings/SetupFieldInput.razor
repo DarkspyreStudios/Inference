@@ -78,17 +78,22 @@
                     }
                     @if (choice.Capabilities.SupportsSearch == InferenceSupport.Unsupported && choice.Capabilities.SupportsPaging == InferenceSupport.Unsupported && !choice.AllowsManualEntry)
                     {
-                        <Select Value="@_value" ValueChanged="@(value => SetChoiceAsync(choice, value))" Disabled="@Unavailable" @bind-Open="_choiceOpen">
+                        <Select Value="@(choice.ShowValue ? _value : string.Empty)" ValueChanged="@(value => SetChoiceAsync(choice, value))" Disabled="@Unavailable" @bind-Open="_choiceOpen">
                             <SelectTrigger />
                             <SelectContent>
                                 @foreach (var option in _choices)
-                                { <SelectItem Value="@option.Value">@option.DisplayName</SelectItem> }
+                                {
+                                    <SelectItem Value="@option.Value">
+                                        @option.DisplayName
+                                        @if (option.Install is { } install) { <SetupInstallChip State="@ChipState(install)" Text="@ChipText(install)" /> }
+                                    </SelectItem>
+                                }
                             </SelectContent>
                         </Select>
                     }
                     else if (_choices.Count > 0 || !choice.AllowsManualEntry)
                     {
-                        <Combobox Value="@_value" ValueChanged="@(value => SetChoiceAsync(choice, value))"
+                        <Combobox Value="@(choice.ShowValue ? _value : string.Empty)" ValueChanged="@(value => SetChoiceAsync(choice, value))"
                                   @bind-Open="_choiceOpen" Creatable="@choice.AllowsManualEntry" Disabled="@Unavailable">
                             <ComboboxInput Placeholder="Choose or search" />
                             <ComboboxContent>
@@ -99,6 +104,7 @@
                                         @option.DisplayName
                                         @if (option.DisplayName != option.Value)
                                         { <span class="inference-settings-editor__choice-value">@option.Value</span> }
+                                        @if (option.Install is { } install) { <SetupInstallChip State="@ChipState(install)" Text="@ChipText(install)" /> }
                                     </ComboboxItem>
                                 }
                                 @if (choice.AllowsManualEntry) { <ComboboxCreate /> }
@@ -196,6 +202,12 @@
     }
     private string? FieldError => Input.Issues.FirstOrDefault(issue => issue.Severity == SetupIssueSeverity.Error)?.Message
         ?? Issues.FirstOrDefault(issue => issue.FieldId == Field.Description.Id && issue.Severity == SetupIssueSeverity.Error)?.Message;
+
+    // An option with local files shows whether they are installed and, when not, its download size.
+    private static SetupInstallState ChipState(SetupChoiceInstall install) =>
+        install.IsInstalled ? SetupInstallState.Installed : SetupInstallState.NotDownloaded;
+    private static string ChipText(SetupChoiceInstall install) =>
+        install.IsInstalled ? "Installed" : $"Not downloaded · {SetupByteSize.Format(install.Size)}";
 
     private static string ChoiceSearchText(SetupChoice choice) =>
         choice.DisplayName == choice.Value ? choice.Value : choice.DisplayName + " " + choice.Value;
