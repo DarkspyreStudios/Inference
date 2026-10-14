@@ -24,7 +24,7 @@ bash ../agent-ds/scripts/workspace-env.sh dotnet restore Tensor/tools/Darkspyre.
 ```
 
 ```bash
-bash ../agent-ds/scripts/workspace-env.sh dotnet build Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/Darkspyre.Inference.Tensor.GemmaExperiment.csproj -c Release --no-restore -maxcpucount:1
+bash ../agent-ds/scripts/workspace-env.sh dotnet build Tensor/tools/Darkspyre.Inference.Tensor.GemmaExperiment/Darkspyre.Inference.Tensor.GemmaExperiment.csproj -c Release --no-restore
 ```
 
 ```bash
