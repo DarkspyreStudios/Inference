@@ -43,20 +43,21 @@ Library boundaries:
   Whisper.net runtime. Whisper.net, Whisper.net.Runtime and NAudio.Core remain declared NuGet
   dependencies, not third-party DLLs embedded by the Darkspyre package.
 - `Darkspyre.Inference.Tensor.Embedding` — resident text embeddings through TensorSharp's GGUF
-  embedding models. Its built-in packs are Qwen3-Embedding-0.6B (Q8_0, the default; managed CPU, GGML
-  CPU and Metal) and Snowflake Arctic Embed L v2.0 (Q8_0; managed CPU and GGML CPU, because
-  TensorSharp's Metal encoder cannot run it). Both have 1,024 dimensions and an 8,192-token limit.
+  embedding models. Models arrive by import; the resolver accepts a GGUF whose header is a Qwen3
+  embedding model (last-token pooling; managed CPU, GGML CPU and Metal) or a BERT embedding model
+  (mean, CLS or last-token pooling; managed CPU and GGML CPU, because TensorSharp's Metal encoder
+  cannot run it), with 1,024 dimensions and at least an 8,192-token context.
   On Auto and the GGML backends the engine borrows the shared `GgmlRuntimeOwner`, so it runs on the
   backend the process's other GGML engines use; a pack that does not support that backend fails to
   load. The runtime formats queries itself: callers state whether inputs are queries or documents,
   using Common's `TextEmbeddingInput`. Capabilities declare text support; a batch containing
   `MediaEmbeddingInput` fails with `UnsupportedFeature` before the model runs.
   Documents are embedded as given. Qwen3 queries carry an instruction, by default the codebase
-  retrieval task; Arctic queries take the `query: ` prefix. The runtime counts every input before
+  retrieval task; BERT queries take the `query: ` prefix. The runtime counts every input before
   embedding any; an input over the limit fails the request with `EmbeddingInputTooLongException`,
   which names each over-limit input, unless the request permits truncation, in which case the
   result lists the inputs that were cut. A smaller requested size is taken from the vector's leading
-  values and scaled back to unit length (Qwen3: 32 to 1,024; Arctic: 256 and 1,024). Each result
+  values and scaled back to unit length (Qwen3: 32 to 1,024; BERT: 256 and 1,024). Each result
   carries the model fingerprint, a SHA-256 over the weights, architecture and query format; vectors
   with different fingerprints are not comparable.
   A failed model release retains the model and its artifact/runtime leases. An explicit unload or
@@ -95,8 +96,8 @@ Setup Examples and Tensor ConsoleTester declare that reference alongside their
 engine and registry references. A transitive implementation reference does not
 supply the constructor's compile-time type in this source build.
 
-The existing Tensor ConsoleTester runs `tensor embedding --store <embedding-pack-dir> --backend GgmlMetal`
-against the installed pinned Qwen3-Embedding-0.6B pack. It downloads nothing. The command checks ordered
+The existing Tensor ConsoleTester runs `tensor embedding --store <model-store> --backend GgmlMetal`
+against the first model the Embedding family reports in that model store. It downloads nothing. The command checks ordered
 document/query vectors at 512 dimensions, unit length, matching-document ranking, actual fingerprint
 and provenance, and a result round-trip through `InferenceJson.EmbeddingResult`. A loaded GGML model
 must report Busy on runtime shutdown. The command disposes the model before terminal runtime cleanup.
@@ -287,11 +288,17 @@ A provider exposes four operations:
   prerequisites. Its `ModelStoreKey` names the engine's pack namespace: `Qwen`, `Supra`, `Laya`,
   `Whisper` or `Embedding`. Reading a definition constructs no engine, loads no native library, opens no store,
   reads no credential and makes no network call.
-- `GetOfferedModelsAsync(packs)` returns the engine's built-in packs followed by the packs of its
-  own family registered in `packs`. Qwen and Supra have one built-in pack, the embedding engine
-  has two, Whisper has its twelve published variants, and Laya has none. The engine's compatibility validator checks every offered
-  pack. A registered manifest that differs from a built-in at the same key fails; it never replaces
-  the built-in.
+- `BuiltInModels` lists the engine's built-in packs. Whisper has its twelve published variants, Supra
+  and EmbeddingGemma have one each, and Qwen, Embedding and Laya have none: their models arrive by
+  import. Reading it touches no file.
+- `GetInstalledModelsAsync(IPersist modelStore)` returns the models the engine can load from its
+  `ModelStoreKey` store in the model store, through `TensorInstalledPacks.ReportAsync`. A pack is
+  reported when its `install.json` names artifacts that are all present at their recorded length, and
+  the family recognises it: a built-in whose key and artifact hashes match `install.json`, or a pack
+  whose `model.json` matches `install.json`, passes the engine's compatibility validator and, where the
+  family has a resolver, resolves as Supported from its installed files. The report hashes nothing and
+  loads no native code; the lease before a load hashes every artifact. Built-ins come first, then the
+  others by key.
 - `CreateInstance(packs, backend)` constructs the engine with its own execution coordinator. The
   returned `ITensorModelInstance` also implements the engine's capability interface:
   `ITensorLlmInference`, `ITensorImageInference`, `ITensorDecisionInference` or
@@ -340,17 +347,20 @@ foreach (TensorEngineDefinition definition in registry.Definitions)
 
 if (registry.TryGetProvider(savedConfiguration.ImplementationId, out ITensorEngineProvider? provider))
 {
-    var packs = new TensorModelPackManager(new TensorModelCatalog(savedManifests),
+    IReadOnlyList<TensorModelPackDefinition> installed =
+        await provider.GetInstalledModelsAsync(new OsUserPersist(hostStorageRoot));
+    IReadOnlyList<TensorModelPackDefinition> offered =
+        [.. provider.BuiltInModels, .. installed.Where(model => !provider.BuiltInModels.Any(builtIn => builtIn.Key == model.Key))];
+    var packs = new TensorModelPackManager(new TensorModelCatalog(offered),
         Path.Combine(hostStorageRoot, provider.Definition.ModelStoreKey));
-    IReadOnlyList<TensorModelPackDefinition> offered = await provider.GetOfferedModelsAsync(packs);
     ITensorModelInstance instance = provider.CreateInstance(packs, savedConfiguration.Backend);
     TensorSettingsManager manager = provider.CreateSettingsManager(commitTarget, packs, offered, instance);
 }
 // Otherwise the saved entry's engine is not registered: keep the record and show it unavailable.
 ```
 
-`tensor registry --store <dir>` in the Tensor ConsoleTester lists every registered engine and opens
-its settings through the same provider calls. It installs, loads and saves nothing.
+`tensor registry --store <dir>` in the Tensor ConsoleTester lists every registered engine, its built-in
+count and the models it reports in that model store, and opens its settings through the same provider calls. It installs, loads and saves nothing.
 
 The Qwen console runner retains the shared runtime owner that its engine borrows. It disposes the
 engine before retiring the runtime. Operation, engine cleanup and runtime cleanup failures remain
@@ -373,7 +383,7 @@ It exposes the throw site of errors a managed turn reports through its safe fail
 opening a store or loading native libraries. Their `CreateSettingsManager` methods bind a typed host
 `ISetupCommitTarget<TensorSetupChanges>` and the existing pack manager to a `TensorSettingsManager`.
 Its `OpenAsync(identity, existing)` returns the `TensorSettings` object the common setup editor renders.
-For Qwen and Supra, the default setup list contains the engine's built-in pack, and hosts may supply
+For Supra, the default setup list contains its built-in pack; Qwen's default list is empty. Hosts may supply
 `offeredModels` with their own registered compatible packs. Laya has no built-in pack, so its
 `offeredModels` is required. Qwen and Supra validate the pack's capability, family,
 roles and declared backends before offering it. All four factories bind their model-family resolver
@@ -414,7 +424,8 @@ provider-owned dirty state and explicit choice capabilities for the shared Setti
 `JsonSerializer` when reading or writing Tensor-owned data. The metadata belongs to the Tensor
 assembly generation; consumers release their references when that generation retires.
 Each getter returns metadata with its own options and type cache, released with the caller's metadata.
-The pack manager uses the same source-generated context for installed manifests. Manifest fingerprinting
+The pack manager uses the same source-generated context for installed manifests.
+Each install writes the pack's definition as `model.json` beside `install.json` with `ModelPack` metadata; a removal deletes it. Manifest fingerprinting
 also uses generated metadata and retains the established canonical bytes. These formats retain
 their property names, numeric enum values and null/empty distinctions. Unknown properties are
 ignored; model validation remains separate from JSON parsing. Serializer tests load the real Tensor
@@ -578,7 +589,7 @@ checks the installed GGUF architecture/version, tokenizer and chat metadata, dim
 encoding and complete shard declarations before native allocation. Qwen 3 checks every layer's
 tensor shapes; for the Qwen 3.5 family it checks the recurrent-state keys and layer layout, and
 TensorSharp's own load validates each layer. Listed context/output limits remain unknown until validated loaded-runtime
-metadata is available; the built-in 4B limits are not copied onto other models. A split GGUF pack
+metadata is available. A split GGUF pack
 installs every declared shard beside the primary file under its numbered name, and Qwen passes
 TensorSharp the primary path; TensorSharp opens the sibling shards from the same directory. Shard
 count/names/numbering and duplicate tensors are checked before native allocation.

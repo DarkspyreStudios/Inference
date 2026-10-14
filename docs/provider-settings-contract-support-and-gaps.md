@@ -317,7 +317,7 @@ native resources while active work still uses them. Preserve these lifecycle rul
 
 | Tensor implementation | Existing model/runtime boundary | Additional provider-specific requirement |
 |---|---|
-| Qwen Text | `QwenLlmInference`, `TensorLlmModels.Qwen3FourBillionQ4Km`, typed LLM interface and explicit lifecycle | Enumerate genuinely supported GGUF candidates/variants; validate their architecture and backend compatibility; load the selected supported pack rather than always selecting the built-in one |
+| Qwen Text | `QwenLlmInference`, imported GGUF packs on `TensorLlmModels.Backends`, typed LLM interface and explicit lifecycle | Enumerate genuinely supported GGUF candidates/variants; validate their architecture and backend compatibility; load the selected supported pack |
 | Supra Image | `SupraImageInference`, `TensorImageModels.Supra2Image`, typed image interface; pack includes Supra, text encoder/tokenizer and VAE artifacts | Resolve and validate the entire compatible artifact set. Surface current output and prompt limitations through capabilities; do not offer arbitrary image-model repositories as interchangeable |
 | Laya Decision | Typed decision interface and its own pinned definition | Keep correct capability identity in shared discovery. CE's requested three settings groups do not authorize adding a Decision section |
 | Audio | No engine or model-pack capability contract found | Define actual audio tasks, engines, supported artifacts and compatibility rules before an audio model picker can be functional |
@@ -326,7 +326,6 @@ Sources: [catalog and pack definitions](../Tensor/src/Common/Darkspyre.Inference
 [pack manager](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/TensorModelPackManager.cs),
 [model lifecycle](../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/ITensorModelInstance.cs),
 [Qwen engine](../Tensor/src/LLM/Darkspyre.Inference.Tensor.LLM.Qwen/QwenLlmInference.cs),
-[Qwen pack](../Tensor/src/LLM/Darkspyre.Inference.Tensor.LLM.Qwen/TensorLlmModels.cs),
 [Supra engine](../Tensor/src/Image/Darkspyre.Inference.Tensor.Image.Supra/SupraImageInference.cs),
 [Supra pack](../Tensor/src/Image/Darkspyre.Inference.Tensor.Image.Supra/TensorImageModels.cs),
 [Tensor integration guide](../Tensor/README.md).
