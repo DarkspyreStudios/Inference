@@ -31,7 +31,7 @@ file replacement and cancellation, not Google's live token exchange.
 **Approved strict capability amendment:** `LlmToolCapabilities.StrictInputSchema` uses
 `LlmStrictInputSchemaSupport` with Supported / Unsupported / Unknown (Unknown is the default).
 Unknown permits an explicit strict attempt through Connect, unchanged; it does not promise success.
-The host decides its policy, and AgentDS defaults to "try and see if it works". Known Unsupported
+The host decides its policy, and Darkspyre defaults to "try and see if it works". Known Unsupported
 rejects explicit strict requests. Ordinary tools remain non-strict and are never gated by strict
 support. Existing compatible-chat, Anthropic and Bedrock opt-in wire behavior is preserved.
 

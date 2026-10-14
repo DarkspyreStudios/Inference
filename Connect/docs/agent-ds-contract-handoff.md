@@ -1,5 +1,5 @@
 > **Approved host policy:** `LlmToolCapabilities.StrictInputSchema` is Supported / Unsupported /
-> Unknown. Unknown must permit an explicit strict attempt in Connect; AgentDS defaults to trying it
+> Unknown. Unknown must permit an explicit strict attempt in Connect; Darkspyre defaults to trying it
 > and handling the provider result. Do not translate Unknown into Unsupported or silently change
 > `Strict=true` to false. Ordinary tool definitions remain non-strict by default.
 
@@ -40,7 +40,7 @@ contract guidance below remains the integration baseline until that coordinated 
 - Carry `UnboundContinuationState` through requests and surface `OmittedContinuationStateCount`.
   Reject is the default; discarding incompatible state requires explicit Omit policy.
 - Use `Tools.StrictInputSchema` independently of ordinary `SupportsToolUse`. Unknown remains
-  attemptable; AgentDS defaults to trying the requested operation and handling failure.
+  attemptable; Darkspyre defaults to trying the requested operation and handling failure.
 - Preserve model Availability/AvailabilityReason and nullable cache/reasoning usage details. Usage
   details are subsets, not extra tokens to add to the normalized totals.
 - Add typed Google project/location/authentication setup; protect service-account JSON in the host

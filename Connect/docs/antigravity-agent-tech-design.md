@@ -4,7 +4,7 @@
 
 **Combined design:** [DSA-75](https://darkspyre.atlassian.net/browse/DSA-75), with
 [DSA-58](https://darkspyre.atlassian.net/browse/DSA-58) for Tensor registry details and
-[DSA-76](https://darkspyre.atlassian.net/browse/DSA-76) for AgentDS adoption.
+[DSA-76](https://darkspyre.atlassian.net/browse/DSA-76) for Darkspyre adoption.
 The epic owns shared contract decisions, sequencing and combined acceptance; this document maps the AGY component.
 
 **Date:** 2026-09-28
@@ -114,7 +114,7 @@ same implementation unit. Claude/AgentCore retain their current policy mappings;
 continue rejecting native runtime options. Unknown policy variants fail before process/remote work.
 No parallel legacy policy members or dual readers.
 
-AgentDS must explicitly select provider policy for AGY and present its actual control limits. Existing
+Darkspyre must explicitly select provider policy for AGY and present its actual control limits. Existing
 Claude/AgentCore runtime settings map mechanically into the host-policy variant. Host adoption is tracked by DSA-76 under DSA-75; do not change DSA-68's released 11.12 contract into a moving target.
 
 ## 4. Capability mapping
