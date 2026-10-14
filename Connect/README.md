@@ -47,9 +47,12 @@ projects are out of the solution, the `Darkspyre.Inference.Connect` package and 
 `Inference/AGENTS.md`. Sections of this page that describe an excluded provider, transport or project
 describe that kept source, which this build does not compile.
 
-Stored data keeps its shape. `LlmConnection.Xai`, `LlmTransport.XaiResponses`, `ImageTransport.XaiImagine`
-and `TtsTransport.XaiTts` stay, so a saved connection or setting that names them still reads. No adapter is
-registered for those transports, so a request through one fails with the existing missing-client refusal.
+Stored data keeps its shape. `LlmTransport.XaiResponses`, `ImageTransport.XaiImagine` and `TtsTransport.XaiTts`
+stay, so a saved connection or setting that names them still reads. No adapter is registered for those
+transports, so a request through one fails with the existing missing-client refusal. `LlmConnection` has no
+xAI or Chat Completions settings. A saved connection that still carries `Xai` or `ChatCompletions` reads,
+and the reader skips both members. The excluded xAI, OpenAI-compatible chat and Azure Chat source still
+names them.
 
 The phase-1 build removes these public surfaces: `ILlmFileClient`, `IXaiFilePublicUrlClient`,
 `IXaiSkillClient`, `IDocumentSearchClient` and their request and result types; `LlmProviderCapabilities.Skills`;
@@ -3494,29 +3497,10 @@ Prompt-image overrides send `image_url` data-URL parts. Prompt-document override
 `file` parts and valid UTF-8 `text/*` documents as text parts. Other document formats fail before
 dispatch. Tool results remain text-only; prompt overrides do not enable binary tool results.
 
-For OpenAI-compatible connections, `LlmConnection.ChatCompletions` stores two non-secret protocol choices. A null `OutputLimitField`
-selects `max_completion_tokens` for `api.openai.com` and `max_tokens` elsewhere; an explicit
-`MaxTokens` or `MaxCompletionTokens` wins. A null `UsePromptCacheKey` maps a nonempty
-`ConversationKey` to `prompt_cache_key` only for `api.openai.com`. Other endpoints require explicit
-true; explicit false disables the mapping on any endpoint. The advanced settings expose both
-choices and require retesting after edits. Provider options cannot replace a standard field written
+Provider options cannot replace a standard field written
 by the typed request. Conversation affinity is a hint, not an explicit billed cache resource.
 Existing provider JSON, headers and model-specific overrides are retained; the editor does not turn them into
 an arbitrary JSON settings payload.
-
-`XaiResponses` defines the Grok OAuth connection and settings contract. `LlmConnection.Xai` holds
-`XaiConnectionOptions`: `Global` selects `https://api.x.ai/v1`, and `UnitedStates` selects
-`https://us.api.x.ai/v1`. `GetEndpoint()` derives that fixed URL. Setup offers bounded region and
-`Default`/`Priority` service-tier choices, with no endpoint or API-key field. It retains unrelated
-headers, provider options and overrides. A kept OAuth access token or a completed draft sign-in
-satisfies Save; an API key or static secret header does not. Region edits replace the endpoint;
-tier edits require retesting but do not request reauthentication.
-
-Opening Grok settings preserves the supplied endpoint and typed options. Missing typed options or
-a route/region mismatch is shown locally and blocks Save, Check and model discovery until an
-explicit region selection fixes the draft. Read-only **Saved sign-in** and **Draft sign-in** fields
-report credential configuration without exposing secret values or claiming a fresh authentication
-check. A draft sign-in remains unsaved until Save commits; an uncertain save remains unknown.
 
 `IXaiDeviceLogin` supplies the device grant to `StartXaiLoginAsync`, `CompleteXaiLoginAsync` and
 `SignInAsync`. Completion performs one token poll; interactive sign-in owns the polling loop.
@@ -3843,17 +3827,6 @@ its formatter does not report payload presence. The nonstreaming run establishes
 delivery, not decoded pixels, dimensions, streaming byte delivery or Session/Workspace commit.
 Neither run writes image bytes to a file or log, retries, changes account/route or establishes
 separate subscription billing from the reported cost.
-
-`LlmChatRequest.ProviderControls`, its Common request projection and `LlmAgentTurnRequest`
-carry `XaiMultiAgentControls`. An absent control inherits `XaiConnectionOptions.MultiAgent`;
-a present control with `AgentCount = null` suppresses the saved count and leaves the provider
-default unspecified. The existing `grok-4.20-multi-agent` profile supports 4 or 16 agents, encoded
-as REST `reasoning.effort = "low"` or `"high"`, never `agent_count`. Profile-backed setup offers
-those counts and a provider-default choice. Explicit unsupported models/counts, non-xAI routes,
-neutral or raw reasoning combined with a multi-agent control, and raw agent-count injection
-refuse before refresh, catalog access or generation. Managed turns retain their effective control
-through tool iterations; Connect and batch Resources metadata preserve the fixed
-`xai-multi-agent` discriminator, while Common metadata refuses this Connect subtype.
 
 `AddLlmConnect` registers the Grok provider, authenticator, Responses client and managed agent through
 the same finite SDK HTTP pipelines. Provider discovery performs no OAuth or model requests.

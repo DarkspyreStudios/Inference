@@ -55,12 +55,6 @@ public sealed record LlmConnection
     /// <summary>Transient explicit launch values; non-null values cannot be serialized as configuration.</summary>
     public LlmAgentRuntimeLaunchInputs? RuntimeLaunchInputs { get; init; }
 
-    /// <summary>Chat Completions protocol choices; null selects endpoint-aware defaults.</summary>
-    public LlmChatCompletionsConfiguration? ChatCompletions { get; init; }
-
-    /// <summary>xAI settings, when the connection uses xAI.</summary>
-    public XaiConnectionOptions? Xai { get; init; }
-
     /// <summary>Non-standard headers such as OpenRouter attribution headers.</summary>
     public IReadOnlyDictionary<string, string> AdditionalHeaders { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

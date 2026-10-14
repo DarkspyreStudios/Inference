@@ -53,8 +53,7 @@ public sealed class ProviderTerminalEvidenceTests
         {
             Version = "1",
             Transport = transport,
-            Endpoint = transport == LlmTransport.XaiResponses ? "https://api.x.ai/v1" : "https://provider.example.test/v1",
-            Xai = transport == LlmTransport.XaiResponses ? new() : null,
+            Endpoint = "https://provider.example.test/v1",
             Credential = (transport == LlmTransport.OpenAiResponses
                 ? new LlmCredential { ApiKey = "test-token" }
                 : new LlmCredential { OAuth = new() { AccessToken = "test-token", AccountId = "test-account" } }).Serialize(),
@@ -66,7 +65,7 @@ public sealed class ProviderTerminalEvidenceTests
         LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(async () =>
         {
             await foreach (LlmStreamEvent item in client.StreamAsync(connection,
-                new() { ModelId = transport == LlmTransport.XaiResponses ? "grok-4.7" : "selected-model", Messages = [new("user", "hello")] }))
+                new() { ModelId = "selected-model", Messages = [new("user", "hello")] }))
                 observations.Add(item);
         });
 
@@ -100,8 +99,7 @@ public sealed class ProviderTerminalEvidenceTests
         {
             Version = "1",
             Transport = transport,
-            Endpoint = accountUsage && transport == LlmTransport.OpenAiCompatibleChat
-                ? "https://openrouter.ai/api/v1" : "https://provider.example.test/backend-api/codex",
+            Endpoint = "https://provider.example.test/backend-api/codex",
             Credential = (transport == LlmTransport.OpenAiCodex
                 ? new LlmCredential { OAuth = new() { AccessToken = "test-token", AccountId = "test-account" } }
                 : new LlmCredential { ApiKey = "test-token" }).Serialize(),
@@ -167,12 +165,11 @@ public sealed class ProviderTerminalEvidenceTests
         {
             Version = "1",
             Transport = transport,
-            Endpoint = transport == LlmTransport.XaiResponses ? "https://api.x.ai/v1" : "https://provider.example.test/v1",
-            Xai = transport == LlmTransport.XaiResponses ? new() : null,
+            Endpoint = "https://provider.example.test/v1",
             Credential = new LlmCredential
             {
-                ApiKey = transport is LlmTransport.OpenAiCodex or LlmTransport.XaiResponses ? null : "test-key",
-                OAuth = transport is LlmTransport.OpenAiCodex or LlmTransport.XaiResponses
+                ApiKey = transport is LlmTransport.OpenAiCodex ? null : "test-key",
+                OAuth = transport is LlmTransport.OpenAiCodex
                     ? new() { AccessToken = "test-token", AccountId = "test-account" } : null
             }.Serialize(),
             ResolvedContinuationScope = transport is LlmTransport.GoogleGeminiApi or LlmTransport.GoogleVertexAi ? "test-scope" : null,
@@ -248,9 +245,6 @@ public sealed class ProviderTerminalEvidenceTests
         const string responses = """
             {"id":"response-1","model":"reported-model","status":"UNKNOWN_STOP","output":[{"type":"message","id":"message-1","role":"assistant","content":[{"type":"output_text","text":"partial"}]},{"type":"function_call","id":"fc-1","call_id":"call-1","name":"echo","arguments":"{}"}],"usage":{"input_tokens":5,"output_tokens":2,"total_tokens":7}}
             """;
-        const string chat = """
-            {"id":"response-1","model":"reported-model","choices":[{"index":0,"message":{"role":"assistant","content":"partial","tool_calls":[{"id":"call-1","type":"function","function":{"name":"echo","arguments":"{}"}}]},"finish_reason":"UNKNOWN_STOP"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}
-            """;
         const string anthropic = """
             {"type":"message","id":"response-1","model":"reported-model","content":[{"type":"text","text":"partial"},{"type":"tool_use","id":"call-1","name":"echo","input":{}}],"stop_reason":"UNKNOWN_STOP","usage":{"input_tokens":5,"output_tokens":2}}
             """;
@@ -259,22 +253,16 @@ public sealed class ProviderTerminalEvidenceTests
             """;
         if (!streaming) return transport switch
         {
-            LlmTransport.OpenAiResponses or LlmTransport.XaiResponses => responses,
-            LlmTransport.OpenAiCompatibleChat => chat,
+            LlmTransport.OpenAiResponses => responses,
             LlmTransport.AnthropicMessages => anthropic,
             LlmTransport.GoogleGeminiApi or LlmTransport.GoogleVertexAi => gemini,
             _ => throw new InvalidOperationException("Unexpected complete test route.")
         };
         return transport switch
         {
-            LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.XaiResponses =>
+            LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex =>
                 "data: {\"type\":\"response.completed\",\"response\":" + responses + "}\n\n",
             LlmTransport.GoogleGeminiApi or LlmTransport.GoogleVertexAi => "data: " + gemini + "\n\n",
-            LlmTransport.OpenAiCompatibleChat => """
-                data: {"id":"response-1","model":"reported-model","choices":[{"index":0,"delta":{"content":"partial","tool_calls":[{"index":0,"id":"call-1","type":"function","function":{"name":"echo","arguments":"{}"}}]},"finish_reason":"UNKNOWN_STOP"}],"usage":{"prompt_tokens":5,"completion_tokens":2,"total_tokens":7}}
-
-                data: [DONE]
-                """ + "\n\n",
             LlmTransport.AnthropicMessages => """
                 data: {"type":"message_start","message":{"id":"response-1","model":"reported-model","usage":{"input_tokens":5,"output_tokens":0}}}
 
