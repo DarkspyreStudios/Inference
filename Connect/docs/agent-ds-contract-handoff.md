@@ -8,7 +8,7 @@
 > version is 2; unversioned captures and the old `ResponseState` member are rejected. Preserve
 > original records during migration. The user authorized publication for host migration testing.
 
-# Agent DS: managed-agent contract handoff
+# Darkspyre: managed-agent contract handoff
 
 ## Pending: shared LLM contract migration (DSA-61 / DSA-68)
 
@@ -164,7 +164,7 @@ Semantics and the Claude CLI mapping are in the [canonical design](enhancements.
 
 ## Rich tool output: 11.7.0-rc.1
 
-`11.7.0-rc.1` is a breaking-contract release. Agent DS floats `11.*-*`, so its tool-result bridge
+`11.7.0-rc.1` is a breaking-contract release. Darkspyre floats `11.*-*`, so its tool-result bridge
 must move in the same change that restores this version.
 
 - `LlmToolResult(ToolCallId, LlmToolOutput Output)` replaces the content string, `IsError` and
@@ -209,7 +209,7 @@ below. The earlier `11.5.3-rc.1` packages do not contain them.
 
 All existing estimators remain estimates, with unknown occupancy for uncountable content. These APIs
 do not certify strict bounded fit or guarantee an eligible bounded route. Keep `IContextCompactor`,
-its request/deadline ledger and SessionManager replacement coordination in Agent DS. No consumer
+its request/deadline ledger and SessionManager replacement coordination in Darkspyre. No consumer
 source changes are included. Exact semantics and evidence are in the
 [canonical design](enhancements.md#public-nonmutating-accounting).
 
@@ -220,9 +220,9 @@ live-tested for 3.0.0 under the new package and namespace. Version 2.2.0 does no
 Direct Codex now uses host-owned device OAuth; Claude/Antigravity remain CLI-owned.
 The public contracts are now distributed through the coordinated three-package release.
 
-Agent DS can now implement its data mappings, ownership selection, event handling and host compactor
+Darkspyre can now implement its data mappings, ownership selection, event handling and host compactor
 against these exact types. Consume `Darkspyre.Inference.Connect` through the private NuGet 10.1.0 package;
-do not copy library source into Agent DS. Keep the new path capability-gated.
+do not copy library source into Darkspyre. Keep the new path capability-gated.
 The [README](../README.md) is the canonical integration contract; the
 [technical design](enhancements.md) defines the execution semantics.
 
@@ -252,10 +252,10 @@ Framework `IAsyncDisposable` still uses `ValueTask`. Identity properties and mod
 ordinary data, not asynchronous lookups. Published 11.9.2-rc.1 retains its previous signatures;
 do not migrate a package consumer until the coordinated contract release is available.
 
-Inference setup notifications are non-blocking invalidation hints. Agent DS separately awaits all
+Inference setup notifications are non-blocking invalidation hints. Darkspyre separately awaits all
 entered subscribers when publishing its own change. The host adapter owns snapshot refresh,
 stale-result rejection, downstream publication, failures and shutdown settlement. Awaiting an
-Inference save does not mean Agent DS subscribers have finished; no discarded Task bridges these
+Inference save does not mean Darkspyre subscribers have finished; no discarded Task bridges these
 two completion boundaries. See the [async contract design](../../docs/inference-async-tech-design.md#21-notification-ownership-across-the-host-boundary).
 
 ### Retained context
@@ -278,7 +278,7 @@ endpoint/header scope; after key rotation, old state is unbound and a request th
 opt in with `UnboundContinuationState.Omit`. OAuth account identity, when available, survives token
 refresh. Scope is compatibility, not authenticity.
 
-To switch a session to another model or provider, Agent DS sends its retained history, or a compacted
+To switch a session to another model or provider, Darkspyre sends its retained history, or a compacted
 summary, to the target with `UnboundContinuationState.Omit`. `MeasureRequestAsync` on the target connection
 and model estimates the history before sending. The result's `OmittedContinuationStateCount`, or the
 first-turn `LlmAgentWarningEvent` on an agent session, reports what the target did not receive. Agent
@@ -320,7 +320,7 @@ reports what each part sends. The adapter serializes through the same projection
 route cannot carry, so a tool never fails for unsupported content. The Connect README has the route
 table and the fixed text renderings.
 
-Use `IncludeAttachmentData = true` for live compaction. Agent DS can separately omit bytes from
+Use `IncludeAttachmentData = true` for live compaction. Darkspyre can separately omit bytes from
 its stored projection. Never send that stripped projection back into the live run by accident.
 Darkspyre.Inference.Connect.LLM will not read application paths to reconstruct missing attachments after reopen.
 
@@ -370,21 +370,21 @@ conversation does. Codex and Claude compact inside Inference with `ConversationC
    carries thread/turn/pause IDs, status, reason (`Threshold` or `ProviderOverflow`),
    `CanCompactHistory` and `ProtectedEntryIds`. It is **not** a completed turn.
 2. Capture with attachment bytes. All issued tools have settled; retain protected records intact.
-   Summarize only earlier complete groups using Agent DS's existing compactor. Its own model input
+   Summarize only earlier complete groups using Darkspyre's existing compactor. Its own model input
    must be bounded too. If `CanCompactHistory` is false, interrupt and surface oversized fixed input.
-3. Persist the replacement through the existing `ISessionStore` under Agent DS's existing policy,
+3. Persist the replacement through the existing `ISessionStore` under Darkspyre's existing policy,
    retaining the original durable context for rollback. If persistence fails, do not continue.
 4. Enumerate `session.ContinueTurnAsync(new LlmAgentTurnContinuation(pause.TurnId, pause.PauseId,
    captured.Revision, replacement), ct)`. No second prompt. The engine validates and installs
    atomically, assigns its next revision, and consumes the pause ID once on success.
 5. A `LlmAgentTurnContinuedEvent` confirms acceptance. Validation failure leaves the original live
-   context/pause intact: Agent DS restores/retains its original durable state. A later provider
+   context/pause intact: Darkspyre restores/retains its original durable state. A later provider
    failure after acceptance does **not** roll the installed context back. Persist a fresh settled
    capture after completion, another pause, or settled cancellation.
 
 The [compiled example](../examples/Darkspyre.Inference.Connect.LLM.Examples/HostOwnedAgentContext.cs) demonstrates
 open, capture and continue calls without creating a competing store or compactor seam.
-Serialize Agent DS edits during this sequence. There is no cross-system transaction and no claim
+Serialize Darkspyre edits during this sequence. There is no cross-system transaction and no claim
 of exactly-once recovery. Queued steering may make a replacement insufficient; a rejected replacement
 can be corrected against the same live pause. The engine, not a supplied `replacement.Revision`,
 chooses the new revision.
@@ -392,7 +392,7 @@ chooses the new revision.
 Instructions, model, reasoning level, schemas, tool definitions, usage and iteration counts stay
 fixed across the logical run's pauses. `Instructions = null` uses the session base, `""` clears it
 for this run, and nonempty replaces it. Completion, failure, interruption or cancellation ends that
-override. Agent DS owns plugin instruction composition; Darkspyre.Inference.Connect.LLM does not persist it as user text.
+override. Darkspyre owns plugin instruction composition; Darkspyre.Inference.Connect.LLM does not persist it as user text.
 
 `LlmAgentUsageEvent` contains a model-step `RequestId`, per-request `Usage`, and `RunTotals` including
 earlier continued segments. Null means unreported. `LlmAgentTurnCompletedEvent.Reason` distinguishes
@@ -403,7 +403,7 @@ displayed. Pre-output transient retries are bounded to three total attempts; exp
 Breaking enumeration or cancellation must settle active work before capturing. A cancelled consumer
 may not receive a final event. Deliberately ending at a compaction pause preserves the live run.
 After process death/disposal, the pause is not resumable: snapshots are context data, not executable
-checkpoints. Agent DS can reopen its stored context and explicitly initiate new work under its own
+checkpoints. Darkspyre can reopen its stored context and explicitly initiate new work under its own
 recovery policy. No durable harness, scheduler, journal or automatic tool replay is added here.
 
 ## Implemented availability
@@ -421,7 +421,7 @@ They reject host IDs, managed `ExecutionOptions`, managed tool scheduling flags,
 agent features. Direct Codex uses the existing device-OAuth flow and protected host connection store;
 it never scrapes CLI credentials. Replace executable endpoints with the direct HTTPS endpoint.
 Native Codex shell/file/web/MCP/subagent execution is not implicitly registered in the managed
-engine: Agent DS supplies and secures those tools. Start managed sessions through
+engine: Darkspyre supplies and secures those tools. Start managed sessions through
 `LlmAgentProviderService` so every iteration resolves/refreshes the host connection.
 
 ## Verification and consumer handoff
@@ -431,7 +431,7 @@ their results, separately from deterministic tests. Live proof includes direct m
 usage, chat/agent attachment tools, ordered state replay, JSON save/reopen, independent fork, and
 same-run host compaction with retained instructions and no duplicate prompt or settled tool replay.
 
-Agent DS can now integrate its existing store and compactor against this implementation. Keep
+Darkspyre can now integrate its existing store and compactor against this implementation. Keep
 capability gating and its existing durability/security responsibilities. The library adds no
 storage seam, durable harness, scheduler, command executor, or automatic replay of external effects.
 The core and Bedrock assemblies ship together in `Darkspyre.Inference.Connect` 10.1.0, which depends

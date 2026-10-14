@@ -161,8 +161,8 @@ request-level continuation token.
 contract: open host context, capture with bytes, and continue after host compaction. Claude and
 AgentCore remain provider-owned and reject these operations.
 
-The [Agent DS handoff](../../docs/agent-ds-contract-handoff.md) defines persistence, context pressure,
-same-run continuation, attachment ownership, and rollback responsibilities. Agent DS keeps its
+The [Darkspyre handoff](../../docs/agent-ds-contract-handoff.md) defines persistence, context pressure,
+same-run continuation, attachment ownership, and rollback responsibilities. Darkspyre keeps its
 existing session store. The [live console scenario](../../tools/Darkspyre.Inference.Connect.ConsoleTester/ManagedAgentProbe.cs)
 uses in-memory JSON only, exercising real capture/reopen/fork and a low context cap.
 
@@ -177,7 +177,7 @@ RunTurnAsync -> model -> host tools -> next model
                    v
      CompactionRequired (enumeration ends)
                    |
- Agent DS: capture bytes -> compact older groups -> persist
+ Darkspyre: capture bytes -> compact older groups -> persist
                    |
  ContinueTurnAsync(same turn, pause ID, captured revision)
                    v

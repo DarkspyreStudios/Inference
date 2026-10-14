@@ -790,7 +790,7 @@ The coordinated release contains Common, Connect, independently consumable Tenso
 `<net>.<release>.<minor>`: .NET generation, breaking-contract release, and compatible tweak/fix.
 The direct Codex and host-owned managed-agent behavior from the former `Mathis.LlmConnect` 3.0.0 is
 retained; Claude and AgentCore retain provider-owned sessions.
-See the [Agent DS handoff](docs/agent-ds-contract-handoff.md),
+See the [Darkspyre handoff](docs/agent-ds-contract-handoff.md),
 [technical design](docs/enhancements.md), and [verification record](docs/managed-agent-verification.md).
 
 The Apple on-device adapter is registered by `AddLlmConnect`. Its separately built Swift
@@ -3295,7 +3295,7 @@ nonempty replaces them. Native adapters currently reject any non-null override b
 
 The existing `ILlmAgentSession` now includes async capability/status queries, context capture,
 idle compare-and-swap replacement, and streamed same-run continuation. `LlmAgentContext` is a
-versioned list of stable `LlmAgentContextEntry` records, not a durable run scheduler. Agent DS owns
+versioned list of stable `LlmAgentContextEntry` records, not a durable run scheduler. Darkspyre owns
 its existing session store, restore/fork decisions and compactor; Darkspyre.Inference.Connect.LLM adds no storage seam.
 
 `LlmAgentContextStatus.NeedsCompaction` and token counts are nullable: unknown is not zero/false.
@@ -3327,7 +3327,7 @@ truncation remains an incomplete completion.
 
 An unclassified managed-run exception emits a `LlmAgentWarningEvent` with its runtime type and
 managed stack frames before the generic failure completion. The diagnostic omits exception messages,
-source-file paths and provider payloads. Agent DS records this warning in the application log,
+source-file paths and provider payloads. Darkspyre records this warning in the application log,
 not in the conversation.
 
 Grok uses the separate provider-owned automatic mode. A known threshold triggers
@@ -4229,7 +4229,7 @@ the library does not manufacture reasoning text. See [OpenAI reasoning summaries
 
 Both `SupportsToolUse` and `SupportsAgentToolUse` is `Supported`. With chat, the caller runs the tool
 loop. With `LlmAgentProviderService`, Darkspyre.Inference.Connect.LLM runs it and invokes the host's handlers; do not
-run a second Agent DS loop on top. Start through that facade so every model iteration re-resolves
+run a second Darkspyre loop on top. Start through that facade so every model iteration re-resolves
 and refreshes the host connection. Account/endpoint changes reject an existing session.
 
 Account usage reads the same-origin `/backend-api/wham/usage` endpoint: reported quota windows,
@@ -4324,7 +4324,7 @@ its working directory, `Ephemeral` and `Policy`. The Claude CLI reads only the w
 AgentCore accept `HostControlled`; the Antigravity CLI accepts only `ProviderConfigured`; managed runtimes
 report an empty set. No runtime refuses a policy variant: the Claude CLI runs the default host-controlled
 policy when it receives another. Managed Codex has no built-in shell, file editor,
-network tool, or approval executor. Agent DS must enforce authorization, filesystem roots, and network
+network tool, or approval executor. Darkspyre must enforce authorization, filesystem roots, and network
 policy inside each tool handler. Managed sessions are always live/in-memory; persistence is explicit
 host capture.
 

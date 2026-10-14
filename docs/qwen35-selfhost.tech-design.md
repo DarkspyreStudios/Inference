@@ -6,7 +6,7 @@ This design covers three parts:
    It changes no public contract and ships as a point release.
 2. A Connect `SelfHost` transport runs an in-process `ILlmInference` as an agent session. It adds
    public contract and ships as its own release.
-3. A host, such as Agent DS, configures Tensor entries, owns one engine per entry, and lists the
+3. A host, such as Darkspyre, configures Tensor entries, owns one engine per entry, and lists the
    engines that SelfHost connections name.
 
 The motivating model is `ukisai/Swift-1.5-Qwen3.8-27B-GGUF`. Its GGUF header reports
