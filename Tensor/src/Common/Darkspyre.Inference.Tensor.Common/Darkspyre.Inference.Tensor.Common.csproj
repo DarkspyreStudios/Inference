@@ -7,6 +7,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Darkspyre.Persist" />
     <PackageReference Include="Darkspyre.TensorSharp.Runtime" />
   </ItemGroup>
 

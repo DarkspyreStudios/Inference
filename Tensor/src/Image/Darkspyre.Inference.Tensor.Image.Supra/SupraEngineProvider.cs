@@ -1,5 +1,6 @@
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
+using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.Image.Supra;
 
@@ -10,16 +11,18 @@ public sealed class SupraEngineProvider : ITensorEngineProvider
     public TensorEngineDefinition Definition { get; } = new(SupraSetup.Definition, "Supra");
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<TensorModelPackDefinition>> GetOfferedModelsAsync(ITensorModelPackManager packs,
-        CancellationToken cancellationToken = default)
+    public IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; } = [TensorImageModels.Supra2Image];
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TensorModelPackDefinition>> GetInstalledModelsAsync(IPersist modelStore,
+        CancellationToken cancellationToken = default) =>
+        TensorInstalledPacks.ReportAsync(modelStore, Definition.ModelStoreKey, BuiltInModels, Accepts, new SupraModelResolver(), cancellationToken);
+
+    private static bool Accepts(TensorModelPackDefinition model)
     {
-        ArgumentNullException.ThrowIfNull(packs);
-        IReadOnlyList<TensorModelPackDefinition> registered = await packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false);
-        IReadOnlyList<TensorModelPackDefinition> offered = new TensorModelCatalog(new[] { TensorImageModels.Supra2Image }
-            .Concat(registered.Where(model => model.Capability == TensorCapability.Image
-                && model.RuntimeArchitecture == TensorImageModels.SupraRuntimeArchitecture))).Definitions;
-        foreach (TensorModelPackDefinition model in offered) { SupraModelCompatibility.Validate(model); }
-        return offered;
+        if (model.Capability != TensorCapability.Image || model.RuntimeArchitecture != TensorImageModels.SupraRuntimeArchitecture) { return false; }
+        SupraModelCompatibility.Validate(model);
+        return true;
     }
 
     /// <inheritdoc />

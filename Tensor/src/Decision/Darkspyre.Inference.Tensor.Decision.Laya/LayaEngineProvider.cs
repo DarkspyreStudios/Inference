@@ -1,11 +1,12 @@
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
+using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.Decision.Laya;
 
 /// <summary>
 /// Registers Laya decisions. Its packs live under the <c>Laya</c> store key. Laya has no built-in pack:
-/// it offers only the compatible packs registered in the host's pack manager, and an empty list still
+/// it reports only the compatible packs installed in the model store, and an empty list still
 /// permits setup and import of a supported checkpoint.
 /// </summary>
 public sealed class LayaEngineProvider : ITensorEngineProvider
@@ -14,15 +15,18 @@ public sealed class LayaEngineProvider : ITensorEngineProvider
     public TensorEngineDefinition Definition { get; } = new(LayaSetup.Definition, "Laya");
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<TensorModelPackDefinition>> GetOfferedModelsAsync(ITensorModelPackManager packs,
-        CancellationToken cancellationToken = default)
+    public IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; } = [];
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TensorModelPackDefinition>> GetInstalledModelsAsync(IPersist modelStore,
+        CancellationToken cancellationToken = default) =>
+        TensorInstalledPacks.ReportAsync(modelStore, Definition.ModelStoreKey, BuiltInModels, Accepts, new LayaModelResolver(), cancellationToken);
+
+    private static bool Accepts(TensorModelPackDefinition model)
     {
-        ArgumentNullException.ThrowIfNull(packs);
-        IReadOnlyList<TensorModelPackDefinition> registered = await packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false);
-        IReadOnlyList<TensorModelPackDefinition> offered = new TensorModelCatalog(registered.Where(model =>
-            model.Capability == TensorCapability.Decision && model.RuntimeArchitecture == TensorDecisionModels.LayaRuntimeArchitecture)).Definitions;
-        foreach (TensorModelPackDefinition model in offered) { LayaModelCompatibility.Validate(model); }
-        return offered;
+        if (model.Capability != TensorCapability.Decision || model.RuntimeArchitecture != TensorDecisionModels.LayaRuntimeArchitecture) { return false; }
+        LayaModelCompatibility.Validate(model);
+        return true;
     }
 
     /// <inheritdoc />

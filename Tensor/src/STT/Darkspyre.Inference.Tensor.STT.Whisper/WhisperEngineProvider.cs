@@ -1,5 +1,6 @@
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
+using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.STT.Whisper;
 
@@ -13,16 +14,18 @@ public sealed class WhisperEngineProvider : ITensorEngineProvider
     public TensorEngineDefinition Definition { get; } = new(WhisperSetup.Definition, "Whisper");
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<TensorModelPackDefinition>> GetOfferedModelsAsync(ITensorModelPackManager packs,
-        CancellationToken cancellationToken = default)
+    public IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; } = TensorSpeechModels.Whisper;
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TensorModelPackDefinition>> GetInstalledModelsAsync(IPersist modelStore,
+        CancellationToken cancellationToken = default) =>
+        TensorInstalledPacks.ReportAsync(modelStore, Definition.ModelStoreKey, BuiltInModels, Accepts, new WhisperModelResolver(), cancellationToken);
+
+    private static bool Accepts(TensorModelPackDefinition model)
     {
-        ArgumentNullException.ThrowIfNull(packs);
-        IReadOnlyList<TensorModelPackDefinition> registered = await packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false);
-        IReadOnlyList<TensorModelPackDefinition> offered = new TensorModelCatalog(TensorSpeechModels.Whisper
-            .Concat(registered.Where(model => model.Capability == TensorCapability.SpeechTranscription
-                && model.RuntimeArchitecture == TensorSpeechModels.WhisperRuntimeArchitecture))).Definitions;
-        foreach (TensorModelPackDefinition model in offered) { WhisperCompatibility.Validate(model); }
-        return offered;
+        if (model.Capability != TensorCapability.SpeechTranscription || model.RuntimeArchitecture != TensorSpeechModels.WhisperRuntimeArchitecture) { return false; }
+        WhisperCompatibility.Validate(model);
+        return true;
     }
 
     /// <inheritdoc />

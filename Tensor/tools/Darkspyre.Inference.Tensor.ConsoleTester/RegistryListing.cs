@@ -1,6 +1,7 @@
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Registry;
+using Darkspyre.Persist;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Tensor.ConsoleTester;
@@ -23,6 +24,7 @@ internal static class RegistryListing
         await using ServiceProvider services = new ServiceCollection().AddTensorEngines().BuildServiceProvider();
         TensorEngineRegistry registry = services.GetRequiredService<TensorEngineRegistry>();
         Console.WriteLine($"store   : {store}");
+        var modelStore = new OsUserPersist(store);
         foreach (TensorEngineDefinition definition in registry.Definitions)
         {
             if (!registry.TryGetProvider(definition.Setup.Implementation.Id, out ITensorEngineProvider? provider))
@@ -30,9 +32,14 @@ internal static class RegistryListing
                 throw new InvalidOperationException($"The registry did not resolve '{definition.Setup.Implementation.Id}'.");
             }
 
+            IReadOnlyList<TensorModelPackDefinition> installed = await provider.GetInstalledModelsAsync(modelStore, cancellationToken);
+            IReadOnlyList<TensorModelPackDefinition> offered =
+            [
+                .. provider.BuiltInModels,
+                .. installed.Where(model => !provider.BuiltInModels.Any(builtIn => builtIn.Key == model.Key))
+            ];
             // One pack manager per engine kind, rooted at the engine's store key beneath the host's root.
-            using var packs = new TensorModelPackManager(new TensorModelCatalog([]), Path.Combine(store, definition.ModelStoreKey));
-            IReadOnlyList<TensorModelPackDefinition> offered = await provider.GetOfferedModelsAsync(packs, cancellationToken);
+            using var packs = new TensorModelPackManager(new TensorModelCatalog(offered), Path.Combine(store, definition.ModelStoreKey));
             TensorSettingsManager manager = provider.CreateSettingsManager(new ListingTarget(), packs, offered);
             TensorSettings settings = await manager.OpenAsync(new(SetupChangeIntent.Create, "registry-listing", null), cancellationToken: cancellationToken);
 
@@ -40,7 +47,11 @@ internal static class RegistryListing
             Console.WriteLine($"engine  : {definition.Setup.Implementation.Id} ({definition.Setup.Implementation.DisplayName})");
             Console.WriteLine($"  tasks   : {string.Join(", ", definition.Setup.Implementation.Tasks)}");
             Console.WriteLine($"  store   : {definition.ModelStoreKey}");
-            Console.WriteLine($"  models  : {offered.Count} offered{(offered.Count == 0 ? "; setup can import a supported checkpoint" : string.Empty)}");
+            Console.WriteLine($"  models  : {provider.BuiltInModels.Count} built in, {installed.Count} installed");
+            foreach (TensorModelPackDefinition model in installed)
+            {
+                Console.WriteLine($"    installed {model.Key.ModelId} @ {model.Key.Revision}");
+            }
             Console.WriteLine($"  setup   : {settings.Steps.Sum(step => step.Sections.Count)} sections; configured {settings.Status.Configured.Value}");
             foreach (SetupActionDescriptor action in settings.Actions)
             {

@@ -19,7 +19,7 @@ public static class QwenSetup
         IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
         ITensorBackendProbe? backendProbe = null, GgmlRuntimeOwner? runtimeOwner = null)
     {
-        IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [TensorLlmModels.Qwen3FourBillionQ4Km];
+        IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [];
         foreach (TensorModelPackDefinition model in models) { QwenModelCompatibility.Validate(model); }
         GgmlRuntimeOwner owner = runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate();
         return new(Definition, target, models, packs, instance, backendProbe ?? new QwenBackendProbe(owner), new QwenModelResolver(source, reader, owner));

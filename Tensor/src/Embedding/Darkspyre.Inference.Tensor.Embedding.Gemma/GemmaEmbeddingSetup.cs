@@ -1,6 +1,7 @@
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
+using Darkspyre.Persist;
 using Microsoft.ML.OnnxRuntime;
 
 namespace Darkspyre.Inference.Tensor.Embedding.Gemma;
@@ -31,16 +32,18 @@ public sealed class GemmaEmbeddingEngineProvider : ITensorEngineProvider
     public TensorEngineDefinition Definition { get; } = new(GemmaEmbeddingSetup.Definition, "EmbeddingGemma");
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<TensorModelPackDefinition>> GetOfferedModelsAsync(ITensorModelPackManager packs,
-        CancellationToken cancellationToken = default)
+    public IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; } = [GemmaEmbeddingModels.EmbeddingGemma2];
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TensorModelPackDefinition>> GetInstalledModelsAsync(IPersist modelStore,
+        CancellationToken cancellationToken = default) =>
+        TensorInstalledPacks.ReportAsync(modelStore, Definition.ModelStoreKey, BuiltInModels, Accepts, null, cancellationToken);
+
+    private static bool Accepts(TensorModelPackDefinition model)
     {
-        ArgumentNullException.ThrowIfNull(packs);
-        IReadOnlyList<TensorModelPackDefinition> registered = await packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false);
-        IReadOnlyList<TensorModelPackDefinition> offered = new TensorModelCatalog(new[] { GemmaEmbeddingModels.EmbeddingGemma2 }
-            .Concat(registered.Where(model => model.Capability == TensorCapability.Embedding
-                && model.RuntimeArchitecture == GemmaEmbeddingModels.Architecture))).Definitions;
-        foreach (TensorModelPackDefinition model in offered) GemmaEmbeddingModels.Validate(model);
-        return offered;
+        if (model.Capability != TensorCapability.Embedding || model.RuntimeArchitecture != GemmaEmbeddingModels.Architecture) { return false; }
+        GemmaEmbeddingModels.Validate(model);
+        return true;
     }
 
     /// <inheritdoc />

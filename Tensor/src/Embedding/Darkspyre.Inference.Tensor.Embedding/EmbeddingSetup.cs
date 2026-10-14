@@ -2,6 +2,8 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Ggml;
+using Darkspyre.Persist;
+using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.Embedding;
 
@@ -19,15 +21,15 @@ public static class EmbeddingSetup
         IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
         ITensorBackendProbe? backendProbe = null)
     {
-        IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? TensorEmbeddingModels.BuiltIn;
+        IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [];
         foreach (TensorModelPackDefinition model in models) EmbeddingCompatibility.Validate(model);
         return new(Definition, target, models, packs, instance, backendProbe ?? new EmbeddingBackendProbe(), new EmbeddingModelResolver(source, reader));
     }
 }
 
 /// <summary>
-/// Resolves embedding content by its pinned size and SHA-256. Other content stays Unverified: a filename or a GGUF
-/// architecture string is not evidence that the encoder's pooling and tokenizer match a supported architecture.
+/// Resolves a GGUF embedding model from its header: architecture, pooling, dimensions, context and tokenizer must be ones
+/// this engine runs.
 /// </summary>
 public sealed class EmbeddingModelResolver : TensorModelResolver
 {
@@ -37,27 +39,41 @@ public sealed class EmbeddingModelResolver : TensorModelResolver
     public override IReadOnlyList<TensorArtifactRequirement> Requirements => [new("model", "*.gguf")];
 
     /// <inheritdoc />
-    public override Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
+    public override async Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
         ITensorArtifactReader reader, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(candidate); cancellationToken.ThrowIfCancellationRequested();
-        static Task<TensorModelResolution> Failure(TensorCompatibilityState state, string code, string message) =>
-            Task.FromResult(new TensorModelResolution(new(state, [new(code, message)], [])));
+        var evidence = new List<TensorCompatibilityEvidence>();
+        TensorModelResolution Failure(TensorCompatibilityState state, string code, string message, TensorSourceState sourceState = TensorSourceState.Available) =>
+            new(new(state, [new(code, message)], evidence.ToArray(), sourceState));
         if (backend != TensorBackendKind.Auto && !TensorEmbeddingModels.Backends.Contains(backend))
             return Failure(TensorCompatibilityState.Unsupported, "backend-unsupported", "Embeddings run on managed CPU or a GGML backend.");
         TensorSourceArtifact[] selected = candidate.Artifacts.Where(item => item.Path == candidate.Selection.Variant).ToArray();
         if (selected.Length != 1)
             return Failure(TensorCompatibilityState.Unverified, "candidate-unavailable", "The selected source artifact is missing or ambiguous.");
         TensorSourceArtifact artifact = selected[0];
-        TensorModelPackDefinition? known = TensorEmbeddingModels.KnownContent(artifact.Length, artifact.Sha256);
-        if (known is null || string.IsNullOrWhiteSpace(candidate.License) || string.IsNullOrWhiteSpace(artifact.Provenance.License))
-            return Failure(TensorCompatibilityState.Unverified, "embedding-content-unverified",
-                "Resolution verifies the published embedding weights by their pinned size and SHA-256; other content requires further compatibility evidence.");
-        TensorModelPackDefinition definition = TensorResolvedPack.Create(candidate, TensorCapability.Embedding, known.RuntimeArchitecture,
-            known.SupportedBackends, [TensorResolvedPack.Artifact(artifact, "model", artifact.Path)], known);
-        EmbeddingCompatibility.Validate(definition);
-        return Task.FromResult(new TensorModelResolution(new(TensorCompatibilityState.Supported, [], [new(artifact.Path, known.RuntimeArchitecture,
-            "Published content identity verified. Installation verifies all bytes; Load validates the GGUF.")]), definition));
+        if (artifact.Length is not > 0 || artifact.Sha256 is not { Length: 64 } hash || !hash.All(Uri.IsHexDigit)
+            || string.IsNullOrWhiteSpace(candidate.License) || string.IsNullOrWhiteSpace(artifact.Provenance.License))
+            return Failure(TensorCompatibilityState.Unverified, "pack-metadata-incomplete", "Every artifact needs a pinned source, length, SHA-256 and license before resolution.");
+        try
+        {
+            GgufMetadata header = await new TensorMetadataReader(reader).ReadAsync(artifact, stream => GgufFile.InspectMetadata(stream), cancellationToken)
+                .ConfigureAwait(false);
+            evidence.Add(new(artifact.Path, "gguf-header", $"GGUF {header.Version}; {header.Tensors.Count} tensors."));
+            TensorEmbeddingArchitecture architecture = EmbeddingCompatibility.MatchHeader(header.Values);
+            TensorModelPackDefinition definition = TensorResolvedPack.Create(candidate, TensorCapability.Embedding, architecture.Name,
+                architecture.Backends, [TensorResolvedPack.Artifact(artifact, "model", artifact.Path)]);
+            EmbeddingCompatibility.Validate(definition);
+            evidence.Add(new(artifact.Path, architecture.Name,
+                "Embedding header accepted: pooling, dimensions, context and tokenizer. Installation verifies all bytes; Load validates the tensors."));
+            return new(new(TensorCompatibilityState.Supported, [], evidence.ToArray()), definition);
+        }
+        catch (TensorSourceException exception)
+        { return Failure(TensorCompatibilityState.Unverified, exception.Code, exception.Message, exception.State); }
+        catch (Exception exception) when (exception is InvalidDataException or FormatException or ArgumentException or OverflowException)
+        { return Failure(TensorCompatibilityState.Unsupported, "embedding-schema", exception.Message); }
+        catch (IOException)
+        { return Failure(TensorCompatibilityState.Unverified, "metadata-incomplete", "The embedding GGUF header could not be inspected completely."); }
     }
 }
 
@@ -82,8 +98,7 @@ internal sealed class EmbeddingBackendProbe(GgmlRuntimeOwner? runtimeOwner = nul
 }
 
 /// <summary>
-/// Registers text embeddings. Its packs live under the <c>Embedding</c> store key. Its built-in packs are
-/// Qwen3-Embedding-0.6B, the default, and Arctic Embed L v2.0. Its engines borrow <paramref name="runtimeOwner"/>.
+/// Registers text embeddings. Its packs live under the <c>Embedding</c> store key and arrive by import. Its engines borrow <paramref name="runtimeOwner"/>.
 /// </summary>
 public sealed class EmbeddingEngineProvider(GgmlRuntimeOwner runtimeOwner) : ITensorEngineProvider
 {
@@ -91,16 +106,18 @@ public sealed class EmbeddingEngineProvider(GgmlRuntimeOwner runtimeOwner) : ITe
     public TensorEngineDefinition Definition { get; } = new(EmbeddingSetup.Definition, "Embedding");
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<TensorModelPackDefinition>> GetOfferedModelsAsync(ITensorModelPackManager packs,
-        CancellationToken cancellationToken = default)
+    public IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; } = [];
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TensorModelPackDefinition>> GetInstalledModelsAsync(IPersist modelStore,
+        CancellationToken cancellationToken = default) =>
+        TensorInstalledPacks.ReportAsync(modelStore, Definition.ModelStoreKey, BuiltInModels, Accepts, new EmbeddingModelResolver(), cancellationToken);
+
+    private static bool Accepts(TensorModelPackDefinition model)
     {
-        ArgumentNullException.ThrowIfNull(packs);
-        IReadOnlyList<TensorModelPackDefinition> registered = await packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false);
-        IReadOnlyList<TensorModelPackDefinition> offered = new TensorModelCatalog(TensorEmbeddingModels.BuiltIn
-            .Concat(registered.Where(model => model.Capability == TensorCapability.Embedding
-                && TensorEmbeddingModels.ArchitectureOf(model) is not null))).Definitions;
-        foreach (TensorModelPackDefinition model in offered) { EmbeddingCompatibility.Validate(model); }
-        return offered;
+        if (model.Capability != TensorCapability.Embedding || TensorEmbeddingModels.ArchitectureOf(model) is null) { return false; }
+        EmbeddingCompatibility.Validate(model);
+        return true;
     }
 
     /// <inheritdoc />

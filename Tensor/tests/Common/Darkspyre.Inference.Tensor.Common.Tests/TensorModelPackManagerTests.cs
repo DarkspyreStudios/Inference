@@ -96,6 +96,34 @@ public sealed class TensorModelPackManagerTests : IDisposable
         Assert.Equal(weights, await File.ReadAllBytesAsync(lease.GetRequiredArtifact("model")));
     }
 
+    [Fact]
+    public async Task InstallWritesTheDescriptionAndRemovalDeletesIt()
+    {
+        Directory.CreateDirectory(_packDirectory);
+        byte[] weights = "described weights"u8.ToArray();
+        string sourcePath = Path.Combine(_packDirectory, "source.gguf");
+        await File.WriteAllBytesAsync(sourcePath, weights);
+        TensorModelPackDefinition definition = Definition(weights) with
+        {
+            Artifacts = [Definition(weights).Artifacts[0] with { Sources = [new Uri(sourcePath)] }]
+        };
+        string packs = Path.Combine(_packDirectory, "store");
+        string description = Path.Combine(packs, TensorModelPackManager.DescriptionName(definition.Key));
+        using var manager = new TensorModelPackManager(new([definition]), packs);
+
+        await manager.InstallAsync(definition.Key);
+        Assert.Equal(JsonSerializer.Serialize(definition, TensorJson.ModelPack), await File.ReadAllTextAsync(description));
+
+        // A pack installed before descriptions existed gains one on its next install.
+        File.Delete(description);
+        await manager.InstallAsync(definition.Key);
+        Assert.True(File.Exists(description));
+
+        await manager.RemoveAsync(definition.Key);
+        Assert.False(File.Exists(description));
+        Assert.False(File.Exists(Path.Combine(packs, TensorModelPackManager.ManifestName(definition.Key))));
+    }
+
     private sealed class LocalResolver : TensorModelResolver
     {
         public override IReadOnlyList<TensorArtifactRequirement> Requirements { get; } = [new("model", "*.gguf")];

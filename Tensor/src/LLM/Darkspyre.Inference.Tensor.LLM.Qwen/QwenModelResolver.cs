@@ -34,7 +34,7 @@ public sealed partial class QwenModelResolver : TensorModelResolver
         TensorModelResolution Failure(TensorCompatibilityState state, string code, string message, TensorSourceState sourceState = TensorSourceState.Available) =>
             new(new(state, [new(code, message)], evidence.ToArray(), sourceState));
         IReadOnlyList<TensorBackendKind> compatible = GgmlRuntimeOwner.CompatibleBackends(backend, _runtimeOwner.Plan.TargetRid);
-        if (!compatible.Any(TensorLlmModels.Qwen3FourBillionQ4Km.SupportedBackends.Contains))
+        if (!compatible.Any(TensorLlmModels.Backends.Contains))
         { return Failure(TensorCompatibilityState.Unsupported, "backend-unsupported", "This Qwen adapter does not support the selected backend."); }
         TensorSourceArtifact[] matches = candidate.Artifacts.Where(artifact => artifact.Path == candidate.Selection.Variant).ToArray();
         if (matches.Length != 1) { return Failure(TensorCompatibilityState.Unverified, "variant-missing", "The selected artifact is missing or ambiguous in the candidate."); }
@@ -58,8 +58,7 @@ public sealed partial class QwenModelResolver : TensorModelResolver
             TensorModelArtifactDefinition[] manifest = artifacts.Select((artifact, index) => TensorResolvedPack.Artifact(artifact,
                 index == 0 ? "model" : $"model-shard-{index + 1}", artifact.Path)).ToArray();
             TensorModelPackDefinition definition = TensorResolvedPack.Create(candidate with { Selection = candidate.Selection with { Variant = artifacts[0].Path } }, TensorCapability.Llm,
-                TensorLlmModels.QwenRuntimeArchitecture, TensorLlmModels.Qwen3FourBillionQ4Km.SupportedBackends, manifest,
-                TensorLlmModels.Qwen3FourBillionQ4Km);
+                TensorLlmModels.QwenRuntimeArchitecture, TensorLlmModels.Backends, manifest);
             QwenModelCompatibility.Validate(definition);
             QwenModelCompatibility.ValidateHeaders(headers, definition);
             string architecture = QwenModelCompatibility.ArchitectureOf(headers[0].Header.Values);

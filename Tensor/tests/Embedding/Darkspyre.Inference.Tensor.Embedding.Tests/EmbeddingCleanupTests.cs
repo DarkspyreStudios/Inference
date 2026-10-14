@@ -144,9 +144,13 @@ public sealed class EmbeddingCleanupTests : IDisposable
         byte[] bytes = "controlled checkpoint bytes"u8.ToArray();
         string source = Path.Combine(_root, "source.gguf");
         await File.WriteAllBytesAsync(source, bytes);
-        TensorModelPackDefinition definition = TensorEmbeddingModels.Qwen3Embedding06B with
+        TensorModelPackDefinition definition = new()
         {
             Key = Key,
+            Capability = TensorCapability.Embedding,
+            RuntimeArchitecture = TensorEmbeddingModels.Qwen3Gguf.Name,
+            License = "Apache-2.0",
+            SupportedBackends = TensorEmbeddingModels.Backends,
             Artifacts = [new() { Role = "model", RelativePath = "model.gguf", Length = bytes.Length,
                 Sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)), Sources = [new(source)] }]
         };

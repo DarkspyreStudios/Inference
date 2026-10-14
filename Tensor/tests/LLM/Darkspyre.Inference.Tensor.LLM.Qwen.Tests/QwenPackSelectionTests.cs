@@ -339,9 +339,13 @@ public sealed class QwenPackSelectionTests : IDisposable
     }
 
     private TensorModelPackManager Manager(HttpClient http, params TensorModelPackDefinition[] definitions) => new(new(definitions), _root, http);
-    private static TensorModelPackDefinition Pack(string id) => TensorLlmModels.Qwen3FourBillionQ4Km with
+    private static TensorModelPackDefinition Pack(string id) => new()
     {
-        Key = new(id, "custom-revision"),
+        Key = new(id, "test"),
+        Capability = TensorCapability.Llm,
+        RuntimeArchitecture = TensorLlmModels.QwenRuntimeArchitecture,
+        License = "Apache-2.0",
+        SupportedBackends = TensorLlmModels.Backends,
         Artifacts = [new() { Role = "model", RelativePath = "model.gguf", Length = Weights.Length,
             Sha256 = Convert.ToHexStringLower(SHA256.HashData(Weights)), Sources = [new("https://weights.example.test/model.gguf")] }]
     };

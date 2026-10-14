@@ -80,7 +80,7 @@ public interface ITensorModelPackManager
         TensorModelKey key,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Downloads, verifies and publishes every artifact of a registered pack, then writes its manifest last. A pack that already verifies is left as it is.</summary>
+    /// <summary>Downloads, verifies and publishes every artifact of a registered pack, writes the pack's description, <c>model.json</c>, beside the manifest, then writes its manifest last. A pack that already verifies keeps its files and gains its description.</summary>
     Task InstallAsync(
         TensorModelKey key,
         IProgress<TensorModelInstallProgress>? progress = null,
@@ -100,7 +100,7 @@ public interface ITensorModelPackManager
         TensorModelKey key,
         CancellationToken cancellationToken = default);
 
-    /// <summary>Deletes the pack's manifest and artifacts. A pack with an active lease cannot be removed.</summary>
+    /// <summary>Deletes the pack's manifest, its description and its artifacts. A pack with an active lease cannot be removed.</summary>
     Task RemoveAsync(TensorModelKey key, CancellationToken cancellationToken = default);
 }
 
@@ -222,6 +222,8 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
             TensorModelPackStatus existing = await VerifyAsync(key, cancellationToken).ConfigureAwait(false);
             if (existing.State == TensorModelPackState.Installed)
             {
+                // A pack installed before descriptions existed gains one here.
+                await SaveDescriptionAsync(definition, cancellationToken).ConfigureAwait(false);
                 Report(progress, new(TensorModelInstallStage.Completed, OverallBytesTransferred: total, OverallTotalBytes: total));
                 return;
             }
@@ -273,6 +275,7 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                 }
             }
 
+            await SaveDescriptionAsync(definition, cancellationToken).ConfigureAwait(false);
             var manifest = PersistedModelManifest.Create(definition);
             await using var manifestContent = new MemoryStream();
             await JsonSerializer.SerializeAsync(
@@ -457,7 +460,9 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
                 throw new TensorModelPackException(key, "The tensor model pack is currently in use.");
             }
 
+            // The manifest goes first, so the pack stops being reported at once.
             await _directory.DeleteAsync(ManifestName(key), cancellationToken).ConfigureAwait(false);
+            await _directory.DeleteAsync(DescriptionName(key), cancellationToken).ConfigureAwait(false);
             foreach (TensorModelArtifactDefinition artifact in definition.Artifacts)
             {
                 await _directory.DeleteAsync(
@@ -632,7 +637,15 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         return (length, Convert.ToHexStringLower(hash.GetHashAndReset()));
     }
 
-    private static bool ManifestMatches(
+    private async Task SaveDescriptionAsync(TensorModelPackDefinition definition, CancellationToken cancellationToken)
+    {
+        await using var content = new MemoryStream();
+        await JsonSerializer.SerializeAsync(content, definition, TensorJson.ModelPack, cancellationToken).ConfigureAwait(false);
+        content.Position = 0;
+        await _directory.SaveAsync(DescriptionName(definition.Key), content, cancellationToken).ConfigureAwait(false);
+    }
+
+    internal static bool ManifestMatches(
         TensorModelPackDefinition definition,
         PersistedModelManifest manifest) =>
         string.Equals(manifest.ModelId, definition.Key.ModelId, StringComparison.Ordinal)
@@ -651,6 +664,9 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
 
     internal static string ManifestName(TensorModelKey key) =>
         $"packs/{EncodeSegment(key.ModelId)}/{EncodeSegment(key.Revision)}/install.json";
+
+    internal static string DescriptionName(TensorModelKey key) =>
+        $"packs/{EncodeSegment(key.ModelId)}/{EncodeSegment(key.Revision)}/model.json";
 
     internal static string EncodeSegment(string value) => Uri.EscapeDataString(value).Replace("%", "_", StringComparison.Ordinal);
 

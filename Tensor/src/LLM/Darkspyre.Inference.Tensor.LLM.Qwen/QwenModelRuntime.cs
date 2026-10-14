@@ -93,7 +93,7 @@ internal static class QwenModelCompatibility
                 || (artifact.Role != "model" && !artifact.Role.StartsWith("model-shard-", StringComparison.Ordinal))))
         { throw new ArgumentException("A Qwen pack requires its GGUF model and any complete companion shards.", nameof(definition)); }
         if (definition.SupportedBackends.Count == 0 || definition.SupportedBackends.Any(backend =>
-                !TensorLlmModels.Qwen3FourBillionQ4Km.SupportedBackends.Contains(backend)))
+                !TensorLlmModels.Backends.Contains(backend)))
         { throw new ArgumentException("The Qwen pack declares an unsupported backend.", nameof(definition)); }
     }
 

@@ -4,6 +4,7 @@ using Darkspyre.Inference.Common.Embedding;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Embedding;
 using Darkspyre.Inference.Tensor.Ggml;
+using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.ConsoleTester;
 
@@ -23,17 +24,19 @@ internal static class EmbeddingSuite
                 _ => throw new ArgumentException($"Unknown embedding option '{name}'.")
             };
         }
-        if (options.Store is null) throw new ArgumentException("--store is required: name the Embedding pack store.");
+        if (options.Store is null) throw new ArgumentException("--store is required: name the model store.");
         return options;
     }
 
     internal static async Task<int> RunAsync(ConsoleOptions options, CancellationToken token)
     {
-        TensorModelPackDefinition definition = TensorEmbeddingModels.Qwen3Embedding06B;
-        using var packs = new TensorModelPackManager(new TensorModelCatalog([definition]), options.Store!);
-        if ((await packs.GetStatusAsync(definition.Key, token)).State != TensorModelPackState.Installed)
-            throw new InvalidOperationException("The pinned Qwen3 embedding pack is not installed in this store.");
         GgmlRuntimeOwner runtime = GgmlRuntimeOwner.GetOrCreate();
+        var provider = new EmbeddingEngineProvider(runtime);
+        IReadOnlyList<TensorModelPackDefinition> installed = await provider.GetInstalledModelsAsync(new OsUserPersist(options.Store!), token);
+        TensorModelPackDefinition definition = installed.Count > 0 ? installed[0]
+            : throw new InvalidOperationException("No Embedding model is installed in this store.");
+        using var packs = new TensorModelPackManager(new TensorModelCatalog([definition]),
+            Path.Combine(options.Store!, provider.Definition.ModelStoreKey));
         var engine = new TensorEmbeddingInference(packs, options.Backend, runtime);
         return await Program.RunOwnedEngineAsync(async () =>
         {

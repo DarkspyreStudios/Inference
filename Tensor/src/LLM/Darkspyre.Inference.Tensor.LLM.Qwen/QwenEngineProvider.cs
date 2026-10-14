@@ -1,10 +1,11 @@
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Ggml;
+using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
-/// <summary>Registers Qwen text generation. Its packs live under the <c>Qwen</c> store key.</summary>
+/// <summary>Registers Qwen text generation. Its packs live under the <c>Qwen</c> store key and arrive by import.</summary>
 public sealed class QwenEngineProvider(GgmlRuntimeOwner? runtimeOwner = null) : ITensorEngineProvider
 {
     private readonly GgmlRuntimeOwner _runtimeOwner = runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate();
@@ -12,16 +13,19 @@ public sealed class QwenEngineProvider(GgmlRuntimeOwner? runtimeOwner = null) : 
     public TensorEngineDefinition Definition { get; } = new(QwenSetup.Definition, "Qwen");
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<TensorModelPackDefinition>> GetOfferedModelsAsync(ITensorModelPackManager packs,
-        CancellationToken cancellationToken = default)
+    public IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; } = [];
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<TensorModelPackDefinition>> GetInstalledModelsAsync(IPersist modelStore,
+        CancellationToken cancellationToken = default) =>
+        TensorInstalledPacks.ReportAsync(modelStore, Definition.ModelStoreKey, BuiltInModels, Accepts,
+            new QwenModelResolver(runtimeOwner: _runtimeOwner), cancellationToken);
+
+    private static bool Accepts(TensorModelPackDefinition model)
     {
-        ArgumentNullException.ThrowIfNull(packs);
-        IReadOnlyList<TensorModelPackDefinition> registered = await packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false);
-        IReadOnlyList<TensorModelPackDefinition> offered = new TensorModelCatalog(new[] { TensorLlmModels.Qwen3FourBillionQ4Km }
-            .Concat(registered.Where(model => model.Capability == TensorCapability.Llm
-                && model.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture))).Definitions;
-        foreach (TensorModelPackDefinition model in offered) { QwenModelCompatibility.Validate(model); }
-        return offered;
+        if (model.Capability != TensorCapability.Llm || model.RuntimeArchitecture != TensorLlmModels.QwenRuntimeArchitecture) { return false; }
+        QwenModelCompatibility.Validate(model);
+        return true;
     }
 
     /// <inheritdoc />
