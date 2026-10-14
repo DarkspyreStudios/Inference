@@ -89,8 +89,9 @@ public interface ITensorEngineProvider
     /// optional; a supplied instance must belong to this implementation and capability.
     /// A supplied backend probe replaces the local probe. Probe creation does not load native code;
     /// only the explicit backend-check action invokes it. The manager borrows the probe.
+    /// <paramref name="models"/> is the host's live list of this family's models in the model store; the editor follows it.
     /// </summary>
     TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
-        IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
+        ITensorModelList models, ITensorModelInstance? instance = null,
         ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null);
 }

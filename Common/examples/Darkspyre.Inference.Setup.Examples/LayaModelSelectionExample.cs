@@ -17,7 +17,7 @@ public static class LayaModelSelectionExample
         ArgumentNullException.ThrowIfNull(catalog);
         TensorModelPackDefinition[] offered = catalog.Definitions.Where(definition =>
             definition.Capability == TensorCapability.Decision && definition.RuntimeArchitecture == TensorDecisionModels.LayaRuntimeArchitecture).ToArray();
-        TensorSettingsManager manager = LayaSetup.CreateSettingsManager(target, packs, offered);
+        TensorSettingsManager manager = LayaSetup.CreateSettingsManager(target, packs, SetupCompositionExample.ExampleList(offered));
         TensorSettings settings = await manager.OpenAsync(new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null),
             cancellationToken: cancellationToken).ConfigureAwait(false);
         var draft = new SetupDraft(manager, settings);

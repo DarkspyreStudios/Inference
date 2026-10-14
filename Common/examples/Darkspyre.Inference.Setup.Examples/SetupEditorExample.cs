@@ -37,12 +37,13 @@ public static class SetupCompositionExample
         drafts.Add(new(imageManager, await imageManager.OpenAsync(ImageTransport.ComfyUi, NewEntry(), cancellationToken: cancellationToken)
             .ConfigureAwait(false)));
         TensorSettingsManager qwen = QwenSetup.CreateSettingsManager(tensorTarget, packs,
-            offeredModels: definitions.Where(pack => pack.Capability == TensorCapability.Llm
-                && pack.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture).ToArray(), source: modelSource);
+            ExampleList(definitions.Where(pack => pack.Capability == TensorCapability.Llm
+                && pack.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture)), source: modelSource);
         TensorSettingsManager supra = SupraSetup.CreateSettingsManager(tensorTarget, packs,
-            offeredModels: definitions.Where(pack => pack.Capability == TensorCapability.Image
-                && pack.RuntimeArchitecture == TensorImageModels.SupraRuntimeArchitecture).ToArray(), source: modelSource);
-        TensorSettingsManager whisper = WhisperSetup.CreateSettingsManager(tensorTarget, packs, source: modelSource);
+            ExampleList(definitions.Where(pack => pack.Capability == TensorCapability.Image
+                && pack.RuntimeArchitecture == TensorImageModels.SupraRuntimeArchitecture)), source: modelSource);
+        TensorSettingsManager whisper = WhisperSetup.CreateSettingsManager(tensorTarget, packs,
+            ExampleList(TensorSpeechModels.Whisper), source: modelSource);
         foreach (TensorSettingsManager manager in new[] { qwen, supra, whisper })
         {
             drafts.Add(new(manager, await manager.OpenAsync(NewEntry(), cancellationToken: cancellationToken).ConfigureAwait(false)));
@@ -50,6 +51,11 @@ public static class SetupCompositionExample
 
         return drafts.AsReadOnly();
     }
+
+    /// <summary>A model list with no live model store: every definition is offered as not downloaded.</summary>
+    internal static ITensorModelList ExampleList(IEnumerable<TensorModelPackDefinition> definitions) =>
+        TensorModelList.Fixed(new("example store",
+            definitions.Select(definition => new TensorListedModel(definition, SetupInstallState.NotDownloaded, null)).ToArray(), null));
 
     private static SetupConfigurationIdentity NewEntry() => new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null);
 }
@@ -70,6 +76,7 @@ public interface ISetupEditorControls
     void Toggle(SetupBooleanField field);
     void Choice(SetupChoiceField field, IInferenceSettingsManager manager, InferenceSettings settings);
     void Secret(SetupSecretField field);
+    void InstallStatus(SetupInstallStatusField field);
     void BeginGroup(SetupRepeatableGroupField field);
     void BeginRow(SetupFieldRow row);
     void EndRow();
@@ -124,6 +131,7 @@ public static class SetupEditorExample
             case SetupBooleanField boolean: controls.Toggle(boolean); break;
             case SetupChoiceField choice: controls.Choice(choice, draft.Manager, draft.Settings); break;
             case SetupSecretField secret: controls.Secret(secret); break;
+            case SetupInstallStatusField install: controls.InstallStatus(install); break;
             case SetupRepeatableGroupField group:
                 controls.BeginGroup(group);
                 foreach (SetupFieldRow row in group.Rows)

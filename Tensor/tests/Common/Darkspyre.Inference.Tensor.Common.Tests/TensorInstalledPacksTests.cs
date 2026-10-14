@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.STT.Whisper;
 using Darkspyre.Persist;
 
@@ -65,6 +66,57 @@ public sealed class TensorInstalledPacksTests : IDisposable
         await WriteWhisperPackAsync(provider.Definition.ModelStoreKey, imported, magic: 0x12345678);
         Assert.Empty(await provider.GetInstalledModelsAsync(modelStore));
     }
+
+    [Fact]
+    public async Task TheListingTellsInstalledFilesMissingAndNotDownloadedApart()
+    {
+        TensorModelPackDefinition absent = Definition("test/absent", "absent weights", "unused.gguf");
+        TensorModelPackDefinition installed = await InstallAsync("test/installed", "installed weights");
+        TensorModelPackDefinition deleted = await InstallAsync("test/deleted", "deleted weights");
+        TensorModelPackDefinition shorter = await InstallAsync("test/shorter", "shorter weights");
+        TensorModelPackDefinition unparseable = await InstallAsync("test/unparseable", "unparseable weights");
+        File.Delete(ArtifactPath(deleted));
+        await using (var file = new FileStream(ArtifactPath(shorter), FileMode.Open)) { file.SetLength(file.Length - 1); }
+        await File.WriteAllTextAsync(StorePath(TensorModelPackManager.ManifestName(unparseable.Key)), "{ not json");
+
+        TensorModelListing listing = await ListAsync([absent, installed, deleted, shorter, unparseable], [installed], saved: null);
+
+        Assert.Equal("the store", listing.Store);
+        Assert.Null(listing.Saved);
+        Assert.Equal(
+            [
+                (absent.Key, SetupInstallState.NotDownloaded, (string?)null),
+                (installed.Key, SetupInstallState.Installed, null),
+                (deleted.Key, SetupInstallState.FilesMissing, "model.gguf"),
+                (shorter.Key, SetupInstallState.FilesMissing, "model.gguf"),
+                (unparseable.Key, SetupInstallState.NotDownloaded, null)
+            ],
+            listing.Models.Select(model => (model.Definition.Key, model.State, model.MissingFile)));
+    }
+
+    [Fact]
+    public async Task AnUnreportedSavedModelIsCarriedApartFromTheOfferedModels()
+    {
+        TensorModelPackDefinition builtIn = Definition("test/built-in", "built-in weights", "unused.gguf");
+        TensorModelPackDefinition imported = await InstallAsync("test/imported", "imported weights");
+        File.Delete(ArtifactPath(imported));
+
+        TensorModelListing missing = await ListAsync([builtIn], [], imported);
+        TensorModelListing never = await ListAsync([builtIn], [], Definition("test/never", "never weights", "unused.gguf"));
+        TensorModelListing reported = await ListAsync([builtIn], [imported], imported);
+
+        Assert.Equal(builtIn.Key, Assert.Single(missing.Models).Definition.Key);
+        Assert.Equal((imported.Key, SetupInstallState.FilesMissing, "model.gguf"),
+            (missing.Saved!.Definition.Key, missing.Saved.State, missing.Saved.MissingFile));
+        Assert.Equal(SetupInstallState.NotDownloaded, never.Saved!.State);
+        Assert.Single(never.Models);
+        Assert.Null(reported.Saved);
+        Assert.Equal(SetupInstallState.Installed, reported.Models.Single(model => model.Definition.Key == imported.Key).State);
+    }
+
+    private Task<TensorModelListing> ListAsync(IReadOnlyList<TensorModelPackDefinition> builtIns,
+        IReadOnlyList<TensorModelPackDefinition> installed, TensorModelPackDefinition? saved) =>
+        TensorInstalledPacks.ListAsync(new OsUserPersist(_root), "the store", Store, builtIns, installed, saved);
 
     // A sparse file of the tiny variant's length with its GGML header, and the manifest and description of the pack.
     private async Task WriteWhisperPackAsync(string store, TensorModelPackDefinition pack, uint magic)

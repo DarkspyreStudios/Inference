@@ -185,11 +185,28 @@ public sealed class SetupSecretField(
     }
 }
 
+/// <summary>Whether a model's files are in the local store.</summary>
+public enum SetupInstallState
+{
+    /// <summary>Every file is present and the engine can load the model.</summary>
+    Installed,
+    /// <summary>The store holds no install record for the model.</summary>
+    NotDownloaded,
+    /// <summary>The store holds the model's install record, but a file it names is absent or shorter or longer than recorded.</summary>
+    FilesMissing
+}
+
+/// <summary>The install facts a choice shows as its chip.</summary>
+/// <param name="IsInstalled">True when the option's files are in the store and complete.</param>
+/// <param name="Size">The option's total download size in bytes.</param>
+public sealed record SetupChoiceInstall(bool IsInstalled, long Size);
+
 /// <summary>One option a choice field offers.</summary>
 /// <param name="Value">The value stored when the option is chosen.</param>
 /// <param name="DisplayName">Label shown to the user.</param>
 /// <param name="Description">Optional text that describes the option.</param>
-public sealed record SetupChoice(string Value, string DisplayName, string? Description = null);
+/// <param name="Install">The option's install chip, or null for an option that has no local files.</param>
+public sealed record SetupChoice(string Value, string DisplayName, string? Description = null, SetupChoiceInstall? Install = null);
 /// <summary>A request for one page of a choice field's options.</summary>
 /// <param name="Search">Search text that filters the options; empty matches every option.</param>
 /// <param name="Continuation">Token from the previous page's <see cref="SetupChoicePage.Continuation"/>, or null for the first page.</param>
@@ -223,7 +240,8 @@ public sealed class SetupChoiceField(
     SetupFieldDescription description, string value, string defaultValue, Func<string, SetupEditResult> edit,
     bool allowsManualEntry,
     SetupSideEffect choiceSideEffects = SetupSideEffect.None,
-    SetupChoiceCapabilities? capabilities = null)
+    SetupChoiceCapabilities? capabilities = null,
+    bool showValue = true)
     : SetupValueField<string>(description, value, defaultValue, edit)
 {
     /// <summary>True when the user may enter a value that is not among the choices.</summary>
@@ -232,6 +250,30 @@ public sealed class SetupChoiceField(
     public SetupSideEffect ChoiceSideEffects { get; } = choiceSideEffects;
     /// <summary>What the choice source supports.</summary>
     public SetupChoiceCapabilities Capabilities { get; } = capabilities ?? SetupChoiceCapabilities.Bounded;
+    /// <summary>False when the field holds a value the editor must not render as the selected choice, such as a model
+    /// whose files are not installed. The value still saves and validates; a status field shows it instead.</summary>
+    public bool ShowValue { get; } = showValue;
+}
+
+/// <summary>The selected model's install state, shown as a status card.</summary>
+/// <param name="State">Whether the model's files are in the store.</param>
+/// <param name="Name">The model's name.</param>
+/// <param name="Location">The model store folder, as the user set it.</param>
+/// <param name="FileCount">How many files the model has.</param>
+/// <param name="Size">The model's total size in bytes.</param>
+/// <param name="License">The model's licence.</param>
+/// <param name="MissingFile">For <see cref="SetupInstallState.FilesMissing"/>, the relative path of the first absent or wrong-length file; otherwise null.</param>
+/// <param name="Actions">The card's buttons, in display order. They run through the settings manager like any other action.</param>
+public sealed record SetupInstallStatus(SetupInstallState State, string Name, string Location, int FileCount, long Size,
+    string License, string? MissingFile, IReadOnlyList<SetupActionDescriptor> Actions);
+
+/// <summary>A read-only field that shows a model's install state and the actions that change it.</summary>
+/// <param name="description">Identity and presentation state of the field. The label names the card for assistive technology.</param>
+/// <param name="status">The install state the card shows.</param>
+public sealed class SetupInstallStatusField(SetupFieldDescription description, SetupInstallStatus status) : SetupField(description)
+{
+    /// <summary>The install state the card shows.</summary>
+    public SetupInstallStatus Status { get; } = status;
 }
 
 /// <summary>One row of a repeatable group.</summary>

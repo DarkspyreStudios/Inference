@@ -23,7 +23,6 @@ public sealed record TensorSetupChanges(SetupConfigurationIdentity Identity, Ten
 /// </summary>
 public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
 {
-    private readonly IReadOnlyList<TensorModelPackDefinition> _models;
     private readonly TensorSetupConfiguration? _original;
     private readonly bool _hasBackendProbe;
     private readonly bool _hasInstance;
@@ -44,13 +43,12 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
     private readonly Dictionary<string, string> _companions = new(StringComparer.Ordinal);
     private TensorModelKey? _model;
     private TensorBackendKind _backend;
-    private TensorModelObservation? _instanceObservation;
     private readonly object _backendCheckGate = new();
     private long _backendCheckRevision;
     private TensorBackendAvailability? _backendAvailability;
 
     internal TensorSettings(InferenceSetupDefinition definition, SetupConfigurationIdentity identity,
-        IReadOnlyList<TensorModelPackDefinition> models, TensorSetupConfiguration? existing, bool hasBackendProbe,
+        TensorModelListing listing, TensorSetupConfiguration? existing, bool hasBackendProbe,
         TensorBackendKind? instanceBackend, ITensorModelResolver? resolver)
         : base(definition, identity)
     {
@@ -59,7 +57,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
         {
             throw new ArgumentException("An edit requires the matching saved Tensor configuration.", nameof(existing));
         }
-        _models = models;
+        Listing = listing;
         _original = existing;
         _hasBackendProbe = hasBackendProbe;
         _hasInstance = instanceBackend is not null;
@@ -73,11 +71,14 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
         _backend = existing?.Backend ?? TensorBackendKind.Auto;
         Status = new()
         {
-            Configured = SetupObservation.Known(existing is not null),
-            Installed = SetupObservation.Unknown,
-            Loaded = SetupObservation.Unknown
+            Configured = SetupObservation.NotApplicable,
+            Verified = SetupObservation.NotApplicable,
+            Ready = SetupObservation.NotApplicable
         };
     }
+
+    /// <summary>The host's model list as last read: offered models with install state, the saved model and the store folder.</summary>
+    internal TensorModelListing Listing { get; set; }
 
     internal TensorModelKey? Model => _model;
     internal TensorBackendKind Backend => _backend;
@@ -111,21 +112,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
     internal TensorModelEvaluation? Evaluation { get; private set; }
 
     /// <summary>The engine observation last read from the host's instance.</summary>
-    internal TensorModelObservation? InstanceObservation
-    {
-        get => _instanceObservation;
-        set
-        {
-            _instanceObservation = value;
-            Status = Status with
-            {
-                Loaded = value is null ? SetupObservation.Unknown : new(true, value.Model == _model && _model is not null, value.ObservedAt),
-                Ready = value is null ? SetupObservation.Unknown : new(true,
-                    value.Model == _model && _model is not null && value.State == TensorEngineState.Loaded && _instanceBackend == _backend,
-                    value.ObservedAt)
-            };
-        }
-    }
+    internal TensorModelObservation? InstanceObservation { get; set; }
 
     /// <inheritdoc />
     protected override IReadOnlyList<SetupStep> CreateSteps()
@@ -135,18 +122,23 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
         var sections = new List<SetupSection>
         { new("model", "Selection", [
         new SetupChoiceField(new("model", "Model pack") { IsRequired = true }, _model?.ToString() ?? string.Empty,
-            string.Empty, SelectModel, false, capabilities: new(InferenceSupport.Supported, InferenceSupport.Supported)),
+            string.Empty, SelectModel, false, capabilities: new(InferenceSupport.Supported, InferenceSupport.Supported),
+            showValue: SelectedState() == SetupInstallState.Installed),
+        .. selection is null ? Array.Empty<SetupField>()
+            : [new SetupInstallStatusField(new("install-status", "Install state") { IsReadOnly = true }, InstallStatus(selection))],
         new SetupChoiceField(new("backend", "Execution backend") { IsRequired = true,
             HelpText = "Supported backend names are not a hardware availability guarantee. Load confirms actual runtime availability." },
             _backend.ToString(), TensorBackendKind.Auto.ToString(), SelectBackend, false),
         Observation("backend-availability", "Backend availability",
-            BackendAvailability?.Reason ?? "Unknown. Run Check backend prerequisites explicitly."),
-        Observation("pack-details", "Selected pack", selection is null ? "No resolved pack selected."
+            BackendAvailability?.Reason ?? "Unknown. Run Check backend prerequisites explicitly.")
+        ]),
+        new("model-definition", "Model definition (what the pack contains, not whether it is downloaded)", [
+        Observation("pack-details", "Contents", selection is null ? "No resolved pack selected."
             : $"{selection.Artifacts.Count} artifacts; {selection.Artifacts.Sum(artifact => (decimal)artifact.Length):0} bytes; license: {selection.License}. Installation does not support resume."),
-        Observation("pack-artifacts", "Pack artifacts and provenance", selection is null ? "No resolved pack selected."
+        Observation("pack-artifacts", "Files and provenance", selection is null ? "No resolved pack selected."
             : string.Join(Environment.NewLine, selection.Artifacts.Select(artifact => $"{artifact.Role}: {artifact.RelativePath}; {artifact.Length} bytes; "
                 + (artifact.Provenance is { } provenance ? $"{(provenance.Repository is null ? provenance.Origin.ToString() : provenance.Repository + "@" + provenance.Revision)}; {provenance.License}" : "Source provenance not supplied by the host."))))
-        ]) };
+        ], IsAdvanced: true) };
         if (_hasResolver)
         {
             sections.Add(new("location", "Model location", [
@@ -215,6 +207,39 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
         return [new("model", "Model and backend", "Select a supported pack. Browsing and saving never install or load weights.", sections)];
     }
 
+    // The selected model's install status card: the state of its listed entry and the actions that change it.
+    private SetupInstallStatus InstallStatus(TensorModelPackDefinition selection)
+    {
+        TensorListedModel listed = SelectedListing() ?? new(selection, SetupInstallState.NotDownloaded, null);
+        long size = selection.Artifacts.Sum(artifact => artifact.Length);
+        bool valid = ValidateDraft().IsValid;
+        SetupActionDescriptor[] actions = listed.State switch
+        {
+            SetupInstallState.NotDownloaded =>
+            [
+                new("download", $"Download ({SetupByteSize.Format(size)})", SetupActionPurpose.Install,
+                    SetupSideEffect.Network | SetupSideEffect.Download, IsEnabled: valid)
+            ],
+            SetupInstallState.FilesMissing =>
+            [
+                new("download", "Download again", SetupActionPurpose.Install,
+                    SetupSideEffect.Network | SetupSideEffect.Download, IsEnabled: valid),
+                new("remove", "Remove", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles, IsEnabled: true)
+            ],
+            _ => []
+        };
+        return new(listed.State, selection.Key.ModelId, Listing.Store, selection.Artifacts.Count, size, selection.License,
+            listed.MissingFile, actions);
+    }
+
+    // The selected model's listed entry, offered or saved; null when the selection is not in the listing.
+    private TensorListedModel? SelectedListing() => _model is null ? null
+        : Listing.Models.FirstOrDefault(model => model.Definition.Key == _model)
+            ?? (Listing.Saved is { } saved && saved.Definition.Key == _model ? saved : null);
+
+    // The selected model's install state; a selection outside the listing is NotDownloaded.
+    private SetupInstallState SelectedState() => SelectedListing()?.State ?? SetupInstallState.NotDownloaded;
+
     private static SetupTextField Observation(string id, string label, string value) =>
         new(new(id, label) { IsReadOnly = true }, value, string.Empty,
             _ => new(SetupEditState.Invalid, [new("read-only", "This field is an observation.", id)]));
@@ -222,7 +247,9 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
     /// <inheritdoc />
     protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query) => fieldId switch
     {
-        "model" => Page(query, Choices().Select(model => new SetupChoice(model.Key.ToString(), model.Key.ModelId, model.Key.Revision))),
+        "model" => Page(query, Choices().Select(model => new SetupChoice(model.Key.ToString(), model.Key.ModelId, model.Key.Revision,
+            new SetupChoiceInstall(Listing.Models.Any(listed => listed.Definition.Key == model.Key && listed.State == SetupInstallState.Installed),
+                model.Artifacts.Sum(artifact => artifact.Length))))),
         "backend" => Page(query, Backends().Select(backend => new SetupChoice(backend.ToString(), backend.ToString()))),
         "location-kind" => Page(query, new[] { new SetupChoice("file", "Local file"), new("folder", "Local folder"), new("url", "Artifact URL") }
             .Concat(_hasSource ? [new SetupChoice("repository", "Repository")] : [])),
@@ -273,10 +300,14 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
         _model = definition?.Key;
     }
 
-    internal TensorModelPackDefinition? SelectedDefinition() => Choices().FirstOrDefault(model => model.Key == _model);
+    internal TensorModelPackDefinition? SelectedDefinition() => Choices().FirstOrDefault(model => model.Key == _model)
+        ?? (Listing.Saved is { } saved && saved.Definition.Key == _model ? saved.Definition : null);
 
-    private IEnumerable<TensorModelPackDefinition> Choices() => Resolved is null ? _models
-        : _models.Where(model => model.Key != Resolved.Key).Append(Resolved);
+    private IEnumerable<TensorModelPackDefinition> Choices()
+    {
+        IEnumerable<TensorModelPackDefinition> offered = Listing.Models.Select(model => model.Definition);
+        return Resolved is null || Listing.Models.Any(model => model.Definition.Key == Resolved.Key) ? offered : offered.Append(Resolved);
+    }
 
     private SetupEditResult SelectModel(string value)
     {
@@ -296,13 +327,13 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
             : new(SetupEditState.Invalid, [new("backend-unsupported", "Select a supported backend.", "backend")]);
 
     private IEnumerable<TensorBackendKind> Backends() => new[] { TensorBackendKind.Auto }.Concat(
-        SelectedDefinition()?.SupportedBackends ?? _models.SelectMany(model => model.SupportedBackends)).Distinct();
+        SelectedDefinition()?.SupportedBackends ?? Listing.Models.SelectMany(model => model.Definition.SupportedBackends)).Distinct();
 
     /// <inheritdoc />
     protected override IReadOnlyList<SetupActionDescriptor> CreateActions()
     {
         bool selected = ValidateDraft().IsValid;
-        bool live = _hasInstance && _instanceObservation?.State != TensorEngineState.Stopped;
+        bool live = _hasInstance && InstanceObservation?.State != TensorEngineState.Stopped;
         bool matchingBackend = _instanceBackend == _backend;
         return
         [
@@ -315,14 +346,10 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
             new("import", "Import model artifacts", SetupActionPurpose.Install,
                 SetupSideEffect.Network | SetupSideEffect.Download | SetupSideEffect.LocalVerification, _hasResolver && HasLocation,
                 "Copies complete artifacts, calculates hashes, validates compatibility and installs them into the pack directory. Does not load a model."),
-            new("status", "Check installation and readiness", SetupActionPurpose.CheckReadiness,
-                SetupSideEffect.LocalVerification, selected),
-            new("install", "Install selected pack", SetupActionPurpose.Install,
-                SetupSideEffect.Network | SetupSideEffect.Download, selected),
             new("verify", "Verify installed weights", SetupActionPurpose.Verify,
                 SetupSideEffect.LocalVerification, selected),
             new("load", "Load selected model", SetupActionPurpose.Load,
-                SetupSideEffect.ModelLoad, selected && live && matchingBackend && _instanceObservation?.Model is null,
+                SetupSideEffect.ModelLoad, selected && live && matchingBackend && InstanceObservation?.Model is null,
                 !live ? "The host must supply a live instance." : !matchingBackend ? "The host must supply an instance configured for this backend." : null),
             new("unload", "Unload model", SetupActionPurpose.Unload, SetupSideEffect.ModelUnload, live),
             new("stop", "Stop instance permanently", SetupActionPurpose.Stop, SetupSideEffect.TerminalStop | SetupSideEffect.ModelUnload, live)
@@ -364,9 +391,6 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
             ++_backendCheckRevision;
             _backendAvailability = null;
         }
-        Status = Status with { Installed = SetupObservation.Unknown, Verified = SetupObservation.Unknown, Loaded = SetupObservation.Unknown, Ready = SetupObservation.Unknown };
-        // Loaded and Ready follow the last engine observation against the new selection.
-        if (_instanceObservation is not null) { InstanceObservation = _instanceObservation; }
     }
 
     /// <inheritdoc />
@@ -390,14 +414,14 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
 
 /// <summary>
 /// Opens, acts on and saves one Tensor family's settings over the host's pack manager and optional
-/// live instance. Import and Install write the pack directory at once; Load, Unload and Stop act on
-/// the running instance at once. <see cref="StatusChanged"/> relays the instance's
-/// <see cref="ITensorModelInstance.EngineStatusChanged"/> while the editor listens.
+/// live instance. Import, Download and Remove write the pack directory at once; Load, Unload and Stop act on
+/// the running instance at once. <see cref="StatusChanged"/> relays the host's <see cref="ITensorModelList.Changed"/>
+/// and the instance's <see cref="ITensorModelInstance.EngineStatusChanged"/> while the editor listens.
 /// </summary>
 public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSettings, TensorSetupChanges>, IInferenceSettingsStatusSource
 {
     private readonly InferenceSetupDefinition _definition;
-    private readonly IReadOnlyList<TensorModelPackDefinition> _models;
+    private readonly ITensorModelList _models;
     private readonly ITensorModelPackManager _packs;
     private readonly ITensorModelInstance? _instance;
     private readonly ITensorBackendProbe? _backendProbe;
@@ -405,31 +429,35 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
     private readonly Lock _listeners = new();
     private EventHandler? _statusChanged;
 
-    /// <summary>Creates a manager over the supported pack definitions, the host's pack manager and the optional instance, backend probe and model resolver.</summary>
+    /// <summary>Creates a manager over the host's live model list, the host's pack manager and the optional instance, backend probe and model resolver.</summary>
     public TensorSettingsManager(InferenceSetupDefinition definition, ISetupCommitTarget<TensorSetupChanges> target,
-        IReadOnlyList<TensorModelPackDefinition> supportedModels, ITensorModelPackManager packs,
+        ITensorModelList models, ITensorModelPackManager packs,
         ITensorModelInstance? instance = null, ITensorBackendProbe? backendProbe = null, ITensorModelResolver? resolver = null)
         : base(target)
     {
         ArgumentNullException.ThrowIfNull(definition);
-        ArgumentNullException.ThrowIfNull(supportedModels);
+        ArgumentNullException.ThrowIfNull(models);
         ArgumentNullException.ThrowIfNull(packs);
         _definition = definition;
-        _models = new TensorModelCatalog(supportedModels).Definitions;
+        _models = models;
         _packs = packs;
         _instance = instance;
         _backendProbe = backendProbe;
         _resolver = resolver;
     }
 
-    /// <summary>Raised when the host's instance reports a lifecycle transition.</summary>
+    /// <summary>Raised when the host's instance reports a lifecycle transition or the host's model list changes.</summary>
     public event EventHandler? StatusChanged
     {
         add
         {
             lock (_listeners)
             {
-                if (_statusChanged is null && _instance is not null) { _instance.EngineStatusChanged += OnEngineStatusChanged; }
+                if (_statusChanged is null)
+                {
+                    _models.Changed += OnModelsChanged;
+                    if (_instance is not null) { _instance.EngineStatusChanged += OnEngineStatusChanged; }
+                }
                 _statusChanged += value;
             }
         }
@@ -438,7 +466,11 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
             lock (_listeners)
             {
                 _statusChanged -= value;
-                if (_statusChanged is null && _instance is not null) { _instance.EngineStatusChanged -= OnEngineStatusChanged; }
+                if (_statusChanged is null)
+                {
+                    _models.Changed -= OnModelsChanged;
+                    if (_instance is not null) { _instance.EngineStatusChanged -= OnEngineStatusChanged; }
+                }
             }
         }
     }
@@ -448,17 +480,23 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var settings = new TensorSettings(_definition, identity, _models, existing, _backendProbe is not null,
+        TensorModelListing listing = await _models.ReadAsync(cancellationToken).ConfigureAwait(false);
+        var settings = new TensorSettings(_definition, identity, listing, existing, _backendProbe is not null,
             _instance?.RequestedBackend, _resolver);
-        await RefreshStatusAsync(settings, cancellationToken).ConfigureAwait(false);
+        if (_instance is not null)
+        {
+            settings.InstanceObservation = await _instance.GetObservationAsync(cancellationToken).ConfigureAwait(false);
+        }
         return settings;
     }
 
-    /// <summary>Reads the host instance's current engine observation into Tensor settings. Other settings and a manager without an instance are left unchanged.</summary>
+    /// <summary>Reads the host's model list and the instance's current engine observation into Tensor settings. Other settings are left unchanged.</summary>
     public async Task RefreshStatusAsync(InferenceSettings settings, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(settings);
-        if (_instance is not null && settings is TensorSettings tensor)
+        if (settings is not TensorSettings tensor) { return; }
+        tensor.Listing = await _models.ReadAsync(cancellationToken).ConfigureAwait(false);
+        if (_instance is not null)
         {
             tensor.InstanceObservation = await _instance.GetObservationAsync(cancellationToken).ConfigureAwait(false);
         }
@@ -473,12 +511,18 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
             case "backend-check": return await CheckBackendAsync(settings, cancellationToken).ConfigureAwait(false);
             case "resolve": return await ResolveAsync(settings, progress, cancellationToken).ConfigureAwait(false);
             case "import": return await ImportAsync(settings, progress, cancellationToken).ConfigureAwait(false);
-            case "status": return await CheckAsync(settings, cancellationToken).ConfigureAwait(false);
-            case "install": return await InstallAsync(settings, progress, cancellationToken).ConfigureAwait(false);
+            case "download": return await InstallAsync(settings, progress, cancellationToken).ConfigureAwait(false);
+            case "remove":
+                // An unreported saved model is not in the pack manager's catalog, and removal needs it there.
+                await _packs.RegisterAsync(settings.SelectedDefinition()!, cancellationToken).ConfigureAwait(false);
+                await _packs.RemoveAsync(settings.Model!, cancellationToken).ConfigureAwait(false);
+                await RefreshStatusAsync(settings, CancellationToken.None).ConfigureAwait(false);
+                return SetupActionResult.Completed;
             case "verify": return await VerifyAsync(settings, cancellationToken).ConfigureAwait(false);
             case "load":
                 await _instance!.LoadAsync(settings.Model!, cancellationToken).ConfigureAwait(false);
-                return await CheckAsync(settings, cancellationToken).ConfigureAwait(false);
+                await RefreshStatusAsync(settings, CancellationToken.None).ConfigureAwait(false);
+                return SetupActionResult.Completed;
             case "unload":
                 await _instance!.UnloadAsync(cancellationToken).ConfigureAwait(false);
                 await RefreshStatusAsync(settings, CancellationToken.None).ConfigureAwait(false);
@@ -528,7 +572,6 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
     {
         TensorModelSelection selection = settings.CreateSelection(_resolver!.Source?.Id);
         settings.ClearResolution();
-        settings.Status = settings.Status with { Installed = SetupObservation.Unknown, Verified = SetupObservation.Unknown };
         progress?.Report(new("Resolving", "Inspecting bounded model metadata and required companions."));
         TensorModelResolution result = await _resolver.ResolveAsync(selection, token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
@@ -544,15 +587,18 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
     {
         TensorModelSelection selection = settings.CreateSelection(_resolver!.Source?.Id);
         settings.ClearResolution();
-        settings.Status = settings.Status with { Installed = SetupObservation.Unknown, Verified = SetupObservation.Unknown };
         TensorModelImportResult result = await _packs.ImportAsync(new(selection, _resolver), new InstallProgress(progress), token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
         TensorModelResolution resolution = result.Resolution;
         TensorModelPackDefinition? resolved = resolution.Evaluation.State == TensorCompatibilityState.Supported && resolution.Definition is not null
             ? await _packs.GetRequiredDefinitionAsync(resolution.Definition.Key, token).ConfigureAwait(false) : null;
         settings.Resolve(resolution.Evaluation, resolved);
-        return settings.Model is not null ? await VerifyAsync(settings, token).ConfigureAwait(false)
-            : new(SetupActionState.Failed, resolution.Evaluation.Issues.Select(issue => new SetupIssue(issue.Code, issue.Message)).ToArray(), IsRetryable: true);
+        if (settings.Model is null)
+        {
+            return new(SetupActionState.Failed, resolution.Evaluation.Issues.Select(issue => new SetupIssue(issue.Code, issue.Message)).ToArray(), IsRetryable: true);
+        }
+        await RefreshStatusAsync(settings, token).ConfigureAwait(false);
+        return await VerifyAsync(settings, token).ConfigureAwait(false);
     }
 
     private async Task<SetupActionResult> CheckBackendAsync(TensorSettings settings, CancellationToken token)
@@ -576,22 +622,8 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
             IsRetryable: observation.State is TensorBackendAvailabilityState.Unknown or TensorBackendAvailabilityState.Unavailable);
     }
 
-    private async Task<SetupActionResult> CheckAsync(TensorSettings settings, CancellationToken token)
-    {
-        if (!(await _packs.GetDefinitionsAsync(token).ConfigureAwait(false)).Any(definition => definition.Key == settings.Model))
-        {
-            settings.Status = settings.Status with { Installed = SetupObservation.Known(false), Verified = SetupObservation.Known(false) };
-            return SetupActionResult.Completed;
-        }
-        TensorModelPackStatus status = await _packs.GetStatusAsync(settings.Model!, token).ConfigureAwait(false);
-        settings.Status = settings.Status with { Installed = SetupObservation.Known(status.State == TensorModelPackState.Installed) };
-        await RefreshStatusAsync(settings, token).ConfigureAwait(false);
-        return SetupActionResult.Completed;
-    }
-
     private async Task<SetupActionResult> InstallAsync(TensorSettings settings, IProgress<SetupProgress>? progress, CancellationToken token)
     {
-        settings.Status = settings.Status with { Installed = SetupObservation.Unknown, Verified = SetupObservation.Unknown };
         await _packs.RegisterAsync(settings.SelectedDefinition()!, token).ConfigureAwait(false);
         await _packs.InstallAsync(settings.Model!, new InstallProgress(progress), token).ConfigureAwait(false);
         return await VerifyAsync(settings, token).ConfigureAwait(false);
@@ -601,16 +633,18 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
     {
         if (!(await _packs.GetDefinitionsAsync(token).ConfigureAwait(false)).Any(definition => definition.Key == settings.Model))
         { return new(SetupActionState.Failed, [new("pack-not-installed", "Install the resolved pack explicitly before verifying it.", "model")]); }
-        settings.Status = settings.Status with { Verified = SetupObservation.Unknown };
         TensorModelPackStatus status = await _packs.VerifyAsync(settings.Model!, token).ConfigureAwait(false);
         bool valid = status.State == TensorModelPackState.Installed;
-        settings.Status = settings.Status with { Installed = SetupObservation.Known(valid), Verified = SetupObservation.Known(valid) };
         await RefreshStatusAsync(settings, token).ConfigureAwait(false);
         return valid ? SetupActionResult.Completed : new(SetupActionState.Failed,
             [new("pack-unverified", "The selected pack is missing or failed integrity verification.", "model")], IsRetryable: true);
     }
 
-    private void OnEngineStatusChanged(object? sender, TensorEngineStatus status)
+    private void OnEngineStatusChanged(object? sender, TensorEngineStatus status) => Relay();
+
+    private void OnModelsChanged(object? sender, EventArgs e) => Relay();
+
+    private void Relay()
     {
         EventHandler? listeners;
         lock (_listeners) { listeners = _statusChanged; }

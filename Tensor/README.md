@@ -304,8 +304,9 @@ A provider exposes four operations:
   `ITensorLlmInference`, `ITensorImageInference`, `ITensorDecisionInference` or
   `ITensorSpeechToTextInference`. Creation does not Start, Load or download anything. The engines'
   public constructors remain available for compositions that supply their own coordinator.
-- `CreateSettingsManager(target, packs, offeredModels, instance, source, reader, backendProbe)` delegates to the
-  engine's `*Setup.CreateSettingsManager`. The instance is optional. A supplied instance must
+- `CreateSettingsManager(target, packs, models, instance, source, reader, backendProbe)` delegates to the
+  engine's `*Setup.CreateSettingsManager`. `models` is the host's live `ITensorModelList` of this family's
+  models in the model store; the editor follows it. The instance is optional. A supplied instance must
   implement the engine's capability interface and report the provider's implementation ID;
   otherwise the call throws `ArgumentException`. The final optional `ITensorBackendProbe` replaces
   the local probe. The setup factories accept the same optional parameter. The manager borrows the
@@ -347,20 +348,22 @@ foreach (TensorEngineDefinition definition in registry.Definitions)
 
 if (registry.TryGetProvider(savedConfiguration.ImplementationId, out ITensorEngineProvider? provider))
 {
-    IReadOnlyList<TensorModelPackDefinition> installed =
-        await provider.GetInstalledModelsAsync(new OsUserPersist(hostStorageRoot));
-    IReadOnlyList<TensorModelPackDefinition> offered =
-        [.. provider.BuiltInModels, .. installed.Where(model => !provider.BuiltInModels.Any(builtIn => builtIn.Key == model.Key))];
-    var packs = new TensorModelPackManager(new TensorModelCatalog(offered),
+    var modelStore = new OsUserPersist(hostStorageRoot);
+    IReadOnlyList<TensorModelPackDefinition> installed = await provider.GetInstalledModelsAsync(modelStore);
+    TensorModelListing listing = await TensorInstalledPacks.ListAsync(modelStore, hostStorageRoot,
+        provider.Definition.ModelStoreKey, provider.BuiltInModels, installed, savedDefinition);
+    var packs = new TensorModelPackManager(new TensorModelCatalog(listing.Models.Select(model => model.Definition)),
         Path.Combine(hostStorageRoot, provider.Definition.ModelStoreKey));
     ITensorModelInstance instance = provider.CreateInstance(packs, savedConfiguration.Backend);
-    TensorSettingsManager manager = provider.CreateSettingsManager(commitTarget, packs, offered, instance);
+    // A host with a live model store implements ITensorModelList and raises Changed after each new report.
+    TensorSettingsManager manager = provider.CreateSettingsManager(commitTarget, packs, TensorModelList.Fixed(listing), instance);
 }
 // Otherwise the saved entry's engine is not registered: keep the record and show it unavailable.
 ```
 
 `tensor registry --store <dir>` in the Tensor ConsoleTester lists every registered engine, its built-in
-count and the models it reports in that model store, and opens its settings through the same provider calls. It installs, loads and saves nothing.
+count, each offered model with its install state in that model store (`installed`, `not-downloaded` or
+`files-missing (<file>)`), and opens its settings through the same provider calls. It installs, loads and saves nothing.
 
 The Qwen console runner retains the shared runtime owner that its engine borrows. It disposes the
 engine before retiring the runtime. Operation, engine cleanup and runtime cleanup failures remain
@@ -383,21 +386,37 @@ It exposes the throw site of errors a managed turn reports through its safe fail
 opening a store or loading native libraries. Their `CreateSettingsManager` methods bind a typed host
 `ISetupCommitTarget<TensorSetupChanges>` and the existing pack manager to a `TensorSettingsManager`.
 Its `OpenAsync(identity, existing)` returns the `TensorSettings` object the common setup editor renders.
-For Supra, the default setup list contains its built-in pack; Qwen's default list is empty. Hosts may supply
-`offeredModels` with their own registered compatible packs. Laya has no built-in pack, so its
-`offeredModels` is required. Qwen and Supra validate the pack's capability, family,
-roles and declared backends before offering it. All four factories bind their model-family resolver
+Every factory takes a required `ITensorModelList`, the host's live list of the family's models in the
+model store. `TensorInstalledPacks.ListAsync` builds its `TensorModelListing`: the family's built-ins in
+their declared order, then every other model the family reports, each with a `SetupInstallState`.
+A reported model is Installed. Any other model is FilesMissing when its `install.json` names an artifact
+that is absent or not at its recorded length, and NotDownloaded otherwise. `TensorModelListing.Saved`
+carries the edited engine's own saved model when the family does not report it; it is never offered as a
+choice and shows only in the status card. The listing holds only built-ins and models that passed the
+family's own check in the report, so the factories validate nothing further. `TensorModelList.Fixed`
+serves hosts with no live model store, such as the examples and the console. All four factories bind their model-family resolver
 for local files/folders and independent URLs. Supply an `ITensorModelSource` through the optional
 `source` argument to additionally enable repository browsing. The optional `reader` argument accepts
 host-configured artifact access, for example `new TensorArtifactReader(source, httpClient, access)`.
 
-Selection/Save does not install or load. Install, verify, load, unload and stop are distinct callable
+The model choice offers each listed model with a `SetupChoiceInstall` chip: whether it is installed and
+its download size. The choice shows its value only while the selected model is Installed
+(`SetupChoiceField.ShowValue`). Under it, a `SetupInstallStatusField` ("Install state") carries the
+selected model's `SetupInstallStatus` card. An Installed model has no card actions. A NotDownloaded model
+offers **Download (<size>)**. A FilesMissing model names the missing file and offers **Download again**
+and **Remove**. Download and Download again run the `download` action: register, install, verify and
+refresh; a FilesMissing pack is downloaded again in full. Remove runs the `remove` action: it registers
+the definition, removes the pack's files and refreshes. The pack's contents, files and provenance fold
+away under "Model definition (what the pack contains, not whether it is downloaded)". Every
+`SetupStatus` observation of Tensor settings is not applicable; the card shows install state.
+
+Selection/Save does not install or load. Download, remove, verify, load, unload and stop are distinct callable
 actions with declared side effects. Load, Unload and Stop return once the engine accepts the request;
 the outcome arrives through `EngineStatusChanged`. The supplied instance is optional and remains
-host-owned. `OpenAsync` reads its state through `GetObservationAsync`. The manager implements
-`IInferenceSettingsStatusSource`: while a listener is attached to `StatusChanged`, it relays each
-`EngineStatusChanged` transition, and `RefreshStatusAsync` reads the new observation into the settings.
-Without an instance, Loaded/Ready remain unknown. A backend name is a supported selection, not proof
+host-owned. `OpenAsync` reads the model list and the instance's state through `GetObservationAsync`.
+The manager implements `IInferenceSettingsStatusSource`: while a listener is attached to `StatusChanged`,
+it relays each `ITensorModelList.Changed` and `EngineStatusChanged` event, and `RefreshStatusAsync`
+reads the new listing and observation into the settings. A backend name is a supported selection, not proof
 that the backend is available. The explicit **Check backend prerequisites** action records available,
 unavailable or unknown runtime/device prerequisites without installing or loading a model. Qwen uses
 the shared runtime owner's Auto policy: Metal then GGML CPU on macOS; CUDA, Vulkan, then GGML CPU
@@ -852,13 +871,11 @@ provenance use that pack's actual key. Unloaded capabilities describe the family
 they do not assert that a named pack is registered, installed or verified.
 
 `LayaSetup.Definition` advertises the Decision task without activating the engine.
-`LayaSetup.CreateSettingsManager(target, packs, offeredModels, instance, source, reader)` feeds the host's
-compatible definitions to the existing shared editor. `offeredModels` is required; an empty list
-offers no pre-registered selections; local/URL resolution and optional repository browsing remain
-available. Validate/register the same definitions in the manager's
-catalog. The editor saves the selected key/backend in `TensorSetupConfiguration`, not raw weight
+`LayaSetup.CreateSettingsManager(target, packs, models, instance, source, reader)` feeds the host's
+model list to the existing shared editor. Laya has no built-in pack, so a list with no reported model
+offers no selections; local/URL resolution and optional repository browsing remain available. The editor saves the selected key/backend in `TensorSetupConfiguration`, not raw weight
 bytes or a provider-specific UI payload. Selection and Save never unload an active model. The usual
-explicit install/verify/load/unload/stop actions apply; changing the saved selection reports
+explicit download/verify/load/unload/stop actions apply; changing the saved selection reports
 `RequiresUnload`, and closing the editor does not stop the host's engine. See the compile-checked
 `LayaModelSelectionExample` in the shared examples.
 
@@ -897,8 +914,8 @@ Only CPU is supplied/advertised. Auto selects CPU; other backend values fail exp
 backend check invokes the real native runtime without loading a model. Definition/model listing
 does not load native libraries, probe hardware, select a default pack or download anything.
 
-`WhisperSetup.CreateSettingsManager` uses the existing generic Tensor editor, with all twelve definitions,
-explicit install/verify/lifecycle actions and typed `TensorSetupChanges`. Its optional source binds
+`WhisperSetup.CreateSettingsManager` uses the existing generic Tensor editor over the host's model list,
+which offers all twelve built-in definitions, with explicit download/verify/lifecycle actions and typed `TensorSetupChanges`. Its optional source binds
 `WhisperModelResolver`: the initial remote policy verifies published weight identities plus actual
 GGML architecture/vocabulary headers. Unknown hashes remain Unverified; tags or filenames alone
 cannot produce a compatible pack. The native loader rechecks installed headers and validates the

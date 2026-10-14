@@ -16,11 +16,9 @@ public static class GemmaEmbeddingSetup
 
     /// <summary>Creates settings over the caller's pack manager and optional resident instance.</summary>
     public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,
-        ITensorModelPackManager packs, ITensorEmbeddingInference? instance = null,
-        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorBackendProbe? backendProbe = null)
+        ITensorModelPackManager packs, ITensorModelList models, ITensorEmbeddingInference? instance = null,
+        ITensorBackendProbe? backendProbe = null)
     {
-        IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [GemmaEmbeddingModels.EmbeddingGemma2];
-        foreach (TensorModelPackDefinition model in models) GemmaEmbeddingModels.Validate(model);
         return new(Definition, target, models, packs, instance, backendProbe ?? new GemmaBackendProbe());
     }
 }
@@ -52,7 +50,7 @@ public sealed class GemmaEmbeddingEngineProvider : ITensorEngineProvider
 
     /// <inheritdoc />
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
-        IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
+        ITensorModelList models, ITensorModelInstance? instance = null,
         ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null)
     {
         ITensorEmbeddingInference? live = instance switch
@@ -61,7 +59,7 @@ public sealed class GemmaEmbeddingEngineProvider : ITensorEngineProvider
             ITensorEmbeddingInference embedding when embedding.Descriptor.Id == Definition.Setup.Implementation.Id => embedding,
             _ => throw new ArgumentException("The instance does not belong to EmbeddingGemma.", nameof(instance))
         };
-        return GemmaEmbeddingSetup.CreateSettingsManager(target, packs, live, offeredModels, backendProbe);
+        return GemmaEmbeddingSetup.CreateSettingsManager(target, packs, models, live, backendProbe);
     }
 }
 

@@ -17,12 +17,10 @@ public static class EmbeddingSetup
 
     /// <summary>Creates the settings manager for embedding packs over the host's pack manager and optional live instance.</summary>
     public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,
-        ITensorModelPackManager packs, ITensorEmbeddingInference? instance = null,
-        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
+        ITensorModelPackManager packs, ITensorModelList models, ITensorEmbeddingInference? instance = null,
+        ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
         ITensorBackendProbe? backendProbe = null)
     {
-        IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [];
-        foreach (TensorModelPackDefinition model in models) EmbeddingCompatibility.Validate(model);
         return new(Definition, target, models, packs, instance, backendProbe ?? new EmbeddingBackendProbe(), new EmbeddingModelResolver(source, reader));
     }
 }
@@ -126,17 +124,17 @@ public sealed class EmbeddingEngineProvider(GgmlRuntimeOwner runtimeOwner) : ITe
 
     /// <inheritdoc />
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
-        IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
+        ITensorModelList models, ITensorModelInstance? instance = null,
         ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null)
     {
-        ArgumentNullException.ThrowIfNull(offeredModels);
+        ArgumentNullException.ThrowIfNull(models);
         ITensorEmbeddingInference? live = instance switch
         {
             null => null,
             ITensorEmbeddingInference embedding when embedding.Descriptor.Id == Definition.Setup.Implementation.Id => embedding,
             _ => throw new ArgumentException("The instance does not belong to the embedding implementation.", nameof(instance))
         };
-        return EmbeddingSetup.CreateSettingsManager(target, packs, live, offeredModels, source, reader,
+        return EmbeddingSetup.CreateSettingsManager(target, packs, models, live, source, reader,
             backendProbe ?? new EmbeddingBackendProbe(runtimeOwner));
     }
 }

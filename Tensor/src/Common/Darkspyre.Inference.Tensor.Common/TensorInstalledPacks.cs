@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.Common;
@@ -71,6 +72,50 @@ public static class TensorInstalledPacks
         ];
     }
 
+    /// <summary>
+    /// The listing an engine family's editor shows for <paramref name="storeName"/> of <paramref name="modelStore"/>.
+    /// Offered models: <paramref name="builtIns"/> in their declared order, then every model of <paramref name="installed"/>
+    /// that is not a built-in, in the order given. A model in <paramref name="installed"/> is Installed. Any other model is
+    /// FilesMissing when the store holds a readable install.json at its key that names an artifact absent or not at its
+    /// recorded length, and NotDownloaded otherwise. <paramref name="saved"/>, when given and not offered, becomes
+    /// <see cref="TensorModelListing.Saved"/> with its state found the same way.
+    /// </summary>
+    /// <param name="modelStore">The model store the host passes in.</param>
+    /// <param name="store">The model store folder as the host's setting names it; copied into the listing.</param>
+    /// <param name="storeName">The family's store key.</param>
+    /// <param name="builtIns">The family's built-in packs; empty for a family without built-ins.</param>
+    /// <param name="installed">The family's last report of <paramref name="modelStore"/> (<see cref="ReportAsync"/>).</param>
+    /// <param name="saved">The edited engine's saved model, or null for a new engine.</param>
+    /// <param name="cancellationToken">Cancels the check.</param>
+    /// <gotcha>A pack whose install.json exists and whose files are all present, but which the report refused (a hash
+    /// that differs from a built-in's, or a failed format check), is NotDownloaded. Its Download replaces it.</gotcha>
+    public static async Task<TensorModelListing> ListAsync(IPersist modelStore, string store, string storeName,
+        IReadOnlyList<TensorModelPackDefinition> builtIns, IReadOnlyList<TensorModelPackDefinition> installed,
+        TensorModelPackDefinition? saved, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(modelStore);
+        ArgumentNullException.ThrowIfNull(store);
+        ArgumentException.ThrowIfNullOrWhiteSpace(storeName);
+        ArgumentNullException.ThrowIfNull(builtIns);
+        ArgumentNullException.ThrowIfNull(installed);
+        var installedKeys = installed.Select(definition => definition.Key).ToHashSet();
+        var builtInKeys = builtIns.Select(definition => definition.Key).ToHashSet();
+        TensorModelPackDefinition[] offered = [.. builtIns, .. installed.Where(definition => !builtInKeys.Contains(definition.Key))];
+        var models = new List<TensorListedModel>(offered.Length);
+        foreach (TensorModelPackDefinition definition in offered)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            models.Add(installedKeys.Contains(definition.Key)
+                ? new(definition, SetupInstallState.Installed, null)
+                : await CheckAsync(modelStore, storeName, definition, cancellationToken).ConfigureAwait(false));
+        }
+
+        TensorListedModel? savedModel = saved is not null && !offered.Any(definition => definition.Key == saved.Key)
+            ? await CheckAsync(modelStore, storeName, saved, cancellationToken).ConfigureAwait(false)
+            : null;
+        return new(store, models, savedModel);
+    }
+
     private static bool IsManifestName(string name)
     {
         string[] segments = name.Split('/');
@@ -103,11 +148,9 @@ public static class TensorInstalledPacks
         try
         {
             if (TensorModelPackManager.ManifestName(key) != name) { return null; }
-            foreach (PersistedArtifact artifact in manifest.Artifacts)
+            if (await FirstMissingAsync(modelStore, storeName, key, manifest, cancellationToken).ConfigureAwait(false) is not null)
             {
-                await using Stream? file = await modelStore.OpenReadAsync(storeName,
-                    TensorModelPackManager.ArtifactName(key, artifact.RelativePath), cancellationToken).ConfigureAwait(false);
-                if (file is null || !file.CanSeek || file.Length != artifact.Length) { return null; }
+                return null;
             }
         }
         catch (ArgumentException)
@@ -117,6 +160,59 @@ public static class TensorInstalledPacks
         }
 
         return new(manifest, await ReadDescriptionAsync(modelStore, storeName, key, manifest, cancellationToken).ConfigureAwait(false));
+    }
+
+    // The relative path of the first artifact of `manifest` that is absent, not seekable or not at its recorded length,
+    // or null when every one is present.
+    private static async Task<string?> FirstMissingAsync(IPersist modelStore, string storeName, TensorModelKey key,
+        PersistedModelManifest manifest, CancellationToken cancellationToken)
+    {
+        foreach (PersistedArtifact artifact in manifest.Artifacts)
+        {
+            await using Stream? file = await modelStore.OpenReadAsync(storeName,
+                TensorModelPackManager.ArtifactName(key, artifact.RelativePath), cancellationToken).ConfigureAwait(false);
+            if (file is null || !file.CanSeek || file.Length != artifact.Length) { return artifact.RelativePath; }
+        }
+
+        return null;
+    }
+
+    // The state of one model that the report does not list: FilesMissing when its install.json names an artifact that
+    // is absent or not at its recorded length, otherwise NotDownloaded.
+    private static async Task<TensorListedModel> CheckAsync(IPersist modelStore, string storeName,
+        TensorModelPackDefinition definition, CancellationToken cancellationToken)
+    {
+        var notDownloaded = new TensorListedModel(definition, SetupInstallState.NotDownloaded, null);
+        try
+        {
+            PersistedModelManifest? manifest;
+            await using (Stream? content = await modelStore.OpenReadAsync(storeName,
+                TensorModelPackManager.ManifestName(definition.Key), cancellationToken).ConfigureAwait(false))
+            {
+                if (content is null) { return notDownloaded; }
+                try
+                {
+                    manifest = await JsonSerializer.DeserializeAsync(content, TensorJsonContext.Default.PersistedModelManifest,
+                        cancellationToken).ConfigureAwait(false);
+                }
+                catch (JsonException) { return notDownloaded; }
+            }
+
+            if (manifest is not { ModelId: not null, Revision: not null, Artifacts: not null }
+                || manifest.Artifacts.Any(artifact => artifact?.RelativePath is null)
+                || new TensorModelKey(manifest.ModelId, manifest.Revision) != definition.Key)
+            {
+                return notDownloaded;
+            }
+
+            string? missing = await FirstMissingAsync(modelStore, storeName, definition.Key, manifest, cancellationToken).ConfigureAwait(false);
+            return missing is null ? notDownloaded : new(definition, SetupInstallState.FilesMissing, missing);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            // A file removed, locked or unnamable mid-check leaves the model NotDownloaded, as the report leaves it out.
+            return notDownloaded;
+        }
     }
 
     private static async Task<TensorModelPackDefinition?> ReadDescriptionAsync(IPersist modelStore, string storeName,

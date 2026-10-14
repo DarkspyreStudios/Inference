@@ -15,12 +15,10 @@ public static class QwenSetup
 
     /// <summary>Creates the settings manager for Qwen packs over the host's pack manager and optional live instance.</summary>
     public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,
-        ITensorModelPackManager packs, ITensorLlmInference? instance = null,
-        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
+        ITensorModelPackManager packs, ITensorModelList models, ITensorLlmInference? instance = null,
+        ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
         ITensorBackendProbe? backendProbe = null, GgmlRuntimeOwner? runtimeOwner = null)
     {
-        IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? [];
-        foreach (TensorModelPackDefinition model in models) { QwenModelCompatibility.Validate(model); }
         GgmlRuntimeOwner owner = runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate();
         return new(Definition, target, models, packs, instance, backendProbe ?? new QwenBackendProbe(owner), new QwenModelResolver(source, reader, owner));
     }

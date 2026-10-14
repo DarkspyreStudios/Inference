@@ -34,16 +34,16 @@ public sealed class WhisperEngineProvider : ITensorEngineProvider
 
     /// <inheritdoc />
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
-        IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
+        ITensorModelList models, ITensorModelInstance? instance = null,
         ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null)
     {
-        ArgumentNullException.ThrowIfNull(offeredModels);
+        ArgumentNullException.ThrowIfNull(models);
         ITensorSpeechToTextInference? live = instance switch
         {
             null => null,
             ITensorSpeechToTextInference speech when speech.Descriptor.Id == Definition.Setup.Implementation.Id => speech,
             _ => throw new ArgumentException("The instance does not belong to the Whisper implementation.", nameof(instance))
         };
-        return WhisperSetup.CreateSettingsManager(target, packs, live, offeredModels, source, reader, backendProbe);
+        return WhisperSetup.CreateSettingsManager(target, packs, models, live, source, reader, backendProbe);
     }
 }

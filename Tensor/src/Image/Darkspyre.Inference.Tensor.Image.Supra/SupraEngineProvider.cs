@@ -31,16 +31,16 @@ public sealed class SupraEngineProvider : ITensorEngineProvider
 
     /// <inheritdoc />
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
-        IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
+        ITensorModelList models, ITensorModelInstance? instance = null,
         ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null)
     {
-        ArgumentNullException.ThrowIfNull(offeredModels);
+        ArgumentNullException.ThrowIfNull(models);
         ITensorImageInference? live = instance switch
         {
             null => null,
             ITensorImageInference image when image.Descriptor.Id == Definition.Setup.Implementation.Id => image,
             _ => throw new ArgumentException("The instance does not belong to the Supra implementation.", nameof(instance))
         };
-        return SupraSetup.CreateSettingsManager(target, packs, live, offeredModels, source, reader, backendProbe);
+        return SupraSetup.CreateSettingsManager(target, packs, models, live, source, reader, backendProbe);
     }
 }

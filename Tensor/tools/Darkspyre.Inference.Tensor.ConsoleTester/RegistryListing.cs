@@ -33,14 +33,12 @@ internal static class RegistryListing
             }
 
             IReadOnlyList<TensorModelPackDefinition> installed = await provider.GetInstalledModelsAsync(modelStore, cancellationToken);
-            IReadOnlyList<TensorModelPackDefinition> offered =
-            [
-                .. provider.BuiltInModels,
-                .. installed.Where(model => !provider.BuiltInModels.Any(builtIn => builtIn.Key == model.Key))
-            ];
+            TensorModelListing listing = await TensorInstalledPacks.ListAsync(modelStore, store, definition.ModelStoreKey,
+                provider.BuiltInModels, installed, saved: null, cancellationToken);
             // One pack manager per engine kind, rooted at the engine's store key beneath the host's root.
-            using var packs = new TensorModelPackManager(new TensorModelCatalog(offered), Path.Combine(store, definition.ModelStoreKey));
-            TensorSettingsManager manager = provider.CreateSettingsManager(new ListingTarget(), packs, offered);
+            using var packs = new TensorModelPackManager(new TensorModelCatalog(listing.Models.Select(model => model.Definition).ToArray()),
+                Path.Combine(store, definition.ModelStoreKey));
+            TensorSettingsManager manager = provider.CreateSettingsManager(new ListingTarget(), packs, TensorModelList.Fixed(listing));
             TensorSettings settings = await manager.OpenAsync(new(SetupChangeIntent.Create, "registry-listing", null), cancellationToken: cancellationToken);
 
             Console.WriteLine();
@@ -48,11 +46,17 @@ internal static class RegistryListing
             Console.WriteLine($"  tasks   : {string.Join(", ", definition.Setup.Implementation.Tasks)}");
             Console.WriteLine($"  store   : {definition.ModelStoreKey}");
             Console.WriteLine($"  models  : {provider.BuiltInModels.Count} built in, {installed.Count} installed");
-            foreach (TensorModelPackDefinition model in installed)
+            foreach (TensorListedModel model in listing.Models)
             {
-                Console.WriteLine($"    installed {model.Key.ModelId} @ {model.Key.Revision}");
+                string state = model.State switch
+                {
+                    SetupInstallState.Installed => "installed",
+                    SetupInstallState.FilesMissing => $"files-missing ({model.MissingFile})",
+                    _ => "not-downloaded"
+                };
+                Console.WriteLine($"    {state} {model.Definition.Key.ModelId} @ {model.Definition.Key.Revision}");
             }
-            Console.WriteLine($"  setup   : {settings.Steps.Sum(step => step.Sections.Count)} sections; configured {settings.Status.Configured.Value}");
+            Console.WriteLine($"  setup   : {settings.Steps.Sum(step => step.Sections.Count)} sections");
             foreach (SetupActionDescriptor action in settings.Actions)
             {
                 Console.WriteLine($"    {(action.IsEnabled ? "enabled " : "disabled")} {action.Id,-13} {action.Purpose}");

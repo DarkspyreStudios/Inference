@@ -14,12 +14,10 @@ public static class WhisperSetup
 
     /// <summary>Creates the settings manager for Whisper packs over the host's pack manager and optional live instance.</summary>
     public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,
-        ITensorModelPackManager packs, ITensorSpeechToTextInference? instance = null,
-        IReadOnlyList<TensorModelPackDefinition>? offeredModels = null, ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
+        ITensorModelPackManager packs, ITensorModelList models, ITensorSpeechToTextInference? instance = null,
+        ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
         ITensorBackendProbe? backendProbe = null)
     {
-        IReadOnlyList<TensorModelPackDefinition> models = offeredModels ?? TensorSpeechModels.Whisper;
-        foreach (TensorModelPackDefinition model in models) WhisperCompatibility.Validate(model);
         return new(Definition, target, models, packs, instance, backendProbe ?? new WhisperBackendProbe(), new WhisperModelResolver(source, reader));
     }
 }

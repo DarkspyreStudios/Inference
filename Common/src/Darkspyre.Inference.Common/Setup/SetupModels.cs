@@ -188,7 +188,9 @@ public enum SetupSideEffect
     /// <summary>Unloads a model.</summary>
     ModelUnload = 128,
     /// <summary>Stops a running process.</summary>
-    TerminalStop = 256
+    TerminalStop = 256,
+    /// <summary>Deletes files from local storage.</summary>
+    DeleteFiles = 512
 }
 
 /// <summary>What a setup action does.</summary>
@@ -210,6 +212,8 @@ public enum SetupActionPurpose
     CheckReadiness,
     /// <summary>Installs required software or files.</summary>
     Install,
+    /// <summary>Removes installed software or files.</summary>
+    Remove,
     /// <summary>Verifies the installation.</summary>
     Verify,
     /// <summary>Loads the model.</summary>

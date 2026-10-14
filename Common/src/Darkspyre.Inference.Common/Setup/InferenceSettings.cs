@@ -117,7 +117,8 @@ public abstract class InferenceSettings
         AllFields().FirstOrDefault(field => string.Equals(field.Description.Id, fieldId, StringComparison.Ordinal));
 
     internal SetupActionDescriptor? FindAction(string actionId) =>
-        Actions.Concat(InteractionActions()).FirstOrDefault(action => string.Equals(action.Id, actionId, StringComparison.Ordinal));
+        Actions.Concat(InteractionActions()).Concat(AllFields().OfType<SetupInstallStatusField>().SelectMany(field => field.Status.Actions))
+            .FirstOrDefault(action => string.Equals(action.Id, actionId, StringComparison.Ordinal));
 
     private IEnumerable<SetupActionDescriptor> InteractionActions() => Interaction switch
     {

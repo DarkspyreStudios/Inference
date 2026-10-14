@@ -35,7 +35,7 @@ public sealed class LayaEngineProvider : ITensorEngineProvider
 
     /// <inheritdoc />
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
-        IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
+        ITensorModelList models, ITensorModelInstance? instance = null,
         ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null)
     {
         ITensorDecisionInference? live = instance switch
@@ -44,6 +44,6 @@ public sealed class LayaEngineProvider : ITensorEngineProvider
             ITensorDecisionInference decision when decision.Descriptor.Id == Definition.Setup.Implementation.Id => decision,
             _ => throw new ArgumentException("The instance does not belong to the Laya implementation.", nameof(instance))
         };
-        return LayaSetup.CreateSettingsManager(target, packs, offeredModels, live, source, reader, backendProbe);
+        return LayaSetup.CreateSettingsManager(target, packs, models, live, source, reader, backendProbe);
     }
 }

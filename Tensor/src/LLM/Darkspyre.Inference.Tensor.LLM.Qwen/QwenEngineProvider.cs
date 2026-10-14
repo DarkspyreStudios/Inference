@@ -34,16 +34,16 @@ public sealed class QwenEngineProvider(GgmlRuntimeOwner? runtimeOwner = null) : 
 
     /// <inheritdoc />
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,
-        IReadOnlyList<TensorModelPackDefinition> offeredModels, ITensorModelInstance? instance = null,
+        ITensorModelList models, ITensorModelInstance? instance = null,
         ITensorModelSource? source = null, ITensorArtifactReader? reader = null, ITensorBackendProbe? backendProbe = null)
     {
-        ArgumentNullException.ThrowIfNull(offeredModels);
+        ArgumentNullException.ThrowIfNull(models);
         ITensorLlmInference? live = instance switch
         {
             null => null,
             ITensorLlmInference llm when llm.Descriptor.Id == Definition.Setup.Implementation.Id => llm,
             _ => throw new ArgumentException("The instance does not belong to the Qwen implementation.", nameof(instance))
         };
-        return QwenSetup.CreateSettingsManager(target, packs, live, offeredModels, source, reader, backendProbe, _runtimeOwner);
+        return QwenSetup.CreateSettingsManager(target, packs, models, live, source, reader, backendProbe, _runtimeOwner);
     }
 }
