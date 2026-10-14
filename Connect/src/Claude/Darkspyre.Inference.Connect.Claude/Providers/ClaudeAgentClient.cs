@@ -432,11 +432,10 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             var request = new JsonObject
             {
                 ["subtype"] = "initialize",
-                ["systemPrompt"] = string.IsNullOrWhiteSpace(instructions)
-                    ? null
-                    : new JsonArray(instructions),
                 ["systemPromptSnapshot"] = false
             };
+            if (!string.IsNullOrWhiteSpace(instructions))
+                request["systemPrompt"] = new JsonArray(instructions);
             if (_tools.Count > 0)
             {
                 request["sdkMcpServers"] = new JsonArray(McpServerName);

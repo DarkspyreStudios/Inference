@@ -578,6 +578,27 @@ public sealed class ClaudeAgentResourcesTests : IDisposable
         static string? ResultText(JsonElement answer) => answer.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
     }
 
+    [Theory]
+    [InlineData("BASE")]
+    [InlineData(null)]
+    public async Task InitializeSendsInstructionsAsSystemPromptOnlyWhenPresent(string? instructions)
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        {
+            ModelId = "claude-test",
+            Instructions = instructions,
+            Runtime = new() { WorkingDirectory = _directory }
+        });
+
+        JsonElement initialize = process.Requests().Single(request => request.GetProperty("subtype").GetString() == "initialize");
+        bool present = initialize.TryGetProperty("systemPrompt", out JsonElement systemPrompt);
+        if (instructions is null)
+            Assert.False(present);
+        else
+            Assert.Equal([instructions], systemPrompt.EnumerateArray().Select(item => item.GetString()));
+    }
+
     [Fact]
     public async Task SequentialToolsRunOneAtATime()
     {
