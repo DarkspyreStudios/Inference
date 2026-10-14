@@ -88,7 +88,8 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         {
             Version = "0",
             Transport = transport,
-            Endpoint = definition.DefaultEndpoint
+            Endpoint = definition.DefaultEndpoint,
+            Xai = transport == LlmTransport.XaiResponses ? new() : null
         }
             : existing with
             {
@@ -96,7 +97,8 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
                 ProviderOptions = existing.ProviderOptions.ToDictionary(pair => pair.Key, pair => pair.Value.Clone(), StringComparer.Ordinal),
                 ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>(existing.ModelCapabilityOverrides, StringComparer.Ordinal)
             };
-        _draft = UsesFixedEndpoint(transport)
+        // Grok routing changes only through an explicit region edit; preserve supplied configuration on open.
+        _draft = UsesFixedEndpoint(transport) && transport != LlmTransport.XaiResponses
             ? opened with { Endpoint = definition.DefaultEndpoint } : opened;
         _model = _originalModel = modelId ?? (UsesAzure ? existing?.Azure?.DeploymentId : null) ?? definition.DefaultModelId;
         if (UsesAzure && _draft.Azure is null) _draft = _draft with { Azure = new() { DeploymentId = _model } };
@@ -147,7 +149,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
 
     /// <inheritdoc />
     protected override bool IsDraftDirty =>
-        _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || (UsesAzure ? _azure!.IsDirty : _draft.Azure != _baseline.Azure) || _model != _originalModel
+        _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || (UsesAzure ? _azure!.IsDirty : _draft.Azure != _baseline.Azure) || _draft.ChatCompletions != _baseline.ChatCompletions || _draft.Xai != _baseline.Xai || _model != _originalModel
             || (_draft.CapabilityOverrides ?? new()) != (_baseline.CapabilityOverrides ?? new()) || _callback.Length != 0
             || !SameModelOverrides(_draft.ModelCapabilityOverrides, _baseline.ModelCapabilityOverrides)
             || UsesVertex && (_cacheBucket != (_baseline.Vertex?.CacheStaging?.Bucket ?? string.Empty)
@@ -428,6 +430,33 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         }
         SetupSection section = new("capabilities", "Endpoint capability overrides",
         [
+            new SetupChoiceField(new("output-limit-field", "Output-limit field")
+                { HelpText = UsesAzure ? "Default uses max_completion_tokens on Azure v1." : "Default uses max_completion_tokens on api.openai.com and max_tokens elsewhere." },
+                _draft.ChatCompletions?.OutputLimitField switch
+                {
+                    LlmChatCompletionsOutputLimitField.MaxTokens => "max_tokens",
+                    LlmChatCompletionsOutputLimitField.MaxCompletionTokens => "max_completion_tokens",
+                    _ => "default"
+                }, "default", selection =>
+                {
+                    if (selection is not ("default" or "max_tokens" or "max_completion_tokens"))
+                        return new(SetupEditState.Invalid, [new("output-limit-invalid", "Select default, max_tokens or max_completion_tokens.", "output-limit-field")]);
+                    return Edit(() => SetChatCompletions((_draft.ChatCompletions ?? new()) with
+                    {
+                        OutputLimitField = selection == "default" ? null : selection == "max_tokens"
+                            ? LlmChatCompletionsOutputLimitField.MaxTokens : LlmChatCompletionsOutputLimitField.MaxCompletionTokens
+                    }));
+                }, false),
+            new SetupChoiceField(new("prompt-cache-key", "Conversation cache key")
+                { HelpText = UsesAzure ? "Default omits the conversation cache key. Enable only when the deployment supports prompt_cache_key." : "Default sends the conversation key only to api.openai.com. Enable only when the endpoint supports prompt_cache_key." },
+                _draft.ChatCompletions?.UsePromptCacheKey is { } cacheKey ? cacheKey ? "enabled" : "disabled" : "default",
+                "default", selection =>
+                {
+                    if (selection is not ("default" or "enabled" or "disabled"))
+                        return new(SetupEditState.Invalid, [new("cache-key-invalid", "Select default, enabled or disabled.", "prompt-cache-key")]);
+                    return Edit(() => SetChatCompletions((_draft.ChatCompletions ?? new()) with
+                    { UsePromptCacheKey = selection == "default" ? null : selection == "enabled" }));
+                }, false),
             Override("streaming", "Streaming", current.SupportsStreaming, (value, selection) => value with { SupportsStreaming = selection },
                 "Disabled sends the endpoint's non-streaming request. The reply arrives in one piece when generation ends."),
             Override("streaming-usage", "Streaming usage", current.SupportsStreamingUsage, (value, selection) => value with { SupportsStreamingUsage = selection }),
@@ -463,7 +492,8 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         ], IsAdvanced: true);
         return !UsesAzure ? section : section with
         {
-            Fields = [.. section.Fields.Where(field => field.Description.Id != "model-listing")]
+            Fields = [.. section.Fields.Where(field => field.Description.Id != "model-listing"
+                && (_draft.Transport != LlmTransport.AzureOpenAiResponses || field.Description.Id is not ("output-limit-field" or "prompt-cache-key")))]
         };
     }
 
@@ -487,6 +517,9 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         _credentialChange = SetupSecretEditKind.Replace;
     }
 
+    private void SetChatCompletions(LlmChatCompletionsConfiguration configuration) =>
+        _draft = _draft with { ChatCompletions = configuration.OutputLimitField is null && configuration.UsePromptCacheKey is null ? null : configuration };
+
     private void SetModel(string value)
     {
         _model = value;
@@ -502,6 +535,9 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             ? Page(query, [new(LlmGoogleAuthenticationMode.ApplicationDefault.ToString(), "Application default credentials"),
                 new(LlmGoogleAuthenticationMode.ServiceAccount.ToString(), "Service-account key"),
                 new(LlmGoogleAuthenticationMode.ApiKey.ToString(), "API key (express mode)")])
+            : fieldId == "output-limit-field" && _draft.Transport is LlmTransport.OpenAiCompatibleChat or LlmTransport.AzureOpenAiChat
+                ? Page(query, [new("default", "Default"), new("max_tokens", "max_tokens"), new("max_completion_tokens", "max_completion_tokens")])
+            : fieldId == "prompt-cache-key" && _draft.Transport is LlmTransport.OpenAiCompatibleChat or LlmTransport.AzureOpenAiChat ? Page(query, OverrideChoices)
             : _overrideFields.Contains(fieldId) ? Page(query, fieldId.StartsWith("reasoning-level-", StringComparison.Ordinal) ? OverrideChoices : SupportChoices) : null;
     }
 
@@ -701,8 +737,8 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             : _draft.Credential is null ? SetupSecretEdit.Clear : SetupSecretEdit.Replace(_draft.Credential),
         _original is not null && (_original.Endpoint != _draft.Endpoint || _original.Vertex != draft.Vertex || _original.Azure != draft.Azure)
             || UsesAzure && _azure!.HasCredentialEdits,
-        _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != draft.Vertex || _original.Azure != draft.Azure || _originalModel != _model
-            || _original.CapabilityOverrides != _draft.CapabilityOverrides
+        _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != draft.Vertex || _original.Azure != draft.Azure || _original.Xai != _draft.Xai || _originalModel != _model
+            || _original.ChatCompletions != _draft.ChatCompletions || _original.CapabilityOverrides != _draft.CapabilityOverrides
             || !SameModelOverrides(_original.ModelCapabilityOverrides, _draft.ModelCapabilityOverrides)
             || (UsesAzure ? _azure!.HasCredentialEdits : _credentialChange != SetupSecretEditKind.Keep));
     }

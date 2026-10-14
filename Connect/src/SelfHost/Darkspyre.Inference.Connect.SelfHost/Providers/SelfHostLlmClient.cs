@@ -125,6 +125,8 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
     {
         try { RuntimeInputAdmission.Validate(connection); }
         catch (NotSupportedException error) { return ("self-host-runtime-inputs", error.Message); }
+        if (connection.Xai?.MultiAgent is not null)
+        { return ("self-host-provider-controls", "SelfHost does not forward connector-owned provider controls."); }
         if (request?.ExplicitCache is not null)
         { return ("self-host-explicit-cache", "SelfHost does not forward native provider cache receipts."); }
         if (request?.Resources is not null)

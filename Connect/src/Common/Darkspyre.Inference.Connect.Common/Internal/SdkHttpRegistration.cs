@@ -9,9 +9,9 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 internal static class SdkHttpRegistration
 {
     internal static readonly string[] Names = ["AppleFoundationModelsClient", "GeminiApiLlmClient", "OpenAiResponsesLlmClient",
-        "AnthropicMessagesLlmClient", "ClaudeCliLlmClient", "OpenAiEmbeddingClient", "OpenAiCodexLlmClient",
+        "OpenAiCompatibleChatLlmClient", "AnthropicMessagesLlmClient", "ClaudeCliLlmClient", "OpenAiEmbeddingClient", "OpenAiCodexLlmClient",
         "CodexAuthenticator", "ClaudeAuthenticator", "AzureResponsesLlmClient", "AzureChatLlmClient", "VertexLlmClient", "", "PocketTtsHttpProvider", "TangoFluxHttpProvider",
-        "XaiTtsProvider", "XaiSttProvider", "XaiRealtimeProvider"];
+        "XaiResponsesLlmClient", "XaiAuthenticator", "XaiMediaDownloadClient", "XaiTtsProvider", "XaiSttProvider", "XaiRealtimeProvider"];
     internal static void ValidateName(string name)
     {
         ArgumentNullException.ThrowIfNull(name);

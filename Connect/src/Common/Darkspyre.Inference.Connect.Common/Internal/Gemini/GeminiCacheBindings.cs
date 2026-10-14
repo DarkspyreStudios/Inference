@@ -129,7 +129,7 @@ internal sealed class GeminiCacheBindings
 
     private static bool SameSelection(LlmConnection left, LlmConnection right) =>
         left.Version == right.Version && left.Transport == right.Transport && left.Endpoint == right.Endpoint
-        && left.Credential == right.Credential && left.Vertex == right.Vertex
+        && left.Credential == right.Credential && left.Vertex == right.Vertex && left.ChatCompletions == right.ChatCompletions
         && left.CacheCredentialEvidence == right.CacheCredentialEvidence
         && SameOverrides(left.CapabilityOverrides, right.CapabilityOverrides)
         && left.ModelCapabilityOverrides.Count == right.ModelCapabilityOverrides.Count

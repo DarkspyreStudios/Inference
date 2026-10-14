@@ -14,6 +14,8 @@ public static class ConnectLlmJson
 {
     /// <summary>JSON serializer metadata for the <c>LlmVertexCacheStaging</c> contract.</summary>
     public static JsonTypeInfo<LlmVertexCacheStaging> LlmVertexCacheStaging => Metadata<LlmVertexCacheStaging>();
+    /// <summary>JSON serializer metadata for the <c>XaiMultiAgentControls</c> contract.</summary>
+    public static JsonTypeInfo<XaiMultiAgentControls> XaiMultiAgentControls => Metadata<XaiMultiAgentControls>();
     /// <summary>JSON serializer metadata for the <c>LlmAgentCapabilities</c> contract.</summary>
     public static JsonTypeInfo<LlmAgentCapabilities> LlmAgentCapabilities => Metadata<LlmAgentCapabilities>();
     /// <summary>JSON serializer metadata for the <c>LlmAzureConfiguration</c> contract.</summary>
@@ -242,6 +244,13 @@ public static class ConnectLlmJson
             if (LlmAgentCallerJson.RuntimeMetadata(type, options) is { } runtime) return runtime;
             if (LlmRuntimeAuthenticationJson.RuntimeMetadata(type, options) is { } authentication) return authentication;
             var metadata = ((IJsonTypeInfoResolver)ConnectLlmJsonContext.Default).GetTypeInfo(type, options);
+            if (type == typeof(LlmProviderControls) && metadata is not null)
+                metadata.PolymorphismOptions = new JsonPolymorphismOptions
+                {
+                    TypeDiscriminatorPropertyName = "type",
+                    UnknownDerivedTypeHandling = JsonUnknownDerivedTypeHandling.FailSerialization,
+                    DerivedTypes = { new JsonDerivedType(typeof(XaiMultiAgentControls), "xai-multi-agent") }
+                };
             if (type == typeof(LlmAgentRuntimePolicy) && metadata is not null)
                 metadata.PolymorphismOptions = new JsonPolymorphismOptions
                 {
@@ -387,6 +396,7 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmAgentStagedStateSnapshot))]
 [JsonSerializable(typeof(LlmAgentStagedStateCommitResult))]
 [JsonSerializable(typeof(LlmConnection))]
+[JsonSerializable(typeof(XaiMultiAgentControls))]
 [JsonSerializable(typeof(LlmAgentTurnRequest))]
 [JsonSerializable(typeof(LlmFileCapabilities))]
 [JsonSerializable(typeof(LlmContextCacheCreate))]

@@ -62,8 +62,8 @@ public sealed class CollectibleSerializationTests
 
         LlmConnection connection = JsonSerializer.Deserialize(DevConnection, ConnectLlmJson.Connection)!;
         Assert.Equal(LlmTransport.XaiResponses, connection.Transport);
-        // The payload's Xai and ChatCompletions members name removed settings; the reader skips them.
-        Assert.Equal("https://api.x.ai/v1", connection.Endpoint);
+        Assert.Equal(XaiRegion.UnitedStates, connection.Xai!.Region);
+        Assert.Equal(4, connection.Xai.MultiAgent!.AgentCount);
         Assert.Equal(InferenceSupport.Unsupported, connection.CapabilityOverrides!.SupportsTemperature);
         Assert.Equal(InferenceSupport.Unsupported, connection.ModelCapabilityOverrides["grok-4"].SupportsSeed);
     }

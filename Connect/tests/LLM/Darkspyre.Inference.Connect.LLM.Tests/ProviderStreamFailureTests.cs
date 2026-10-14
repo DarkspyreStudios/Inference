@@ -67,10 +67,10 @@ public sealed class ProviderStreamFailureTests
         using var handler = new ResponseHandler(body);
         var services = new ServiceCollection();
         services.AddLlmConnect();
-        services.AddHttpClient("OpenAiEmbeddingClient").ConfigurePrimaryHttpMessageHandler(() => handler);
+        services.AddHttpClient("XaiMediaDownloadClient").ConfigurePrimaryHttpMessageHandler(() => handler);
         ServiceProvider container = services.BuildServiceProvider();
         SdkHttpGenerationPool pool = container.GetRequiredService<SdkHttpGenerationPool>();
-        using HttpClient client = pool.CreateClient("OpenAiEmbeddingClient");
+        using HttpClient client = pool.CreateClient("XaiMediaDownloadClient");
         Assert.NotSame(pool, container.GetRequiredService<IHttpClientFactory>());
         using HttpResponseMessage response = await client.GetAsync("https://media.example.test/video", HttpCompletionOption.ResponseHeadersRead);
         try
@@ -82,7 +82,7 @@ public sealed class ProviderStreamFailureTests
             Task repeated = pool.DisposeAsync().AsTask();
             Assert.False(retirement.IsCompleted);
             Assert.False(repeated.IsCompleted);
-            Assert.Throws<ObjectDisposedException>(() => pool.CreateClient("OpenAiEmbeddingClient"));
+            Assert.Throws<ObjectDisposedException>(() => pool.CreateClient("XaiMediaDownloadClient"));
             Assert.Equal(0, handler.Disposals);
             Exception? responseCleanup = Record.Exception(response.Dispose);
             if (refuseCleanup) Assert.Same(body.Failure, responseCleanup);
