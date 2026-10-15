@@ -5209,7 +5209,7 @@ per open session, with an open standard input and one output reader.
   enforce host roots, network, approval or background limits. The working directory is the process
   working directory; it is not a filesystem boundary. `Ephemeral = true` is rejected: AGY persists every
   conversation.
-- Start waits up to 15 seconds for the CLI handshake and returns its conversation ID as both
+- Start waits up to 60 seconds for the CLI handshake and returns its conversation ID as both
   `ThreadId` and `SessionId`. No hidden prompt is sent.
 - `ResumeSessionAsync` passes that exact ID with `--conversation` and fails if the handshake reports
   another. Resume without `Runtime` fails, so the host must supply its stored working directory and

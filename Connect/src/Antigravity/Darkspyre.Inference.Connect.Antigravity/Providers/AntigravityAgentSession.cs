@@ -22,7 +22,8 @@ internal sealed record AntigravityLaunch(string? ModelId, LlmReasoningLevel? Eff
 /// </summary>
 internal sealed class AntigravityAgentSession : ILlmAgentSession
 {
-    internal static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(15);
+    /// <summary>Twice the slowest startup handshake measured on AGY 1.3.2 (29 seconds; most starts take about 5).</summary>
+    internal static readonly TimeSpan HandshakeTimeout = TimeSpan.FromSeconds(60);
 
     private static readonly TimeSpan ReopenExitTimeout = TimeSpan.FromSeconds(10);
 
