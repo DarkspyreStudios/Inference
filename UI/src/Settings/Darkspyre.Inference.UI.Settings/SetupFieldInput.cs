@@ -22,6 +22,7 @@ public sealed class SetupFieldInput : UserControl
     private readonly InferenceSettings settings;
     private readonly SetupEditorInputState inputs;
     private readonly Func<SetupEditResult, Task> edited;
+    private readonly Func<SetupFieldInput, Task>? chosen;
     private readonly bool sensitiveInput;
     private readonly CancellationTokenSource lifetime = new();
     private readonly TextBlock error = Text(string.Empty, "inference-settings-field-error");
@@ -45,6 +46,7 @@ public sealed class SetupFieldInput : UserControl
     private TextBox? search;
     private TextBox? secret;
     private StackPanel? choiceActions;
+    private WrapPanel? packCards;
     private TextBlock? choiceStatus;
     private TextBlock? secretState;
     private Button? browse;
@@ -68,8 +70,10 @@ public sealed class SetupFieldInput : UserControl
     /// <param name="inputs">The editor's typed input, kept across steps.</param>
     /// <param name="edited">Receives the result after each edit is applied to the field.</param>
     /// <param name="sensitiveInput">True masks a text field's input and keeps the typed text when the field is redrawn.</param>
+    /// <param name="chosen">Receives the input after a choice is picked from the list, or typed and committed, and applied.
+    /// Text typed into the manual box applies on each change and does not count as a choice.</param>
     internal SetupFieldInput(SetupField field, InferenceSettings settings, IInferenceSettingsManager manager, IInferenceSettingsInteractionHost host,
-        SetupEditorInputState inputs, Func<SetupEditResult, Task> edited, bool sensitiveInput = false)
+        SetupEditorInputState inputs, Func<SetupEditResult, Task> edited, bool sensitiveInput = false, Func<SetupFieldInput, Task>? chosen = null)
     {
         this.field = field;
         this.settings = settings;
@@ -77,6 +81,7 @@ public sealed class SetupFieldInput : UserControl
         this.host = host;
         this.inputs = inputs;
         this.edited = edited;
+        this.chosen = chosen;
         this.sensitiveInput = sensitiveInput;
         this.error.IsVisible = false;
         this.Classes.Add("inference-settings-field");
@@ -275,7 +280,7 @@ public sealed class SetupFieldInput : UserControl
             this.fixedChoices.SelectionChanged += (_, _) =>
             {
                 if (!this.syncing && this.fixedChoices.SelectedItem is SetupChoice picked && picked.Value != this.Value && this.field is SetupChoiceField current)
-                    _ = this.SetChoiceAsync(current, picked.Value);
+                    _ = this.ChooseAsync(current, picked.Value);
             };
             layout.Children.Add(this.fixedChoices);
         }
@@ -294,14 +299,14 @@ public sealed class SetupFieldInput : UserControl
             this.openChoices.SelectionChanged += (_, _) =>
             {
                 if (!this.syncing && this.openChoices.SelectedItem is SetupChoice picked && picked.Value != this.Value && this.field is SetupChoiceField current)
-                    _ = this.SetChoiceAsync(current, picked.Value);
+                    _ = this.ChooseAsync(current, picked.Value);
             };
             // A value typed by hand is taken when the person leaves the box or presses Enter.
             void Commit()
             {
                 if (this.syncing || this.field is not SetupChoiceField { AllowsManualEntry: true } current) return;
                 string typed = this.openChoices.Text ?? string.Empty;
-                if (typed != this.Value) _ = this.SetChoiceAsync(current, typed);
+                if (typed != this.Value) _ = this.ChooseAsync(current, typed);
             }
             this.openChoices.LostFocus += (_, _) => Commit();
             this.openChoices.AddHandler(KeyDownEvent, (_, args) =>
@@ -321,6 +326,11 @@ public sealed class SetupFieldInput : UserControl
                 layout.Children.Add(this.manualChoice);
             }
         }
+        // Model packs show as cards in place of the list once every loaded choice has local files.
+        this.packCards = new WrapPanel { ItemSpacing = 12, LineSpacing = 12, IsVisible = false };
+        this.packCards.Classes.Add("inference-model-pack-cards");
+        Avalonia.Automation.AutomationProperties.SetName(this.packCards, choice.Description.DisplayName);
+        layout.Children.Add(this.packCards);
         this.choiceActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         this.choiceActions.Classes.Add("inference-settings-choice-actions");
         layout.Children.Add(this.choiceActions);
@@ -451,18 +461,20 @@ public sealed class SetupFieldInput : UserControl
     private void RenderChoice(SetupChoiceField choice, bool unavailable)
     {
         string shown = choice.ShowValue ? this.Value : string.Empty;
+        bool cards = this.choices.Count > 0 && this.choices.All(option => option.Install is not null);
         if (this.fixedChoices is { } list)
         {
             if (!ReferenceEquals(list.ItemsSource, this.choices)) list.ItemsSource = this.choices;
             list.SelectedItem = this.choices.FirstOrDefault(option => option.Value == shown);
             list.IsEnabled = !unavailable;
+            list.IsVisible = !cards;
         }
         if (this.openChoices is { } open)
         {
             if (!ReferenceEquals(open.ItemsSource, this.choices)) open.ItemsSource = this.choices;
             if (open.Text != shown && !open.IsKeyboardFocusWithin) open.Text = shown;
             open.IsEnabled = !unavailable;
-            open.IsVisible = this.choices.Count > 0 || !choice.AllowsManualEntry;
+            open.IsVisible = !cards && (this.choices.Count > 0 || !choice.AllowsManualEntry);
         }
         if (this.manualChoice is { } manual)
         {
@@ -473,7 +485,20 @@ public sealed class SetupFieldInput : UserControl
         if (this.search is { } box)
         {
             box.IsEnabled = !unavailable;
-            ((Control)box.Parent!).IsVisible = this.continuation is not null || (box.Text?.Length ?? 0) > 0;
+            ((Control)box.Parent!).IsVisible = !cards && (this.continuation is not null || (box.Text?.Length ?? 0) > 0);
+        }
+        this.packCards!.Children.Clear();
+        this.packCards.IsVisible = cards;
+        if (cards)
+        {
+            foreach (SetupChoice option in this.choices)
+            {
+                ModelPackCard card = new(option, option.Value == shown, () =>
+                {
+                    if (!this.Unavailable && option.Value != this.Value && this.field is SetupChoiceField current) _ = this.ChooseAsync(current, option.Value);
+                }) { IsEnabled = !unavailable };
+                this.packCards.Children.Add(card);
+            }
         }
         this.choiceActions!.Children.Clear();
         if (choice.Capabilities.SupportsRefresh != InferenceSupport.Unsupported)
@@ -493,18 +518,21 @@ public sealed class SetupFieldInput : UserControl
         this.choiceStatus.IsVisible = status is not null;
     }
 
-    // An option with local files shows whether they are installed and, when not, its download size.
+    // An option with local files shows whether they are installed and, when not, its download size. Its tags show as chips,
+    // and its description as a line under the name.
     private static StackPanel ChoiceView(SetupChoice? option)
     {
         StackPanel line = new() { Spacing = 2 };
         if (option is null) return line;
-        StackPanel head = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
+        WrapPanel head = new() { ItemSpacing = 8, LineSpacing = 4 };
         head.Children.Add(new TextBlock { Text = option.DisplayName, VerticalAlignment = VerticalAlignment.Center });
         if (option.Install is { } install)
             head.Children.Add(new SetupInstallChip(install.IsInstalled ? SetupInstallState.Installed : SetupInstallState.NotDownloaded,
                 install.IsInstalled ? "Installed" : $"Not downloaded · {SetupByteSize.Format(install.Size)}"));
+        foreach (string tag in option.Tags) head.Children.Add(InferenceSettingsEditor.Chip(tag, null));
         line.Children.Add(head);
         if (option.DisplayName != option.Value) line.Children.Add(Text(option.Value, "inference-settings-choice-value"));
+        if (!string.IsNullOrWhiteSpace(option.Description)) line.Children.Add(Text(option.Description, "inference-settings-help"));
         return line;
     }
 
@@ -562,6 +590,13 @@ public sealed class SetupFieldInput : UserControl
     {
         this.Value = value;
         return this.ApplyAsync(current.SetValue(value));
+    }
+
+    // A choice picked from the list, or typed and committed: applied, then reported as chosen.
+    private async Task ChooseAsync(SetupChoiceField current, string value)
+    {
+        await this.SetChoiceAsync(current, value);
+        if (!this.disposed && !this.Input.Pending && this.chosen is { } report) await report(this);
     }
 
     private Task SetUriAsync(SetupUriField current, string value)

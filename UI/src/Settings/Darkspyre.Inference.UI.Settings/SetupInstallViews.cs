@@ -48,9 +48,15 @@ public sealed class SetupInstallChip : ContentControl
 /// <summary>The selected model's install state under its choice, with the actions that change it.</summary>
 public sealed class SetupInstallStatusCard : UserControl
 {
-    /// <summary>Creates the card for <paramref name="status"/>, named <paramref name="label"/>; <paramref name="run"/> runs an action its buttons name.</summary>
-    public SetupInstallStatusCard(SetupInstallStatus status, string label, bool disabled, Func<SetupActionDescriptor, Task> run)
+    /// <summary>
+    /// Creates the card for <paramref name="status"/>, named <paramref name="label"/>; <paramref name="run"/> runs an action its buttons
+    /// name, and <paramref name="reveal"/> shows the store folder of an installed model in the file manager.
+    /// </summary>
+    public SetupInstallStatusCard(SetupInstallStatus status, string label, bool disabled, Func<SetupActionDescriptor, Task> run,
+        Func<string, Task> reveal)
     {
+        ArgumentNullException.ThrowIfNull(status);
+        ArgumentNullException.ThrowIfNull(reveal);
         StackPanel body = new() { Spacing = 8 };
         TextBlock title = new() { Text = status.Name, FontWeight = FontWeight.SemiBold };
         body.Children.Add(title);
@@ -59,7 +65,12 @@ public sealed class SetupInstallStatusCard : UserControl
             case SetupInstallState.Installed:
                 body.Children.Add(new SetupInstallChip(SetupInstallState.Installed, $"Installed in {status.Location}"));
                 string files = status.FileCount == 1 ? "1 file" : $"{status.FileCount} files";
-                body.Children.Add(Text($"Ready to load. {files}, {SetupByteSize.Format(status.Size)}, {status.License}.", "inference-install-card-detail"));
+                WrapPanel detail = new() { ItemSpacing = 12, LineSpacing = 6 };
+                detail.Children.Add(Text($"Ready to load. {files}, {SetupByteSize.Format(status.Size)}, {status.License}.", "inference-install-card-detail"));
+                Button show = InferenceSettingsEditor.Button("Show", "ghost", () => reveal(status.Location));
+                Avalonia.Automation.AutomationProperties.SetName(show, "Show the model folder");
+                detail.Children.Add(show);
+                body.Children.Add(detail);
                 break;
             case SetupInstallState.NotDownloaded:
                 body.Children.Add(new SetupInstallChip(SetupInstallState.NotDownloaded, "Not downloaded"));
@@ -78,6 +89,8 @@ public sealed class SetupInstallStatusCard : UserControl
                 Button button = InferenceSettingsEditor.Button(action.DisplayName, "outline", () => run(action));
                 button.IsEnabled = !disabled && action.IsEnabled;
                 actions.Children.Add(button);
+                if (!action.IsEnabled && !string.IsNullOrWhiteSpace(action.UnavailableReason))
+                    actions.Children.Add(Text(action.UnavailableReason, "inference-install-card-detail"));
             }
             body.Children.Add(actions);
         }

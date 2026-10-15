@@ -37,19 +37,63 @@ the dialog and refresh its own list. Closing without Save discards the object. T
 When the manager implements `IInferenceSettingsStatusSource`, the editor listens to `StatusChanged`
 while it is shown. After each refresh it renders the new status and reloads its choice fields, so
 install chips follow the change.
-The status line shows only the applicable `SetupStatus` observations and is absent when none
-applies. The **Authentication checked** label renders the actual authentication observation as
-Unknown, Stale, Yes or No; stored sign-in configuration or a successful Save does not establish a
-fresh check.
+The status line shows each applicable `SetupStatus` observation as a chip and is absent when none
+applies: "Signed in", "Not signed in" or "Sign-in not checked", and the same for Configured,
+Installed, Verified, Loaded and Ready. A stale observation reads as not checked; stored sign-in
+configuration or a successful Save does not establish a fresh check. Action and save results read
+as sentences, never as enum names.
 A `SetupInstallStatusField` renders as a status card under the choice it follows: Installed in the
-store, with the file count, size and licence; Not downloaded, with a Download button; or Files
-missing, naming the missing file, with Download again and Remove. The card's buttons run through
-the manager like any other action, with the editor's progress and Cancel. A choice whose
-`SetupChoice.Install` is set shows a chip: "Installed", or "Not downloaded" with its download size.
-Only an Installed chip carries a check mark. A `SetupChoiceField` with `ShowValue` false keeps its
-value but renders no selection; the status card shows the value instead.
+store, with the file count, size and licence and a **Show** button that calls the host's
+`RevealFolderAsync` with the store folder; Not downloaded, with a Download button; or Files missing,
+naming the missing file, with Download again and Delete download. A disabled card action shows its
+reason beside it. The card's buttons run through the manager like any other action, with the
+editor's progress and Cancel. A choice whose `SetupChoice.Install` is set shows a chip: "Installed",
+or "Not downloaded" with its download size. Only an Installed chip carries a check mark. When every
+loaded choice of a field carries `Install`, the field shows the choices as model pack cards in place
+of the list: name, download size and install state, chosen on click. A `SetupChoiceField` with
+`ShowValue` false keeps its value but renders no selection, and no card shows as selected; the
+status card shows the value instead. A choice's `Tags` show as chips beside its name, and its
+description as a line under it.
 `IntroContent` and `SupplementaryContent` accept optional host guidance without changing the
-provider-owned fields or actions.
+provider-owned fields or actions. `MoreOptionsContent` is host content drawn on the first step: at
+the end of its advanced section titled "More options", or in a "More options" expander of its own
+when the step has none.
+
+## Step actions, the tool checklist and the model test
+
+The tail under a step draws the actions the step names in `SetupStep.ActionIds`, in that order.
+When no step of the settings names any action, every action shows on every step. The first of
+several steps is the connection step: its instructions show under "About this connection", and its
+troubleshooting text only when the person opens "Trouble signing in?".
+
+A step that names a `CheckPrerequisites` action, in settings whose `Status.Installed` applies, shows
+a checklist above its actions. The first item reads "✓ Installed: <executable>" once the check has
+found the tool, "Not installed" when it has not, and "Not checked yet" while the observation is
+unknown or stale; a missing tool's prerequisite shows as an interaction. The second item reads
+"✓ Signed in", or offers the step's sign-in action. A step with no sign-in action offers the
+prerequisite instructions with their recheck instead. The tail leaves out the actions the checklist
+draws. The editor runs the check once when such a step is first shown, and again after a sign-in
+completes.
+
+On a step whose `ActionIds` contains `test`, choosing a model from the `model` field's list, or
+typing one and pressing Enter or leaving the box, runs the test. Text typed into the manual box,
+which shows while no choice is listed, applies on each change and starts no test. A test result
+shows "Test reply received in 1.4 s", the result's `Message`, and a **Test again** button.
+
+## Editing an existing connection
+
+`ConnectionTabs` shows a connection's settings on two tabs, "Connection" and "Model", one per step;
+each step's own title is its heading, and no step list or Back and Next buttons show. One editor
+serves both tabs, so typed input and a sign-in in progress carry across them. Its
+`MoreOptionsContent` goes to the Connection tab. The host frames the tabs with the connection's name
+and saves through `SaveAsync`; `CommitCompleted` reports the result. A refused save selects the tab
+with the problem.
+
+## Showing a folder
+
+`IInferenceSettingsInteractionHost.RevealFolderAsync(folder, token)` shows a folder in the platform's
+file manager. The install card's **Show** button calls it with the model store folder; an exception
+shows its message as the action result.
 
 ## Optional native path selection
 

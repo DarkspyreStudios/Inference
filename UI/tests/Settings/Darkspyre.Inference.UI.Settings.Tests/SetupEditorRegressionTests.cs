@@ -379,5 +379,6 @@ public sealed class SetupEditorRegressionTests
             IProgress<SetupProgress> progress, CancellationToken cancellationToken = default) =>
             manager.RunAsync(settings, action.Id, progress, cancellationToken);
         public ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+        public Task RevealFolderAsync(string folder, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

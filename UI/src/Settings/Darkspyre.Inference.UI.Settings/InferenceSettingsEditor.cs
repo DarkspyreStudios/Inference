@@ -32,7 +32,11 @@ public sealed class InferenceSettingsEditor : UserControl
     private string? copiedCode;
     private string? copyStatus;
     private SetupActionResult? actionResult;
+    // The action whose result the tail shows, or null for a result no action produced.
+    private SetupActionDescriptor? resultAction;
     private SetupCommitResult? commitResult;
+    // Steps whose checklist has run its automatic check.
+    private readonly HashSet<string> checkedSteps = new(StringComparer.Ordinal);
     private CancellationTokenSource? actionCancellation;
     private SetupValidation validation = SetupValidation.Valid;
     private bool attached;
@@ -80,6 +84,18 @@ public sealed class InferenceSettingsEditor : UserControl
     /// <summary>Host content shown below the current step and above the issue list.</summary>
     public Control? SupplementaryContent { get; init; }
 
+    /// <summary>
+    /// Host content drawn on the first step: at the end of its advanced section titled "More options", or in a
+    /// "More options" expander of its own when the step has none.
+    /// </summary>
+    public Control? MoreOptionsContent { get; init; }
+
+    /// <summary>
+    /// False hides the step list and the Back and Next buttons and shows the current step's title as its heading;
+    /// <see cref="ShowStep"/> chooses the step. <see cref="ConnectionTabs"/> uses this for its tabs.
+    /// </summary>
+    internal bool StepNavigation { get; init; } = true;
+
     /// <summary>Raised after Save. A Committed result means the host closes the dialog.</summary>
     public event EventHandler<SetupCommitResult>? CommitCompleted;
 
@@ -95,6 +111,16 @@ public sealed class InferenceSettingsEditor : UserControl
     private bool Busy => this.running || this.saving || this.settings.IsSaved;
 
     private IReadOnlyList<SetupStep> Steps => this.settings.Steps;
+
+    /// <summary>The index of the step the editor shows.</summary>
+    internal int CurrentStepIndex => this.stepIndex;
+
+    /// <summary>Shows the step at <paramref name="index"/>, as a tab does.</summary>
+    internal void ShowStep(int index)
+    {
+        this.stepIndex = Math.Clamp(index, 0, Math.Max(0, this.Steps.Count - 1));
+        this.Changed();
+    }
 
     private SetupStep? CurrentStep => this.stepIndex < this.Steps.Count ? this.Steps[this.stepIndex] : null;
 
@@ -221,15 +247,15 @@ public sealed class InferenceSettingsEditor : UserControl
             Detach(intro);
             head.Children.Add(intro);
         }
-        (string Label, SetupObservation Observation)[] status = [.. this.StatusItems()];
+        (string Text, bool? Value)[] status = [.. this.StatusChips()];
         if (status.Length > 0)
         {
-            WrapPanel line = new() { ItemSpacing = 12, LineSpacing = 6 };
+            WrapPanel line = new() { ItemSpacing = 8, LineSpacing = 6 };
             line.Classes.Add("inference-settings-status");
-            foreach ((string label, SetupObservation observation) in status) line.Children.Add(new TextBlock { Text = $"{label}: {Describe(observation)}" });
+            foreach ((string text, bool? value) in status) line.Children.Add(Chip(text, value switch { true => "success", false => "warning", _ => null }));
             head.Children.Add(line);
         }
-        if (this.Steps.Count > 1)
+        if (this.StepNavigation && this.Steps.Count > 1)
         {
             WrapPanel steps = new() { ItemSpacing = 12, LineSpacing = 6 };
             steps.Classes.Add("inference-settings-steps");
@@ -251,10 +277,21 @@ public sealed class InferenceSettingsEditor : UserControl
         foreach (SetupIssue issue in issues) list.Children.Add(SetupFieldInput.Text(issue.Message));
         this.issuesRegion.Content = list;
         this.issuesRegion.IsVisible = issues.Length > 0;
+        SetupStep? step = this.CurrentStep;
+        bool checklist = this.ShowsChecklist(step);
+        SetupActionDescriptor[] stepActions = [.. this.StepActions(step)];
+        SetupActionDescriptor? signIn = stepActions.FirstOrDefault(action => action.Purpose == SetupActionPurpose.Authenticate);
+        // The checklist draws the prerequisite itself when the step has no sign-in action of its own.
+        bool prerequisiteInChecklist = checklist && signIn is null && this.settings.Interaction is SetupExternalPrerequisite;
         this.RenderInteraction();
-        this.interactionRegion.IsVisible = this.settings.Interaction is not null;
+        this.interactionRegion.IsVisible = this.settings.Interaction is not null && !prerequisiteInChecklist;
         StackPanel tail = new() { Spacing = 24 };
-        if (this.settings.Actions.Count > 0) tail.Children.Add(this.Actions());
+        if (checklist) tail.Children.Add(this.Checklist(step!, stepActions, signIn));
+        // The checklist draws its sign-in action, and for a step without one its check; a test with a shown result offers "Test again".
+        SetupActionDescriptor[] tailActions = [.. stepActions.Where(action => !(checklist && (action.Purpose == SetupActionPurpose.Authenticate
+            || signIn is null && action.Purpose == SetupActionPurpose.CheckPrerequisites))
+            && !(this.actionResult is not null && this.resultAction?.Id == action.Id && action.Purpose == SetupActionPurpose.Test))];
+        if (tailActions.Length > 0) tail.Children.Add(this.Actions(tailActions));
         if (this.progress is { } current)
             tail.Children.Add(SetupFieldInput.Text($"{current.Stage}: {current.Message}" + (current.Total is > 0 ? $" ({current.Completed} / {current.Total})" : string.Empty),
                 "inference-settings-progress"));
@@ -268,17 +305,18 @@ public sealed class InferenceSettingsEditor : UserControl
             cancel.HorizontalAlignment = HorizontalAlignment.Left;
             tail.Children.Add(cancel);
         }
-        if (this.actionResult is { } action) tail.Children.Add(SetupFieldInput.Text(action.Issues is { Count: > 0 } failed ? failed[0].Message : action.State.ToString()));
-        if (this.commitResult is { } commit) tail.Children.Add(SetupFieldInput.Text(commit.Issues is { Count: > 0 } refused ? refused[0].Message : commit.State.ToString()));
+        if (this.actionResult is { } action) tail.Children.Add(this.Result(action));
+        if (this.commitResult is { } commit) tail.Children.Add(SetupFieldInput.Text(commit.Issues is { Count: > 0 } refused ? refused[0].Message : Describe(commit.State)));
         WrapPanel navigation = new() { ItemSpacing = 12, LineSpacing = 8 };
         navigation.Classes.Add("inference-settings-navigation");
-        if (this.stepIndex > 0) navigation.Children.Add(Enabled(Button("Back", "ghost", this.PreviousStep), !this.Busy));
-        if (this.stepIndex < this.Steps.Count - 1) navigation.Children.Add(Enabled(Button("Next", "primary", this.NextStep), !this.Busy));
+        if (this.StepNavigation && this.stepIndex > 0) navigation.Children.Add(Enabled(Button("Back", "ghost", this.PreviousStep), !this.Busy));
+        if (this.StepNavigation && this.stepIndex < this.Steps.Count - 1) navigation.Children.Add(Enabled(Button("Next", "primary", this.NextStep), !this.Busy));
         if (this.ShowSaveButton && this.stepIndex >= this.Steps.Count - 1)
             navigation.Children.Add(Enabled(Button("Save settings", "primary", async () => await this.SaveAsync()), this.State.CanSave));
         if (navigation.Children.Count > 0) tail.Children.Add(navigation);
         this.tailRegion.Content = tail;
         this.tailRegion.IsVisible = tail.Children.Count > 0;
+        if (checklist && this.attached && !this.Busy && this.checkedSteps.Add(step!.Id)) this.RunCheckLater(stepActions);
     }
 
     // The step is rebuilt only when its shape changes: another step, or other visible fields. Otherwise each field
@@ -343,10 +381,19 @@ public sealed class InferenceSettingsEditor : UserControl
     {
         StackPanel view = new() { Spacing = 12 };
         view.Classes.Add("inference-settings-step");
-        // The step list above names and marks the current step; a single step has no list.
-        if (this.Steps.Count <= 1) view.Children.Add(SetupFieldInput.Text(step.Title, "h3"));
-        if (!string.IsNullOrWhiteSpace(step.Instructions)) view.Children.Add(SetupFieldInput.Text(step.Instructions));
+        // The step list above names and marks the current step; a single step, or a step shown as a tab, has no list.
+        if (this.Steps.Count <= 1 || !this.StepNavigation) view.Children.Add(SetupFieldInput.Text(step.Title, "h3"));
+        // The first of several steps is the connection step: its instructions say what the connection is.
+        bool connection = this.stepIndex == 0 && this.Steps.Count > 1;
+        if (!string.IsNullOrWhiteSpace(step.Instructions))
+        {
+            if (connection) view.Children.Add(SetupFieldInput.Text("About this connection", "h4"));
+            view.Children.Add(SetupFieldInput.Text(step.Instructions));
+        }
         if (step.HasPlatformInstructions) view.Children.Add(SetupFieldInput.Text(step.PlatformInstructions));
+        Control? moreOptions = this.stepIndex == 0 ? this.MoreOptionsContent : null;
+        if (moreOptions is not null) Detach(moreOptions);
+        bool moreOptionsPlaced = false;
         foreach (SetupSection section in step.Sections)
         {
             StackPanel body = new() { Spacing = 14 };
@@ -354,13 +401,12 @@ public sealed class InferenceSettingsEditor : UserControl
             foreach (SetupField field in section.Fields.Where(value => value.Description.IsVisible)) body.Children.Add(this.Field(field, live));
             if (section.IsAdvanced)
             {
-                string key = step.Id + "/" + section.Title;
-                Expander advanced = new() { Header = section.Title, Content = body, HorizontalAlignment = HorizontalAlignment.Stretch };
-                advanced.IsExpanded = this.openSections.Contains(key) || this.HasErrors(section);
-                advanced.Expanded += (_, _) => this.openSections.Add(key);
-                advanced.Collapsed += (_, _) => this.openSections.Remove(key);
-                advanced.Classes.Add("inference-settings-section");
-                view.Children.Add(advanced);
+                if (moreOptions is not null && section.Title == MoreOptionsTitle)
+                {
+                    body.Children.Add(moreOptions);
+                    moreOptionsPlaced = true;
+                }
+                view.Children.Add(this.Advanced(step.Id + "/" + section.Title, section.Title, body, this.HasErrors(section)));
             }
             else
             {
@@ -372,20 +418,45 @@ public sealed class InferenceSettingsEditor : UserControl
                 view.Children.Add(group);
             }
         }
+        if (moreOptions is not null && !moreOptionsPlaced)
+        {
+            StackPanel body = new() { Spacing = 14 };
+            body.Classes.Add("inference-settings-fields");
+            body.Children.Add(moreOptions);
+            view.Children.Add(this.Advanced(step.Id + "/" + MoreOptionsTitle, MoreOptionsTitle, body, false));
+        }
         if (step.HasCompletionRequirement) view.Children.Add(SetupFieldInput.Text(step.CompletionRequirement));
-        if (step.HasTroubleshooting) view.Children.Add(SetupFieldInput.Text(step.Troubleshooting));
+        if (step.HasTroubleshooting)
+        {
+            // The connection step's troubleshooting shows only when asked.
+            if (connection) view.Children.Add(this.Advanced(step.Id + "/troubleshooting", "Trouble signing in?", SetupFieldInput.Text(step.Troubleshooting), false));
+            else view.Children.Add(SetupFieldInput.Text(step.Troubleshooting));
+        }
         return view;
+    }
+
+    private const string MoreOptionsTitle = "More options";
+
+    // A collapsed section that stays open across redraws once the person opens it, and opens itself for an error.
+    private Expander Advanced(string key, string title, Control body, bool hasErrors)
+    {
+        Expander advanced = new() { Header = title, Content = body, HorizontalAlignment = HorizontalAlignment.Stretch };
+        advanced.IsExpanded = this.openSections.Contains(key) || hasErrors;
+        advanced.Expanded += (_, _) => this.openSections.Add(key);
+        advanced.Collapsed += (_, _) => this.openSections.Remove(key);
+        advanced.Classes.Add("inference-settings-section");
+        return advanced;
     }
 
     // An install status field shows as its card; every other field shows its input.
     private Control Field(SetupField field, HashSet<string> live)
     {
         if (field is SetupInstallStatusField install)
-            return new SetupInstallStatusCard(install.Status, install.Description.DisplayName, this.Busy, this.RunActionAsync);
+            return new SetupInstallStatusCard(install.Status, install.Description.DisplayName, this.Busy, this.RunActionAsync, this.RevealAsync);
         string id = field.Description.Id;
         live.Add(id);
         if (!this.fields.TryGetValue(id, out SetupFieldInput? view))
-            this.fields[id] = view = new SetupFieldInput(field, this.settings, this.manager, this.host, this.inputs, this.OnFieldEditedAsync);
+            this.fields[id] = view = new SetupFieldInput(field, this.settings, this.manager, this.host, this.inputs, this.OnFieldEditedAsync, chosen: this.OnChoiceChosenAsync);
         Detach(view);
         view.Update(field, this.editVersion, this.AllIssues, this.Busy);
         return view;
@@ -437,12 +508,12 @@ public sealed class InferenceSettingsEditor : UserControl
         return view;
     }
 
-    private StackPanel Actions()
+    private StackPanel Actions(IEnumerable<SetupActionDescriptor> actions)
     {
         StackPanel view = new() { Spacing = 8 };
         view.Classes.Add("inference-settings-actions");
         Avalonia.Automation.AutomationProperties.SetName(view, "Provider actions");
-        foreach (SetupActionDescriptor action in this.settings.Actions)
+        foreach (SetupActionDescriptor action in actions)
         {
             WrapPanel row = new() { ItemSpacing = 12, LineSpacing = 6 };
             row.Children.Add(Enabled(Button(action.DisplayName, "outline", () => this.RunActionAsync(action)), !this.Busy && action.IsEnabled));
@@ -452,6 +523,110 @@ public sealed class InferenceSettingsEditor : UserControl
             view.Children.Add(row);
         }
         return view;
+    }
+
+    // The actions the step names, in order; when no step names any action, every action shows on every step.
+    private IEnumerable<SetupActionDescriptor> StepActions(SetupStep? step)
+    {
+        IReadOnlyList<SetupActionDescriptor> actions = this.settings.Actions;
+        if (!this.Steps.Any(item => item.ActionIds.Count > 0)) return actions;
+        return step is null ? [] : step.ActionIds.Select(id => actions.FirstOrDefault(action => action.Id == id)).OfType<SetupActionDescriptor>();
+    }
+
+    // A step that checks an installed tool shows whether the tool is installed and signed in.
+    private bool ShowsChecklist(SetupStep? step) => this.settings.Status.Installed.IsApplicable
+        && this.StepActions(step).Any(action => action.Purpose == SetupActionPurpose.CheckPrerequisites);
+
+    private StackPanel Checklist(SetupStep step, SetupActionDescriptor[] stepActions, SetupActionDescriptor? signIn)
+    {
+        StackPanel view = new() { Spacing = 8 };
+        view.Classes.Add("inference-settings-checklist");
+        Avalonia.Automation.AutomationProperties.SetName(view, "Setup checklist");
+        SetupStatus status = this.settings.Status;
+        SetupExecutableField? executable = step.Sections.SelectMany(section => section.Fields).SelectMany(SetupEditorInputState.Flatten)
+            .OfType<SetupExecutableField>().FirstOrDefault();
+        string tool = executable is null ? string.Empty
+            : string.IsNullOrWhiteSpace(executable.Value.Value) ? executable.DefaultValue.Value : executable.Value.Value;
+        view.Children.Add(SetupFieldInput.Text(Known(status.Installed) switch
+        {
+            true => $"✓ Installed: {tool}",
+            false => "Not installed",
+            null => "Not checked yet",
+        }, "inference-settings-checklist-item"));
+        if (Known(status.Authenticated) == true) view.Children.Add(SetupFieldInput.Text("✓ Signed in", "inference-settings-checklist-item"));
+        else if (signIn is not null)
+        {
+            Button button = Enabled(Button(signIn.DisplayName, "primary", () => this.RunActionAsync(signIn)), !this.Busy && signIn.IsEnabled);
+            button.HorizontalAlignment = HorizontalAlignment.Left;
+            view.Children.Add(button);
+        }
+        else if (this.settings.Interaction is SetupExternalPrerequisite prerequisite)
+        {
+            view.Children.Add(SetupFieldInput.Text(prerequisite.Instructions));
+            Button again = Enabled(Button("Check again", "primary", () => this.RunActionAsync(prerequisite.Recheck)), !this.Busy);
+            again.HorizontalAlignment = HorizontalAlignment.Left;
+            view.Children.Add(again);
+        }
+        else if (stepActions.FirstOrDefault(action => action.Purpose == SetupActionPurpose.CheckPrerequisites) is { } check)
+        {
+            Button button = Enabled(Button(check.DisplayName, "outline", () => this.RunActionAsync(check)), !this.Busy && check.IsEnabled);
+            button.HorizontalAlignment = HorizontalAlignment.Left;
+            view.Children.Add(button);
+        }
+        return view;
+    }
+
+    // A fresh observed value, or null while it is unknown or stale.
+    private static bool? Known(SetupObservation observation) => observation.IsStale ? null : observation.Value;
+
+    // Runs the step's check after the current redraw, as when a checklist step is first shown or a sign-in completes.
+    private void RunCheckLater(IEnumerable<SetupActionDescriptor> stepActions)
+    {
+        if (stepActions.FirstOrDefault(action => action.Purpose == SetupActionPurpose.CheckPrerequisites) is not { IsEnabled: true } check) return;
+        Dispatcher.UIThread.Post(async () =>
+        {
+            if (!this.closed && !this.Busy) await this.RunActionAsync(check);
+        });
+    }
+
+    // Choosing a model on a step that tests runs the test, so the person sees a reply without another click.
+    private async Task OnChoiceChosenAsync(SetupFieldInput view)
+    {
+        if (this.closed || this.Busy || view.Field.Description.Id != "model" || this.CurrentStep is not { } step
+            || !step.ActionIds.Contains("test")) return;
+        if (this.settings.Actions.FirstOrDefault(action => action.Id == "test") is { IsEnabled: true } test) await this.RunActionAsync(test);
+    }
+
+    private StackPanel Result(SetupActionResult result)
+    {
+        StackPanel view = new() { Spacing = 8 };
+        view.Classes.Add("inference-settings-result");
+        bool test = this.resultAction?.Purpose == SetupActionPurpose.Test;
+        if (result.Issues is { Count: > 0 } failed) view.Children.Add(SetupFieldInput.Text(failed[0].Message));
+        else if (test && result.State == SetupActionState.Completed && result.Elapsed is { } elapsed)
+            view.Children.Add(SetupFieldInput.Text(string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                $"Test reply received in {elapsed.TotalSeconds:0.0} s"), "inference-settings-result-title"));
+        else if (result.Message is null) view.Children.Add(SetupFieldInput.Text(Describe(result.State)));
+        if (result.Message is { } message) view.Children.Add(SetupFieldInput.Text(message));
+        if (test && this.resultAction is { } again
+            && this.settings.Actions.FirstOrDefault(action => action.Id == again.Id) is { } current)
+        {
+            Button retry = Enabled(Button("Test again", "outline", () => this.RunActionAsync(current)), !this.Busy && current.IsEnabled);
+            retry.HorizontalAlignment = HorizontalAlignment.Left;
+            view.Children.Add(retry);
+        }
+        return view;
+    }
+
+    private async Task RevealAsync(string folder)
+    {
+        try { await this.host.RevealFolderAsync(folder, CancellationToken.None); }
+        catch (Exception error) when (!this.closed)
+        {
+            this.resultAction = null;
+            this.actionResult = new(SetupActionState.Failed, [new("reveal-failed", error.Message)]);
+            this.Changed();
+        }
     }
 
     private Task OnFieldEditedAsync(SetupEditResult result)
@@ -503,6 +678,7 @@ public sealed class InferenceSettingsEditor : UserControl
         this.actionCancellation = cancellation;
         this.progress = null;
         this.actionResult = null;
+        this.resultAction = action;
         this.running = true;
         this.Changed();
         Progress<SetupProgress> reported = new(value => Dispatcher.UIThread.Post(() =>
@@ -525,6 +701,10 @@ public sealed class InferenceSettingsEditor : UserControl
         this.inputs.Reconcile(this.settings);
         if (this.validation.Issues.Count > 0) this.validation = this.settings.Validate();
         this.Changed();
+        // A completed sign-in is checked again, so the checklist shows the signed-in tool.
+        if (action.Purpose is SetupActionPurpose.Authenticate or SetupActionPurpose.ContinueAuthentication
+            && this.actionResult?.State == SetupActionState.Completed && this.ShowsChecklist(this.CurrentStep))
+            this.RunCheckLater(this.StepActions(this.CurrentStep));
     }
 
     private async Task OpenBrowserAsync(Uri uri)
@@ -536,6 +716,7 @@ public sealed class InferenceSettingsEditor : UserControl
         }
         catch (Exception) when (!this.closed)
         {
+            this.resultAction = null;
             this.actionResult = new(SetupActionState.Failed);
             this.Changed();
         }
@@ -558,15 +739,53 @@ public sealed class InferenceSettingsEditor : UserControl
         this.Changed();
     }
 
-    private IEnumerable<(string Label, SetupObservation Observation)> StatusItems()
+    // Each applicable status fact as a chip: what is true, what is not, or that it is not checked.
+    private IEnumerable<(string Text, bool? Value)> StatusChips()
     {
         SetupStatus status = this.settings.Status;
-        return new[]
+        (SetupObservation Observation, string Yes, string No, string Unknown)[] facts =
+        [
+            (status.Configured, "Configured", "Not configured", "Configuration not checked"),
+            (status.Authenticated, "Signed in", "Not signed in", "Sign-in not checked"),
+            (status.Installed, "Installed", "Not installed", "Install not checked"),
+            (status.Verified, "Verified", "Not verified", "Not verified yet"),
+            (status.Loaded, "Loaded", "Not loaded", "Load state not checked"),
+            (status.Ready, "Ready", "Not ready", "Readiness not checked"),
+        ];
+        return facts.Where(fact => fact.Observation.IsApplicable).Select(fact => Known(fact.Observation) switch
         {
-            ("Configured", status.Configured), ("Authentication checked", status.Authenticated), ("Installed", status.Installed),
-            ("Verified", status.Verified), ("Loaded", status.Loaded), ("Ready", status.Ready),
-        }.Where(item => item.Item2.IsApplicable);
+            true => (fact.Yes, (bool?)true),
+            false => (fact.No, (bool?)false),
+            null => (fact.Unknown, (bool?)null),
+        });
     }
 
-    private static string Describe(SetupObservation value) => value.IsStale ? "Stale" : value.Value is null ? "Unknown" : value.Value.Value ? "Yes" : "No";
+    /// <summary>A chip in the host's badge look; <paramref name="tone"/> is success, warning or null for a neutral chip.</summary>
+    internal static ContentControl Chip(string text, string? tone)
+    {
+        ContentControl chip = new() { Content = new TextBlock { Text = text }, HorizontalAlignment = HorizontalAlignment.Left };
+        chip.Classes.Add("badge");
+        chip.Classes.Add("inference-settings-chip");
+        if (tone is not null) chip.Classes.Add(tone);
+        return chip;
+    }
+
+    private static string Describe(SetupActionState state) => state switch
+    {
+        SetupActionState.Completed => "Done.",
+        SetupActionState.NeedsInteraction => "Finish the step above to continue.",
+        SetupActionState.Failed => "That did not work. Try again.",
+        SetupActionState.Cancelled => "Cancelled.",
+        _ => "This is not available right now.",
+    };
+
+    private static string Describe(SetupCommitState state) => state switch
+    {
+        SetupCommitState.Committed => "Saved.",
+        SetupCommitState.Conflict => "These settings changed elsewhere. Close them and open them again.",
+        SetupCommitState.Invalid => "Fix the problems above, then save.",
+        SetupCommitState.Cancelled => "Not saved.",
+        SetupCommitState.Failed => "The settings could not be saved.",
+        _ => "It is not known whether the settings were saved. Open them again to check.",
+    };
 }

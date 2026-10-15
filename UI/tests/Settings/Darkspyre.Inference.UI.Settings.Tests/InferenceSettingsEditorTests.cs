@@ -24,7 +24,9 @@ public sealed class InferenceSettingsEditorTests
         Assert.Empty(EditorSession.All<TextBlock>(framed, "h2"));
         Assert.Empty(EditorSession.All<TextBlock>(framed, "inference-settings-effects"));
         Assert.NotNull(EditorSession.Button(framed, "Check connection"));
-        Assert.Contains("Configured: Yes", EditorSession.TextOf(framed), StringComparison.Ordinal);
+        // Status facts read as chips, never as enum names.
+        Assert.Equal(["Configured", "Not verified yet", "Readiness not checked"],
+            EditorSession.All<ContentControl>(framed, "inference-settings-chip").Select(chip => ((TextBlock)chip.Content!).Text));
         return Task.CompletedTask;
     });
 
@@ -64,7 +66,7 @@ public sealed class InferenceSettingsEditorTests
             case SetupInstallState.Installed:
                 Assert.Contains("Installed in /models", text, StringComparison.Ordinal);
                 Assert.Contains("Ready to load. 1 file, 465 MB, MIT.", text, StringComparison.Ordinal);
-                Assert.Empty(buttons);
+                Assert.Equal(["Show"], buttons);
                 break;
             case SetupInstallState.NotDownloaded:
                 Assert.Contains("Not downloaded", text, StringComparison.Ordinal);
@@ -74,7 +76,7 @@ public sealed class InferenceSettingsEditorTests
             default:
                 Assert.Contains("Files missing", text, StringComparison.Ordinal);
                 Assert.Contains("ggml-small.bin is missing from the model store.", text, StringComparison.Ordinal);
-                Assert.Equal(["Download again", "Remove"], buttons);
+                Assert.Equal(["Download again", "Delete download"], buttons);
                 break;
         }
         // No observation applies, so no status line.
@@ -96,20 +98,20 @@ public sealed class InferenceSettingsEditorTests
     });
 
     [Fact]
-    public Task ChoiceItemsShowInstallChipsAndFollowAStatusChange() => EditorSession.RunAsync(async () =>
+    public Task PackCardsShowSizeAndStateAndFollowAStatusChange() => EditorSession.RunAsync(async () =>
     {
         var manager = new InstallManager();
         InferenceSettingsEditor editor = ShowInstallEditor(new InstallSettings("small", SetupInstallState.Installed), manager);
-        await EditorSession.WaitForAsync(() => Choices(editor).Count == 2);
+        await EditorSession.WaitForAsync(() => Cards(editor).Length == 2);
 
-        Assert.Equal("small", Choices(editor)[0].Value);
-        Assert.True(Choices(editor).Single(choice => choice.Value == "small").Install!.IsInstalled);
-        Assert.False(Choices(editor).Single(choice => choice.Value == "tiny").Install!.IsInstalled);
+        // The cards replace the list.
+        Assert.False(Assert.Single(EditorSession.All<AutoCompleteBox>(EditorSession.Field(editor, "model"))).IsVisible);
+        Assert.Equal(["small 465 MB download Installed", "tiny 465 MB download Not downloaded"], Cards(editor).Select(card => Squash(EditorSession.TextOf(card))));
 
         manager.Next = SetupInstallState.NotDownloaded;
         manager.RaiseStatusChanged();
 
-        await EditorSession.WaitForAsync(() => Choices(editor).Count == 2 && !Choices(editor).Single(choice => choice.Value == "small").Install!.IsInstalled);
+        await EditorSession.WaitForAsync(() => Cards(editor).Length == 2 && Squash(EditorSession.TextOf(Cards(editor)[0])).EndsWith("Not downloaded", StringComparison.Ordinal));
         Assert.Equal(1, manager.RefreshCount);
     });
 
@@ -119,21 +121,27 @@ public sealed class InferenceSettingsEditorTests
     public Task AModelThatIsNotInstalledIsNeverTheShownSelection(SetupInstallState state) => EditorSession.RunAsync(async () =>
     {
         InferenceSettingsEditor editor = ShowInstallEditor(new InstallSettings("small", state), new InstallManager());
-        await EditorSession.WaitForAsync(() => Choices(editor).Count == 2);
+        await EditorSession.WaitForAsync(() => Cards(editor).Length == 2);
 
-        AutoCompleteBox model = Assert.Single(EditorSession.All<AutoCompleteBox>(EditorSession.Field(editor, "model")));
-        Assert.Equal(string.Empty, model.Text ?? string.Empty);
-        Assert.Null(model.SelectedItem);
+        Assert.Empty(EditorSession.All<Button>(editor, "inference-model-pack-card", "selected"));
         Assert.Contains("small", EditorSession.TextOf(Assert.Single(EditorSession.All<SetupInstallStatusCard>(editor))), StringComparison.Ordinal);
     });
 
     [Fact]
-    public Task AnInstalledSelectionIsTheShownChoiceValue() => EditorSession.RunAsync(async () =>
+    public Task AnInstalledSelectionIsTheSelectedCardAndAClickChoosesAnother() => EditorSession.RunAsync(async () =>
     {
-        InferenceSettingsEditor editor = ShowInstallEditor(new InstallSettings("small", SetupInstallState.Installed), new InstallManager());
-        await EditorSession.WaitForAsync(() => Choices(editor).Count == 2);
+        var settings = new InstallSettings("small", SetupInstallState.Installed);
+        var host = new FakeHost();
+        InferenceSettingsEditor editor = ShowInstallEditor(settings, new InstallManager(), host);
+        await EditorSession.WaitForAsync(() => Cards(editor).Length == 2);
+        Assert.Equal("small", Avalonia.Automation.AutomationProperties.GetName(
+            Assert.Single(EditorSession.All<Button>(editor, "inference-model-pack-card", "selected"))));
 
-        Assert.Equal("small", Assert.Single(EditorSession.All<AutoCompleteBox>(EditorSession.Field(editor, "model"))).Text);
+        EditorSession.Click(EditorSession.Button(Assert.Single(EditorSession.All<SetupInstallStatusCard>(editor)), "Show the model folder"));
+        Assert.Equal(["/models"], host.Revealed);
+
+        EditorSession.Click(EditorSession.Button(editor, "tiny"));
+        Assert.Equal("tiny", settings.Model);
     });
 
     private static InferenceSettingsEditor ShowInstallEditor(InstallSettings settings, InstallManager manager, FakeHost? host = null)
@@ -143,9 +151,8 @@ public sealed class InferenceSettingsEditorTests
         return editor;
     }
 
-    // The choices the model field has loaded.
-    private static List<SetupChoice> Choices(InferenceSettingsEditor editor) =>
-        [.. (Assert.Single(EditorSession.All<AutoCompleteBox>(EditorSession.Field(editor, "model"))).ItemsSource as IEnumerable<SetupChoice> ?? [])];
+    // The model pack cards the model field shows.
+    private static ModelPackCard[] Cards(InferenceSettingsEditor editor) => [.. EditorSession.All<ModelPackCard>(EditorSession.Field(editor, "model"))];
 
     private static string Squash(string text) => string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
 
@@ -229,6 +236,7 @@ public sealed class InferenceSettingsEditorTests
         private const long Size = 487_601_967;
         private static readonly string[] Keys = ["small", "tiny"];
         private string _model = model;
+        public string Model => _model;
         public SetupInstallState State { get; set; } = state;
         public InstallSettings Unobserved()
         {
@@ -249,7 +257,7 @@ public sealed class InferenceSettingsEditorTests
                     SetupInstallState.FilesMissing =>
                     [
                         new("download", "Download again", SetupActionPurpose.Install, SetupSideEffect.Download),
-                        new("remove", "Remove", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles)
+                        new("remove", "Delete download", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles)
                     ],
                     _ => []
                 }))
@@ -313,5 +321,11 @@ public sealed class InferenceSettingsEditorTests
         }
         public ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default) =>
             ValueTask.CompletedTask;
+        public List<string> Revealed { get; } = [];
+        public Task RevealFolderAsync(string folder, CancellationToken cancellationToken)
+        {
+            Revealed.Add(folder);
+            return Task.CompletedTask;
+        }
     }
 }

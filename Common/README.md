@@ -411,3 +411,13 @@ as well as limits. A manager whose settings follow a running engine implements
 `IInferenceSettingsStatusSource`: `StatusChanged` reports a change, and `RefreshStatusAsync` reads it
 into the object. Common remains UI-framework-neutral; renderers must also gate Save on any locally
 invalid or unapplied input which has not reached the settings object.
+
+`SetupStep.ActionIds` names the actions a step shows, in order; when no step names any action, every
+action shows on every step. `SetupChoice.Tags` are short facts a renderer draws as chips.
+`SetupActionResult.Message` is one line shown after an action, such as a test reply, and `Elapsed` is how
+long it took. A local edit marks the authenticated, installed, verified and ready observations stale.
+`InferenceSetupDefinition.Icon` is the implementation's logo as a `SetupIcon`: SVG elements without the
+enclosing `svg` element, limited to `path`, `rect` and `circle` with fill colours, and their view box.
+`SetupIcons.FromResource` reads one from an SVG file an assembly embeds; Common embeds the OpenAI mark
+under `SetupIcons.OpenAiResource`. `Group` is the add-connection group the implementation lists under:
+Subscription, ApiKey, ThisComputer or More, the default.

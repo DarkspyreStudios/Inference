@@ -15,6 +15,9 @@ public interface IInferenceSettingsInteractionHost
 
     /// <summary>Opens <paramref name="uri"/> in the person's browser.</summary>
     ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default);
+
+    /// <summary>Shows a folder in the platform's file manager.</summary>
+    Task RevealFolderAsync(string folder, CancellationToken cancellationToken);
 }
 
 /// <summary>Optional host-native picker. Null means cancelled; the host owns permissions and returns an absolute path.

@@ -29,6 +29,35 @@
     <Setter Property="Margin" Value="4,0" />
   </Style>
 
+  <!-- Status, tag and checklist chips: success, warning or neutral. -->
+  <Style Selector="ContentControl.inference-settings-chip">
+    <Setter Property="Background" Value="{DynamicResource color-muted.brush}" />
+    <Setter Property="Foreground" Value="{DynamicResource color-muted-foreground.brush}" />
+  </Style>
+  <Style Selector="ContentControl.inference-settings-chip.success">
+    <Setter Property="Background" Value="{DynamicResource color-success.brush.15}" />
+    <Setter Property="Foreground" Value="{DynamicResource color-success.brush}" />
+  </Style>
+  <Style Selector="ContentControl.inference-settings-chip.warning">
+    <Setter Property="Background" Value="{DynamicResource color-warning.brush.15}" />
+    <Setter Property="Foreground" Value="{DynamicResource color-warning.brush}" />
+  </Style>
+  <Style Selector="TextBlock.inference-settings-result-title, TextBlock.inference-settings-checklist-item">
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+
+  <!-- Model pack cards: the selected card carries the accent border. -->
+  <Style Selector="Button.inference-model-pack-card">
+    <Setter Property="MinWidth" Value="180" />
+    <Setter Property="Padding" Value="14,12" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource radius-lg}" />
+  </Style>
+  <Style Selector="Button.inference-model-pack-card.selected">
+    <Setter Property="BorderThickness" Value="2" />
+    <Setter Property="BorderBrush" Value="{DynamicResource color-primary.brush}" />
+  </Style>
+
   <!-- Install chips and cards: success, warning or destructive. -->
   <Style Selector="ContentControl.inference-install-chip.success">
     <Setter Property="Background" Value="{DynamicResource color-success.brush.15}" />
