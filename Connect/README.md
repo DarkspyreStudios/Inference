@@ -126,8 +126,8 @@ session normalizes each request it builds, so its measure sees what is sent. A d
 - Claude chat drops continuation state and prepares caller-owned resources inline; a prepared file its lane cannot
   carry gets the attachment notice. A Claude turn attachment the model cannot take gets the same notice.
 
-A refusal remains only for an operation the conversation marks Unsupported, and it names the feature: steering on
-Claude; resume on Codex (`{transport} agent sessions cannot resume a provider thread.`); a hosted tool kind the route does
+A refusal remains only for an operation the conversation marks Unsupported, and it names the feature: resume on
+Codex (`{transport} agent sessions cannot resume a provider thread.`); a hosted tool kind the route does
 not implement; context capture, replacement or compaction handoff where unsupported; tool use on a model without
 it; and an opening on a model that marks agent sessions or agent tool use Unsupported
 (`The selected model does not support agent sessions.` or `... agent tool use.`).
@@ -207,7 +207,7 @@ history, and the session settings `ExecutionOptions`, `ToolHandling`, `SkillFold
 | SupportsContextStatus | Supported | Supported | Supported |
 | SupportsCompactionHandoff | Unsupported | Unsupported | Unsupported |
 | SupportsNativeResume | Unsupported | Unsupported | Supported |
-| SupportsSteering | Supported | Supported | Unsupported |
+| SupportsSteering | Supported | Supported | Supported |
 | SupportsInterrupt | Supported | Supported | Supported |
 | SupportsExternalToolHandoff | Supported | Supported | Unknown |
 | ResourceObservation | Unsupported | Unsupported | Supported |
@@ -4377,7 +4377,7 @@ cache affinity is not file storage.
 
 Managed sessions expose `ThreadId` and `SessionId`, explicit interrupt, safe-boundary steering,
 and host context operations. Codex and Claude continue, fork and rewind by starting a new session with the cut
-history; `ResumeSessionAsync` refuses on both. Claude supports interrupt; its steering method is unsupported. Tools return
+history; `ResumeSessionAsync` refuses on both. Claude supports interrupt and steering. Tools return
 text plus provider-neutral image/document attachments. On Codex, an image URL in a turn's input
 becomes the text `[Image: {url}]`. Claude receives tool-result resources inline in the bridge's MCP results;
 its built-in tools, `Read` included, are off (`--tools ""`). A tool-capable session receives a host tool handler unless it returns its calls
@@ -4387,6 +4387,16 @@ is returned with its argument check, and the next turn opens a new CLI session f
 sessions that run their calls add `update_plan` after the Host's tools, and `load_skill` with a skills list in the
 instructions when a `SkillFolders` folder holds a `SKILL.md`. Inference answers both (`Plan updated.`, or the
 SKILL.md text and the skill's folder); a Host tool of either name is used in its place.
+
+A Claude steer is a user message written to the CLI with `priority: "next"` and `origin: {kind: "human"}`, keyed by a
+new uuid. It does not wait for the turn gate, and its echo never starts a host turn. During a tool call the CLI adds
+the steer to the tool results of the same turn. When the steer arrives as the model finishes, the CLI ends its turn
+with `queued_turn_count` above 0 and then starts its own turn for the steer. The host turn stays open across both CLI
+turns and completes at the second result; its usage request ids carry a suffix per CLI turn, and its run totals add
+them. The steer's `command_lifecycle` frames, keyed by `command_uuid`, track it: `started` records it in the saved
+history at that point of the turn; `cancelled`, `discarded` or `refused` before `started` reports a warning on the
+turn. An interrupt first withdraws the turn's unstarted steers with `cancel_async_message`. A steer still unstarted
+when the conversation reopens the CLI is recorded in the history the new CLI opens with.
 
 ## AWS Bedrock AgentCore Harness transport
 

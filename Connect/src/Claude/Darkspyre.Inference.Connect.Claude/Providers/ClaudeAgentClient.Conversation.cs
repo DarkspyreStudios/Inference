@@ -132,8 +132,36 @@ internal sealed partial class ClaudeAgentClient
                 : marks with { SupportsNativeResume = InferenceSupport.Unsupported };
         }
 
-        public Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input, CancellationToken cancellationToken = default) =>
-            _inner?.SteerAsync(turnId, input, cancellationToken) ?? throw new NotSupportedException(ClaudeAgentSession.SteeringUnsupported);
+        /// <summary>
+        /// Sends <paramref name="input"/> to the running inner turn. The saved history records it where the CLI takes it
+        /// in, when its lifecycle reports it started.
+        /// </summary>
+        public async Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input, CancellationToken cancellationToken = default)
+        {
+            ArgumentNullException.ThrowIfNull(input);
+            ObjectDisposedException.ThrowIf(_retirement is not null, this);
+            string steerId = Guid.NewGuid().ToString();
+            ActiveTurn turn;
+            ClaudeAgentSession inner;
+            string innerTurnId;
+            lock (_sync)
+            {
+                // The inner session accepts only its own turn id.
+                if (_turn is not { } active || active.Id != turnId || active.InnerTurnId is not { } running || _inner is not { } open)
+                    throw new ArgumentException("The requested turn is not active.", nameof(turnId));
+                (turn, inner, innerTurnId) = (active, open, running);
+                turn.Steers.Add(steerId, ManagedAgentSession.UserMessage(new LlmAgentTurnRequest { Input = input }));
+            }
+            try
+            {
+                await inner.SteerAsync(innerTurnId, steerId, input, cancellationToken);
+            }
+            catch
+            {
+                lock (_sync) { turn.Steers.Remove(steerId); }
+                throw;
+            }
+        }
 
         public Task<LlmRequestAccounting> MeasureContextAsync(LlmAgentContext proposedContext, CancellationToken cancellationToken = default) =>
             (_inner ?? throw NativeAgentContract.UnsupportedContext(cancellationToken)).MeasureContextAsync(proposedContext, cancellationToken);
@@ -292,7 +320,9 @@ internal sealed partial class ClaudeAgentClient
                 LlmAgentTurnCompletedEvent? completion = await ForwardAsync(turn, next);
                 if (completion is null)
                 {
-                    // Decision point (b) stopped the inner turn with the step's last result unwritten.
+                    // Decision point (b) stopped the inner turn with the step's last result unwritten. A steer waits
+                    // for that result, so the closing CLI never started it.
+                    RecordUnstartedSteers(turn);
                     if (!await ReopenAsync(turn)) return;
                     next = Continue(request);
                     continue;
@@ -547,7 +577,8 @@ internal sealed partial class ClaudeAgentClient
             int generation;
             lock (_sync) { generation = ++_nextGeneration; }
             ClaudeAgentSession session = await _owner.OpenInnerAsync(_connectionId, _connection, _options, _workingDirectory,
-                _ephemeral, opening, identity, item => Record(generation, item), token => BeforeResultsAsync(generation, token),
+                _ephemeral, opening, identity, item => Record(generation, item), (steerId, started) => SteerSettled(generation, steerId, started),
+                token => BeforeResultsAsync(generation, token),
                 cancellationToken);
             bool retired;
             long revision;
@@ -611,6 +642,33 @@ internal sealed partial class ClaudeAgentClient
                     return;
                 }
                 foreach (LlmAgentContextEntry entry in turn.Record.Apply(item)) Upsert(entry);
+            }
+        }
+
+        /// <summary>
+        /// A steer of the open inner session settled. One that started is recorded at this point of the turn, where the
+        /// CLI took it in; one the CLI ended unstarted is dropped.
+        /// </summary>
+        private void SteerSettled(int generation, string steerId, bool started)
+        {
+            lock (_sync)
+            {
+                if (generation != _generation || _turn is not { } turn || !turn.Steers.Remove(steerId, out LlmChatMessage? message)) return;
+                if (started) Upsert(new LlmAgentContextEntry(turn.Record.Steer(), turn.Id, message));
+            }
+        }
+
+        /// <summary>
+        /// Records the turn's steers the closing inner session never started, so the next CLI session receives them in
+        /// its opening.
+        /// </summary>
+        private void RecordUnstartedSteers(ActiveTurn turn)
+        {
+            lock (_sync)
+            {
+                foreach (LlmChatMessage message in turn.Steers.Values)
+                    Upsert(new LlmAgentContextEntry(turn.Record.Steer(), turn.Id, message));
+                turn.Steers.Clear();
             }
         }
 
@@ -793,6 +851,8 @@ internal sealed partial class ClaudeAgentClient
             public CancellationToken Token { get; } = cancellation.Token;
             public string ModelId { get; set; } = string.Empty;
             public string? InnerTurnId { get; set; }
+            // Steers sent in this turn and not yet settled, by id, as the saved history records them; _sync guards it.
+            public Dictionary<string, LlmChatMessage> Steers { get; } = new(StringComparer.Ordinal);
             public bool Interrupted { get; set; }
             public bool Refused { get; set; }
             // The turn's input before it is recorded; measures and compaction count it.
@@ -860,6 +920,13 @@ internal sealed partial class ClaudeAgentClient
 
             /// <summary>The next arrival starts a new step: the current one is in a compacted history.</summary>
             public void Close() => _step = null;
+
+            /// <summary>The id of a steer's user message. The model's next output starts a new step after it.</summary>
+            public string Steer()
+            {
+                _step = null;
+                return NextId();
+            }
 
             /// <summary>The entries an event changed.</summary>
             public IReadOnlyList<LlmAgentContextEntry> Apply(LlmAgentEvent item)

@@ -67,6 +67,9 @@ internal sealed class ClaudeStreamUsage(bool enabled, ISet<string>? accountedCal
 
     public void Finish() => _finished = true;
 
+    /// <summary>Usage for the next CLI turn, with the same settings and the same record of accounted calls.</summary>
+    public ClaudeStreamUsage Next() => new(enabled, accountedCalls);
+
     /// <summary>The usage reported for the latest model message; null until one reports.</summary>
     public LlmUsage? Last => _current?.Usage;
 

@@ -1029,6 +1029,174 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         Assert.True(prospective.UsedContextTokens >= status.UsedContextTokens + 100);
     }
 
+    [Fact]
+    public async Task ASteerDuringAToolCallJoinsTheSameTurn()
+    {
+        var process = new ManualProcess();
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using ILlmAgentSession session = await StartWithTool(process, async (_, token) =>
+        {
+            entered.TrySetResult();
+            await release.Task.WaitAsync(token);
+            return LlmToolOutput.FromText("held");
+        });
+        Assert.Equal(InferenceSupport.Supported, (await session.GetCapabilitiesAsync()).SupportsSteering);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, process, limit.Token);
+        List<LlmAgentEvent> events = [feed.Current];
+        string turnId = feed.Current.TurnId!;
+        string hostInput = await process.WaitForUserMessage(limit.Token);
+        process.Push(ToolUse("tu1"));
+        process.Push(ToolCall("c1", 1));
+        await entered.Task.WaitAsync(limit.Token);
+
+        await session.SteerAsync(turnId, [new LlmAgentTextContent("Also end with BANANA.")], limit.Token);
+
+        string steerId = await process.WaitForUserMessage(limit.Token, index: 1);
+        JsonElement steer = process.Writes().Single(root => root.GetProperty("type").GetString() == "user"
+            && root.GetProperty("uuid").GetString() == steerId);
+        Assert.Equal("next", steer.GetProperty("priority").GetString());
+        Assert.Equal("human", steer.GetProperty("origin").GetProperty("kind").GetString());
+        Assert.Equal(JsonValueKind.Null, steer.GetProperty("parent_tool_use_id").ValueKind);
+        Assert.Equal("Also end with BANANA.", steer.GetProperty("message").GetProperty("content")[0].GetProperty("text").GetString());
+        // The CLI folds the steer into the running turn once the tool result arrives: its echo starts no host turn.
+        process.Push(Lifecycle(steerId, "queued"));
+        release.TrySetResult();
+        await AnswerFor(process, "c1");
+        process.Push(new { type = "user", uuid = steerId, isReplay = true, origin = new { kind = "human" } });
+        process.Push(Lifecycle(steerId, "started"));
+        process.Push(new { type = "assistant", message = new { id = "m2", content = new[] { new { type = "text", text = "DONE BANANA" } } } });
+        process.Push(Lifecycle(steerId, "completed"));
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "DONE BANANA", stop_reason = "end_turn", queued_turn_count = 0 });
+        process.Push(Lifecycle(hostInput, "completed"));
+        events.AddRange(await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent));
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Equal(["DONE BANANA"], events.OfType<LlmAgentMessageCompletedEvent>().Select(item => item.Text));
+        Assert.All(events, item => Assert.Equal(turnId, item.TurnId));
+        Assert.Empty(events.OfType<LlmAgentWarningEvent>());
+    }
+
+    [Fact]
+    public async Task ASteerDuringTextContinuesInTheTurnTheCliStartsForIt()
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await Start(process);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, process, limit.Token);
+        List<LlmAgentEvent> events = [feed.Current];
+        string turnId = feed.Current.TurnId!;
+        string hostInput = await process.WaitForUserMessage(limit.Token);
+        process.Push(new { type = "assistant", message = new { id = "m1", content = new[] { new { type = "text", text = "first reply" } } } });
+
+        await session.SteerAsync(turnId, [new LlmAgentTextContent("Also end with BANANA.")], limit.Token);
+        string steerId = await process.WaitForUserMessage(limit.Token, index: 1);
+        process.Push(Lifecycle(steerId, "queued"));
+        // The steer came too late for this reply: the CLI ends its turn, then starts one of its own for the steer.
+        process.Push(Result("first reply", queued: 1, input: 10, output: 5));
+        process.Push(Lifecycle(hostInput, "completed"));
+        process.Push(Lifecycle(steerId, "started"));
+        process.Push(new { type = "system", subtype = "init" });
+        process.Push(new { type = "user", uuid = steerId, isReplay = true, origin = new { kind = "human" } });
+        process.Push(new { type = "assistant", message = new { id = "m2", content = new[] { new { type = "text", text = "second reply BANANA" } } } });
+        process.Push(Result("second reply BANANA", queued: 0, input: 20, output: 7));
+        process.Push(Lifecycle(steerId, "completed"));
+        events.AddRange(await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent));
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Equal(["first reply", "second reply BANANA"], events.OfType<LlmAgentMessageCompletedEvent>().Select(item => item.Text));
+        Assert.All(events, item => Assert.Equal(turnId, item.TurnId));
+        LlmAgentUsageEvent[] usage = [.. events.OfType<LlmAgentUsageEvent>()];
+        Assert.Equal(usage.Length, usage.Select(item => item.RequestId).Distinct().Count());
+        Assert.Equal((30, 12), (usage[^1].RunTotals!.InputTokens, usage[^1].RunTotals!.OutputTokens));
+
+        // The next host turn runs on its own: the steer's echo and turn did not take its place.
+        await feed.DisposeAsync();
+        List<LlmAgentEvent> next = await CompleteTurnAsync(session, process, index: 2);
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.IsType<LlmAgentTurnCompletedEvent>(next[^1]).Reason);
+        Assert.NotEqual(turnId, next[0].TurnId);
+    }
+
+    [Fact]
+    public async Task AnInterruptWithdrawsAQueuedSteer()
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await Start(process);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, process, limit.Token);
+        List<LlmAgentEvent> events = [feed.Current];
+        string turnId = feed.Current.TurnId!;
+        await session.SteerAsync(turnId, [new LlmAgentTextContent("Also end with BANANA.")], limit.Token);
+        string steerId = await process.WaitForUserMessage(limit.Token, index: 1);
+        process.Push(Lifecycle(steerId, "queued"));
+
+        await session.InterruptAsync(turnId, limit.Token);
+        events.AddRange(await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent));
+
+        Assert.Equal(LlmAgentCompletionReason.Interruption, Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]).Reason);
+        string[] requests = [.. process.Requests().Select(request => request.GetProperty("subtype").GetString()!)];
+        int withdrawn = Array.FindIndex(requests, subtype => subtype == "cancel_async_message");
+        Assert.True(withdrawn >= 0 && withdrawn < Array.IndexOf(requests, "interrupt"));
+        Assert.Equal(steerId, process.Requests().First(request => request.GetProperty("subtype").GetString() == "cancel_async_message")
+            .GetProperty("message_uuid").GetString());
+        // The interrupted turn ends at its result even though the CLI still counted the steer.
+        process.Push(Lifecycle(steerId, "cancelled"));
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "", terminal_reason = "aborted_streaming", queued_turn_count = 1 });
+        await feed.DisposeAsync();
+        List<LlmAgentEvent> next = await CompleteTurnAsync(session, process, index: 2);
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.IsType<LlmAgentTurnCompletedEvent>(next[^1]).Reason);
+        Assert.Empty(next.OfType<LlmAgentWarningEvent>());
+    }
+
+    [Fact]
+    public async Task ASteerTheClosingCliNeverStartedReachesTheReopenedCli()
+    {
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var first = new ManualProcess();
+        var second = new ManualProcess();
+        await using ILlmAgentSession session = await Client(new Factory(first, second)).StartSessionAsync("connection", Connection(),
+            Options(null, Window(4000)) with
+            {
+                Tools = [new LlmAgentToolDefinition { Name = "fetch", InputSchema = Json(new { type = "object" }) }],
+                ToolHandler = async (_, token) =>
+                {
+                    entered.TrySetResult();
+                    await release.Task.WaitAsync(token);
+                    return LlmToolOutput.FromText(Words("beta", 4000));
+                }
+            });
+        await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, first, limit.Token);
+        string turnId = feed.Current.TurnId!;
+        first.Push(ToolUse("tu1", "fetch"));
+        first.Push(new { type = "stream_event", @event = new { type = "message_stop" } });
+        first.Push(ToolCall("c1", 1, "fetch"));
+        await entered.Task.WaitAsync(limit.Token);
+        await session.SteerAsync(turnId, [new LlmAgentTextContent("Also end with BANANA.")], limit.Token);
+        await first.WaitForUserMessage(limit.Token, index: 1);
+
+        // The settled step measures over the trigger, so the result is never written and the steer never starts.
+        release.TrySetResult();
+        await second.WaitForUserMessage(limit.Token);
+
+        Assert.Contains("Also end with BANANA.", UserText(second), StringComparison.Ordinal);
+    }
+
+    private static object Lifecycle(string commandId, string state) => new { type = "command_lifecycle", command_uuid = commandId, state };
+
+    private static object Result(string text, int queued, int input, int output) => new
+    {
+        type = "result",
+        subtype = "success",
+        is_error = false,
+        result = text,
+        stop_reason = "end_turn",
+        queued_turn_count = queued,
+        usage = new { input_tokens = input, output_tokens = output }
+    };
+
     private LlmAgentSessionOptions Options(LlmAgentContext? context, LlmAgentExecutionOptions? execution) => new()
     {
         ModelId = "claude-test",
@@ -1058,10 +1226,10 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         .EnumerateArray().Where(part => part.GetProperty("type").GetString() == "text").Select(part => part.GetProperty("text").GetString()));
 
     /// <summary>Runs one turn the CLI answers with "done".</summary>
-    private static async Task<List<LlmAgentEvent>> CompleteTurnAsync(ILlmAgentSession session, ManualProcess process)
+    private static async Task<List<LlmAgentEvent>> CompleteTurnAsync(ILlmAgentSession session, ManualProcess process, int index = 0)
     {
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, process, limit.Token);
+        await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, process, limit.Token, index: index);
         List<LlmAgentEvent> events = [feed.Current];
         process.Push(new { type = "result", subtype = "success", is_error = false, result = "done", stop_reason = "end_turn" });
         events.AddRange(await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent));

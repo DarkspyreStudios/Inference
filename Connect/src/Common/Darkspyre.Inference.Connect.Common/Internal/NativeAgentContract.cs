@@ -22,7 +22,8 @@ internal static class NativeAgentContract
         SupportsCompactionHandoff = InferenceSupport.Unsupported,
         // A conversation reports Unsupported once its live CLI session is not the one its thread id names.
         SupportsNativeResume = InferenceSupport.Supported,
-        SupportsSteering = InferenceSupport.Unsupported,
+        // A steer goes to the CLI with priority "next": it joins the running turn at the next model step.
+        SupportsSteering = InferenceSupport.Supported,
         SupportsInterrupt = InferenceSupport.Supported,
         SupportsExternalToolHandoff = InferenceSupport.Unknown,
         SupportsCompactNow = InferenceSupport.Supported,

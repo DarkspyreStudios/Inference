@@ -120,7 +120,8 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
     [SuppressMessage("Design", "CA1031", Justification = "Failed opening preserves both the original failure and a genuine retirement failure.")]
     private async Task<ClaudeAgentSession> OpenInnerAsync(string connectionId, LlmConnection connection,
         LlmAgentSessionOptions options, string workingDirectory, bool ephemeral, LlmAgentContext opening,
-        (string Id, bool Resume)? identity, Action<LlmAgentEvent> record, Func<CancellationToken, ValueTask<bool>> beforeResults,
+        (string Id, bool Resume)? identity, Action<LlmAgentEvent> record, Action<string, bool> steerSettled,
+        Func<CancellationToken, ValueTask<bool>> beforeResults,
         CancellationToken cancellationToken)
     {
         string threadId = identity?.Id ?? Guid.NewGuid().ToString();
@@ -183,6 +184,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             resourceScope,
             connection,
             record,
+            steerSettled,
             beforeResults);
         try
         {
@@ -350,6 +352,11 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         private bool _disposed;
         // Called with every event of a host turn before it is queued, so the conversation records it in order.
         private readonly Action<LlmAgentEvent> _record;
+        // Called on the reader when a steer's command lifecycle settles: true when it started in the turn, false when
+        // the CLI ended it unstarted.
+        private readonly Action<string, bool> _steerSettled;
+        // Steers written to the CLI and not yet started, by uuid, with the host turn each was sent to; _route guards it.
+        private readonly Dictionary<string, HostTurn> _steers = new(StringComparer.Ordinal);
         // Decision point (b): asked when a model step's last bridge call settles, before its response is written.
         private readonly Func<CancellationToken, ValueTask<bool>> _beforeResults;
         // LlmAgentToolHandling.ReturnRequests: the first bridge call ends the turn with the step's calls unrun.
@@ -374,10 +381,12 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             InferenceResourceSelectionVersion? resourceScope,
             LlmConnection connection,
             Action<LlmAgentEvent> record,
+            Action<string, bool> steerSettled,
             Func<CancellationToken, ValueTask<bool>> beforeResults)
         {
             _process = process;
             _record = record;
+            _steerSettled = steerSettled;
             _beforeResults = beforeResults;
             _returnRequests = returnRequests;
             _richRoute = richRoute;
@@ -404,9 +413,6 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
 
         /// <summary>The usage the CLI last reported for one model step; null until it reports one.</summary>
         internal LlmUsage? LastStepUsage => Volatile.Read(ref _lastStepUsage);
-
-        /// <summary>The refusal of mid-turn steering.</summary>
-        internal const string SteeringUnsupported = "Claude CLI does not expose mid-turn steering through this adapter.";
 
         public Task<LlmAgentCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
         {
@@ -682,10 +688,59 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         public Task SteerAsync(
             string turnId,
             IReadOnlyList<LlmAgentContent> input,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default) =>
+            SteerAsync(turnId, Guid.NewGuid().ToString(), input, cancellationToken);
+
+        /// <summary>
+        /// Writes <paramref name="input"/> as a user message with <c>priority: "next"</c>, keyed by
+        /// <paramref name="steerId"/>. The CLI takes it into the running turn at the next model step, or starts its own
+        /// turn for it once the running one ends; either way its output stays in the host turn. The steer does not
+        /// wait for the turn gate, and its echo never starts a host turn.
+        /// </summary>
+        internal async Task SteerAsync(
+            string turnId,
+            string steerId,
+            IReadOnlyList<LlmAgentContent> input,
+            CancellationToken cancellationToken)
         {
             using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-            throw new NotSupportedException(SteeringUnsupported);
+            cancellationToken = operation.Token;
+            ArgumentNullException.ThrowIfNull(input);
+            if (input.Count == 0) throw new ArgumentException("Steering requires input.", nameof(input));
+            JsonArray content = SerializeInput(input, []);
+            lock (_route)
+            {
+                if (_failure is { } failure) { throw failure; }
+                // A turn written and not yet echoed takes the steer too: the CLI queues it behind the turn's input.
+                HostTurn? turn = _host?.Id == turnId ? _host : _written.FirstOrDefault(candidate => candidate.Id == turnId);
+                if (turn is null || turn.Interrupted || turn.Abandoned)
+                    throw new ArgumentException("The requested turn is not active.", nameof(turnId));
+                _steers.Add(steerId, turn);
+            }
+            try
+            {
+                await WriteJsonLineAsync(
+                    new JsonObject
+                    {
+                        ["type"] = "user",
+                        ["session_id"] = string.Empty,
+                        ["uuid"] = steerId,
+                        ["priority"] = "next",
+                        ["origin"] = new JsonObject { ["kind"] = "human" },
+                        ["message"] = new JsonObject
+                        {
+                            ["role"] = "user",
+                            ["content"] = content
+                        },
+                        ["parent_tool_use_id"] = null
+                    },
+                    cancellationToken);
+            }
+            catch
+            {
+                lock (_route) { _steers.Remove(steerId); }
+                throw;
+            }
         }
 
         public async Task InterruptAsync(
@@ -694,6 +749,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         {
             using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
             cancellationToken = operation.Token;
+            HostTurn? running;
             lock (_route)
             {
                 if (_written.FirstOrDefault(turn => turn.Id == turnId) is { } queued)
@@ -706,8 +762,10 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                 {
                     throw new ArgumentException("The requested turn is not active.", nameof(turnId));
                 }
+                running = _host?.Id == turnId ? _host : null;
             }
 
+            if (running is not null) await CancelSteersAsync(running, cancellationToken);
             await WriteControlRequestWithoutWaitingAsync(
                 new JsonObject { ["subtype"] = "interrupt", ["cancel_queued"] = false },
                 cancellationToken);
@@ -1018,7 +1076,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                     : new LlmAgentToolEvent(ThreadId, host.Id, call.Id, McpServerName, call.Name, call.Arguments, false, "failed",
                         LlmToolOutput.FromText(rejection, isError: true)));
             }
-            await TryInterruptAsync();
+            await TryInterruptAsync(host);
             Emit(new LlmAgentTurnCompletedEvent(ThreadId, host.Id, LlmAgentCompletionReason.ToolRequests, null));
             lock (_route)
             {
@@ -1536,8 +1594,8 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                             if (target.Usage.Last is { } stepUsage) Volatile.Write(ref _lastStepUsage, stepUsage);
                             if (observation is not null)
                             {
-                                Emit(new LlmAgentUsageEvent(ThreadId, target.Id, $"usage-{target.Id}",
-                                    observation.Cumulative, observation.Cumulative) { ModelId = target.ModelId });
+                                Emit(new LlmAgentUsageEvent(ThreadId, target.Id, target.UsageId,
+                                    observation.Cumulative, target.Totals(observation.Cumulative)) { ModelId = target.ModelId });
                             }
                             foreach (LlmAgentEvent item in MapStreamEvent(root, target.Id, target.ReasoningText))
                             {
@@ -1553,6 +1611,9 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                         break;
                     case "result":
                         EndTurn(root);
+                        break;
+                    case "command_lifecycle":
+                        ObserveLifecycle(root);
                         break;
                 }
             }
@@ -1595,7 +1656,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             }
             if (turn.InterruptOnStart || turn.Abandoned)
             {
-                await TryInterruptAsync();
+                await TryInterruptAsync(turn);
             }
         }
 
@@ -1650,12 +1711,19 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             }
             target.Usage.Finish();
             LlmUsage? usage = ClaudeStreamUsage.ReadFinal(root);
-            Emit(new LlmAgentUsageEvent(ThreadId, target.Id, $"usage-{target.Id}", usage, usage) { ModelId = target.ModelId });
+            Emit(new LlmAgentUsageEvent(ThreadId, target.Id, target.UsageId, usage, target.Totals(usage)) { ModelId = target.ModelId });
             bool isError = OptionalBoolean(root, "is_error") == true;
             string text = OptionalString(root, "result") ?? string.Empty;
             if (!isError && text.Length > 0 && target.Completed.Count == 0)
             {
                 Emit(new LlmAgentMessageCompletedEvent(ThreadId, target.Id, $"result-{target.Id}", text));
+            }
+            if (target is HostTurn waiting && WaitsForSteer(waiting, root))
+            {
+                // A steer arrived as the model finished. The CLI starts the steer's own turn next, and its output
+                // continues this host turn, so the steer's reply reaches the same conversation.
+                target.Continue(usage);
+                return;
             }
             string subtype = OptionalString(root, "subtype") ?? string.Empty;
             string? stopReason = OptionalString(root, "stop_reason") ?? OptionalString(root, "terminal_reason");
@@ -1735,15 +1803,16 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             }
             if (running)
             {
-                await TryInterruptAsync();
+                await TryInterruptAsync(turn);
             }
         }
 
-        private async Task TryInterruptAsync()
+        private async Task TryInterruptAsync(HostTurn turn)
         {
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             try
             {
+                await CancelSteersAsync(turn, timeout.Token);
                 await WriteControlRequestWithoutWaitingAsync(
                     new JsonObject { ["subtype"] = "interrupt", ["cancel_queued"] = false },
                     timeout.Token);
@@ -1755,12 +1824,85 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             }
         }
 
+        /// <summary>
+        /// Marks <paramref name="turn"/> interrupted and withdraws its steers the CLI has not started, so none of them
+        /// runs as a turn of its own after the interrupt. Written before the interrupt, so the CLI reads them first.
+        /// </summary>
+        private async Task CancelSteersAsync(HostTurn turn, CancellationToken cancellationToken)
+        {
+            string[] steers;
+            lock (_route)
+            {
+                turn.Interrupted = true;
+                steers = [.. _steers.Where(steer => steer.Value == turn).Select(steer => steer.Key)];
+            }
+            foreach (string steerId in steers)
+            {
+                await WriteControlRequestWithoutWaitingAsync(
+                    new JsonObject { ["subtype"] = "cancel_async_message", ["message_uuid"] = steerId },
+                    cancellationToken);
+            }
+        }
+
+        /// <summary>
+        /// Follows a steer's <c>command_lifecycle</c>, keyed by its uuid. <c>started</c> means the CLI took it into the
+        /// running turn or began a turn for it; <c>cancelled</c>, <c>discarded</c> or <c>refused</c> before that means
+        /// it never reaches the model. Lifecycles of host turns and of later states are not needed.
+        /// </summary>
+        private void ObserveLifecycle(JsonElement root)
+        {
+            string? steerId = OptionalString(root, "command_uuid");
+            string? state = OptionalString(root, "state");
+            if (steerId is null || state is null or "queued") return;
+            HostTurn? turn;
+            lock (_route)
+            {
+                if (!_steers.Remove(steerId, out turn)) return;
+            }
+            bool started = state == "started";
+            _steerSettled(steerId, started);
+            if (!started && !turn.Interrupted && !turn.Abandoned)
+                Emit(new LlmAgentWarningEvent(ThreadId, turn.Id, $"Claude CLI did not deliver the steering message (state '{state}')."));
+        }
+
+        /// <summary>
+        /// True when the CLI is about to start its own turn for a steer of <paramref name="turn"/> that arrived too late
+        /// for the turn that just ended: the steer has not started and the result counts a queued turn.
+        /// </summary>
+        private bool WaitsForSteer(HostTurn turn, JsonElement result)
+        {
+            if (OptionalInt32(result, "queued_turn_count") is not > 0 || turn.Interrupted || turn.Abandoned || turn.Suspended)
+                return false;
+            lock (_route) { return _steers.ContainsValue(turn); }
+        }
+
         /// <summary>A turn that receives routed events: a host turn, or one the runtime started.</summary>
         private abstract class TurnTarget(string id, ClaudeStreamUsage usage, bool reasoningText)
         {
+            // The final usage of the CLI turns this turn already spans, and how many there are.
+            private LlmUsage? _earlier;
+            private int _parts;
+
             public string Id { get; } = id;
-            public ClaudeStreamUsage Usage { get; } = usage;
+
+            /// <summary>Usage of the CLI turn now running inside this turn.</summary>
+            public ClaudeStreamUsage Usage { get; private set; } = usage;
+
             public bool ReasoningText { get; } = reasoningText;
+
+            /// <summary>The usage request id of the CLI turn now running inside this turn.</summary>
+            public string UsageId => _parts == 0 ? $"usage-{Id}" : $"usage-{Id}-{_parts}";
+
+            /// <summary>The turn's totals: the earlier CLI turns' final usage plus <paramref name="current"/>.</summary>
+            public LlmUsage? Totals(LlmUsage? current) => _parts == 0 ? current : UsageTotals.Add(_earlier, current, first: false);
+
+            /// <summary>The CLI turn that reported <paramref name="final"/> ended, and the CLI starts another inside this turn.</summary>
+            public void Continue(LlmUsage? final)
+            {
+                _earlier = Totals(final);
+                _parts++;
+                Usage = Usage.Next();
+            }
 
             /// <summary>The model the CLI last reported for this turn; null until it reports one.</summary>
             public string? ModelId { get; set; }
@@ -1774,6 +1916,9 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                 new UnboundedChannelOptions { SingleReader = true });
 
             public bool InterruptOnStart { get; set; }
+
+            /// <summary>An interrupt was written for this turn; its queued steers were withdrawn first.</summary>
+            public bool Interrupted { get; set; }
 
             /// <summary>The turn's answer schema; the final answer is checked against it.</summary>
             public JsonElement? OutputSchema { get; init; }
