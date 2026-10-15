@@ -84,7 +84,7 @@ public sealed class SupportStateTests
             ("SupportsContextReplacement", marks => marks.SupportsContextReplacement, Yes, No),
             ("SupportsContextStatus", marks => marks.SupportsContextStatus, Yes, Yes),
             ("SupportsCompactionHandoff", marks => marks.SupportsCompactionHandoff, No, No),
-            ("SupportsNativeResume", marks => marks.SupportsNativeResume, No, No),
+            ("SupportsNativeResume", marks => marks.SupportsNativeResume, No, Yes),
             ("SupportsSteering", marks => marks.SupportsSteering, Yes, No),
             ("SupportsInterrupt", marks => marks.SupportsInterrupt, Yes, Yes),
             ("SupportsExternalToolHandoff", marks => marks.SupportsExternalToolHandoff, Yes, Unknown),

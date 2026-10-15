@@ -11,7 +11,7 @@ using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
-public sealed class ClaudeAgentResourcesTests : IDisposable
+public sealed partial class ClaudeAgentResourcesTests : IDisposable
 {
     private readonly string _directory = Directory.CreateTempSubdirectory("connect-claude-resources-").FullName;
 

@@ -83,8 +83,8 @@ it. The constructors of `LlmProviderService`, `LlmAgentProviderService` and `Llm
 
 These public surfaces are deleted: `LlmProviderService.MeasureRequestAsync`, `CountInputTokensAsync` and
 `ProjectToolOutputAsync`; `ILlmProviderTokenCounter` and `LlmProviderInputTokenCount`; `LlmToolOutputLane`;
-`ConnectLlmJson.ChatRequest` and `ChatResult`; `LlmAgentProviderService.ForkSessionAsync`,
-`ILlmAgentResumeClient` and `ILlmAgentForkClient`; `LlmAgentSessionOptions.UnboundContinuationState`;
+`ConnectLlmJson.ChatRequest` and `ChatResult`; `LlmAgentProviderService.ForkSessionAsync` and
+`ILlmAgentForkClient`; `LlmAgentSessionOptions.UnboundContinuationState`;
 `ProviderControls` on `LlmAgentTurnRequest` and `LlmChatRequest`; `Strict` on `LlmToolDefinition` and
 `LlmAgentToolDefinition`; `Strict` and `Fallback` on `LlmStructuredOutputRequest`, `LlmStructuredOutputFallback`,
 `LlmToolCapabilities.StrictInputSchema` and `LlmStrictInputSchemaSupport`; and the agent mechanics
@@ -127,7 +127,7 @@ session normalizes each request it builds, so its measure sees what is sent. A d
   carry gets the attachment notice. A Claude turn attachment the model cannot take gets the same notice.
 
 A refusal remains only for an operation the conversation marks Unsupported, and it names the feature: steering on
-Claude; resume (`{transport} agent sessions cannot resume a provider thread.`); a hosted tool kind the route does
+Claude; resume on Codex (`{transport} agent sessions cannot resume a provider thread.`); a hosted tool kind the route does
 not implement; context capture, replacement or compaction handoff where unsupported; tool use on a model without
 it; and an opening on a model that marks agent sessions or agent tool use Unsupported
 (`The selected model does not support agent sessions.` or `... agent tool use.`).
@@ -176,11 +176,26 @@ is `LlmAgentTurnCompletedEvent.StructuredOutput`; the completion reason does not
 its reason and reports `IsValid = false` with `The answer was not evaluated: {reason}.` No second request is sent.
 Claude appends the guidance to the turn input for every root and checks the turn's final result text the same way.
 
-**Continuing, forking and rewinding.** Codex and the Claude CLI continue a conversation by starting a new session
-with its history through `StartSessionAsync`. Neither keeps provider-side state the host must resume. Continuation
-state the selected model, provider and account cannot replay is left out and counted, so a history from any
-provider or connection continues, including one whose connection was removed. `ResumeSessionAsync` keeps its
-signature and refuses on both transports.
+**Continuing, forking and rewinding.** Codex continues, forks and rewinds a conversation by starting a new session
+with its history through `StartSessionAsync`; the Claude CLI forks and rewinds the same way. Continuation state the
+selected model, provider and account cannot replay is left out and counted, so a history from any provider or
+connection continues, including one whose connection was removed.
+
+`LlmAgentProviderService.ResumeSessionAsync` routes to the transport's internal `ILlmAgentResumeClient`; Codex has
+none and refuses. Claude resumes by the conversation's thread id with `LlmAgentResumeOptions.Context`, the caller's
+history, and the session settings `ExecutionOptions`, `ToolHandling`, `SkillFolders` and `FallbackModelIds`:
+
+- When the CLI saved that session for the working folder (`<config folder>/projects/<working folder>/<id>.jsonl`,
+  where the config folder is `CLAUDE_CONFIG_DIR` or `~/.claude` and the folder name is the working folder with every
+  character other than an ASCII letter or digit replaced by `-`), the first CLI session opens with `--resume=<id>`
+  and sends no opening history.
+- Otherwise the first CLI session opens under the same id from the supplied history, as a start does.
+- Either way the conversation measures and compacts from the supplied history. The caller resumes only when nothing
+  changed the history outside Claude's own turns since the session was saved; otherwise it starts from the history.
+- A conversation reports `SupportsNativeResume` Unsupported while its live CLI session is not the one its thread id
+  names: after a compaction, a reopen after a refused or paused step, or a turn that returned tool requests, and
+  for an ephemeral session. The CLI saves every session except an ephemeral one or one that returns tool requests
+  (`--no-session-persistence`).
 
 **Feature list.** `LlmAgentCapabilities` reports public features only. Values:
 
@@ -191,7 +206,7 @@ signature and refuses on both transports.
 | SupportsContextCapture, SupportsContextReplacement | Supported | Supported | Unsupported |
 | SupportsContextStatus | Supported | Supported | Supported |
 | SupportsCompactionHandoff | Unsupported | Unsupported | Unsupported |
-| SupportsNativeResume | Unsupported | Unsupported | Unsupported |
+| SupportsNativeResume | Unsupported | Unsupported | Supported |
 | SupportsSteering | Supported | Supported | Unsupported |
 | SupportsInterrupt | Supported | Supported | Supported |
 | SupportsExternalToolHandoff | Supported | Supported | Unknown |

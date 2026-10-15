@@ -14,6 +14,8 @@ internal sealed partial class ClaudeAgentClient
 
     private LearnedModelContext Learned => learned;
 
+    private IClaudeCliSessionProcessFactory Processes => processFactory;
+
     /// <summary>
     /// The Claude conversation the Host holds. It owns the saved history and the current CLI session, measures before
     /// each send, and compacts by opening a new CLI session with the compacted history as its opening.
@@ -28,6 +30,8 @@ internal sealed partial class ClaudeAgentClient
         private readonly LlmConnection _connection;
         private readonly string _workingDirectory;
         private readonly bool _ephemeral;
+        // The thread id a resume names; the first CLI session opens under it.
+        private readonly string? _resumeThreadId;
         private readonly LlmAgentToolHandler? _toolHandler;
         private readonly Dictionary<string, LlmAgentToolDefinition> _toolsByName;
         // The session instructions followed by the tool list the bridge sends, as the CLI receives both.
@@ -59,8 +63,9 @@ internal sealed partial class ClaudeAgentClient
         private Task? _retirement;
 
         internal ClaudeConversation(ClaudeAgentClient owner, string connectionId, LlmConnection connection,
-            LlmAgentSessionOptions options, string workingDirectory, bool ephemeral, LlmAgentContext history)
+            LlmAgentSessionOptions options, string workingDirectory, bool ephemeral, LlmAgentContext history, string? resumeThreadId)
         {
+            _resumeThreadId = resumeThreadId;
             _owner = owner;
             _connectionId = connectionId;
             _connection = connection;
@@ -89,17 +94,43 @@ internal sealed partial class ClaudeAgentClient
 
         private bool Preserve => _execution.ContextPolicy.PreserveSuppliedContext;
 
-        /// <summary>Opens the first CLI session with the saved history as its opening. The first turn's decision point
-        /// (a) measures and compacts it.</summary>
+        /// <summary>
+        /// Opens the first CLI session. A resume whose session the CLI saved for this working folder opens it with
+        /// <c>--resume</c> and sends no opening; otherwise the saved history is the opening, under the resumed id when
+        /// there is one. The first turn's decision point (a) measures and compacts the saved history.
+        /// </summary>
         internal async Task OpenAsync(CancellationToken cancellationToken)
         {
-            await EnsureOpenAsync(cancellationToken);
+            if (_resumeThreadId is { } id)
+            {
+                bool native = !_ephemeral
+                    && _owner.Processes.SessionSaved(CliInfrastructure.NormalizeWorkingDirectory(_workingDirectory), id);
+                LlmAgentContext saved;
+                lock (_sync) { saved = _saved; }
+                _ = await OpenAndInstallAsync(native ? new() : saved, replaceHistory: false, cancellationToken, (id, native));
+            }
+            else
+            {
+                await EnsureOpenAsync(cancellationToken);
+            }
             ThreadId = _inner!.ThreadId;
             SessionId = _options.SessionId ?? ThreadId;
         }
 
-        public Task<LlmAgentCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default) =>
-            _inner is { } inner ? inner.GetCapabilitiesAsync(cancellationToken) : Task.FromResult(NativeAgentContract.Claude);
+        /// <summary>
+        /// The Claude marks. SupportsNativeResume is Supported only while the open CLI session is the one ThreadId names
+        /// and the CLI saves it: a compaction, a reopen or an unanswered tool call moves the conversation to another CLI
+        /// session, which a resume by ThreadId does not reach.
+        /// </summary>
+        public async Task<LlmAgentCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
+        {
+            ClaudeAgentSession? inner;
+            lock (_sync) { inner = _inner; }
+            LlmAgentCapabilities marks = inner is null ? NativeAgentContract.Claude : await inner.GetCapabilitiesAsync(cancellationToken);
+            return !_ephemeral && inner is not null && inner.ThreadId == ThreadId
+                ? marks
+                : marks with { SupportsNativeResume = InferenceSupport.Unsupported };
+        }
 
         public Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input, CancellationToken cancellationToken = default) =>
             _inner?.SteerAsync(turnId, input, cancellationToken) ?? throw new NotSupportedException(ClaudeAgentSession.SteeringUnsupported);
@@ -510,12 +541,13 @@ internal sealed partial class ClaudeAgentClient
         /// Opens a CLI session with <paramref name="opening"/> and makes it current. With <paramref name="replaceHistory"/>,
         /// the opening becomes the next revision of the saved history, only once the session opened. Returns the revision.
         /// </summary>
-        private async Task<long> OpenAndInstallAsync(LlmAgentContext opening, bool replaceHistory, CancellationToken cancellationToken)
+        private async Task<long> OpenAndInstallAsync(LlmAgentContext opening, bool replaceHistory, CancellationToken cancellationToken,
+            (string Id, bool Resume)? identity = null)
         {
             int generation;
             lock (_sync) { generation = ++_nextGeneration; }
             ClaudeAgentSession session = await _owner.OpenInnerAsync(_connectionId, _connection, _options, _workingDirectory,
-                _ephemeral, opening, item => Record(generation, item), token => BeforeResultsAsync(generation, token),
+                _ephemeral, opening, identity, item => Record(generation, item), token => BeforeResultsAsync(generation, token),
                 cancellationToken);
             bool retired;
             long revision;

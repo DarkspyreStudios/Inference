@@ -83,7 +83,8 @@ internal static class ClientTools
     internal static LlmAgentResumeOptions Snapshot(LlmAgentResumeOptions options) => options with
     {
         Tools = Snapshot(options.Tools),
-        HostedTools = HostedTools.Snapshot(options.HostedTools)
+        HostedTools = HostedTools.Snapshot(options.HostedTools),
+        Context = options.Context is null ? null : ManagedAgentContext.Copy(options.Context, includeAttachmentData: true)
     };
 
     internal static LlmAgentTurnRequest Snapshot(LlmAgentTurnRequest request) => request with

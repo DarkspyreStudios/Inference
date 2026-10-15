@@ -69,4 +69,20 @@ internal interface IClaudeCliSessionProcessFactory
     Task<IClaudeCliSessionProcess> StartAsync(
         ClaudeCliSessionInvocation invocation,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Whether the CLI saved the session <paramref name="sessionId"/> for <paramref name="workingDirectory"/>, so
+    /// <c>--resume</c> finds it. The CLI keeps each session at
+    /// <c>&lt;config folder&gt;/projects/&lt;working folder&gt;/&lt;session id&gt;.jsonl</c>: the config folder is
+    /// CLAUDE_CONFIG_DIR or <c>~/.claude</c>, and the folder name is the working folder with every character other than
+    /// an ASCII letter or digit replaced by <c>-</c>.
+    /// </summary>
+    bool SessionSaved(string workingDirectory, string sessionId)
+    {
+        string root = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR") is { Length: > 0 } configured
+            ? configured
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
+        string folder = string.Concat(workingDirectory.Select(character => char.IsAsciiLetterOrDigit(character) ? character : '-'));
+        return File.Exists(Path.Combine(root, "projects", folder, sessionId + ".jsonl"));
+    }
 }

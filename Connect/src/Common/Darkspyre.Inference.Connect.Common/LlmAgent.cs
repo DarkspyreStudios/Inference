@@ -238,6 +238,24 @@ public sealed record LlmAgentResumeOptions
     /// <summary>The model for the resumed session; null leaves the choice to the runtime.</summary>
     public string? ModelId { get; init; }
 
+    /// <summary>
+    /// The caller's history of the conversation. A runtime that keeps its own history ignores it; a runtime that
+    /// measures and compacts the history itself starts from it, and continues from it when it cannot resume natively.
+    /// </summary>
+    public LlmAgentContext? Context { get; init; }
+
+    /// <summary>Null selects the defaults. Each adapter reads the members it uses.</summary>
+    public LlmAgentExecutionOptions? ExecutionOptions { get; init; }
+
+    /// <summary>Execute runs the handler; ReturnRequests ends the turn with the calls unrun.</summary>
+    public LlmAgentToolHandling ToolHandling { get; init; } = LlmAgentToolHandling.Execute;
+
+    /// <summary>Folders that each hold a SKILL.md. The model can load any of them with the load_skill tool.</summary>
+    public IReadOnlyList<string> SkillFolders { get; init; } = [];
+
+    /// <summary>Models tried in order when the session model is overloaded or unavailable for a turn.</summary>
+    public IReadOnlyList<string> FallbackModelIds { get; init; } = [];
+
     /// <summary>System instructions applied to every turn after resuming.</summary>
     public string? Instructions { get; init; }
 

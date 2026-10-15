@@ -18,17 +18,59 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// <see cref="ClaudeConversation"/>, which owns the saved history and runs each CLI process as an inner session.
 /// </summary>
 internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory processFactory,
-    ClaudeCliLlmClient chat, LearnedModelContext learned) : ILlmAgentClient
+    ClaudeCliLlmClient chat, LearnedModelContext learned) : ILlmAgentResumeClient
 {
     private const string McpServerName = "darkspyre-inference-connect";
 
     public LlmTransport Transport => LlmTransport.AnthropicClaudeCli;
 
-    public async Task<ILlmAgentSession> StartSessionAsync(
+    public Task<ILlmAgentSession> StartSessionAsync(
         string connectionId,
         LlmConnection connection,
         LlmAgentSessionOptions options,
+        CancellationToken cancellationToken = default) =>
+        OpenConversationAsync(connectionId, connection, options, resumeThreadId: null, cancellationToken);
+
+    /// <summary>
+    /// Continues the conversation <paramref name="threadId"/> names. When the CLI saved that session for the working
+    /// folder, the first CLI session opens with <c>--resume</c>; otherwise it opens under the same id from
+    /// <see cref="LlmAgentResumeOptions.Context"/>, as a start does. Either way the conversation measures and compacts
+    /// from that history.
+    /// </summary>
+    public Task<ILlmAgentSession> ResumeSessionAsync(
+        string connectionId,
+        LlmConnection connection,
+        string threadId,
+        LlmAgentResumeOptions? options = null,
         CancellationToken cancellationToken = default)
+    {
+        CliInfrastructure.ValidateThreadId(threadId);
+        options ??= new LlmAgentResumeOptions();
+        return OpenConversationAsync(connectionId, connection, new LlmAgentSessionOptions
+        {
+            ModelId = options.ModelId ?? string.Empty,
+            Context = options.Context,
+            ExecutionOptions = options.ExecutionOptions,
+            Runtime = options.Runtime,
+            Instructions = options.Instructions,
+            Tools = options.Tools,
+            CallerServices = options.CallerServices,
+            HostedTools = options.HostedTools,
+            MaxHostedTurns = options.MaxHostedTurns,
+            ToolHandler = options.ToolHandler,
+            ToolHandling = options.ToolHandling,
+            SkillFolders = options.SkillFolders,
+            FallbackModelIds = options.FallbackModelIds,
+            ResourceOutputRetentionBytes = options.ResourceOutputRetentionBytes
+        }, threadId, cancellationToken);
+    }
+
+    private async Task<ILlmAgentSession> OpenConversationAsync(
+        string connectionId,
+        LlmConnection connection,
+        LlmAgentSessionOptions options,
+        string? resumeThreadId,
+        CancellationToken cancellationToken)
     {
         options = ClientTools.Snapshot(options);
         options = options with { HostedTools = HostedTools.WithoutUnofferedImages(options.HostedTools, NativeAgentContract.Claude.HostedTools) };
@@ -44,7 +86,8 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         options = AgentAbilityTools.Apply(options);
         LlmAgentContext history = options.Context is null ? new()
             : ManagedAgentContext.WithoutContinuationState(options.Context, supportsResources: true).Context;
-        var conversation = new ClaudeConversation(this, connectionId, connection, options, workingDirectory, ephemeral, history);
+        var conversation = new ClaudeConversation(this, connectionId, connection, options, workingDirectory, ephemeral, history,
+            resumeThreadId);
         await conversation.OpenAsync(cancellationToken);
         return conversation;
     }
@@ -70,14 +113,17 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         return (context is null ? null : adopted, new(selection.WorkspaceId, selection.SessionId, selection.Revision));
     }
 
-    /// <summary>Starts one CLI process and its session, with <paramref name="opening"/> sent before the first input.</summary>
+    /// <summary>
+    /// Starts one CLI process and its session, with <paramref name="opening"/> sent before the first input. The session
+    /// is <paramref name="identity"/>'s id, resumed with <c>--resume</c> when Resume is set, or a new id when null.
+    /// </summary>
     [SuppressMessage("Design", "CA1031", Justification = "Failed opening preserves both the original failure and a genuine retirement failure.")]
     private async Task<ClaudeAgentSession> OpenInnerAsync(string connectionId, LlmConnection connection,
         LlmAgentSessionOptions options, string workingDirectory, bool ephemeral, LlmAgentContext opening,
-        Action<LlmAgentEvent> record, Func<CancellationToken, ValueTask<bool>> beforeResults,
+        (string Id, bool Resume)? identity, Action<LlmAgentEvent> record, Func<CancellationToken, ValueTask<bool>> beforeResults,
         CancellationToken cancellationToken)
     {
-        string threadId = Guid.NewGuid().ToString();
+        string threadId = identity?.Id ?? Guid.NewGuid().ToString();
         string? modelId = options.ModelId;
         // The first definition of a duplicated name is the one used.
         IReadOnlyList<LlmAgentToolDefinition> tools = [.. ClientTools.Functions(options.Tools).DistinctBy(tool => tool.Name, StringComparer.Ordinal)];
@@ -93,6 +139,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         LlmToolNames names = LlmToolNames.Create(tools.Select(tool => tool.Name), IsValidMcpToolName);
         IReadOnlyList<string> arguments = BuildArguments(
             threadId,
+            identity?.Resume ?? false,
             modelId,
             tools,
             names,
@@ -153,6 +200,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
 
     private static List<string> BuildArguments(
         string threadId,
+        bool resume,
         string? modelId,
         IReadOnlyList<LlmAgentToolDefinition> tools,
         LlmToolNames names,
@@ -185,7 +233,8 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             arguments.Add(string.Join(',', tools.Select(tool => McpToolName(names.Native(tool.Name)))));
         }
 
-        arguments.Add($"--session-id={threadId}");
+        // A resumed session keeps its id: the CLI appends to the saved session.
+        arguments.Add(resume ? $"--resume={threadId}" : $"--session-id={threadId}");
 
         if (ephemeral)
         {

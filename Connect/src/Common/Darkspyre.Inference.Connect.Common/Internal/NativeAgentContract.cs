@@ -20,7 +20,8 @@ internal static class NativeAgentContract
         // ClaudeConversation measures its own saved history.
         SupportsContextStatus = InferenceSupport.Supported,
         SupportsCompactionHandoff = InferenceSupport.Unsupported,
-        SupportsNativeResume = InferenceSupport.Unsupported,
+        // A conversation reports Unsupported once its live CLI session is not the one its thread id names.
+        SupportsNativeResume = InferenceSupport.Supported,
         SupportsSteering = InferenceSupport.Unsupported,
         SupportsInterrupt = InferenceSupport.Supported,
         SupportsExternalToolHandoff = InferenceSupport.Unknown,
