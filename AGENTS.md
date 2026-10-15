@@ -80,13 +80,13 @@ Connect keeps its platform handling for macOS, Linux and Windows inside its own 
 | `Darkspyre.Inference.Common` | Contracts and models that Connect and Tensor genuinely share |
 | `Darkspyre.Inference.Connect` | Every out-of-process connector, as capability assemblies such as `.Connect.LLM`, `.Connect.LLM.Bedrock` and `.Connect.Image` |
 | `Darkspyre.Inference.Tensor` | Every in-process engine: `.Tensor.Common`, the `.Tensor.LLM`, `.Tensor.Image`, `.Tensor.STT` and `.Tensor.Decision` contracts, their `.Qwen`, `.Supra`, `.Whisper` and `.Laya` implementations, and `.Tensor.Registry` |
-| `Darkspyre.Inference.UI.Settings` | Host-placed Blazor/Lumeo editor for provider settings and their managers |
+| `Darkspyre.Inference.UI.Settings` | Host-placed Avalonia editor for provider settings and their managers |
 
 - Capability names are assembly and namespace boundaries inside their product package. They are never packed or versioned on their own. There is no root `Darkspyre.Inference` package or facade assembly.
 - Connect, Tensor and UI.Settings reference the Common package at the exact release version and never embed the Common assembly. No project overrides the version from `/Directory.Build.props`.
 - Put a contract in Common only when Connect and Tensor share its semantics. Similar property names are not a shared contract. Connector-only contracts stay in their Connect capability assembly.
 - `Tensor.Common` holds only behaviour two Tensor capabilities share. `Tensor.Registry` owns `TensorEngineRegistry` and `AddTensorEngines`; `Tensor.Common` and the implementations never reference it.
-- UI.Settings references Common and Lumeo, never Connect, Tensor or an application assembly. Common, Connect and Tensor stay UI-framework-neutral. A host owns its connection list, editor placement, persistence, protected credentials, consent and manager composition. Field edits stay in the settings object; only Save reaches the host.
+- UI.Settings references Common and Avalonia, never Connect, Tensor or an application assembly. Common, Connect and Tensor stay UI-framework-neutral. A host owns its connection list, editor placement, persistence, protected credentials, consent and manager composition. Field edits stay in the settings object; only Save reaches the host.
 - An implementation that needs a provider SDK lives in its own provider assembly.
 - Shipping Connect libraries stay independent of application persistence and credential storage. Host tools use `Darkspyre.SecureStore` for secrets and `Darkspyre.Persistence` for durable non-secret state, and never copy either into this repository.
 - Provider protocol versions are independent of the package version. The direct Codex adapter uses one explicit Codex compatibility version for its `User-Agent`, `version` header and model-catalog `client_version`.
@@ -163,6 +163,6 @@ When a provider returns, its files rejoin the build and the matching line here i
 
 ### D6 — Per-model context lengths are repeatable rows
 
-An OpenAI API connection's `Context lengths` setting in the provider editor uses the existing repeatable group (`SetupRepeatableGroupField`, rendered by `UI/src/Settings/Darkspyre.Inference.UI.Settings/SetupFieldInput.razor`). Each row holds a model and its context length, edited inline, with `Add row` and `Remove row`. D6 asks for a list with an **Add** button that opens a layered editor.
+An OpenAI API connection's `Context lengths` setting in the provider editor uses the existing repeatable group (`SetupRepeatableGroupField`, rendered by `SetupFieldInput.RenderGroup` in `UI/src/Settings/Darkspyre.Inference.UI.Settings/SetupFieldInput.cs`). Each row holds a model and its context length, edited inline, with `Add row` and `Remove row`. D6 asks for a list with an **Add** button that opens a layered editor.
 
 The reason: the repeatable group is the provider editor's one collection control (D3), and it shows no row until `Add row` is pressed, so no empty entry form appears. A layered row editor inside the provider editor's sheet would be a second collection control for the same job. Brandon approved this on 2026-10-11 (DSA-942).
