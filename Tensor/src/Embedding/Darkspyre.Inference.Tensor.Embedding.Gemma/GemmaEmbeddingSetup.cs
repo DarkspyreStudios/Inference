@@ -12,7 +12,11 @@ public static class GemmaEmbeddingSetup
     /// <summary>The identity and user-facing description of this engine.</summary>
     public static InferenceSetupDefinition Definition { get; } = new(
         new("darkspyre.tensor.embedding.gemma", "EmbeddingGemma", InferenceImplementationKind.Tensor, InferenceTask.Embedding),
-        "On-device text and image embeddings through ONNX Runtime. Install a model and load it explicitly on CPU or WebGPU.");
+        "On-device text and image embeddings through ONNX Runtime. Install a model and load it explicitly on CPU or WebGPU.")
+    {
+        Icon = SetupIcons.FromResource(typeof(GemmaEmbeddingSetup).Assembly, "Icons/gemma.svg"),
+        Group = SetupProviderGroup.ThisComputer
+    };
 
     /// <summary>Creates settings over the caller's pack manager and optional resident instance.</summary>
     public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,

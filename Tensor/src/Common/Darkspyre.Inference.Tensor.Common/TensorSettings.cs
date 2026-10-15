@@ -126,7 +126,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
             showValue: SelectedState() == SetupInstallState.Installed),
         .. selection is null ? Array.Empty<SetupField>()
             : [new SetupInstallStatusField(new("install-status", "Install state") { IsReadOnly = true }, InstallStatus(selection))],
-        new SetupChoiceField(new("backend", "Execution backend") { IsRequired = true,
+        new SetupChoiceField(new("backend", "Runs on") { IsRequired = true,
             HelpText = "Supported backend names are not a hardware availability guarantee. Load confirms actual runtime availability." },
             _backend.ToString(), TensorBackendKind.Auto.ToString(), SelectBackend, false),
         Observation("backend-availability", "Backend availability",
@@ -134,14 +134,16 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
         ]),
         new("model-definition", "Model definition (what the pack contains, not whether it is downloaded)", [
         Observation("pack-details", "Contents", selection is null ? "No resolved pack selected."
-            : $"{selection.Artifacts.Count} artifacts; {selection.Artifacts.Sum(artifact => (decimal)artifact.Length):0} bytes; license: {selection.License}. Installation does not support resume."),
+            : $"{selection.Artifacts.Count} artifacts; {SetupByteSize.Format(selection.Artifacts.Sum(artifact => artifact.Length))}; license: {selection.License}. Installation does not support resume."),
         Observation("pack-artifacts", "Files and provenance", selection is null ? "No resolved pack selected."
-            : string.Join(Environment.NewLine, selection.Artifacts.Select(artifact => $"{artifact.Role}: {artifact.RelativePath}; {artifact.Length} bytes; "
+            : string.Join(Environment.NewLine, selection.Artifacts.Select(artifact => $"{artifact.Role}: {artifact.RelativePath}; {SetupByteSize.Format(artifact.Length)}; "
                 + (artifact.Provenance is { } provenance ? $"{(provenance.Repository is null ? provenance.Origin.ToString() : provenance.Repository + "@" + provenance.Revision)}; {provenance.License}" : "Source provenance not supplied by the host."))))
         ], IsAdvanced: true) };
         if (_hasResolver)
         {
-            sections.Add(new("location", "Model location", [
+            // Every way to bring in a model from outside the offered packs shares one advanced section.
+            var elsewhere = new List<SetupField>
+            {
                 new SetupChoiceField(new("location-kind", "Location type"), _locationKind, _hasSource ? "repository" : "file",
                     value => EditSource("location-kind", value), false),
                 new SetupTextField(new("local-path", "Absolute model path") { IsVisible = _locationKind is "file" or "folder",
@@ -162,17 +164,17 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
                     _sha256, string.Empty, value => EditSource("source-sha256", value)),
                 new SetupIntegerField(new("source-length", "Expected primary length (bytes)") { IsVisible = _locationKind != "repository" },
                     _length, null, value => EditDraft(() => { _length = value; ClearResolution(); }), minimum: 0)
-            ]));
+            };
             if (_requirements.Count > 1)
-                sections.Add(new("companions", "Required companions", _requirements.Skip(1).Select(requirement => (SetupField)
+                elsewhere.AddRange(_requirements.Skip(1).Select(requirement => (SetupField)
                     new SetupTextField(new("companion-" + requirement.Role, requirement.Role + " location")
                     {
                         HelpText = "Optional absolute file path or HTTPS URL override. Folder filename: " + requirement.FileName
                             + (requirement.Default is null ? ". Otherwise provide this artifact explicitly." : ". Default: " + requirement.Default.Location)
                     }, _companions.GetValueOrDefault(requirement.Role, string.Empty), string.Empty,
-                        value => EditSource("companion-" + requirement.Role, value), pathSelection: SetupPathSelectionKind.File)).ToArray()));
+                        value => EditSource("companion-" + requirement.Role, value), pathSelection: SetupPathSelectionKind.File)));
             if (_hasSource && _locationKind == "repository")
-                sections.Add(new("source", "Browse repository metadata", [
+                elsewhere.AddRange([
                     new SetupChoiceField(new("repository", "Repository"), repository, string.Empty,
                         value => EditSource("repository", value), true, SetupSideEffect.Network, SetupChoiceCapabilities.Searchable),
                     new SetupChoiceField(new("source-revision", "Revision") { IsEnabled = repository.Length != 0,
@@ -181,16 +183,15 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
                     new SetupChoiceField(new("variant", "Primary artifact / variant") { IsEnabled = repository.Length != 0 && sourceRevision.Length != 0,
                         HelpText = "A repository file is only a candidate. Resolve compatibility to identify the complete pack." }, _variant, string.Empty,
                         value => EditSource("variant", value), true, SetupSideEffect.Network, SetupChoiceCapabilities.Searchable),
-                ]));
-            sections.Add(new("inspection", "Inspection results", [
+                ]);
+            elsewhere.AddRange([
                 Observation("compatibility", "Compatibility", Evaluation is null ? "Not evaluated."
                     : $"{Evaluation.State} ({Evaluation.SourceState}). " + string.Join(" ", Evaluation.Issues.Select(issue => issue.Message))),
                 Observation("compatibility-evidence", "Compatibility evidence", Evaluation is null ? "Not evaluated."
                     : string.Join(Environment.NewLine, Evaluation.Evidence.Select(evidence => $"{evidence.ArtifactPath}: {evidence.Check} — {evidence.Detail}")))
-            ]));
+            ]);
             if (_additionalArtifactRolePrefix is { } prefix)
-                sections.Add(new("additional-artifacts", "Additional model artifacts", [
-                    new SetupRepeatableGroupField(new("additional-artifacts", "Additional shards")
+                elsewhere.Add(new SetupRepeatableGroupField(new("additional-artifacts", "Additional shards")
                     { HelpText = "For split files, select every remaining shard explicitly, or select their containing folder." },
                     _companions.Where(item => item.Key.StartsWith(prefix, StringComparison.Ordinal)).Select(item => new SetupFieldRow(item.Key,
                         [new SetupTextField(new("companion-" + item.Key, "Shard path or URL"), item.Value, string.Empty,
@@ -201,8 +202,8 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
                         int index = Enumerable.Range(2, 255).First(index => !_companions.ContainsKey(prefix + index));
                         _companions.Add(prefix + index, string.Empty); ClearResolution();
                     }),
-                    id => EditDraft(() => { if (id.StartsWith(prefix, StringComparison.Ordinal)) _companions.Remove(id); ClearResolution(); }))
-                ]));
+                    id => EditDraft(() => { if (id.StartsWith(prefix, StringComparison.Ordinal)) _companions.Remove(id); ClearResolution(); })));
+            sections.Add(new("elsewhere", "Use a model from somewhere else", elsewhere.AsReadOnly(), IsAdvanced: true));
         }
         return [new("model", "Model and backend", "Select a supported pack. Browsing and saving never install or load weights.", sections)];
     }
@@ -224,9 +225,14 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
             [
                 new("download", "Download again", SetupActionPurpose.Install,
                     SetupSideEffect.Network | SetupSideEffect.Download, IsEnabled: valid),
-                new("remove", "Remove", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles, IsEnabled: true)
+                new("remove", "Delete download", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles, IsEnabled: true)
             ],
-            _ => []
+            _ =>
+            [
+                new("remove", "Delete download", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles,
+                    IsEnabled: InstanceObservation?.Model is null,
+                    UnavailableReason: InstanceObservation?.Model is null ? null : "Unload the model first.")
+            ]
         };
         return new(listed.State, selection.Key.ModelId, Listing.Store, selection.Artifacts.Count, size, selection.License,
             listed.MissingFile, actions);
@@ -250,10 +256,24 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
         "model" => Page(query, Choices().Select(model => new SetupChoice(model.Key.ToString(), model.Key.ModelId, model.Key.Revision,
             new SetupChoiceInstall(Listing.Models.Any(listed => listed.Definition.Key == model.Key && listed.State == SetupInstallState.Installed),
                 model.Artifacts.Sum(artifact => artifact.Length))))),
-        "backend" => Page(query, Backends().Select(backend => new SetupChoice(backend.ToString(), backend.ToString()))),
+        "backend" => Page(query, Backends().Select(backend => new SetupChoice(backend.ToString(), BackendName(backend)))),
         "location-kind" => Page(query, new[] { new SetupChoice("file", "Local file"), new("folder", "Local folder"), new("url", "Artifact URL") }
             .Concat(_hasSource ? [new SetupChoice("repository", "Repository")] : [])),
         _ => null
+    };
+
+    /// <summary>The name a person sees for a backend in the "Runs on" choice.</summary>
+    private static string BackendName(TensorBackendKind backend) => backend switch
+    {
+        TensorBackendKind.Auto => "Automatic",
+        TensorBackendKind.Cpu or TensorBackendKind.GgmlCpu => "CPU",
+        TensorBackendKind.GgmlMetal => "Apple GPU",
+        TensorBackendKind.GgmlCuda or TensorBackendKind.Cuda => "NVIDIA GPU",
+        TensorBackendKind.GgmlVulkan => "Vulkan GPU",
+        TensorBackendKind.Mlx => "Apple MLX",
+        TensorBackendKind.CoreMl => "Core ML",
+        TensorBackendKind.WebGpu => "WebGPU",
+        _ => backend.ToString()
     };
 
     private SetupEditResult EditSource(string field, string value)
@@ -346,9 +366,9 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
             new("import", "Import model artifacts", SetupActionPurpose.Install,
                 SetupSideEffect.Network | SetupSideEffect.Download | SetupSideEffect.LocalVerification, _hasResolver && HasLocation,
                 "Copies complete artifacts, calculates hashes, validates compatibility and installs them into the pack directory. Does not load a model."),
-            new("verify", "Verify installed weights", SetupActionPurpose.Verify,
+            new("verify", "Check files", SetupActionPurpose.Verify,
                 SetupSideEffect.LocalVerification, selected),
-            new("load", "Load selected model", SetupActionPurpose.Load,
+            new("load", "Load now", SetupActionPurpose.Load,
                 SetupSideEffect.ModelLoad, selected && live && matchingBackend && InstanceObservation?.Model is null,
                 !live ? "The host must supply a live instance." : !matchingBackend ? "The host must supply an instance configured for this backend." : null),
             new("unload", "Unload model", SetupActionPurpose.Unload, SetupSideEffect.ModelUnload, live),

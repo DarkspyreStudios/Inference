@@ -51,7 +51,7 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
         SetupInstallStatus card = InstallField(settings)!.Status;
         Assert.Equal((SetupInstallState.Installed, "test/installed", "/models", 1, "test-only"),
             (card.State, card.Name, card.Location, card.FileCount, card.License));
-        Assert.Empty(card.Actions);
+        Assert.Equal([("remove", "Delete download")], card.Actions.Select(action => (action.Id, action.DisplayName)));
 
         Select(settings, large);
         Assert.False(ModelField(settings).ShowValue);
@@ -64,7 +64,7 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
         Assert.False(ModelField(settings).ShowValue);
         card = InstallField(settings)!.Status;
         Assert.Equal((SetupInstallState.FilesMissing, "model.gguf"), (card.State, card.MissingFile));
-        Assert.Equal([("download", "Download again"), ("remove", "Remove")],
+        Assert.Equal([("download", "Download again"), ("remove", "Delete download")],
             card.Actions.Select(action => (action.Id, action.DisplayName)));
     }
 
@@ -126,7 +126,7 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
         Assert.False(ModelField(settings).ShowValue);
         SetupInstallStatus card = InstallField(settings)!.Status;
         Assert.Equal((SetupInstallState.FilesMissing, "model.gguf"), (card.State, card.MissingFile));
-        Assert.Equal(["Download again", "Remove"], card.Actions.Select(action => action.DisplayName));
+        Assert.Equal(["Download again", "Delete download"], card.Actions.Select(action => action.DisplayName));
 
         SetupActionResult result = await manager.RunAsync(settings, "remove");
 
@@ -134,6 +134,54 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
         Assert.False(File.Exists(StorePath(TensorModelPackManager.ManifestName(saved.Key))));
         Assert.False(File.Exists(StorePath(TensorModelPackManager.DescriptionName(saved.Key))));
         Assert.Equal(SetupInstallState.NotDownloaded, InstallField(settings)!.Status.State);
+    }
+
+    /// <summary>An installed pack offers Delete download, which a loaded model blocks until it is unloaded.</summary>
+    [Fact]
+    public async Task InstalledPackOffersDeleteDownloadOnlyWhenUnloaded()
+    {
+        TensorModelPackDefinition model = Definition("test/model", "model weights");
+        var list = new TestList(new TensorModelListing("/models", [new(model, SetupInstallState.Installed, null)], null));
+        using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, Store));
+        var manager = new TensorSettingsManager(Setup, new NoSave(), list, packs);
+        TensorSettings settings = await manager.OpenAsync(NewEntry());
+        Select(settings, model);
+        SetupActionDescriptor Delete() => Assert.Single(InstallField(settings)!.Status.Actions, action => action.Id == "remove");
+        Assert.True(Delete().IsEnabled);
+
+        settings.InstanceObservation = new(model.Key, TensorBackendKind.Cpu, TensorEngineState.Loaded, DateTimeOffset.UtcNow);
+
+        Assert.Equal((false, "Unload the model first."), (Delete().IsEnabled, Delete().UnavailableReason));
+        Assert.Equal(SetupActionState.Unavailable, (await manager.RunAsync(settings, "remove")).State);
+
+        settings.InstanceObservation = new(null, TensorBackendKind.Cpu, TensorEngineState.Unloaded, DateTimeOffset.UtcNow);
+        Assert.True(Delete().IsEnabled);
+    }
+
+    /// <summary>The backend shows by name, the actions read plainly, and every custom location field sits in one advanced section.</summary>
+    [Fact]
+    public async Task BackendNamesActionLabelsAndTheCustomLocationSection()
+    {
+        TensorModelPackDefinition model = Definition("test/model", "model weights") with
+        { SupportedBackends = new HashSet<TensorBackendKind> { TensorBackendKind.GgmlCpu, TensorBackendKind.GgmlMetal } };
+        var list = new TestList(new TensorModelListing("/models", [new(model, SetupInstallState.Installed, null)], null));
+        using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, Store));
+        var manager = new TensorSettingsManager(Setup, new NoSave(), list, packs, resolver: new NoResolver());
+        TensorSettings settings = await manager.OpenAsync(NewEntry());
+        Select(settings, model);
+
+        Assert.Equal("Runs on", Fields(settings).Single(field => field.Description.Id == "backend").Description.DisplayName);
+        SetupChoicePage backends = await manager.QueryChoicesAsync(settings, "backend", new());
+        Assert.Equal(["Automatic", "CPU", "Apple GPU"], backends.Choices.Select(choice => choice.DisplayName));
+        Assert.Equal(("Check files", "Load now"),
+            (settings.Actions.Single(action => action.Id == "verify").DisplayName, settings.Actions.Single(action => action.Id == "load").DisplayName));
+        SetupSection elsewhere = settings.Steps[0].Sections.Single(section => section.Title == "Use a model from somewhere else");
+        Assert.True(elsewhere.IsAdvanced);
+        Assert.Contains(elsewhere.Fields, field => field.Description.Id == "location-kind");
+        Assert.Contains(elsewhere.Fields, field => field.Description.Id == "compatibility");
+        Assert.Equal(["model", "model-definition", "elsewhere"], settings.Steps[0].Sections.Select(section => section.Id));
+        string contents = Assert.IsType<SetupTextField>(Fields(settings).Single(field => field.Description.Id == "pack-details")).Value;
+        Assert.Contains("13 B;", contents, StringComparison.Ordinal);
     }
 
     private static SetupConfigurationIdentity NewEntry() => new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null);
@@ -207,6 +255,22 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
             _read?.Invoke() ?? Task.FromResult(Listing);
 
         public void Raise() => Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    private sealed class NoResolver : ITensorModelResolver
+    {
+        public ITensorModelSource? Source => null;
+        public IReadOnlyList<TensorArtifactRequirement> Requirements => [];
+        public string? AdditionalArtifactRolePrefix => null;
+        public Task<TensorSourceResult<TensorModelCandidate>> DiscoverAsync(TensorModelSelection selection, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Opening settings resolves nothing.");
+        public Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
+            ITensorArtifactReader reader, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Opening settings resolves nothing.");
+        public Task<TensorModelEvaluation> EvaluateAsync(TensorModelCandidate candidate, TensorBackendKind backend, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Opening settings resolves nothing.");
+        public Task<TensorModelResolution> ResolveAsync(TensorModelSelection selection, CancellationToken cancellationToken = default) =>
+            throw new InvalidOperationException("Opening settings resolves nothing.");
     }
 
     private sealed class NoSave : ISetupCommitTarget<TensorSetupChanges>

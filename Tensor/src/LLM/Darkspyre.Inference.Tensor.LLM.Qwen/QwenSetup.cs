@@ -11,7 +11,11 @@ public static class QwenSetup
     /// <summary>The Qwen engine's implementation identity and description in the inference catalog.</summary>
     public static InferenceSetupDefinition Definition { get; } = new(
         new("darkspyre.tensor.qwen", "Darkspyre Tensor Qwen", InferenceImplementationKind.Tensor, InferenceTask.TextGeneration),
-        "In-process Qwen text inference with explicitly installed weights and a host-owned resident model.");
+        "In-process Qwen text inference with explicitly installed weights and a host-owned resident model.")
+    {
+        Icon = SetupIcons.FromResource(typeof(QwenSetup).Assembly, "Icons/qwen.svg"),
+        Group = SetupProviderGroup.ThisComputer
+    };
 
     /// <summary>Creates the settings manager for Qwen packs over the host's pack manager and optional live instance.</summary>
     public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,

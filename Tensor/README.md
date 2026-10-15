@@ -402,13 +402,21 @@ host-configured artifact access, for example `new TensorArtifactReader(source, h
 The model choice offers each listed model with a `SetupChoiceInstall` chip: whether it is installed and
 its download size. The choice shows its value only while the selected model is Installed
 (`SetupChoiceField.ShowValue`). Under it, a `SetupInstallStatusField` ("Install state") carries the
-selected model's `SetupInstallStatus` card. An Installed model has no card actions. A NotDownloaded model
-offers **Download (<size>)**. A FilesMissing model names the missing file and offers **Download again**
-and **Remove**. Download and Download again run the `download` action: register, install, verify and
-refresh; a FilesMissing pack is downloaded again in full. Remove runs the `remove` action: it registers
-the definition, removes the pack's files and refreshes. The pack's contents, files and provenance fold
-away under "Model definition (what the pack contains, not whether it is downloaded)". Every
-`SetupStatus` observation of Tensor settings is not applicable; the card shows install state.
+selected model's `SetupInstallStatus` card. An Installed model offers **Delete download**, enabled only
+while the instance holds no model; otherwise its reason reads "Unload the model first." A NotDownloaded
+model offers **Download (<size>)**. A FilesMissing model names the missing file and offers **Download
+again** and **Delete download**. Download and Download again run the `download` action: register,
+install, verify and refresh; a FilesMissing pack is downloaded again in full. Delete download runs the
+`remove` action: it registers the definition, removes the pack's files and refreshes. The pack's
+contents, files and provenance fold away under "Model definition (what the pack contains, not whether
+it is downloaded)", with sizes in readable units (`SetupByteSize.Format`). The fields that bring in a
+model from a file, folder, URL or repository, with their companions, inspection results and extra
+shards, share one advanced section, "Use a model from somewhere else". The backend field is labelled
+"Runs on" and names each backend: Automatic, CPU, Apple GPU, NVIDIA GPU, Vulkan GPU, Apple MLX, Core ML
+or WebGPU. The `verify` action reads **Check files** and `load` reads **Load now**. Qwen and
+EmbeddingGemma carry their own logo in `InferenceSetupDefinition.Icon`, Whisper the shared OpenAI mark;
+all three list in the "Run on this computer" group. Every `SetupStatus` observation of Tensor settings
+is not applicable; the card shows install state.
 
 Selection/Save does not install or load. Download, remove, verify, load, unload and stop are distinct callable
 actions with declared side effects. Load, Unload and Stop return once the engine accepts the request;

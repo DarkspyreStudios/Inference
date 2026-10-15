@@ -10,7 +10,11 @@ public static class WhisperSetup
     /// <summary>The Whisper implementation's identity, a resident CPU speech transcription engine, and its setup description.</summary>
     public static InferenceSetupDefinition Definition { get; } = new(
         new("darkspyre.tensor.whisper", "Darkspyre Tensor Whisper", InferenceImplementationKind.Tensor, InferenceTask.SpeechTranscription),
-        "Resident CPU speech transcription. Select and explicitly install a model; the host controls Load and Unload.");
+        "Resident CPU speech transcription. Select and explicitly install a model; the host controls Load and Unload.")
+    {
+        Icon = SetupIcons.FromResource(typeof(SetupIcons).Assembly, SetupIcons.OpenAiResource),
+        Group = SetupProviderGroup.ThisComputer
+    };
 
     /// <summary>Creates the settings manager for Whisper packs over the host's pack manager and optional live instance.</summary>
     public static TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target,
