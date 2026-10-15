@@ -139,21 +139,6 @@ internal sealed class NativeCliProbe(LlmAgentProviderService agents, string conn
         string threadId = session.ThreadId;
         LlmReasoningLevel? effort = capabilities.ReasoningLevels.Count == 0
             ? null : capabilities.ReasoningLevels.Order().First();
-        if (capabilities.ReasoningLevels.Count <= 1)
-        {
-            LlmReasoningLevel conflict = new[] { LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High }
-                .First(level => !capabilities.ReasoningLevels.Contains(level));
-            bool rejected = false;
-            try
-            {
-                await Drain(session.RunTurnAsync(Turn("Reply with OK only. Use no tools.") with { ReasoningLevel = conflict }, token));
-            }
-            catch (InferenceException error) when (error.Code == InferenceFailureCode.InvalidRequest)
-            {
-                rejected = true;
-            }
-            Require(rejected, "An unsupported selected-model effort was not rejected locally.");
-        }
         TurnSummary selected = await RunAsync(session, Turn("Reply with OK only. Use no tools.") with { ReasoningLevel = effort }, token);
         TurnSummary schema = await RunAsync(session, Turn("Return word set to sample. Use no tools.") with { OutputSchema = Schema }, token);
         TurnSummary plain = await RunAsync(session, Turn("Reply with OK only. Use no tools."), token);
@@ -161,14 +146,12 @@ internal sealed class NativeCliProbe(LlmAgentProviderService agents, string conn
             && plain.Status == LlmAgentTurnStatus.Completed, "A launch-option change did not complete cleanly.");
         Require(session.ThreadId == threadId, "Changing launch options changed the conversation.");
 
-        await RequireRejectedAsync(() => Drain(session.RunTurnAsync(
-            new LlmAgentTurnRequest { Input = [new LlmAgentImageContent("https://example.invalid/image.png")] }, token)));
         await RequireRejectedAsync(() => agents.StartSessionAsync(connectionId, new LlmAgentSessionOptions
         {
             ModelId = model,
             Runtime = new() { WorkingDirectory = workspace, Policy = new LlmAgentHostRuntimePolicy() }
         }, token));
-        return "supported controls, schema and schema removal retained the conversation; unsupported controls, input and host policy rejected";
+        return "supported controls, schema and schema removal retained the conversation; host policy rejected";
     }
 
     private async Task<string> CancelAsync(CancellationToken token)

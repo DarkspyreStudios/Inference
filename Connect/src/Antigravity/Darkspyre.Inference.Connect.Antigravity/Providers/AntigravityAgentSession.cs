@@ -47,6 +47,9 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     private bool _expectingOutput;
     private string? _fault;
     private string? _threadId;
+    // Sent once, ahead of the first turn's input; the notice reports what the opening history could not carry.
+    private string? _introduction;
+    private string? _openingNotice;
 
     // Result usage is cumulative for the whole conversation. A baseline is trusted only within the process
     // generation that reported it; a new conversation starts from zero.
@@ -58,7 +61,9 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         string executable,
         string workingDirectory,
         AntigravityLaunch defaults,
-        LlmConnection connection)
+        LlmConnection connection,
+        string? introduction,
+        string? openingNotice)
     {
         _factory = factory;
         _executable = executable;
@@ -66,6 +71,8 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         _defaults = defaults;
         _connection = connection;
         _launch = defaults;
+        _introduction = introduction;
+        _openingNotice = openingNotice;
     }
 
     private enum SessionState
@@ -89,10 +96,13 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         AntigravityLaunch launch,
         string? conversationId,
         LlmConnection connection,
+        string? introduction,
+        string? openingNotice,
         CancellationToken cancellationToken)
     {
         AntigravityCliLlmClient.ResolveCapabilities(connection, launch.ModelId);
-        var session = new AntigravityAgentSession(factory, executable, workingDirectory, launch, connection);
+        var session = new AntigravityAgentSession(factory, executable, workingDirectory, launch, connection,
+            introduction, openingNotice);
         try
         {
             using LlmOperationLifetime.Lease operation = session._retirement.Enter(cancellationToken);
@@ -146,8 +156,10 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         throw NativeAgentContract.UnsupportedContext(operation.Token);
     }
 
-    public Task<LlmAgentContext> CompactWithProviderAsync(
-        LlmProviderCompactionRequest request, CancellationToken cancellationToken = default)
+    /// <summary>AGY compacts its own conversation; Connect never supplies a replacement.</summary>
+    public LlmCompactionResponsibility CompactionResponsibility => LlmCompactionResponsibility.Provider;
+
+    public Task<LlmAgentCompactedEvent?> CompactNowAsync(CancellationToken cancellationToken = default)
     {
         using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
         throw NativeAgentContract.UnsupportedContext(operation.Token);
@@ -180,7 +192,16 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
-        (AntigravityLaunch launch, string prompt, JsonElement? schema) = Admit(request);
+        (AntigravityLaunch launch, string prompt, JsonElement? schema, bool introduces) = Admit(request);
+        if (prompt.Length == 0)
+        {
+            // Empty input with nothing to introduce sends nothing: the turn completes at once.
+            lock (_sync) { ThrowIfUnavailable(); }
+            string emptyTurnId = Guid.NewGuid().ToString("N");
+            yield return new LlmAgentTurnStartedEvent(ThreadId, emptyTurnId);
+            yield return new LlmAgentTurnCompletedEvent(ThreadId, emptyTurnId, LlmAgentCompletionReason.Completed, null);
+            yield break;
+        }
         bool usageDeltas = (AntigravityCliLlmClient.ResolveCapabilities(_connection, launch.ModelId).SupportsUsageDeltas != InferenceSupport.Unsupported);
         cancellationToken.ThrowIfCancellationRequested();
         lock (_sync)
@@ -219,6 +240,20 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             cancellationToken.ThrowIfCancellationRequested();
 
             string? writeFailure = await WritePromptAsync(prompt, cancellationToken).ConfigureAwait(false);
+            string? openingNotice = null;
+            if (introduces && writeFailure is null)
+            {
+                lock (_sync)
+                {
+                    _introduction = null;
+                    openingNotice = _openingNotice;
+                    _openingNotice = null;
+                }
+            }
+            if (openingNotice is not null)
+            {
+                yield return new LlmAgentWarningEvent(ThreadId, turnId, openingNotice);
+            }
             cancellationToken.ThrowIfCancellationRequested();
             if (writeFailure is not null)
             {
@@ -367,32 +402,14 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         ThrowCleanupFailures();
     }
 
-    private (AntigravityLaunch Launch, string Prompt, JsonElement? Schema) Admit(LlmAgentTurnRequest request)
+    /// <summary>
+    /// The turn's launch flags and its prompt: the introduction on the session's first sent turn, the turn instructions,
+    /// the input, and a notice for each attachment AGY cannot take. Settings AGY has no flag for are not sent.
+    /// </summary>
+    private (AntigravityLaunch Launch, string Prompt, JsonElement? Schema, bool Introduces) Admit(LlmAgentTurnRequest request)
     {
-        NativeAgentContract.ValidateTurn(request);
         ArgumentNullException.ThrowIfNull(request.Input);
         ArgumentNullException.ThrowIfNull(request.Attachments);
-        if (request.Attachments.Count > 0)
-        {
-            throw new NotSupportedException("Antigravity CLI accepts text input only; attachments are unsupported.");
-        }
-        var prompt = new StringBuilder();
-        foreach (LlmAgentContent content in request.Input)
-        {
-            if (content is not LlmAgentTextContent text)
-            {
-                throw new NotSupportedException("Antigravity CLI accepts text input only; image content is unsupported.");
-            }
-            if (prompt.Length > 0)
-            {
-                prompt.Append('\n');
-            }
-            prompt.Append(text.Text);
-        }
-        if (string.IsNullOrWhiteSpace(prompt.ToString()))
-        {
-            throw new ArgumentException("A turn requires nonempty text input.", nameof(request));
-        }
         if (request.ModelId is not null)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(request.ModelId, nameof(request));
@@ -407,8 +424,48 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             request.ModelId ?? _defaults.ModelId,
             request.ReasoningLevel ?? _defaults.Effort,
             request.OutputSchema?.GetRawText());
+        LlmProviderCapabilities capabilities = AntigravityCliLlmClient.ResolveCapabilities(_connection, launch.ModelId);
         launch = launch with { Effort = AntigravityCliLlmClient.MapReasoning(_connection, launch.ModelId, launch.Effort) };
-        return (launch, prompt.ToString(), request.OutputSchema);
+
+        // An attachment AGY cannot take is left out, with the shared notice in its place.
+        string notices = LlmRequestNormalizer.Normalize(_connection, new LlmChatRequest
+        {
+            ModelId = launch.ModelId ?? string.Empty,
+            Messages = [new("user", string.Empty) { Attachments = request.Attachments }]
+        }, capabilities).Messages[0].Content;
+
+        var input = new StringBuilder();
+        foreach (LlmAgentContent content in request.Input)
+        {
+            if (input.Length > 0) input.Append('\n');
+            input.Append(content switch
+            {
+                LlmAgentTextContent text => text.Text,
+                LlmAgentImageContent image => $"[Image: {image.ImageUrl}]",
+                _ => throw new NotSupportedException($"Antigravity CLI does not accept {content.GetType().Name} input.")
+            });
+        }
+        if (notices.Length > 0)
+        {
+            if (input.Length > 0) input.Append('\n');
+            input.Append(notices);
+        }
+
+        string? introduction;
+        lock (_sync) { introduction = _introduction; }
+        // Empty input appends no user message; with nothing to introduce the turn sends nothing.
+        if (input.Length == 0)
+        {
+            return (launch, introduction ?? string.Empty, request.OutputSchema, introduction is not null);
+        }
+        var prompt = new StringBuilder();
+        if (introduction is not null) prompt.Append(introduction).Append("\n\n");
+        if (!string.IsNullOrEmpty(request.Instructions))
+        {
+            prompt.Append("Instructions for this turn:\n").Append(request.Instructions).Append("\n\n");
+        }
+        prompt.Append(input);
+        return (launch, prompt.ToString(), request.OutputSchema, introduction is not null);
     }
 
     private async Task StartProcessAsync(AntigravityLaunch launch, string? conversationId, CancellationToken cancellationToken)

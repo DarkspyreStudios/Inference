@@ -32,7 +32,6 @@
   <ItemGroup>
     <!-- Inactive providers remain excluded. Active providers live in their own library projects. -->
     <Compile Remove="Providers/Anthropic*.cs;Providers/ManagedAnthropicAgentClient.cs" />
-    <Compile Remove="Providers/Antigravity*.cs;Providers/IAntigravityCliRunner.cs" />
     <Compile Remove="Providers/Apple*.cs;Providers/ManagedAppleAgentClient.cs" />
     <Compile Remove="Providers/ChatCompletionsLlmClientBase.cs;Providers/OpenAiCompatibleChatLlmClient.cs;Providers/ManagedOpenAiCompatibleAgentClient.cs" />
     <Compile Remove="Providers/GeminiApiLlmClient*.cs;Providers/ManagedGeminiApiAgentClient.cs" />
@@ -49,6 +48,7 @@
     <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Codex" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Claude" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Antigravity" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.OpenAiApi" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.SelfHost" />
   </ItemGroup>

@@ -125,6 +125,16 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
         LlmProviderCapabilities capabilities)
     {
         EnsureTransport(connection);
+        ValidateOperations(request, capabilities);
+        ValidateAdditionalRequest(connection, request);
+    }
+
+    /// <summary>
+    /// The operation checks every adapter applies after normalization: explicit caches, hosted tools, shell tools, the
+    /// model ID and tool use. An adapter that does not derive from this class calls it directly.
+    /// </summary>
+    internal static void ValidateOperations(LlmChatRequest request, LlmProviderCapabilities capabilities)
+    {
         ExplicitCaches.Validate(request, (capabilities.SupportsExplicitCache != InferenceSupport.Unsupported));
         HostedTools.Validate(request, capabilities);
         ClientTools.Validate(request, (capabilities.SupportsShellTools != InferenceSupport.Unsupported));
@@ -134,7 +144,6 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
         }
 
         ValidateToolUse(request, capabilities);
-        ValidateAdditionalRequest(connection, request);
     }
 
     protected virtual bool SupportsResourcePreparation => false;

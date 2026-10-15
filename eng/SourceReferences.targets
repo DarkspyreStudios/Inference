@@ -109,6 +109,12 @@
         PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Claude')->'%(PrivateAssets)')" />
     <PackageReference Remove="Darkspyre.Inference.Connect.Claude" />
   </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Antigravity'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)Connect/src/Antigravity/Darkspyre.Inference.Connect.Antigravity/Darkspyre.Inference.Connect.Antigravity.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Antigravity')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Antigravity')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.Connect.Antigravity" />
+  </ItemGroup>
   <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.OpenAiApi'))' != ''">
     <_InferenceSourceProject Include="$(_InferenceSourceRoot)Connect/src/OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi.csproj"
         ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.OpenAiApi')->'%(ExcludeAssets)')"

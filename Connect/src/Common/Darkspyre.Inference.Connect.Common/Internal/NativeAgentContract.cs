@@ -35,6 +35,34 @@ internal static class NativeAgentContract
         ResourceObservation = LlmOperationSupport.Supported
     };
 
+    private static IReadOnlySet<LlmAgentRuntimePolicyKind> ProviderConfigured { get; } =
+        FrozenSet.Create(LlmAgentRuntimePolicyKind.ProviderConfigured);
+
+    /// <summary>
+    /// The Antigravity CLI keeps its own conversation, compacts it itself and reopens it by its ID. It runs only its own
+    /// tools under the policy configured in its settings, and takes text only.
+    /// </summary>
+    public static LlmAgentCapabilities Antigravity { get; } = new()
+    {
+        ContextImport = LlmAgentContextImport.OpeningContext,
+        SupportsShellTools = InferenceSupport.Unsupported,
+        SupportsContextCapture = InferenceSupport.Unsupported,
+        SupportsContextReplacement = InferenceSupport.Unsupported,
+        SupportsContextStatus = InferenceSupport.Unsupported,
+        SupportsCompactionHandoff = InferenceSupport.Unsupported,
+        SupportsNativeResume = InferenceSupport.Supported,
+        SupportsSteering = InferenceSupport.Unsupported,
+        SupportsInterrupt = InferenceSupport.Unsupported,
+        SupportsExternalToolHandoff = InferenceSupport.Unsupported,
+        SupportsCompactNow = InferenceSupport.Unsupported,
+        SupportsFallbackModels = InferenceSupport.Unsupported,
+        SupportsTurnCap = InferenceSupport.Unsupported,
+        SupportsSpendCap = InferenceSupport.Unsupported,
+        RichContentSupported = RichContentRoutes.TextOnly,
+        SupportedRuntimePolicies = ProviderConfigured,
+        ResourceObservation = LlmOperationSupport.Unsupported
+    };
+
     /// <summary>
     /// Fails when the connection's overrides disable the operation. <paramref name="supportsAgentToolUse"/> is
     /// what the runtime implements; overrides can only lower it.

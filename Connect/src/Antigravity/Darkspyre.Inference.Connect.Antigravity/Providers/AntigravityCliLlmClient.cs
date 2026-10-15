@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -40,7 +41,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
 
     public LlmTransport Transport => LlmTransport.GoogleAntigravityCli;
 
-    public LlmProviderDefinition ProviderDefinition => ProviderDefinitions.GeminiSubscription;
+    public LlmProviderDefinition ProviderDefinition => AntigravityDefinition.Value;
 
     public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
         => ResolveCapabilities(connection, modelId);
@@ -82,13 +83,14 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         };
     }
 
-    /// <summary>Maps desired effort to the selected Antigravity model's native CLI vocabulary.</summary>
+    /// <summary>
+    /// Maps desired effort to the selected Antigravity model's native CLI vocabulary. A model with no effort control gets
+    /// none: the effort is dropped.
+    /// </summary>
     internal static LlmReasoningLevel? MapReasoning(LlmConnection connection, string? modelId, LlmReasoningLevel? requested)
     {
-        if (requested is null) return null;
+        if (requested is null || modelId is "claude-sonnet-4-6" or "claude-opus-4-6-thinking") return null;
         LlmProviderCapabilities capabilities = ResolveCapabilities(connection, modelId);
-        if (modelId is "claude-sonnet-4-6" or "claude-opus-4-6-thinking")
-            LlmReasoningEffort.Validate(requested, capabilities);
         IReadOnlySet<LlmReasoningLevel> choices = capabilities.ReasoningLevels.Count == 0
             ? Capabilities.ReasoningLevels : capabilities.ReasoningLevels;
         LlmReasoningLevel[] row = requested switch
@@ -113,20 +115,9 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
     {
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
-        LlmStructuredOutputEnforcement? enforcement = ValidateRequest(connection, request, capabilities);
-        request = request with { ReasoningLevel = MapReasoning(connection, request.ModelId, request.ReasoningLevel) };
+        request = Prepare(connection, request, capabilities);
+        LlmStructuredOutputEnforcement? enforcement = ValidateRequest(request, capabilities);
         string prompt = BuildPrompt(request, enforcement);
-        if (request.Tools.Count > 0
-            || request.ToolChoice is not null
-            || request.AllowParallelToolCalls is not null)
-        {
-            throw new NotSupportedException(
-                "Antigravity CLI does not expose host-executed tool calls.");
-        }
-        if (request.Messages.Any(message => message.ContinuationState is not null))
-        {
-            throw new NotSupportedException("Antigravity CLI chat cannot import adapter continuation state.");
-        }
 
         JsonElement? providerSchema = enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema
             ? request.StructuredOutput?.Schema
@@ -610,63 +601,39 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         providerCode: "antigravity_cli_exit_timeout",
         innerException: exception);
 
-    private static LlmStructuredOutputEnforcement? ValidateRequest(
-        LlmConnection connection,
-        LlmChatRequest request,
-        LlmProviderCapabilities capabilities)
+    /// <summary>
+    /// The request as the CLI receives it: another provider's continuation state is not sent, values the model cannot use
+    /// are mapped or dropped, attachments the CLI cannot take become notices, and effort takes the model's CLI vocabulary.
+    /// </summary>
+    private static LlmChatRequest Prepare(LlmConnection connection, LlmChatRequest request, LlmProviderCapabilities capabilities)
     {
-        HostedTools.Validate(request, capabilities);
-        ExplicitCaches.Validate(request, (capabilities.SupportsExplicitCache != InferenceSupport.Unsupported));
-        ProviderControlPolicy.Validate(connection, request);
-        if (string.IsNullOrWhiteSpace(request.ModelId))
-        {
-            throw new ArgumentException("A model id is required.", nameof(request));
-        }
+        request = request with { Messages = [.. request.Messages.Select(message => message with { ContinuationState = null })] };
+        request = LlmRequestNormalizer.Normalize(connection, request, capabilities);
+        return request with { ReasoningLevel = MapReasoning(connection, request.ModelId, request.ReasoningLevel) };
+    }
 
-        if (request.Temperature is not null)
-        {
-            throw new NotSupportedException("Antigravity CLI does not expose a temperature option.");
-        }
-
-        LlmClientBase.ValidateSampling(request, capabilities);
-        if (request.MaxOutputTokens is not null)
-        {
-            throw new NotSupportedException("Antigravity CLI does not expose a maximum-output-token option.");
-        }
-
-        _ = MapReasoning(connection, request.ModelId, request.ReasoningLevel);
-
+    /// <summary>Checks the operations a prepared request invokes. Host tool calls are refused: the CLI runs only its own.</summary>
+    private static LlmStructuredOutputEnforcement? ValidateRequest(LlmChatRequest request, LlmProviderCapabilities capabilities)
+    {
+        LlmClientBase.ValidateOperations(request, capabilities);
         if (request.ProviderOptions.Count > 0)
         {
             throw new NotSupportedException("Antigravity CLI request provider options are not supported.");
         }
 
-        LlmClientBase.ValidatePromptAttachments(request, capabilities);
-
-        if (request.StructuredOutput is not { } structured)
-        {
-            return null;
-        }
-
-        StructuredOutput.ValidateRequest(request);
-        return StructuredOutput.ResolveEnforcement(structured, capabilities);
+        return request.StructuredOutput is { } structured ? StructuredOutput.ResolveEnforcement(structured, capabilities) : null;
     }
 
     public string? EstimateDiagnostic => LocalTokenCount.CliDiagnostic;
 
-    /// <summary>Counts the prompt this client would send.</summary>
-    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    /// <summary>Counts the prompt this client would send. The CLI takes text only, so no caller-owned resource is counted.</summary>
+    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
     {
         ArgumentNullException.ThrowIfNull(request);
-        LlmStructuredOutputEnforcement? enforcement = ValidateRequest(connection, request, GetCapabilities(connection, request.ModelId));
-        if (request.Tools.Count > 0 || request.ToolChoice is not null || request.AllowParallelToolCalls is not null)
-        {
-            throw new NotSupportedException("Antigravity CLI does not expose host-executed tool calls.");
-        }
-        if (request.Messages.Any(message => message.ContinuationState is not null))
-        {
-            throw new NotSupportedException("Antigravity CLI chat cannot import adapter continuation state.");
-        }
+        LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        request = Prepare(connection, request, capabilities);
+        LlmStructuredOutputEnforcement? enforcement = ValidateRequest(request, capabilities);
         return new ContextEstimate(LocalTokenCount.Count(BuildPrompt(request, enforcement)));
     }
 

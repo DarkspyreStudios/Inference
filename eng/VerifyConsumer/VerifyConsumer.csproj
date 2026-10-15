@@ -11,6 +11,7 @@
     <PackageReference Include="Darkspyre.Inference.Connect.Common" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Connect.Codex" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Connect.Claude" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.Connect.Antigravity" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Connect.OpenAiApi" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Connect.SelfHost" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Tensor.Common" Version="[$(Version)]" />

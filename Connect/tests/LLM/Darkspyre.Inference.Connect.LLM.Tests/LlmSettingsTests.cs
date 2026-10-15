@@ -60,7 +60,7 @@ public sealed class LlmSettingsTests
     [Fact]
     public void AntigravitySetupCatalogNamesTheCliWithoutChangingProviderIdentity()
     {
-        var catalog = new LlmProviderCatalog([ProviderDefinitions.GeminiSubscription]);
+        var catalog = new LlmProviderCatalog([AntigravityDefinition.Value]);
         InferenceSetupDefinition setup = Assert.Single(catalog.SetupDefinitions);
 
         Assert.Contains("Antigravity", setup.Implementation.DisplayName, StringComparison.Ordinal);
@@ -74,7 +74,7 @@ public sealed class LlmSettingsTests
     public async Task BlankCliExecutableUsesProviderDefaultForChecksAndSave(LlmTransport transport)
     {
         LlmProviderDefinition definition = transport == LlmTransport.AnthropicClaudeCli
-            ? ClaudeDefinition.Value : ProviderDefinitions.GeminiSubscription;
+            ? ClaudeDefinition.Value : AntigravityDefinition.Value;
         using var provider = new LlmProviderService(new UnusedSource(), [new Client(definition)]);
         var target = new Target();
         var (manager, settings) = await OpenAsync(provider, transport,

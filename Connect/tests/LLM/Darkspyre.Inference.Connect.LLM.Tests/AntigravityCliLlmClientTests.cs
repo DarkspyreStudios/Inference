@@ -13,12 +13,13 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class AntigravityCliLlmClientTests
 {
+    /// <summary>A schema whose root is not an object is checked locally on every route, as the universal contract requires.</summary>
     [Theory]
     [InlineData(true, true)]
     [InlineData(false, true)]
     [InlineData(true, false)]
     [InlineData(false, false)]
-    public async Task TrueSchemaReachesTheSelectedNativeOrLocalPath(bool streaming, bool local)
+    public async Task TrueSchemaIsCheckedLocally(bool streaming, bool local)
     {
         const string payload = """{"status":"SUCCESS","response":"17","structured_output":17}""";
         var runner = new RecordingRunner(new(0, streaming ? "{\"event\":\"result\",\"result\":" + payload + "}" : payload, string.Empty));
@@ -36,8 +37,7 @@ public sealed class AntigravityCliLlmClientTests
             ModelId = "auto", Messages = [new("user", "Return 17 as JSON.")],
             StructuredOutput = new()
             {
-                Name = "answer", Schema = JsonElement.Parse("true"),
-                Fallback = local ? LlmStructuredOutputFallback.LocalValidation : LlmStructuredOutputFallback.None
+                Name = "answer", Schema = JsonElement.Parse("true")
             }
         };
 
@@ -47,17 +47,12 @@ public sealed class AntigravityCliLlmClientTests
         Assert.Equal("17", result.Text);
         Assert.True(result.StructuredOutput!.WasEvaluated);
         Assert.True(result.StructuredOutput.IsValid);
-        Assert.Equal(local ? LlmStructuredOutputEnforcement.LocalValidationOnly : LlmStructuredOutputEnforcement.ProviderJsonSchema,
-            result.StructuredOutput.Enforcement);
+        Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, result.StructuredOutput.Enforcement);
         AntigravityCliInvocation invocation = Assert.Single(runner.Invocations);
-        if (local)
-        {
-            Assert.DoesNotContain("--json-schema", invocation.Arguments);
-            Assert.Null(runner.SchemaContent);
-            string prompt = streaming ? invocation.StandardInput! : invocation.Arguments[invocation.Arguments.ToList().IndexOf("-p") + 1];
-            Assert.Contains("true", prompt, StringComparison.Ordinal);
-        }
-        else Assert.Equal("true", runner.SchemaContent);
+        Assert.DoesNotContain("--json-schema", invocation.Arguments);
+        Assert.Null(runner.SchemaContent);
+        string prompt = streaming ? invocation.StandardInput! : invocation.Arguments[invocation.Arguments.ToList().IndexOf("-p") + 1];
+        Assert.Contains("true", prompt, StringComparison.Ordinal);
         Assert.Equal(JsonValueKind.True, request.StructuredOutput.Schema.ValueKind);
     }
 
@@ -141,7 +136,7 @@ public sealed class AntigravityCliLlmClientTests
     {
         var process = new TerminalProcess();
         await using ILlmAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
-            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), CancellationToken.None);
+            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, CancellationToken.None);
 
         IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(
             new() { Input = [new LlmAgentTextContent("test")] }));
@@ -156,7 +151,7 @@ public sealed class AntigravityCliLlmClientTests
     [Theory]
     [InlineData("claude-sonnet-4-6")]
     [InlineData("claude-opus-4-6-thinking")]
-    public async Task ClaudeModelRejectsEffortBeforeInvocationButAllowsDefault(string model)
+    public async Task ClaudeModelDropsEffortItHasNoControlFor(string model)
     {
         var runner = new RecordingRunner(new(0,
             """{"event":"result","result":{"status":"SUCCESS","response":"OK"}}""", string.Empty));
@@ -175,14 +170,9 @@ public sealed class AntigravityCliLlmClientTests
             ReasoningLevel = LlmReasoningLevel.Medium
         };
 
-        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(() =>
-            ReadAllAsync(client.StreamAsync(connection, request)));
-        Assert.Equal(InferenceFailureCode.InvalidRequest, failure.Code);
-        Assert.Empty(runner.Invocations);
         Assert.Empty(client.GetCapabilities(connection, model).ReasoningLevels);
 
-        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection,
-            request with { ReasoningLevel = null }));
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection, request));
         LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.Completed, result.Status);
         Assert.Equal("OK", result.Text);
@@ -287,7 +277,7 @@ public sealed class AntigravityCliLlmClientTests
     {
         var process = new TerminalProcess();
         await using ILlmAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
-            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), CancellationToken.None);
+            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, CancellationToken.None);
         var request = new LlmAgentTurnRequest { ModelId = model, ReasoningLevel = effort, Input = [new LlmAgentTextContent("answer")] };
 
         IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(request));
@@ -298,6 +288,85 @@ public sealed class AntigravityCliLlmClientTests
         Assert.Equal(effort, request.ReasoningLevel);
         Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
     }
+
+    [Fact]
+    public async Task ResumeReopensTheProviderConversationThroughTheFacade()
+    {
+        var process = new TerminalProcess();
+        await using var providers = new LlmAgentProviderService(new ResourcePreparationTests.Source(Connection()),
+            [new AntigravityAgentClient(process)]);
+
+        await using ILlmAgentSession session = await providers.ResumeSessionAsync("connection", "conversation-1",
+            new() { Runtime = ProviderRuntime() });
+
+        Assert.Equal("conversation-1", session.ThreadId);
+        IReadOnlyList<string> arguments = Assert.Single(process.Invocations);
+        Assert.Equal("conversation-1", arguments[arguments.ToList().IndexOf("--conversation") + 1]);
+        Assert.Equal(InferenceSupport.Supported, (await session.GetCapabilitiesAsync()).SupportsNativeResume);
+    }
+
+    [Fact]
+    public async Task FirstTurnCarriesSessionInstructionsAndOpeningHistoryOnce()
+    {
+        var process = new TerminalProcess();
+        await using ILlmAgentSession session = await new AntigravityAgentClient(process).StartSessionAsync("connection",
+            Connection(), new()
+            {
+                ModelId = "auto",
+                Runtime = ProviderRuntime(),
+                Instructions = "Answer in French.",
+                Context = new() { Entries = [new("e1", "t0", new("user", "My name is Ada."))] }
+            });
+
+        IReadOnlyList<LlmAgentEvent> first = await ReadAllAsync(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("Hello")] }));
+        await ReadAllAsync(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("Again")] }));
+
+        Assert.Equal(2, process.Writes.Count);
+        Assert.Contains("Answer in French.", process.Writes[0], StringComparison.Ordinal);
+        Assert.Contains(AgentOpeningContext.Header, process.Writes[0], StringComparison.Ordinal);
+        Assert.Contains("My name is Ada.", process.Writes[0], StringComparison.Ordinal);
+        Assert.DoesNotContain("Answer in French.", process.Writes[1], StringComparison.Ordinal);
+        Assert.DoesNotContain(AgentOpeningContext.Header, process.Writes[1], StringComparison.Ordinal);
+        Assert.Single(first.OfType<LlmAgentWarningEvent>());
+    }
+
+    [Fact]
+    public async Task TurnInstructionsAndUncarriedAttachmentsReachThePromptAsText()
+    {
+        var process = new TerminalProcess();
+        await using ILlmAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
+            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, CancellationToken.None);
+        var image = new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "chart.png", MediaType = "image/png", Data = new byte[] { 1 } };
+
+        await ReadAllAsync(session.RunTurnAsync(new()
+        {
+            Instructions = "Be brief.", Input = [new LlmAgentTextContent("Look")], Attachments = [image]
+        }));
+
+        string written = Assert.Single(process.Writes);
+        Assert.Contains("Instructions for this turn:", written, StringComparison.Ordinal);
+        Assert.Contains("[Attachment 0 (chart.png): The selected model does not support this attachment. "
+            + "This content was not supplied to the model.]", written, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task EmptyTurnCompletesWithoutWritingToTheCli()
+    {
+        var process = new TerminalProcess();
+        await using ILlmAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
+            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, CancellationToken.None);
+
+        IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(new()));
+
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Empty(process.Writes);
+    }
+
+    private static LlmAgentNativeRuntimeOptions ProviderRuntime() => new()
+    {
+        WorkingDirectory = Environment.CurrentDirectory,
+        Policy = new LlmAgentProviderRuntimePolicy()
+    };
 
     [Fact]
     public async Task ToolHistoryReachesThePromptAsLabelledBlocks()
@@ -368,12 +437,21 @@ public sealed class AntigravityCliLlmClientTests
     private sealed class TerminalProcess : IAntigravityCliSessionProcessFactory, IAntigravityCliSessionProcess
     {
         private readonly Channel<string> _lines = Channel.CreateUnbounded<string>();
+        // Every process the factory starts records its input here.
+        private readonly List<string> _writes;
+
+        public TerminalProcess() : this([]) { }
+
+        private TerminalProcess(List<string> writes) => _writes = writes;
+
         public List<IReadOnlyList<string>> Invocations { get; } = [];
+
+        public List<string> Writes => _writes;
 
         public IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory)
         {
             Invocations.Add(arguments);
-            var process = new TerminalProcess();
+            var process = new TerminalProcess(_writes);
             process._lines.Writer.TryWrite("""{"event":"init","conversation_id":"conversation-1"}""");
             return process;
         }
@@ -381,6 +459,7 @@ public sealed class AntigravityCliLlmClientTests
         public ValueTask WriteAsync(string text, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            _writes.Add(text);
             _lines.Writer.TryWrite(new JsonObject
             {
                 ["event"] = "result",

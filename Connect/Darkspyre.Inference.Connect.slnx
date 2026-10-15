@@ -36,6 +36,9 @@
   <Folder Name="/src/Claude/">
     <Project Path="src/Claude/Darkspyre.Inference.Connect.Claude/Darkspyre.Inference.Connect.Claude.csproj" />
   </Folder>
+  <Folder Name="/src/Antigravity/">
+    <Project Path="src/Antigravity/Darkspyre.Inference.Connect.Antigravity/Darkspyre.Inference.Connect.Antigravity.csproj" />
+  </Folder>
   <Folder Name="/src/OpenAiApi/">
     <Project Path="src/OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi.csproj" />
   </Folder>

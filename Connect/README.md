@@ -9,6 +9,7 @@ The conversation libraries are independently consumable:
 | `Darkspyre.Inference.Connect.Common` | Universal conversation and embedding contracts, facades, shared protocol code and discovery |
 | `Darkspyre.Inference.Connect.Codex` | Native Codex client and authentication |
 | `Darkspyre.Inference.Connect.Claude` | Official Claude CLI conversations and authentication |
+| `Darkspyre.Inference.Connect.Antigravity` | Official Antigravity CLI conversations, native resume and account usage |
 | `Darkspyre.Inference.Connect.OpenAiApi` | OpenAI Responses conversations and text embeddings |
 | `Darkspyre.Inference.Connect.SelfHost` | Conversations and text/image embeddings through caller-owned engines |
 
@@ -29,7 +30,7 @@ Discovery registers services without reading credentials, calling providers or l
 The caller supplies `ILlmConnectionSource`. Including SelfHost also requires caller-owned
 `ILlmSelfHost` when resolving its clients. Connect borrows those engines through Common contracts;
 the caller owns their loading and disposal. Codex, OpenAiApi and SelfHost use the shared managed
-conversation implementation. Claude uses its native universal conversation implementation.
+conversation implementation. Claude and Antigravity use their native universal conversation implementations.
 
 Every library is one managed artifact for Mac, Linux and Windows. Existing runtime OS handling
 stays inside the libraries. Discovery requires deployed assembly files. A deployment without a
@@ -39,7 +40,7 @@ Provider package buildTransitive targets and source-mode targets preserve provid
 trimming. This rooting does not establish full application trimming or NativeAOT compatibility.
 
 Every other LLM provider is out of the build. `Darkspyre.Inference.Connect.Common.csproj` excludes the
-Anthropic API, Antigravity, Apple, OpenAI-compatible chat, Gemini API and xAI files with
+Anthropic API, Apple, OpenAI-compatible chat, Gemini API and xAI files with
 `Compile Remove`. The Image project excludes the xAI image transport and the TTS project
 excludes the xAI speech transport. The Bedrock, Vertex, Azure, STT, Realtime, Video, Resources and examples
 projects are out of the solution, the `Darkspyre.Inference.Connect` package and the source references in
@@ -100,6 +101,9 @@ sends the context as it is, and with an empty context the turn completes at once
 with empty `Input` and no attachments sends the opening context alone, or completes at once when there is none.
 Claude puts nonempty turn `Instructions` before the turn input as `Instructions for this turn:\n{text}\n\n`, and
 sends no tool choice. Claude drops an effort when the model reports no effort control or no offered effort maps.
+Antigravity puts nonempty turn `Instructions` before the turn input the same way, turns an image URL in `Input` into
+`[Image: {url}]`, and appends the attachment notice for every attachment, because the CLI takes text only. A turn with
+empty `Input` and nothing to introduce completes at once as `Completed` without writing to the CLI.
 
 **Values the model cannot use.** Every request passes one normalizer before its client runs, and a managed
 session normalizes each request it builds, so its measure sees what is sent. A dropped setting is not reported.
@@ -182,8 +186,9 @@ selected model, provider and account cannot replay is left out and counted, so a
 connection continues, including one whose connection was removed.
 
 `LlmAgentProviderService.ResumeSessionAsync` routes to the transport's internal `ILlmAgentResumeClient`; Codex has
-none and refuses. Claude resumes by the conversation's thread id with `LlmAgentResumeOptions.Context`, the caller's
-history, and the session settings `ExecutionOptions`, `ToolHandling`, `SkillFolders` and `FallbackModelIds`:
+none and refuses. Antigravity resumes natively: AGY keeps the conversation and reopens it with
+`--conversation <id>`. Claude resumes by the conversation's thread id with `LlmAgentResumeOptions.Context`, the
+caller's history, and the session settings `ExecutionOptions`, `ToolHandling`, `SkillFolders` and `FallbackModelIds`:
 
 - When the CLI saved that session for the working folder (`<config folder>/projects/<working folder>/<id>.jsonl`,
   where the config folder is `CLAUDE_CONFIG_DIR` or `~/.claude` and the folder name is the working folder with every
@@ -199,22 +204,22 @@ history, and the session settings `ExecutionOptions`, `ToolHandling`, `SkillFold
 
 **Feature list.** `LlmAgentCapabilities` reports public features only. Values:
 
-| Member | Codex | OpenAI API | Claude |
-| --- | --- | --- | --- |
-| HostedTools | ImageGeneration | ImageGeneration | none |
-| SupportsShellTools | Unsupported | Unsupported | Unsupported |
-| SupportsContextCapture, SupportsContextReplacement | Supported | Supported | Unsupported |
-| SupportsContextStatus | Supported | Supported | Supported |
-| SupportsCompactionHandoff | Unsupported | Unsupported | Unsupported |
-| SupportsNativeResume | Unsupported | Unsupported | Supported |
-| SupportsSteering | Supported | Supported | Supported |
-| SupportsInterrupt | Supported | Supported | Supported |
-| SupportsExternalToolHandoff | Supported | Supported | Unknown |
-| ResourceObservation | Unsupported | Unsupported | Supported |
-| SupportsFallbackModels | Unsupported | Unsupported | Unknown |
-| SupportsTurnCap | Supported | Supported | Unknown |
-| SupportsSpendCap | Unsupported | Unsupported | Unknown |
-| SupportsCompactNow | Supported | Supported | Supported |
+| Member | Codex | OpenAI API | Claude | Antigravity |
+| --- | --- | --- | --- | --- |
+| HostedTools | ImageGeneration | ImageGeneration | none | none |
+| SupportsShellTools | Unsupported | Unsupported | Unsupported | Unsupported |
+| SupportsContextCapture, SupportsContextReplacement | Supported | Supported | Unsupported | Unsupported |
+| SupportsContextStatus | Supported | Supported | Supported | Unsupported |
+| SupportsCompactionHandoff | Unsupported | Unsupported | Unsupported | Unsupported |
+| SupportsNativeResume | Unsupported | Unsupported | Supported | Supported |
+| SupportsSteering | Supported | Supported | Supported | Unsupported |
+| SupportsInterrupt | Supported | Supported | Supported | Unsupported |
+| SupportsExternalToolHandoff | Supported | Supported | Unknown | Unsupported |
+| ResourceObservation | Unsupported | Unsupported | Supported | Unsupported |
+| SupportsFallbackModels | Unsupported | Unsupported | Unknown | Unsupported |
+| SupportsTurnCap | Supported | Supported | Unknown | Unsupported |
+| SupportsSpendCap | Unsupported | Unsupported | Unknown | Unsupported |
+| SupportsCompactNow | Supported | Supported | Supported | Unsupported |
 
 **The OpenAI API and its endpoint.** An OpenAI API connection has an endpoint, `https://api.openai.com/v1` by
 default, and may point at any service that serves the same API, such as a local llama.cpp server or OpenRouter. The
@@ -5183,7 +5188,7 @@ Its explicit rows map desired effort down to a native choice, or to the lowest a
 when none is at or below the request. A fixed-effort slug maps every explicit effort to its pinned
 level; the adapter never changes the selected model slug. Null leaves the default unchanged.
 The verified `claude-sonnet-4-6` and `claude-opus-4-6-thinking` slugs expose no selectable effort because
-the CLI rejects that flag. Omitted effort preserves their native default. Overrides cannot enable it.
+the CLI rejects that flag. A requested effort is dropped, which keeps their native default. Overrides cannot enable it.
 Other model IDs use the installed CLI's low/medium/high/xhigh/max vocabulary. `None` and `Minimal`
 map to the lowest available effort; this does not disable thinking. Missing observations remain
 attemptable, including xhigh and max. The installed `agy --help` documents those spellings; the public
@@ -5204,8 +5209,12 @@ per open session, with an open standard input and one output reader.
 - `ResumeSessionAsync` passes that exact ID with `--conversation` and fails if the handshake reports
   another. Resume without `Runtime` fails, so the host must supply its stored working directory and
   provider policy. `--continue` is never used.
-- Host tools, a tool handler, host context, host identities, session instructions, per-turn instructions,
-  images and attachments are rejected before any process starts or any prompt is written.
+- Host tools and a tool handler are rejected before any process starts. `ThreadId` and `SessionId` on a start are
+  not read: AGY assigns the conversation ID.
+- Session `Instructions` and a start's `Context` are sent once, ahead of the first turn's input: the instructions
+  as `Instructions for this conversation:\n{text}`, then the history as the `CONVERSATION SO FAR` transcript. That
+  turn emits the opening notice as one `LlmAgentWarningEvent`. A resume sends nonempty session instructions the
+  same way. Turn instructions, images and attachments follow the universal turn rules above.
 - One turn runs at a time. Model, effort (`Low`, `Medium`, `High`) and output schema apply to one turn.
   When they differ from the running process, the session closes that process while idle and reopens the
   same conversation with the new flags before sending the prompt.
@@ -5232,16 +5241,16 @@ per open session, with an open standard input and one output reader.
   usage. All disposal callers share one completion and its cleanup failure. Cancelled turns retain
   cancellation; a failed local termination also faults the session with its PID and remains visible
   to disposal. Failed opening preserves both the opening and cleanup errors when both occur.
-- `SupportsAgentToolUse` is `Unsupported`, `ToolExecutionOwnership` is Provider, `ResourceObservation` is
-  Unsupported and resource operations throw. Interrupt, steering, fork and context capture, status,
-  replacement and compaction handoff are unsupported.
+- `SupportsAgentToolUse` is `Unsupported`, AGY runs only its own tools, `ResourceObservation` is Unsupported
+  and resource operations throw. Interrupt, steering, fork and context capture, status, replacement and
+  compaction handoff are unsupported. `SupportsNativeResume` is Supported.
 
 The ConsoleTester `agy-probe` command runs bounded live qualification cases; see
 [Subscription and AWS smoke tests](#subscription-and-aws-smoke-tests).
 The resume case requires a completed resumed turn as well as the retained conversation ID and recalled
 marker. Matching answer text on a failed or interrupted turn does not qualify resume.
-The control case uses an offered effort, or omits effort when the model has no control. It checks local
-refusal of an unsupported effort before proving that the same session still completes subsequent turns.
+The control case uses an offered effort, or omits effort when the model has no control, and proves that the
+same session completes subsequent turns. It checks that a host-controlled runtime policy is refused.
 Actual native qualification covers the controls, native-tools and cancellation cases on Antigravity 1.3.1 with
 the selected `claude-opus-4-6-thinking` model. The controls case completes three turns and retains
 the conversation through schema addition and removal after local unsupported-effort refusal.
