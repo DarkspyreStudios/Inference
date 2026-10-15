@@ -19,9 +19,9 @@ override choices distinguish Default (inherit) from Unknown, Enabled (Supported)
 
 The host supplies `IInferenceSettingsInteractionHost` to authorize declared side effects and
 run provider actions through `ExecuteAsync(manager, settings, action, progress, token)`. The component
-does not own the settings, the manager, or any engine behind it. The host adds the package's styles,
-`new InferenceSettingsStyles()`, to its application styles once. The styles read the host theme's
-brushes, so the editor follows the host's light or dark theme.
+does not own the settings, the manager, or any engine behind it. The editor carries its own styles,
+`InferenceSettingsStyles`. They read the host theme's brushes, so the editor follows the host's light or
+dark theme.
 
 ```csharp
 InferenceSettingsEditor editor = new(settings, manager, interactionHost);

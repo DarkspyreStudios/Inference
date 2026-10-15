@@ -333,8 +333,7 @@ editor.CommitCompleted += (_, result) => OnCommitCompleted(result);
 dialog.Content = editor;
 ```
 
-The host adds `InferenceSettingsStyles` to its application styles, supplies a typed commit target,
-and owns the settings' lifetime. See the [UI.Settings guide](UI/README.md) and
+The host supplies a typed commit target and owns the settings' lifetime. See the [UI.Settings guide](UI/README.md) and
 [compiled host example](UI/examples/Darkspyre.Inference.UI.Settings.Example/HostPlacedSettingsExample.cs).
 
 ## Repository and further examples
