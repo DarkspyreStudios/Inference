@@ -555,6 +555,21 @@ internal interface ILlmAgentClient
         CancellationToken cancellationToken = default);
 }
 
+/// <summary>
+/// An agent client that resumes a conversation by its thread ID. <see cref="LlmAgentProviderService.ResumeSessionAsync"/>
+/// routes a resume to the client registered for the connection's transport and refuses it for a client without this
+/// interface. Each client decides how it continues the conversation.
+/// </summary>
+internal interface ILlmAgentResumeClient : ILlmAgentClient
+{
+    Task<ILlmAgentSession> ResumeSessionAsync(
+        string connectionId,
+        LlmConnection connection,
+        string threadId,
+        LlmAgentResumeOptions? options = null,
+        CancellationToken cancellationToken = default);
+}
+
 /// <summary>Who compacts a conversation when its context fills.</summary>
 public enum LlmCompactionResponsibility
 {

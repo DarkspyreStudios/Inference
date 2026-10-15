@@ -100,8 +100,10 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
         return await OwnAsync(session, cancellationToken);
     }
 
-    /// <summary>Reopens a provider thread by its ID. No built transport resumes one; a conversation continues by
-    /// <see cref="StartSessionAsync"/> with its history.</summary>
+    /// <summary>Reopens a conversation by its thread ID through the transport's resume client.</summary>
+    /// <gotcha>A transport whose client does not resume refuses with
+    /// <c>{transport} agent sessions cannot resume a provider thread.</c>; that conversation continues by
+    /// <see cref="StartSessionAsync"/> with its history.</gotcha>
     public async Task<ILlmAgentSession> ResumeSessionAsync(
         string connectionId,
         string threadId,
@@ -120,8 +122,13 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfOpeningCanceled(cancellationToken);
         RuntimeInputAdmission.Validate(connection);
-        _ = ClientFor(connection.Transport);
-        throw new NotSupportedException($"{connection.Transport} agent sessions cannot resume a provider thread.");
+        ILlmAgentSession session = await ResumeClientFor(connection.Transport).ResumeSessionAsync(
+            connectionId,
+            connection,
+            threadId,
+            options,
+            cancellationToken);
+        return await OwnAsync(session, cancellationToken);
     }
 
     private void ThrowIfOpeningCanceled(CancellationToken token)
@@ -224,4 +231,8 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
             ? client
             : throw new NotSupportedException(
                 $"No LLM agent client is registered for transport {transport}.");
+
+    private ILlmAgentResumeClient ResumeClientFor(LlmTransport transport) =>
+        ClientFor(transport) as ILlmAgentResumeClient
+            ?? throw new NotSupportedException($"{transport} agent sessions cannot resume a provider thread.");
 }
