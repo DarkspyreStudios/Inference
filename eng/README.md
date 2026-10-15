@@ -66,9 +66,7 @@ system temporary directory and its exact path is printed on success.
 Every package includes a readable package README and the repository license. Pack verification
 confirms that the Common assembly appears only in the Common package, that internal library dependencies use the exact synchronized version, and that each Tensor library
 contains only its own assembly plus XML documentation. Connect.Common and each provider own one assembly.
-The media Connect package keeps Image, TTS and Audio together and depends on Connect.Common. UI.Settings also includes its static web
-assets and `THIRD-PARTY-NOTICES.md` for its owned numeric control's Lumeo-derived
-layout/accessibility. Lumeo is an unmodified package dependency, not a fork.
+The media Connect package keeps Image, TTS and Audio together and depends on Connect.Common.
 
 Source builds use project references. `Directory.Build.targets` pins internal library dependencies to `[$(Version)]` when generating each library's NuGet manifest. `eng/VerifyPackages`
 rejects foreign DLLs, native binaries and shader sources, local-only dependencies, missing owned

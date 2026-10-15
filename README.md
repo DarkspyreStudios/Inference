@@ -62,7 +62,7 @@ solution, version and deployment outside the coordinated library release.
 | `Darkspyre.Inference.Connect` | Existing Image, TTS and Audio capability assemblies |
 | `Darkspyre.Inference.Tensor.Common` | Tensor capability contracts, model lifecycle and verified model packs |
 | `Darkspyre.Inference.Tensor.*` model libraries | Independently consumed in-process loaders and their runtime dependencies |
-| `Darkspyre.Inference.UI.Settings` | Optional host-placed Blazor/Lumeo editor for the shared setup contracts |
+| `Darkspyre.Inference.UI.Settings` | Optional host-placed Avalonia editor for the shared setup contracts |
 
 Connect, Tensor, and UI.Settings reference the **exact same-version Common NuGet**; they do not
 embed its DLL. UI.Settings does not depend on Connect or Tensor. Connect provider and Tensor model libraries are independent packages at the synchronized family version.
@@ -151,7 +151,7 @@ dotnet add package Darkspyre.Inference.Connect.OpenAiApi --version 11.15.1-rc.1
 dotnet add package Darkspyre.Inference.Tensor.Image.Supra --version 11.15.1-rc.1
 ```
 
-Optional, for a Blazor host:
+Optional, for an Avalonia host:
 
 ```bash
 dotnet add package Darkspyre.Inference.UI.Settings --version 11.15.1-rc.1
@@ -321,21 +321,21 @@ public static class SpeechExample
 The returned audio belongs to the host to store or play. For speech **recognition**, use Tensor's
 [Whisper implementation](Tensor/README.md#speech-transcription--whisper).
 
-### Place the shared editor in a Blazor host
+### Place the shared editor in an Avalonia host
 
-Given a provider-created setup session, a host interaction handler, and a commit callback:
+Given provider settings, their manager, a host interaction handler, and a commit handler:
 
-```razor
-@using Darkspyre.Inference.UI.Settings
+```csharp
+using Darkspyre.Inference.UI.Settings;
 
-<InferenceSettingsEditor Session="@selectedSession"
-                         Host="@interactionHost"
-                         CommitCompleted="OnCommitCompletedAsync" />
+InferenceSettingsEditor editor = new(settings, manager, interactionHost);
+editor.CommitCompleted += (_, result) => OnCommitCompleted(result);
+dialog.Content = editor;
 ```
 
-The host registers Lumeo, includes its theme and Razor Class Library assets, supplies a typed commit
-target, and owns session disposal. See the [UI.Settings guide](UI/README.md) and
-[compiled host example](UI/examples/Darkspyre.Inference.UI.Settings.Example/HostPlacedSettingsExample.razor).
+The host adds `InferenceSettingsStyles` to its application styles, supplies a typed commit target,
+and owns the settings' lifetime. See the [UI.Settings guide](UI/README.md) and
+[compiled host example](UI/examples/Darkspyre.Inference.UI.Settings.Example/HostPlacedSettingsExample.cs).
 
 ## Repository and further examples
 

@@ -1,0 +1,65 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="Darkspyre.Inference.UI.Settings.InferenceSettingsStyles">
+  <!-- The setup editor reads the host theme's colour tokens; a host without them shows the platform defaults. -->
+  <Style Selector="TextBlock.inference-settings-help, TextBlock.inference-settings-effects, TextBlock.inference-settings-status, TextBlock.inference-install-card-detail">
+    <Setter Property="Foreground" Value="{DynamicResource color-muted-foreground.brush}" />
+  </Style>
+  <Style Selector="TextBlock.inference-settings-field-error">
+    <Setter Property="Foreground" Value="{DynamicResource color-destructive.brush}" />
+  </Style>
+  <Style Selector="StackPanel.inference-settings-issues > TextBlock">
+    <Setter Property="Foreground" Value="{DynamicResource color-destructive.brush}" />
+  </Style>
+  <Style Selector="WrapPanel.inference-settings-steps > TextBlock.current">
+    <Setter Property="FontWeight" Value="SemiBold" />
+  </Style>
+  <Style Selector="TextBlock.inference-settings-choice-value">
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="Foreground" Value="{DynamicResource color-muted-foreground.brush}" />
+  </Style>
+  <Style Selector="TextBox.invalid">
+    <Setter Property="BorderBrush" Value="{DynamicResource color-destructive.brush}" />
+  </Style>
+  <Style Selector="DockPanel.setup-number-input > Button">
+    <Setter Property="MinWidth" Value="32" />
+    <Setter Property="HorizontalContentAlignment" Value="Center" />
+  </Style>
+  <Style Selector="DockPanel.setup-number-input > TextBox">
+    <Setter Property="Margin" Value="4,0" />
+  </Style>
+
+  <!-- Install chips and cards: success, warning or destructive. -->
+  <Style Selector="ContentControl.inference-install-chip.success">
+    <Setter Property="Background" Value="{DynamicResource color-success.brush.15}" />
+    <Setter Property="Foreground" Value="{DynamicResource color-success.brush}" />
+  </Style>
+  <Style Selector="ContentControl.inference-install-chip.warning">
+    <Setter Property="Background" Value="{DynamicResource color-warning.brush.15}" />
+    <Setter Property="Foreground" Value="{DynamicResource color-warning.brush}" />
+  </Style>
+  <Style Selector="ContentControl.inference-install-chip.destructive">
+    <Setter Property="Background" Value="{DynamicResource color-destructive.brush.15}" />
+    <Setter Property="Foreground" Value="{DynamicResource color-destructive.brush}" />
+  </Style>
+  <Style Selector="Path.inference-install-chip-icon">
+    <Setter Property="Stroke" Value="{Binding $parent[ContentControl].Foreground}" />
+  </Style>
+  <Style Selector="Border.inference-install-card">
+    <Setter Property="Padding" Value="16,12" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="{DynamicResource radius-lg}" />
+  </Style>
+  <Style Selector="Border.inference-install-card.success">
+    <Setter Property="BorderBrush" Value="{DynamicResource color-success.brush.40}" />
+    <Setter Property="Background" Value="{DynamicResource color-success.brush.10}" />
+  </Style>
+  <Style Selector="Border.inference-install-card.warning">
+    <Setter Property="BorderBrush" Value="{DynamicResource color-warning.brush.40}" />
+    <Setter Property="Background" Value="{DynamicResource color-warning.brush.10}" />
+  </Style>
+  <Style Selector="Border.inference-install-card.destructive">
+    <Setter Property="BorderBrush" Value="{DynamicResource color-destructive.brush.40}" />
+    <Setter Property="Background" Value="{DynamicResource color-destructive.brush.10}" />
+  </Style>
+</Styles>

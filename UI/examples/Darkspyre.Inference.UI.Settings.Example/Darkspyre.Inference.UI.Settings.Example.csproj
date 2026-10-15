@@ -1,9 +1,10 @@
-<Project Sdk="Microsoft.NET.Sdk.Razor">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\src\Settings\Darkspyre.Inference.UI.Settings\Darkspyre.Inference.UI.Settings.csproj" />
     <ProjectReference Include="..\..\..\Common\examples\Darkspyre.Inference.Setup.Examples\Darkspyre.Inference.Setup.Examples.csproj" />
+    <PackageReference Include="Avalonia" />
   </ItemGroup>
 </Project>

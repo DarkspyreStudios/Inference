@@ -1,4 +1,10 @@
 <Project>
+  <!-- Avalonia's package props append to UsedAvaloniaProducts; clearing it here, after them, turns off the
+       Avalonia.BuildServices task, which reports project name, Avalonia version and target framework to AvaloniaUI
+       and writes under the user profile. -->
+  <PropertyGroup>
+    <UsedAvaloniaProducts />
+  </PropertyGroup>
   <!-- Source roots come from sibling worktrees in Directory.Build.props.
        Published dependencies require -p:DarkspyreDependencyMode=Packages. -->
   <Import Project="$(TensorSharpSourceRoot)/eng/SourceReferences.targets" Condition="'$(TensorSharpSourceRoot)' != ''" />

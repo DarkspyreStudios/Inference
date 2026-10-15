@@ -1,17 +1,16 @@
-<Project Sdk="Microsoft.NET.Sdk.Razor">
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <PackageId>Darkspyre.Inference.UI.Settings</PackageId>
     <RootNamespace>Darkspyre.Inference.UI.Settings</RootNamespace>
-    <Description>Host-placed Lumeo setup editor for Darkspyre inference providers.</Description>
-    <PackageTags>ai;inference;settings;blazor;lumeo</PackageTags>
+    <Description>Host-placed Avalonia setup editor for Darkspyre inference providers.</Description>
+    <PackageTags>ai;inference;settings;avalonia</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\Common\src\Darkspyre.Inference.Common\Darkspyre.Inference.Common.csproj" />
-    <PackageReference Include="Lumeo" />
-    <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+    <PackageReference Include="Avalonia" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.UI.Settings.Tests" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\..\README.md" Pack="true" PackagePath="README.md" />
-    <None Include="..\..\..\THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="THIRD-PARTY-NOTICES.md" />
   </ItemGroup>
 </Project>

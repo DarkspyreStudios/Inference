@@ -1,69 +1,64 @@
-using Bunit;
+using Avalonia.Controls;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.UI.Settings;
-using Lumeo;
 using Xunit;
 
 namespace Darkspyre.Inference.UI.Settings.Tests;
 
-public sealed class InferenceSettingsEditorTests : BunitContext
+public sealed class InferenceSettingsEditorTests
 {
-    public InferenceSettingsEditorTests()
-    {
-        Services.AddLumeo();
-        JSInterop.Mode = JSRuntimeMode.Loose;
-    }
-
     [Fact]
-    public void HostsWithTheirOwnFrameCanHideTheHeadingAndEffectLabels()
+    public Task HostsWithTheirOwnFrameCanHideTheHeadingAndEffectLabels() => EditorSession.RunAsync(() =>
     {
         var settings = new FakeSettings();
         var manager = new FakeManager();
-        IRenderedComponent<InferenceSettingsEditor> shown = RenderEditor(settings, manager);
-        Assert.Equal("Example provider", shown.Find(".inference-settings-editor__heading h2").TextContent);
-        Assert.Equal("Network", shown.Find(".inference-settings-editor__action small").TextContent);
-        Assert.Equal("Connect", shown.Find(".inference-settings-editor__step h3").TextContent); // One step has no step list.
+        InferenceSettingsEditor shown = new(settings, manager, new FakeHost());
+        EditorSession.Show(shown);
+        Assert.Equal("Example provider", Assert.Single(EditorSession.All<TextBlock>(shown, "h2")).Text);
+        Assert.Equal("Network", Assert.Single(EditorSession.All<TextBlock>(shown, "inference-settings-effects")).Text);
+        Assert.Equal("Connect", Assert.Single(EditorSession.All<TextBlock>(shown, "h3")).Text); // One step has no step list.
 
-        IRenderedComponent<InferenceSettingsEditor> framed = Render<InferenceSettingsEditor>(parameters => parameters
-            .Add(value => value.Settings, settings).Add(value => value.Manager, manager).Add(value => value.Host, new FakeHost())
-            .Add(value => value.ShowHeading, false).Add(value => value.ShowActionEffects, false));
-        Assert.Empty(framed.FindAll(".inference-settings-editor__heading"));
-        Assert.Empty(framed.FindAll(".inference-settings-editor__action small"));
-        Assert.Contains("Check connection", framed.Markup, StringComparison.Ordinal);
-        Assert.Contains("Configured: Yes", framed.Markup, StringComparison.Ordinal);
-    }
+        InferenceSettingsEditor framed = new(settings, manager, new FakeHost()) { ShowHeading = false, ShowActionEffects = false };
+        EditorSession.Show(framed);
+        Assert.Empty(EditorSession.All<TextBlock>(framed, "h2"));
+        Assert.Empty(EditorSession.All<TextBlock>(framed, "inference-settings-effects"));
+        Assert.NotNull(EditorSession.Button(framed, "Check connection"));
+        Assert.Contains("Configured: Yes", EditorSession.TextOf(framed), StringComparison.Ordinal);
+        return Task.CompletedTask;
+    });
 
     [Fact]
-    public void EnteringTheModelAfterNextRefreshesValidationAndEnablesSave()
+    public Task EnteringTheModelAfterNextRefreshesValidationAndEnablesSave() => EditorSession.RunAsync(() =>
     {
-        var manager = new ModelStepManager();
-        IRenderedComponent<InferenceSettingsEditor> editor = Render<InferenceSettingsEditor>(parameters => parameters
-            .Add(value => value.Settings, new ModelStepSettings()).Add(value => value.Manager, manager).Add(value => value.Host, new FakeHost()));
+        InferenceSettingsEditor editor = new(new ModelStepSettings(), new ModelStepManager(), new FakeHost());
+        EditorSession.Show(editor);
 
-        editor.FindAll("button").Single(button => button.TextContent.Trim() == "Next").Click();
-        Assert.True(SaveButton(editor).HasAttribute("disabled"));
+        EditorSession.Click(EditorSession.Button(editor, "Next"));
+        Assert.False(EditorSession.Button(editor, "Save settings").IsEnabled);
 
-        editor.FindComponents<SetupFieldInput>().Single(field => field.Instance.Field.Description.Id == "model").Find("input").Input("model-a");
+        EditorSession.Type(EditorSession.Field(editor, "model"), "model-a");
 
-        Assert.False(SaveButton(editor).HasAttribute("disabled"));
-        Assert.DoesNotContain("Select a model.", editor.Markup, StringComparison.Ordinal);
-    }
+        Assert.True(EditorSession.Button(editor, "Save settings").IsEnabled);
+        Assert.DoesNotContain("Select a model.", EditorSession.TextOf(editor), StringComparison.Ordinal);
+        return Task.CompletedTask;
+    });
 
     [Theory]
     [InlineData(SetupInstallState.Installed)]
     [InlineData(SetupInstallState.NotDownloaded)]
     [InlineData(SetupInstallState.FilesMissing)]
-    public void InstallCardShowsEachStateWithTheMockupTextAndButtons(SetupInstallState state)
+    public Task InstallCardShowsEachStateWithTheMockupTextAndButtons(SetupInstallState state) => EditorSession.RunAsync(() =>
     {
         var settings = new InstallSettings("small", state).Unobserved();
-        IRenderedComponent<InferenceSettingsEditor> editor = RenderInstallEditor(settings, new InstallManager());
+        InferenceSettingsEditor editor = ShowInstallEditor(settings, new InstallManager());
 
-        AngleSharp.Dom.IElement card = editor.Find(".inference-install-card");
-        Assert.Equal("Install state", card.GetAttribute("aria-label"));
-        Assert.Contains("small", card.TextContent, StringComparison.Ordinal);
-        string text = Squash(card.TextContent);
-        string[] buttons = card.QuerySelectorAll("button").Select(button => button.TextContent.Trim()).ToArray();
+        SetupInstallStatusCard view = Assert.Single(EditorSession.All<SetupInstallStatusCard>(editor));
+        Border card = Assert.Single(EditorSession.All<Border>(view, "inference-install-card"));
+        Assert.Equal("Install state", Avalonia.Automation.AutomationProperties.GetName(card));
+        string text = Squash(EditorSession.TextOf(card));
+        Assert.Contains("small", text, StringComparison.Ordinal);
+        string[] buttons = [.. EditorSession.All<Button>(card).Select(button => (string)button.Content!)];
         switch (state)
         {
             case SetupInstallState.Installed:
@@ -82,99 +77,77 @@ public sealed class InferenceSettingsEditorTests : BunitContext
                 Assert.Equal(["Download again", "Remove"], buttons);
                 break;
         }
-        Assert.Empty(editor.FindAll(".inference-settings-editor__status")); // No observation applies, so no status line.
-    }
+        // No observation applies, so no status line.
+        Assert.Empty(EditorSession.All<WrapPanel>(editor, "inference-settings-status"));
+        return Task.CompletedTask;
+    });
 
     [Fact]
-    public void ClickingDownloadRunsTheDownloadActionThroughTheHost()
+    public Task ClickingDownloadRunsTheDownloadActionThroughTheHost() => EditorSession.RunAsync(async () =>
     {
-        var settings = new InstallSettings("small", SetupInstallState.NotDownloaded);
         var manager = new InstallManager();
         var host = new FakeHost();
-        IRenderedComponent<InferenceSettingsEditor> editor = RenderInstallEditor(settings, manager, host);
+        InferenceSettingsEditor editor = ShowInstallEditor(new InstallSettings("small", SetupInstallState.NotDownloaded), manager, host);
 
-        editor.Find(".inference-install-card button").Click();
+        EditorSession.Click(EditorSession.Button(Assert.Single(EditorSession.All<SetupInstallStatusCard>(editor)), "Download (465 MB)"));
 
-        editor.WaitForAssertion(() => Assert.Equal(["download"], manager.Runs));
+        await EditorSession.WaitForAsync(() => manager.Runs.SequenceEqual(["download"]));
         Assert.Equal(1, host.ExecutionCount);
-    }
+    });
 
     [Fact]
-    public async Task ChoiceItemsShowInstallChipsAndFollowAStatusChange()
+    public Task ChoiceItemsShowInstallChipsAndFollowAStatusChange() => EditorSession.RunAsync(async () =>
     {
-        var settings = new InstallSettings("small", SetupInstallState.Installed);
         var manager = new InstallManager();
-        IRenderedComponent<InferenceSettingsEditor> editor = RenderInstallEditor(settings, manager);
-        IRenderedComponent<SetupFieldInput> model = await OpenModelChoiceAsync(editor);
+        InferenceSettingsEditor editor = ShowInstallEditor(new InstallSettings("small", SetupInstallState.Installed), manager);
+        await EditorSession.WaitForAsync(() => Choices(editor).Count == 2);
 
-        Assert.Equal("Installed", Squash(Item(model, "small").Find(".inference-install-chip").TextContent));
-        Assert.Equal("Not downloaded · 465 MB", Squash(Item(model, "tiny").Find(".inference-install-chip").TextContent));
+        Assert.Equal("small", Choices(editor)[0].Value);
+        Assert.True(Choices(editor).Single(choice => choice.Value == "small").Install!.IsInstalled);
+        Assert.False(Choices(editor).Single(choice => choice.Value == "tiny").Install!.IsInstalled);
 
         manager.Next = SetupInstallState.NotDownloaded;
-        await editor.InvokeAsync(manager.RaiseStatusChanged);
+        manager.RaiseStatusChanged();
 
-        editor.WaitForAssertion(() => Assert.Equal("Not downloaded · 465 MB",
-            Squash(Item(Field(editor, "model"), "small").Find(".inference-install-chip").TextContent)));
+        await EditorSession.WaitForAsync(() => Choices(editor).Count == 2 && !Choices(editor).Single(choice => choice.Value == "small").Install!.IsInstalled);
         Assert.Equal(1, manager.RefreshCount);
-    }
+    });
 
     [Theory]
     [InlineData(SetupInstallState.NotDownloaded)]
     [InlineData(SetupInstallState.FilesMissing)]
-    public async Task AModelThatIsNotInstalledIsNeverTheRenderedSelection(SetupInstallState state)
+    public Task AModelThatIsNotInstalledIsNeverTheShownSelection(SetupInstallState state) => EditorSession.RunAsync(async () =>
     {
-        var settings = new InstallSettings("small", state);
-        IRenderedComponent<InferenceSettingsEditor> editor = RenderInstallEditor(settings, new InstallManager());
-        IRenderedComponent<SetupFieldInput> model = await OpenModelChoiceAsync(editor);
+        InferenceSettingsEditor editor = ShowInstallEditor(new InstallSettings("small", state), new InstallManager());
+        await EditorSession.WaitForAsync(() => Choices(editor).Count == 2);
 
-        Assert.Equal(string.Empty, model.FindComponent<Combobox>().Instance.Value ?? string.Empty);
-        Assert.Empty(model.FindAll("[aria-selected=\"true\"]"));
-        Assert.Empty(Item(model, "small").FindAll(CheckMark)); // Neither the library's selection mark nor an Installed chip.
-        Assert.Contains("small", editor.Find(".inference-install-card").TextContent, StringComparison.Ordinal);
-    }
+        AutoCompleteBox model = Assert.Single(EditorSession.All<AutoCompleteBox>(EditorSession.Field(editor, "model")));
+        Assert.Equal(string.Empty, model.Text ?? string.Empty);
+        Assert.Null(model.SelectedItem);
+        Assert.Contains("small", EditorSession.TextOf(Assert.Single(EditorSession.All<SetupInstallStatusCard>(editor))), StringComparison.Ordinal);
+    });
 
     [Fact]
-    public async Task AnInstalledSelectionIsTheRenderedChoiceValue()
+    public Task AnInstalledSelectionIsTheShownChoiceValue() => EditorSession.RunAsync(async () =>
     {
-        var settings = new InstallSettings("small", SetupInstallState.Installed);
-        IRenderedComponent<InferenceSettingsEditor> editor = RenderInstallEditor(settings, new InstallManager());
-        IRenderedComponent<SetupFieldInput> model = await OpenModelChoiceAsync(editor);
+        InferenceSettingsEditor editor = ShowInstallEditor(new InstallSettings("small", SetupInstallState.Installed), new InstallManager());
+        await EditorSession.WaitForAsync(() => Choices(editor).Count == 2);
 
-        Assert.Equal("small", model.FindComponent<Combobox>().Instance.Value);
-        Assert.Equal("true", Item(model, "small").Find("[role=option]").GetAttribute("aria-selected"));
-        Assert.NotEmpty(Item(model, "small").FindAll(CheckMark));
+        Assert.Equal("small", Assert.Single(EditorSession.All<AutoCompleteBox>(EditorSession.Field(editor, "model"))).Text);
+    });
+
+    private static InferenceSettingsEditor ShowInstallEditor(InstallSettings settings, InstallManager manager, FakeHost? host = null)
+    {
+        InferenceSettingsEditor editor = new(settings, manager, host ?? new FakeHost());
+        EditorSession.Show(editor);
+        return editor;
     }
 
-    private IRenderedComponent<InferenceSettingsEditor> RenderInstallEditor(InstallSettings settings, InstallManager manager, FakeHost? host = null) =>
-        Render<InferenceSettingsEditor>(parameters => parameters
-            .Add(value => value.Settings, settings).Add(value => value.Manager, manager).Add(value => value.Host, host ?? new FakeHost()));
-
-    private static IRenderedComponent<SetupFieldInput> Field(IRenderedComponent<InferenceSettingsEditor> editor, string id) =>
-        editor.FindComponents<SetupFieldInput>().Single(field => field.Instance.Field.Description.Id == id);
-
-    private static async Task<IRenderedComponent<SetupFieldInput>> OpenModelChoiceAsync(IRenderedComponent<InferenceSettingsEditor> editor)
-    {
-        IRenderedComponent<SetupFieldInput> model = Field(editor, "model");
-        model.WaitForAssertion(() => Assert.Single(model.FindComponents<Combobox>()));
-        await model.InvokeAsync(() => model.FindComponent<Combobox>().Instance.OpenChanged.InvokeAsync(true));
-        model.WaitForAssertion(() => Assert.Equal(2, model.FindComponents<ComboboxItem>().Count));
-        return model;
-    }
-
-    private static IRenderedComponent<ComboboxItem> Item(IRenderedComponent<SetupFieldInput> model, string value) =>
-        model.FindComponents<ComboboxItem>().Single(item => item.Instance.Value == value);
-
-    // The check glyph both the library's selected item and the Installed chip draw.
-    private const string CheckMark = "path[d=\"M20 6 9 17l-5-5\"]";
+    // The choices the model field has loaded.
+    private static List<SetupChoice> Choices(InferenceSettingsEditor editor) =>
+        [.. (Assert.Single(EditorSession.All<AutoCompleteBox>(EditorSession.Field(editor, "model"))).ItemsSource as IEnumerable<SetupChoice> ?? [])];
 
     private static string Squash(string text) => string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
-
-    private IRenderedComponent<InferenceSettingsEditor> RenderEditor(FakeSettings settings, FakeManager manager, FakeHost? host = null) =>
-        Render<InferenceSettingsEditor>(parameters => parameters
-            .Add(value => value.Settings, settings).Add(value => value.Manager, manager).Add(value => value.Host, host ?? new FakeHost()));
-
-    private static AngleSharp.Dom.IElement SaveButton(IRenderedComponent<InferenceSettingsEditor> editor) =>
-        editor.FindAll("button").Single(button => button.TextContent.Contains("Save settings", StringComparison.Ordinal));
 
     private sealed class FakeSettings : InferenceSettings<string>
     {

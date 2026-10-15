@@ -1,19 +1,16 @@
-using Bunit;
+using Avalonia.Controls;
+using Avalonia.Controls.Templates;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.UI.Settings;
-using Lumeo;
-using Microsoft.AspNetCore.Components;
 using Xunit;
 
 namespace Darkspyre.Inference.UI.Settings.Tests;
 
-public sealed class SetupEditorRegressionTests : BunitContext
+public sealed class SetupEditorRegressionTests
 {
-    public SetupEditorRegressionTests() { Services.AddLumeo(); JSInterop.Mode = JSRuntimeMode.Loose; }
-
     [Fact]
-    public void ExecutableDefaultAppearsAsPlaceholderWithoutApplyingAnEdit()
+    public Task ExecutableDefaultAppearsAsPlaceholderWithoutApplyingAnEdit() => EditorSession.RunAsync(() =>
     {
         var (settings, manager) = New();
         int edits = 0;
@@ -22,83 +19,86 @@ public sealed class SetupEditorRegressionTests : BunitContext
             edits++;
             return SetupEditResult.Applied;
         });
-        IRenderedComponent<SetupFieldInput> component = Render<SetupFieldInput>(parameters => parameters
-            .Add(value => value.Field, field).Add(value => value.Settings, settings)
-            .Add(value => value.Manager, manager).Add(value => value.Host, new Host()));
+        SetupFieldInput input = new(field, settings, manager, new Host(), new SetupEditorInputState(), _ => Task.CompletedTask);
+        EditorSession.Show(input);
 
-        Assert.Equal("claude", component.Find("input").GetAttribute("placeholder"));
-        Assert.Empty(component.Find("input").GetAttribute("value") ?? string.Empty);
+        TextBox box = EditorSession.All<TextBox>(input).First();
+        Assert.Equal("claude", box.PlaceholderText);
+        Assert.Empty(box.Text ?? string.Empty);
         Assert.Empty(field.Value.Value);
         Assert.Equal(0, edits);
-    }
+        return Task.CompletedTask;
+    });
 
     [Fact]
-    public async Task InvalidUrlSurvivesRefreshAndAnotherEditAndNeverCommitsOldValue()
+    public Task InvalidUrlSurvivesRefreshAndAnotherEditAndNeverCommitsOldValue() => EditorSession.RunAsync(async () =>
     {
         var (settings, manager) = New();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
-        Field(editor, "url").Find("input").Input("not a url");
-        await editor.InvokeAsync(manager.RaiseStatusChanged);
-        Field(editor, "name").Find("input").Input("changed");
-        editor.WaitForAssertion(() => Assert.Equal("not a url", Field(editor, "url").Find("input").GetAttribute("value")));
-        Assert.True(editor.Instance.State.HasUnsavedChanges);
-        Assert.True(editor.Instance.State.HasInputErrors);
-        Assert.False(editor.Instance.State.CanSave);
-        SetupCommitResult result = await editor.InvokeAsync(editor.Instance.SaveAsync);
-        Assert.Equal(SetupCommitState.Invalid, result.State);
+        InferenceSettingsEditor editor = Editor(settings, manager);
+        EditorSession.Type(EditorSession.Field(editor, "url"), "not a url");
+        manager.RaiseStatusChanged();
+        EditorSession.Type(EditorSession.Field(editor, "name"), "changed");
+        await EditorSession.WaitForAsync(() => EditorSession.TextIn(EditorSession.Field(editor, "url")) == "not a url");
+        Assert.True(editor.State.HasUnsavedChanges);
+        Assert.True(editor.State.HasInputErrors);
+        Assert.False(editor.State.CanSave);
+        Assert.Equal(SetupCommitState.Invalid, (await editor.SaveAsync()).State);
         Assert.Equal(0, manager.Target.Calls);
-        Field(editor, "url").Find("input").Input("https://changed.test/");
-        Assert.Equal(SetupCommitState.Committed, (await editor.InvokeAsync(editor.Instance.SaveAsync)).State);
+        EditorSession.Type(EditorSession.Field(editor, "url"), "https://changed.test/");
+        Assert.Equal(SetupCommitState.Committed, (await editor.SaveAsync()).State);
         Assert.Equal(new Uri("https://changed.test/"), manager.Target.Saved!.Endpoint);
-        Assert.False(editor.Instance.State.HasUnsavedChanges);
-    }
+        Assert.False(editor.State.HasUnsavedChanges);
+    });
 
     [Fact]
-    public async Task HostStateIncludesUnappliedSecretsAndRevertsWithoutRevisionHeuristics()
+    public Task HostStateIncludesUnappliedSecretsAndRevertsWithoutRevisionHeuristics() => EditorSession.RunAsync(async () =>
     {
         var (settings, manager) = New();
         var states = new List<SetupEditorState>();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager, states);
-        await editor.InvokeAsync(manager.RaiseStatusChanged);
-        Assert.False(editor.Instance.State.HasUnsavedChanges);
-        Field(editor, "name").Find("input").Input("new");
-        Assert.True(editor.Instance.State.HasUnsavedChanges);
-        Field(editor, "name").Find("input").Input(string.Empty);
-        Assert.False(editor.Instance.State.HasUnsavedChanges);
-        Field(editor, "secret").Find("input").Input("never silently discard");
-        Assert.True(editor.Instance.State.HasPendingInput);
-        Assert.Equal(SetupCommitState.Invalid, (await editor.InvokeAsync(editor.Instance.SaveAsync)).State);
-        Click(Field(editor, "secret"), "Replace secret");
-        Assert.False(editor.Instance.State.HasPendingInput);
-        Assert.True(editor.Instance.State.HasUnsavedChanges);
-        Click(Field(editor, "secret"), "Keep");
-        Assert.False(editor.Instance.State.HasUnsavedChanges);
+        InferenceSettingsEditor editor = Editor(settings, manager, states);
+        manager.RaiseStatusChanged();
+        EditorSession.Settle();
+        Assert.False(editor.State.HasUnsavedChanges);
+        EditorSession.Type(EditorSession.Field(editor, "name"), "new");
+        Assert.True(editor.State.HasUnsavedChanges);
+        EditorSession.Type(EditorSession.Field(editor, "name"), string.Empty);
+        Assert.False(editor.State.HasUnsavedChanges);
+        EditorSession.Type(EditorSession.Field(editor, "secret"), "never silently discard");
+        Assert.True(editor.State.HasPendingInput);
+        Assert.Equal(SetupCommitState.Invalid, (await editor.SaveAsync()).State);
+        EditorSession.Click(EditorSession.Button(EditorSession.Field(editor, "secret"), "Replace secret"));
+        Assert.False(editor.State.HasPendingInput);
+        Assert.True(editor.State.HasUnsavedChanges);
+        EditorSession.Click(EditorSession.Button(EditorSession.Field(editor, "secret"), "Keep"));
+        Assert.False(editor.State.HasUnsavedChanges);
         Assert.Contains(states, state => state.HasPendingInput && state.HasUnsavedChanges);
-    }
+    });
 
     [Fact]
-    public async Task CallbackIsRetainedOnlyForItsAttemptAndDoesNotEnterFieldValues()
+    public Task CallbackIsRetainedOnlyForItsAttemptAndDoesNotEnterFieldValues() => EditorSession.RunAsync(async () =>
     {
         var (settings, manager) = New();
         settings.StartCallback();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
+        InferenceSettingsEditor editor = Editor(settings, manager);
         string id = ((SetupBrowserAuthorization)settings.Interaction!).Callback.Description.Id;
-        Field(editor, id).Find("input").Input("code");
-        await editor.InvokeAsync(manager.RaiseStatusChanged);
-        Assert.Equal("code", Field(editor, id).Find("input").GetAttribute("value"));
+        EditorSession.Type(EditorSession.Field(editor, id), "code");
+        manager.RaiseStatusChanged();
+        EditorSession.Settle();
+        Assert.Equal("code", EditorSession.TextIn(EditorSession.Field(editor, id)));
         Assert.Empty(((SetupBrowserAuthorization)settings.Interaction!).Callback.Value);
-        Field(editor, id).Find("input").Input("code#state");
-        Click(editor, "Continue");
-        editor.WaitForAssertion(() => Assert.Equal("code#state", manager.CompletedCallback));
+        EditorSession.Type(EditorSession.Field(editor, id), "code#state");
+        EditorSession.Click(EditorSession.Button(editor, "Continue"));
+        await EditorSession.WaitForAsync(() => manager.CompletedCallback == "code#state");
         settings.StartCallback();
-        editor.Render();
+        manager.RaiseStatusChanged();
         string next = ((SetupBrowserAuthorization)settings.Interaction!).Callback.Description.Id;
         Assert.NotEqual(id, next);
-        Assert.Empty(Field(editor, next).Find("input").GetAttribute("value") ?? string.Empty);
-    }
+        await EditorSession.WaitForAsync(() => EditorSession.All<SetupFieldInput>(editor).Any(field => field.Field.Description.Id == next));
+        Assert.Empty(EditorSession.TextIn(EditorSession.Field(editor, next)) ?? string.Empty);
+    });
 
     [Fact]
-    public async Task DependentEditStartsNewChoiceRequestAndDiscardsOldCompletion()
+    public Task DependentEditStartsNewChoiceRequestAndDiscardsOldCompletion() => EditorSession.RunAsync(async () =>
     {
         var first = new TaskCompletionSource<SetupChoicePage>(TaskCreationOptions.RunContinuationsAsynchronously);
         var second = new TaskCompletionSource<SetupChoicePage>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -107,160 +107,176 @@ public sealed class SetupEditorRegressionTests : BunitContext
         manager.Loader = (_, _) => manager.ChoiceCalls == 1 ? first.Task : second.Task;
         try
         {
-            IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
-            Field(editor, "name").Find("input").Input("new repository");
-            editor.WaitForAssertion(() => Assert.Equal(2, manager.ChoiceCalls));
+            InferenceSettingsEditor editor = Editor(settings, manager);
+            Assert.Equal(1, manager.ChoiceCalls);
+            EditorSession.Type(EditorSession.Field(editor, "name"), "new repository");
+            await EditorSession.WaitForAsync(() => manager.ChoiceCalls == 2);
             Assert.True(manager.ChoiceTokens[0].IsCancellationRequested);
             second.SetResult(new([new("new", "New variant")]));
-            IRenderedComponent<SetupFieldInput> choices = Field(editor, "choice");
-            choices.WaitForAssertion(() => Assert.DoesNotContain("Loading choices", choices.Markup, StringComparison.Ordinal));
-            await choices.InvokeAsync(() => choices.FindComponent<Combobox>().Instance.OpenChanged.InvokeAsync(true));
-            choices.WaitForAssertion(() => Assert.Contains(choices.FindComponents<ComboboxItem>(), item => item.Instance.Value == "new"));
+            await EditorSession.WaitForAsync(() => !EditorSession.TextOf(EditorSession.Field(editor, "choice")).Contains("Loading choices", StringComparison.Ordinal));
+            Assert.Equal(["new"], ChoiceValues(EditorSession.Field(editor, "choice")));
             first.SetResult(new([], State: SetupChoiceState.Failed, Issues: [new("old", "Obsolete failure")]));
-            await editor.InvokeAsync(() => Task.CompletedTask);
-            choices.WaitForAssertion(() => Assert.DoesNotContain("Obsolete failure", choices.Markup, StringComparison.Ordinal));
-            Assert.Contains(Field(editor, "choice").FindComponents<ComboboxItem>(), item => item.Instance.Value == "new");
+            EditorSession.Settle();
+            await Task.Delay(50);
+            EditorSession.Settle();
+            Assert.DoesNotContain("Obsolete failure", EditorSession.TextOf(EditorSession.Field(editor, "choice")), StringComparison.Ordinal);
+            Assert.Equal(["new"], ChoiceValues(EditorSession.Field(editor, "choice")));
         }
         finally
         {
             first.TrySetResult(new([]));
             second.TrySetResult(new([]));
         }
-    }
+    });
 
     [Fact]
-    public void BoundedChoicesUseSelectWithoutSearchOrRefresh()
+    public Task BoundedChoicesUseSelectWithoutSearchOrRefresh() => EditorSession.RunAsync(() =>
     {
         var (settings, manager) = New();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
-        IRenderedComponent<SetupFieldInput> choice = Field(editor, "choice");
-        Assert.Single(choice.FindComponents<Select>());
-        Assert.Empty(choice.FindComponents<Combobox>());
-        Assert.DoesNotContain("Search choices", choice.Markup, StringComparison.Ordinal);
-        Assert.DoesNotContain("Refresh choices", choice.Markup, StringComparison.Ordinal);
-        Assert.Equal("Count", Field(editor, "count").Find("input").GetAttribute("aria-label"));
-        Assert.Equal("Amount", Field(editor, "amount").Find("input").GetAttribute("aria-label"));
-    }
+        InferenceSettingsEditor editor = Editor(settings, manager);
+        SetupFieldInput choice = EditorSession.Field(editor, "choice");
+        Assert.Single(EditorSession.All<ComboBox>(choice));
+        Assert.Empty(EditorSession.All<AutoCompleteBox>(choice));
+        Assert.Empty(EditorSession.All<DockPanel>(choice, "inference-settings-choice-search"));
+        Assert.DoesNotContain(EditorSession.All<Button>(choice), button => button.Content as string == "Refresh choices");
+        Assert.Equal("Count", Avalonia.Automation.AutomationProperties.GetName(EditorSession.All<TextBox>(EditorSession.Field(editor, "count")).First()));
+        Assert.Equal("Amount", Avalonia.Automation.AutomationProperties.GetName(EditorSession.All<TextBox>(EditorSession.Field(editor, "amount")).First()));
+        return Task.CompletedTask;
+    });
 
     [Fact]
-    public void UnknownChoiceSupportKeepsRefreshAndPagingAvailable()
+    public Task UnknownChoiceSupportKeepsRefreshAndPagingAvailable() => EditorSession.RunAsync(async () =>
     {
         var settings = new TestSettings { ChoiceCapabilities = new() };
         var manager = new TestManager(new Target())
         {
             Loader = (_, _) => Task.FromResult(new SetupChoicePage([new("first", "First")], "next"))
         };
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
-        IRenderedComponent<SetupFieldInput> choice = Field(editor, "choice");
-        choice.WaitForAssertion(() =>
-        {
-            Assert.Contains("Refresh choices", choice.Markup, StringComparison.Ordinal);
-            Assert.Contains("Load more", choice.Markup, StringComparison.Ordinal);
-            Assert.Contains("Search choices", choice.Markup, StringComparison.Ordinal);
-            Assert.DoesNotContain("incomplete bounded list", choice.Markup, StringComparison.Ordinal);
-        });
-    }
+        InferenceSettingsEditor editor = Editor(settings, manager);
+        await EditorSession.WaitForAsync(() => SearchShown(EditorSession.Field(editor, "choice")));
+        SetupFieldInput choice = EditorSession.Field(editor, "choice");
+        Assert.NotNull(EditorSession.Button(choice, "Refresh choices"));
+        Assert.NotNull(EditorSession.Button(choice, "Load more"));
+        Assert.DoesNotContain("incomplete bounded list", EditorSession.TextOf(choice), StringComparison.Ordinal);
+    });
 
     [Fact]
-    public void MultiStepSettingsNameTheCurrentStepOnceInTheStepList()
+    public Task MultiStepSettingsNameTheCurrentStepOnceInTheStepList() => EditorSession.RunAsync(() =>
     {
         var (settings, manager) = New();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
-        Assert.Empty(editor.FindAll(".inference-settings-editor__step h3"));
-        Assert.Equal(["First step", "Second step"], editor.FindAll(".inference-settings-editor__steps li").Select(item => item.TextContent));
-        Assert.Equal("First step", editor.Find(".inference-settings-editor__steps li[aria-current=step]").TextContent);
-        Click(editor, "Next");
-        Assert.Equal("Second step", editor.Find(".inference-settings-editor__steps li[aria-current=step]").TextContent);
-        Assert.Empty(editor.FindAll(".inference-settings-editor__step h3"));
-    }
+        InferenceSettingsEditor editor = Editor(settings, manager);
+        Assert.Empty(EditorSession.All<TextBlock>(editor, "h3"));
+        Assert.Equal(["1. First step", "2. Second step"],
+            EditorSession.All<WrapPanel>(editor, "inference-settings-steps").Single().Children.OfType<TextBlock>().Select(item => item.Text));
+        Assert.Equal("1. First step", Assert.Single(EditorSession.All<TextBlock>(editor, "current")).Text);
+        EditorSession.Click(EditorSession.Button(editor, "Next"));
+        Assert.Equal("2. Second step", Assert.Single(EditorSession.All<TextBlock>(editor, "current")).Text);
+        Assert.Empty(EditorSession.All<TextBlock>(editor, "h3"));
+        return Task.CompletedTask;
+    });
 
     [Fact]
-    public void DeviceCodeCanBeCopiedAndReportsWhenTheClipboardRefuses()
+    public Task DeviceCodeCanBeCopied() => EditorSession.RunAsync(async () =>
     {
         var (settings, manager) = New();
-        IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
+        InferenceSettingsEditor editor = Editor(settings, manager);
         settings.StartDevice("ABCD-1234");
-        editor.Render();
-        editor.WaitForAssertion(() => Assert.Equal("ABCD-1234", editor.Find(".inference-settings-editor__user-code").TextContent));
-        Click(editor, "Copy code");
-        editor.WaitForAssertion(() => Assert.Contains("Code copied.", editor.Markup, StringComparison.Ordinal));
-        Assert.Equal(["ABCD-1234"], JSInterop.VerifyInvoke("navigator.clipboard.writeText").Arguments);
-
-        JSInterop.SetupVoid("navigator.clipboard.writeText", "WXYZ-9876").SetException(new Microsoft.JSInterop.JSException("denied"));
-        settings.StartDevice("WXYZ-9876");
-        editor.Render();
-        editor.WaitForAssertion(() => Assert.DoesNotContain("Code copied.", editor.Markup, StringComparison.Ordinal));
-        Click(editor, "Copy code");
-        editor.WaitForAssertion(() => Assert.Contains("The code could not be copied. Select it and copy it instead.", editor.Markup, StringComparison.Ordinal));
-    }
+        manager.RaiseStatusChanged();
+        await EditorSession.WaitForAsync(() => EditorSession.All<SelectableTextBlock>(editor, "inference-settings-user-code").Any());
+        Assert.Equal("ABCD-1234", EditorSession.All<SelectableTextBlock>(editor, "inference-settings-user-code").Single().Text);
+        EditorSession.Click(EditorSession.Button(editor, "Copy code"));
+        await EditorSession.WaitForAsync(() => EditorSession.TextOf(editor).Contains("Code copied.", StringComparison.Ordinal));
+    });
 
     [Fact]
-    public void ProviderSearchAppearsOnlyWhileMoreChoicesRemain()
+    public Task ProviderSearchAppearsOnlyWhileMoreChoicesRemain() => EditorSession.RunAsync(async () =>
     {
         var searchable = new TestSettings { ChoiceCapabilities = SetupChoiceCapabilities.Searchable };
-        IRenderedComponent<SetupFieldInput> choice = Field(Editor(searchable, new TestManager(new Target())), "choice");
-        choice.WaitForAssertion(() => Assert.Single(choice.FindComponents<Combobox>()));
-        Assert.DoesNotContain("Search choices", choice.Markup, StringComparison.Ordinal);
+        InferenceSettingsEditor first = Editor(searchable, new TestManager(new Target()));
+        SetupFieldInput choice = EditorSession.Field(first, "choice");
+        Assert.Single(EditorSession.All<AutoCompleteBox>(choice));
+        Assert.False(SearchShown(choice));
 
         var paged = new TestManager(new Target()) { Loader = (_, _) => Task.FromResult(new SetupChoicePage([new("a", "A")], "1")) };
-        IRenderedComponent<SetupFieldInput> more = Field(Editor(new TestSettings { ChoiceCapabilities = SetupChoiceCapabilities.Searchable }, paged), "choice");
-        more.WaitForAssertion(() => Assert.Contains("Search choices", more.Markup, StringComparison.Ordinal));
-        Assert.Contains("Load more", more.Markup, StringComparison.Ordinal);
-    }
+        InferenceSettingsEditor second = Editor(new TestSettings { ChoiceCapabilities = SetupChoiceCapabilities.Searchable }, paged);
+        await EditorSession.WaitForAsync(() => SearchShown(EditorSession.Field(second, "choice")));
+        Assert.NotNull(EditorSession.Button(EditorSession.Field(second, "choice"), "Load more"));
+    });
 
     [Fact]
-    public async Task ChoicesSharingADisplayNameShowTheirValues()
+    public Task ChoicesSharingADisplayNameShowTheirValues() => EditorSession.RunAsync(async () =>
     {
         var manager = new TestManager(new Target())
         {
             Loader = (_, _) => Task.FromResult(new SetupChoicePage(
                 [new("a", "a"), new("model-v1", "Model"), new("model-v1:300k", "Model")])),
         };
-        IRenderedComponent<SetupFieldInput> choice = Field(Editor(new TestSettings { ChoiceCapabilities = SetupChoiceCapabilities.Searchable }, manager), "choice");
-        choice.WaitForAssertion(() => Assert.Single(choice.FindComponents<Combobox>()));
-        await choice.InvokeAsync(() => choice.FindComponent<Combobox>().Instance.OpenChanged.InvokeAsync(true));
-        choice.WaitForAssertion(() => Assert.Equal(3, choice.FindComponents<ComboboxItem>().Count));
-        IReadOnlyList<IRenderedComponent<ComboboxItem>> items = choice.FindComponents<ComboboxItem>();
-        Assert.Empty(items.Single(item => item.Instance.Value == "a").FindAll(".inference-settings-editor__choice-value"));
-        Assert.Equal("model-v1:300k", items.Single(item => item.Instance.Value == "model-v1:300k")
-            .Find(".inference-settings-editor__choice-value").TextContent);
-        Assert.Equal("Model model-v1", items.Single(item => item.Instance.Value == "model-v1").Instance.SearchValue);
-    }
+        InferenceSettingsEditor editor = Editor(new TestSettings { ChoiceCapabilities = SetupChoiceCapabilities.Searchable }, manager);
+        await EditorSession.WaitForAsync(() => ChoiceValues(EditorSession.Field(editor, "choice")).Length == 3);
+        AutoCompleteBox box = Assert.Single(EditorSession.All<AutoCompleteBox>(EditorSession.Field(editor, "choice")));
+        SetupChoice[] items = [.. (IEnumerable<SetupChoice>)box.ItemsSource!];
+        Control Drawn(string value) => box.ItemTemplate!.Build(items.Single(item => item.Value == value))!;
+        Assert.Empty(EditorSession.All<TextBlock>(Drawn("a"), "inference-settings-choice-value"));
+        Assert.Equal("model-v1:300k", EditorSession.All<TextBlock>(Drawn("model-v1:300k"), "inference-settings-choice-value").Single().Text);
+        // The value is searchable alongside the shared display name.
+        Assert.True(box.ItemFilter!("model-v1:300k", items.Single(item => item.Value == "model-v1:300k")));
+        Assert.False(box.ItemFilter!("model-v1:300k", items.Single(item => item.Value == "model-v1")));
+    });
 
     [Fact]
-    public void NumericControlsPreserveExactTypesAndOnlyClampExplicitSteps()
+    public Task NumericControlsPreserveExactTypesAndOnlyClampExplicitSteps() => EditorSession.RunAsync(() =>
     {
         SetupNumberEdit<long>? whole = null;
-        IRenderedComponent<SetupNumberInput<long>> integer = Render<SetupNumberInput<long>>(parameters => parameters
-            .Add(value => value.Text, "9223372036854775806").Add(value => value.Step, 2L)
-            .Add(value => value.Edited, edit => whole = edit));
-        integer.Find("input").Input("9007199254740993");
+        SetupNumberInput<long> integer = new("Count", null, null, 2L, false);
+        integer.Edited += (_, edit) => whole = edit;
+        EditorSession.Show(integer);
+        integer.Show("9223372036854775806", false, false);
+        TextBox box = EditorSession.All<TextBox>(integer).Single();
+        box.Text = "9007199254740993";
+        EditorSession.Settle();
         Assert.Equal(9007199254740993L, whole!.Value);
-        integer.FindAll("button")[1].Click();
+        box.Text = "9223372036854775806";
+        EditorSession.Settle();
+        EditorSession.Click(EditorSession.Button(integer, "Increase Count"));
         Assert.Equal(long.MaxValue, whole.Value);
+
         SetupNumberEdit<decimal>? fraction = null;
-        IRenderedComponent<SetupNumberInput<decimal>> number = Render<SetupNumberInput<decimal>>(parameters => parameters
-            .Add(value => value.Minimum, 0m).Add(value => value.Maximum, 10m)
-            .Add(value => value.Edited, edit => fraction = edit));
-        number.Find("input").Input("1.1234567890123456789012345678");
+        SetupNumberInput<decimal> number = new("Amount", 0m, 10m, 1m, false);
+        number.Edited += (_, edit) => fraction = edit;
+        EditorSession.Show(number);
+        number.Show("1.5", false, false);
+        TextBox amount = EditorSession.All<TextBox>(number).Single();
+        amount.Text = "1.1234567890123456789012345678";
+        EditorSession.Settle();
         Assert.Equal(1.1234567890123456789012345678m, fraction!.Value);
-        number.Find("input").Input("11");
+        amount.Text = "11";
+        EditorSession.Settle();
         Assert.Equal(11m, fraction.Value);
         Assert.NotNull(fraction.Error);
-        number.Find("input").Input(string.Empty);
+        amount.Text = string.Empty;
+        EditorSession.Settle();
         Assert.Null(fraction.Value);
         Assert.Null(fraction.Error);
-    }
+        return Task.CompletedTask;
+    });
 
     private static (TestSettings Settings, TestManager Manager) New(Target? target = null) =>
         (new TestSettings(), new TestManager(target ?? new Target()));
-    private IRenderedComponent<InferenceSettingsEditor> Editor(TestSettings settings, TestManager manager, List<SetupEditorState>? states = null) =>
-        Render<InferenceSettingsEditor>(parameters => parameters.Add(value => value.Settings, settings).Add(value => value.Manager, manager)
-            .Add(value => value.Host, new Host()).Add(value => value.StateChanged, state => states?.Add(state)));
-    private static IRenderedComponent<SetupFieldInput> Field(IRenderedComponent<InferenceSettingsEditor> editor, string id) =>
-        Assert.Single(editor.FindComponents<SetupFieldInput>(), component => component.Instance.Field.Description.Id == id);
-    private static void Click<T>(IRenderedComponent<T> fragment, string label) where T : IComponent =>
-        Assert.Single(fragment.FindAll("button"), button => button.TextContent.Trim() == label).Click();
+
+    private static InferenceSettingsEditor Editor(TestSettings settings, TestManager manager, List<SetupEditorState>? states = null)
+    {
+        InferenceSettingsEditor editor = new(settings, manager, new Host());
+        editor.StateChanged += (_, state) => states?.Add(state);
+        EditorSession.Show(editor);
+        return editor;
+    }
+
+    private static string[] ChoiceValues(SetupFieldInput field) =>
+        [.. (Assert.Single(EditorSession.All<AutoCompleteBox>(field)).ItemsSource as IEnumerable<SetupChoice> ?? []).Select(choice => choice.Value)];
+
+    // The provider search row shows only while more choices remain or a search is typed.
+    private static bool SearchShown(SetupFieldInput field) =>
+        EditorSession.All<DockPanel>(field, "inference-settings-choice-search").SingleOrDefault()?.IsVisible == true;
 
     private sealed record Changes(Uri? Endpoint, long? Count, decimal? Amount);
     private sealed class Target : ISetupCommitTarget<Changes>

@@ -174,12 +174,6 @@ internal static class PackageVerification
             using Stream build = entry.Open();
             VerifyBuildAssets(XDocument.Load(build), entry.FullName);
         }
-        if (id == "Darkspyre.Inference.UI.Settings")
-        {
-            Require(entries.Contains("THIRD-PARTY-NOTICES.md", StringComparer.Ordinal), $"{id}: missing numeric-control attribution");
-            Require(entries.Any(path => path.StartsWith("staticwebassets/", StringComparison.Ordinal) && path.EndsWith(".css", StringComparison.Ordinal)), $"{id}: missing scoped CSS");
-            Require(entries.Contains("buildTransitive/" + id + ".targets", StringComparer.Ordinal), $"{id}: missing static asset import");
-        }
         if (id.StartsWith("Darkspyre.Inference.Tensor.", StringComparison.Ordinal))
         {
             policy.ValidateDeclarations(dependencies, completeTensor: false);

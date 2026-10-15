@@ -1188,7 +1188,7 @@ The cases match the Vertex probe; both commands run `GoogleProbe`. Calls are met
 | `Darkspyre.Inference.Common` | Typed LLM, image, and decision requests, results, capabilities, streaming events, provenance, and failures shared by Connect and Tensor |
 | `Darkspyre.Inference.Connect` | LLM, Bedrock/AgentCore, ComfyUI, PocketTTS and TangoFlux connections |
 | `Darkspyre.Inference.Tensor` | In-process LLM, image, typed-decision and Whisper speech transcription |
-| `Darkspyre.Inference.UI.Settings` | Host-placed Blazor/Lumeo editor using only Common setup contracts |
+| `Darkspyre.Inference.UI.Settings` | Host-placed Avalonia editor using only Common setup contracts |
 
 Connect, Tensor and UI.Settings depend on the exact synchronized Common NuGet; none carries
 another product's DLLs. UI.Settings does not depend on Connect or Tensor. The release-candidate
