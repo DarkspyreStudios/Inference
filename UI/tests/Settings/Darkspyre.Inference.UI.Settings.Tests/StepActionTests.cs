@@ -94,6 +94,45 @@ public sealed class StepActionTests
         return Task.CompletedTask;
     });
 
+    [Fact]
+    public Task AHostStripReplacesTheStepListAndFollowsTheStep() => EditorSession.RunAsync(() =>
+    {
+        InferenceSettingsEditor editor = new(new TwoStepSettings(), new Manager(), new Host()) { ShowStepList = false };
+        List<int> shown = [];
+        editor.StepChanged += (_, index) => shown.Add(index);
+        EditorSession.Show(editor);
+
+        Assert.Empty(EditorSession.All<WrapPanel>(editor, "inference-settings-steps"));
+        Assert.Equal("Sign in", Assert.Single(EditorSession.All<TextBlock>(editor, "h3")).Text);
+        EditorSession.Click(EditorSession.Button(editor, "Next"));
+
+        Assert.Equal(1, editor.CurrentStepIndex);
+        Assert.Equal([1], shown);
+        Assert.Equal("Model", Assert.Single(EditorSession.All<TextBlock>(editor, "h3")).Text);
+        EditorSession.Click(EditorSession.Button(editor, "Back"));
+        Assert.Equal([1, 0], shown);
+        return Task.CompletedTask;
+    });
+
+    [Fact]
+    public Task ConnectionTabsReportTheEditorsState() => EditorSession.RunAsync(async () =>
+    {
+        ConnectionTabs tabs = new(new TwoStepSettings(), new Manager(), new Host());
+        List<SetupEditorState> states = [];
+        tabs.StateChanged += (_, state) => states.Add(state);
+        EditorSession.Show(tabs);
+        Assert.False(tabs.State.HasUnsavedChanges);
+        Assert.Single(EditorSession.All<TabStrip>(tabs)).SelectedIndex = 1;
+        EditorSession.Settle();
+        AutoCompleteBox models = Assert.Single(EditorSession.All<AutoCompleteBox>(EditorSession.Field(tabs, "model")));
+        await EditorSession.WaitForAsync(() => models.ItemsSource is IEnumerable<SetupChoice> loaded && loaded.Any());
+
+        models.SelectedItem = ((IEnumerable<SetupChoice>)models.ItemsSource!).Single();
+
+        await EditorSession.WaitForAsync(() => tabs.State.HasUnsavedChanges && tabs.State.CanSave);
+        Assert.Contains(states, state => state.HasUnsavedChanges);
+    });
+
     private static InferenceSettingsEditor Show(TwoStepSettings settings, Manager manager)
     {
         InferenceSettingsEditor editor = new(settings, manager, new Host()) { ShowActionEffects = false };

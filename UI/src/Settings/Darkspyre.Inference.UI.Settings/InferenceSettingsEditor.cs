@@ -24,6 +24,7 @@ public sealed class InferenceSettingsEditor : UserControl
     private readonly HashSet<string> openSections = new(StringComparer.Ordinal);
     private SetupFieldInput? callback;
     private SetupEditorState? lastPublishedState;
+    private int lastPublishedStep;
     private bool saving;
     private bool running;
     private long editVersion;
@@ -96,8 +97,17 @@ public sealed class InferenceSettingsEditor : UserControl
     /// </summary>
     internal bool StepNavigation { get; init; } = true;
 
+    /// <summary>
+    /// False hides the numbered step list and shows the current step's title as its heading, while Back and Next stay.
+    /// A host that draws its own step strip from <see cref="CurrentStepIndex"/> and <see cref="StepChanged"/> sets it.
+    /// </summary>
+    public bool ShowStepList { get; init; } = true;
+
     /// <summary>Raised after Save. A Committed result means the host closes the dialog.</summary>
     public event EventHandler<SetupCommitResult>? CommitCompleted;
+
+    /// <summary>Raised with the new step index each time the editor shows another step: Back, Next, a tab, or a refused save.</summary>
+    public event EventHandler<int>? StepChanged;
 
     /// <summary>Raised each time the editor's unsaved, pending, error or can-save state changes.</summary>
     public event EventHandler<SetupEditorState>? StateChanged;
@@ -112,8 +122,8 @@ public sealed class InferenceSettingsEditor : UserControl
 
     private IReadOnlyList<SetupStep> Steps => this.settings.Steps;
 
-    /// <summary>The index of the step the editor shows.</summary>
-    internal int CurrentStepIndex => this.stepIndex;
+    /// <summary>The index in <see cref="InferenceSettings.Steps"/> of the step the editor shows.</summary>
+    public int CurrentStepIndex => this.stepIndex;
 
     /// <summary>Shows the step at <paramref name="index"/>, as a tab does.</summary>
     internal void ShowStep(int index)
@@ -121,6 +131,8 @@ public sealed class InferenceSettingsEditor : UserControl
         this.stepIndex = Math.Clamp(index, 0, Math.Max(0, this.Steps.Count - 1));
         this.Changed();
     }
+
+    private bool ShowsStepList => this.StepNavigation && this.ShowStepList && this.Steps.Count > 1;
 
     private SetupStep? CurrentStep => this.stepIndex < this.Steps.Count ? this.Steps[this.stepIndex] : null;
 
@@ -213,6 +225,11 @@ public sealed class InferenceSettingsEditor : UserControl
     {
         if (this.closed) return;
         this.Render();
+        if (this.stepIndex != this.lastPublishedStep)
+        {
+            this.lastPublishedStep = this.stepIndex;
+            this.StepChanged?.Invoke(this, this.stepIndex);
+        }
         SetupEditorState state = this.State;
         if (state == this.lastPublishedState) return;
         this.lastPublishedState = state;
@@ -255,7 +272,7 @@ public sealed class InferenceSettingsEditor : UserControl
             foreach ((string text, bool? value) in status) line.Children.Add(Chip(text, value switch { true => "success", false => "warning", _ => null }));
             head.Children.Add(line);
         }
-        if (this.StepNavigation && this.Steps.Count > 1)
+        if (this.ShowsStepList)
         {
             WrapPanel steps = new() { ItemSpacing = 12, LineSpacing = 6 };
             steps.Classes.Add("inference-settings-steps");
@@ -381,8 +398,9 @@ public sealed class InferenceSettingsEditor : UserControl
     {
         StackPanel view = new() { Spacing = 12 };
         view.Classes.Add("inference-settings-step");
-        // The step list above names and marks the current step; a single step, or a step shown as a tab, has no list.
-        if (this.Steps.Count <= 1 || !this.StepNavigation) view.Children.Add(SetupFieldInput.Text(step.Title, "h3"));
+        // The step list above names and marks the current step; a single step, a step shown as a tab, or a step under the
+        // host's own strip has no list.
+        if (!this.ShowsStepList) view.Children.Add(SetupFieldInput.Text(step.Title, "h3"));
         // The first of several steps is the connection step: its instructions say what the connection is.
         bool connection = this.stepIndex == 0 && this.Steps.Count > 1;
         if (!string.IsNullOrWhiteSpace(step.Instructions))

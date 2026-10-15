@@ -38,6 +38,12 @@ public sealed class ConnectionTabs : UserControl
     /// <summary>Raised after Save. A Committed result means the host closes its sheet.</summary>
     public event EventHandler<SetupCommitResult>? CommitCompleted;
 
+    /// <summary>Raised each time the editor's unsaved, pending, error or can-save state changes, as <see cref="InferenceSettingsEditor.StateChanged"/>.</summary>
+    public event EventHandler<SetupEditorState>? StateChanged;
+
+    /// <summary>The editor's current unsaved, pending input, error, can-save and uncertain-save state; the host enables Save from CanSave.</summary>
+    public SetupEditorState State => this.Editor().State;
+
     /// <summary>Saves the settings through the manager; <see cref="CommitCompleted"/> reports the result.</summary>
     public async Task SaveAsync() => await this.Editor().SaveAsync();
 
@@ -68,6 +74,7 @@ public sealed class ConnectionTabs : UserControl
             MoreOptionsContent = this.MoreOptionsContent,
         };
         created.CommitCompleted += (_, result) => this.CommitCompleted?.Invoke(this, result);
+        created.StateChanged += (_, state) => this.StateChanged?.Invoke(this, state);
         this.editor = created;
         return created;
     }

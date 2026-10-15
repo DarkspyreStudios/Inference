@@ -87,7 +87,8 @@ each step's own title is its heading, and no step list or Back and Next buttons 
 serves both tabs, so typed input and a sign-in in progress carry across them. Its
 `MoreOptionsContent` goes to the Connection tab. The host frames the tabs with the connection's name
 and saves through `SaveAsync`; `CommitCompleted` reports the result. A refused save selects the tab
-with the problem.
+with the problem. `State` and `StateChanged` report the editor's `SetupEditorState`, so the host
+enables its Save from `CanSave` and asks before discarding unsaved changes.
 
 ## Showing a folder
 
@@ -113,7 +114,9 @@ side effects sets `ShowActionEffects = false` to omit the effect labels beside e
 default to `true`.
 
 When the settings have several steps, the step list names and marks the current step (class `current`),
-and the step's own title is not repeated; single-step settings keep their title. A device
+and the step's own title is not repeated; single-step settings keep their title. A host that draws its
+own step strip sets `ShowStepList = false`: the list is hidden, each step shows its title, and Back and
+Next stay. `CurrentStepIndex` is the shown step, and `StepChanged` reports each move to another step. A device
 authorization shows a **Copy code** button that writes the user code to the clipboard and reports
 the outcome; the code itself selects in one click. A searchable choice list shows its separate
 provider-search box only while the loaded list is incomplete or a search is active; otherwise the
