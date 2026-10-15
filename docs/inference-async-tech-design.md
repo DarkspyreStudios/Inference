@@ -28,7 +28,7 @@ Related authorities:
 - [Repository laws](../.roles/laws.md) and [package rules](../.roles/design-rules.md).
 - [Connect integration](../Connect/README.md) and [managed agents](../Connect/docs/enhancements.md).
 - [Setup/audio](provider-setup-and-audio-technical-design.md) and
-  [settings editor](settings.ui.tech-design.md).
+  [settings editor](../UI/README.md).
 - [Tensor integration](../Tensor/README.md), [model locations](tensor-model-locations.tech-design.md)
   and [Laya runtime](laya-onnx-runtime.tech-design.md).
 
@@ -74,9 +74,9 @@ The settings object carries no revision number. Only the editor changes it, so n
 query can be stale. A model query result that arrives after the user changed a field it depends on
 is dropped by the page: the click handler compares the values it queried with the current ones.
 
-Blazor pages are event based. A field's change handler edits the local object synchronously. A
-button's click handler is async: it awaits its connector calls in order, then updates the page
-state with the result.
+The settings editor, the Avalonia control `InferenceSettingsEditor`, is event based. A field's change
+handler edits the local object synchronously. A button's click handler is async: it awaits its
+connector calls in order, then updates the editor with the result.
 
 The implementation keeps typed fields and does not introduce an untyped property bag. A row leaves
 the settings object only through Remove. A secret field starts as Keep: Save leaves a kept secret

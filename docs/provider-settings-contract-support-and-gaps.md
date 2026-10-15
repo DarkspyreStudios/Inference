@@ -25,13 +25,13 @@ attempt-scoped one-way callback input, explicit choice capabilities and decimal 
 UI.Settings consumes these with a local-input Save gate, latest-request choice loading, compact
 bounded selects and an owned exact numeric control. All Connect/Tensor setup implementations are
 updated together; application integration remains separate. All four packages were published and
-verified with an empty-cache feed-only consumer. See
-[the UI correction record](settings.ui.tech-design.md#12-post-release-settings-corrections-2026-09-23).
+verified with an empty-cache feed-only consumer. The [UI.Settings README](../UI/README.md) describes
+the editor's current behaviour.
 
 ## Shared UI workspace and library
 
-The configuration editor belongs to the Blazor library
-**`Darkspyre.Inference.UI.Settings`**, built with **Lumeo**, in this repository's UI product workspace:
+The configuration editor belongs to the Avalonia library
+**`Darkspyre.Inference.UI.Settings`** in this repository's UI product workspace:
 
 `/Volumes/Data/Development/DarkspyreStudios/Inference/UI/`
 
@@ -47,8 +47,8 @@ host-specific forms or a second local metadata model for the provider-owned cont
 `Darkspyre.Inference.UI.Settings` provides one reusable, host-placed editor surface for a provider
 setup session. It renders the provider's fields, steps, validation, status, actions, and progress.
 Provider definitions drive its content and behavior. It does not own connection lists, cards, Add
-entry points, dialogs, drawers, routes, or the editor's placement. Lumeo supplies the controls;
-presentation remains separate from provider protocol, compatibility and lifecycle implementations.
+entry points, dialogs, drawers, routes, or the editor's placement. Its control,
+`InferenceSettingsEditor`, builds the editor from standard Avalonia controls; presentation remains separate from provider protocol, compatibility and lifecycle implementations.
 
 DarkspyreCE and Agent-DS each compose the shared components and layer their own themes on them.
 The library must support inheritance/extension as well as theme customization without duplicating
@@ -57,22 +57,23 @@ technical design. CE's World Atlas palette and application shell are not baked i
 Each host retains local persistence, protected credential storage, user consent and application
 operation ownership through the appropriate seams.
 
-The new UI library does not introduce a Blazor or Lumeo dependency into Common, Connect or Tensor.
+The UI library does not introduce an Avalonia dependency into Common, Connect or Tensor.
 It is the fourth synchronized Inference package and references Common only among Inference
-products. Its packaging, dependency versions and release policy belong to
-[its approved design](settings.ui.tech-design.md), not this runtime acceptance pass.
+products. Its packaging, dependency versions and release policy are described in
+[its README](../UI/README.md), not in this runtime acceptance pass.
 
 ## Required consumer experience
 
 DarkspyreCE needs Settings grouped by **Text, Image, Audio**, each supporting both **Connect**
 (out-of-process) and **Tensor** (in-process) implementations. Each host decides how to list existing
 connections, start Add/Edit, and place the shared editor. The shared library does not impose a
-collection layout or display container. Its own CSS supplies layout only; the host supplies colors
-and theme through Lumeo.
+collection layout or display container. Its own Avalonia styles, `InferenceSettingsStyles`, supply
+layout and read the host theme's brushes, so the host supplies colors and theme.
 
 The panels and setup wizards must be driven by **contract properties and callable methods**.
 The provider supplies its configuration semantics, field/section/step descriptions, available
-choices, validation, actions, and status. The shared UI library supplies reusable Lumeo controls,
+choices, validation, actions, and status. The shared UI library supplies reusable Avalonia controls
+(`InferenceSettingsEditor`, `SetupFieldInput`, `SetupNumberInput<T>`, `SetupInstallChip`, `SetupInstallStatusCard`),
 editor layout and accessible interaction. Each consuming application supplies its theme, local
 persistence, protected credential storage and explicit user authorization.
 
@@ -346,7 +347,7 @@ does not select vendors, engine architectures, voice catalogs or supported audio
 
 Common, Connect and Tensor own provider semantics, provider/model-host protocols, compatibility
 decisions, setup metadata and operations, and the existing Tensor model manager/lifecycle.
-`Darkspyre.Inference.UI.Settings` owns the shared Lumeo/Blazor presentation foundation. CE and
+`Darkspyre.Inference.UI.Settings` owns the shared Avalonia presentation foundation. CE and
 Agent-DS own their themes, application composition, local connection/configuration persistence,
 protected secret storage through supported seams, user consent and application operation ownership.
 The runtime libraries remain UI-framework-neutral. No host-specific database model or copied

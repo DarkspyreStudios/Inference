@@ -51,8 +51,6 @@ value but renders no selection; the status card shows the value instead.
 `IntroContent` and `SupplementaryContent` accept optional host guidance without changing the
 provider-owned fields or actions.
 
-The canonical technical design is [the Settings UI design](../docs/settings.ui.tech-design.md).
-
 ## Optional native path selection
 
 An interaction host may also implement `IInferenceSettingsPathPicker.SelectPathAsync`. Text fields

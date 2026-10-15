@@ -33,7 +33,7 @@ Out of scope: CE UI implementation, GMTools changes, hosted products, process su
 microphone capture/VAD, soundscape orchestration, Chroma, ComfyUI-style Tensor workflows, a general
 machine-diagnostics library, and new facade NuGets. A Whisper bridge is buildable example source only.
 
-The gap assessment now also records a separate `Darkspyre.Inference.UI.Settings` Blazor/Lumeo
+The gap assessment now also records a separate `Darkspyre.Inference.UI.Settings` Avalonia
 library for CE and Agent-DS, in the separately scoped UI project. It is a consumer of these forthcoming
 contracts, not part of this runtime implementation.
 This design adds no UI-framework dependency; that library's theming, extension points and packaging
@@ -750,9 +750,7 @@ Both Inference solution format checks and transitive vulnerability audits pass; 
 changed-file formatting and Chat dependency audit pass. The nine local dependency archives have
 matching local-version references and were consumed through NuGet by the Inference verification.
 There was no full-weight/native-device experiment, Inference package build, publication or version
-bump. UI source and the other worker's pending documentation remain untouched. The shared
-`Directory.Packages.props` whole-file commit preserves that worker's already-staged Lumeo,
-ASP.NET Components and bunit declarations alongside this unit's TensorSharp dependency pin.
+bump. UI source and the other worker's pending documentation remain untouched.
 
 ### Unit 3c — bounded source inspection, generic resolution editing and backend observations (2026-09-22)
 
@@ -917,7 +915,7 @@ Qwen, Supra and Whisper setup tests now also reopen saved configurations, edit t
 choices, preserve the expected host version and report unload requirements without installation or
 native activation. Existing ComfyUI, TangoFlux and Laya tests already cover create and edit flows.
 The shared example remains a compiled semantic field/action renderer with typed host composition;
-it is not a claim that the separate Blazor application integration has been completed.
+it is not a claim that the separate host application integration has been completed.
 
 Final gates: zero-warning/error Debug and Release builds and deterministic tests pass for both
 focused solutions. **Connect: 293 tests** (22 Common, 136 LLM, 48 Bedrock, 18 Image, 18 TTS, 51 Audio).
