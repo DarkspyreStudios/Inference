@@ -330,6 +330,49 @@ public sealed class AntigravityCliLlmClientTests
         Assert.Single(first.OfType<LlmAgentWarningEvent>());
     }
 
+    /// <summary>
+    /// A fork or a cut history cannot reopen the provider conversation, so a start rebuilds it from the host's history.
+    /// Every entry reaches the first turn as text; content the CLI cannot take is named, never refused.
+    /// </summary>
+    [Fact]
+    public async Task StartRebuildsAConversationFromAnyHostHistory()
+    {
+        var process = new TerminalProcess();
+        var image = new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "chart.png", MediaType = "image/png", Data = new byte[] { 1 } };
+        var resource = new LlmResourceAttachment(new Darkspyre.Inference.Common.Resources.InferenceResourceReference("workspace", "notes"));
+        await using ILlmAgentSession session = await new AntigravityAgentClient(process).StartSessionAsync("connection",
+            Connection(), new()
+            {
+                ModelId = "auto",
+                Runtime = ProviderRuntime(),
+                Context = new()
+                {
+                    Entries =
+                    [
+                        new("e1", "t1", new("user", "Population of Lyon?") { Attachments = [image, resource] }),
+                        new("e2", "t1", new("assistant", string.Empty) { ToolCalls = [new LlmToolCall("c1", "lookup", """{"city":"Lyon"}""")] }),
+                        new("e3", "t1", new("user", string.Empty) { ToolResults = [new LlmToolResult("c1", LlmToolOutput.FromText("522,250"))] }),
+                        new("e4", "t1", new("assistant", "About 522,000."))
+                    ]
+                }
+            });
+
+        IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("Round it.")] }));
+
+        Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        string written = Assert.Single(process.Writes);
+        Assert.Contains(AgentOpeningContext.Header, written, StringComparison.Ordinal);
+        Assert.Contains("Population of Lyon?", written, StringComparison.Ordinal);
+        Assert.Contains("[Attachment 0 (chart.png): The selected model does not support this attachment.", written, StringComparison.Ordinal);
+        Assert.Contains("[Attachment 1 (attachment): No resource access was supplied.", written, StringComparison.Ordinal);
+        Assert.Contains("[TOOL CALL id=c1 name=lookup]", written, StringComparison.Ordinal);
+        Assert.Contains("522,250", written, StringComparison.Ordinal);
+        Assert.Contains("About 522,000.", written, StringComparison.Ordinal);
+        string content = JsonNode.Parse(written)!["message"]!["content"]!.GetValue<string>();
+        Assert.EndsWith("Round it.", content, StringComparison.Ordinal);
+        Assert.DoesNotContain("--conversation", Assert.Single(process.Invocations));
+    }
+
     [Fact]
     public async Task TurnInstructionsAndUncarriedAttachmentsReachThePromptAsText()
     {

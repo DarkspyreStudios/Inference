@@ -25,7 +25,9 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
         // AGY assigns the conversation ID, so ThreadId and SessionId are not read.
         ValidateOpening(connection, options.ModelId, options.Tools, options.ToolHandler, options.HostedTools, options.MaxHostedTurns);
         LlmAgentNativeRuntimeOptions runtime = ValidateRuntime(options.Runtime);
-        AgentOpeningContext? opening = AgentOpeningContext.For(options, carriesAttachments: false);
+        AgentOpeningContext? opening = AgentOpeningContext.For(
+            options.Context is null ? options : options with { Context = TextOnly(connection, options.ModelId, options.Context) },
+            carriesAttachments: false);
         return await AntigravityAgentSession.OpenAsync(
             processFactory,
             AntigravityCliLlmClient.ResolveExecutable(connection.Endpoint),
@@ -62,6 +64,28 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
             Introduction(options.Instructions, null),
             openingNotice: null,
             cancellationToken);
+    }
+
+    /// <summary>
+    /// The history as AGY can take it: every attachment it cannot carry, resource references included, is replaced in its
+    /// own message by the shared notice. A start from any host history, such as a fork, then rebuilds the conversation.
+    /// </summary>
+    private static LlmAgentContext TextOnly(LlmConnection connection, string modelId, LlmAgentContext context)
+    {
+        LlmProviderCapabilities capabilities = AntigravityCliLlmClient.ResolveCapabilities(connection, modelId);
+        return context with
+        {
+            Entries = [.. context.Entries.Select(entry =>
+            {
+                if (entry.Message.Attachments.Count == 0) return entry;
+                LlmChatMessage normalized = LlmRequestNormalizer.Normalize(connection, new LlmChatRequest
+                {
+                    ModelId = modelId,
+                    Messages = [new("user", entry.Message.Content) { Attachments = entry.Message.Attachments }]
+                }, capabilities).Messages[0];
+                return entry with { Message = entry.Message with { Content = normalized.Content, Attachments = normalized.Attachments } };
+            })]
+        };
     }
 
     /// <summary>Refuses host tools, which AGY cannot call, and hosted tools it does not offer. An image tool is dropped.</summary>

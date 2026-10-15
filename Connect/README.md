@@ -202,6 +202,11 @@ caller's history, and the session settings `ExecutionOptions`, `ToolHandling`, `
   for an ephemeral session. The CLI saves every session except an ephemeral one or one that returns tool requests
   (`--no-session-persistence`).
 
+Antigravity also rebuilds a conversation from host history, as Claude does. A fork or a cut history has no provider
+thread to reopen, so the host starts a session with that history as `Context`; it reaches the new AGY conversation
+once as the opening transcript. Every history attachment AGY cannot carry, resource references included, is replaced
+in its own message by the attachment notice, so any history opens.
+
 **Feature list.** `LlmAgentCapabilities` reports public features only. Values:
 
 | Member | Codex | OpenAI API | Claude | Antigravity |
