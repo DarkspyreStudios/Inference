@@ -110,7 +110,12 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             .Where(pair => pair.Value.MaxContextTokens is not null)
             .OrderBy(pair => pair.Key, StringComparer.Ordinal)
             .Select(pair => new ContextLengthRow(Guid.NewGuid().ToString("N"), pair.Key, pair.Value.MaxContextTokens)));
-        Status = new() { Configured = SetupObservation.Known(existing is not null), Authenticated = SetupObservation.Unknown };
+        Status = new()
+        {
+            Configured = SetupObservation.Known(existing is not null),
+            Authenticated = SetupObservation.Unknown,
+            Installed = UsesCli ? SetupObservation.Unknown : SetupObservation.NotApplicable
+        };
     }
 
     internal LlmTransport Transport => _draft.Transport;
@@ -133,8 +138,22 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
 
     internal string AuthorizationCallback => _callback;
 
-    /// <summary>A CLI provider reported it is not authenticated; the settings show its prerequisite.</summary>
+    /// <summary>A CLI provider reported it is not installed or not authenticated; the settings show its prerequisite.</summary>
     internal bool CliPrerequisite { get; set; }
+
+    /// <summary>The display names of the models the provider last listed for the model field, by model id.</summary>
+    internal IReadOnlyDictionary<string, string> ModelNames { get; set; } = new Dictionary<string, string>(StringComparer.Ordinal);
+
+    /// <summary>True when the settings offer an action that signs in.</summary>
+    internal bool HasSignInAction => SignInActionId is not null;
+
+    /// <summary>The id of the action that signs in, or null when the transport signs in some other way.</summary>
+    private string? SignInActionId => _draft.Transport switch
+    {
+        LlmTransport.OpenAiCodex => "authorize",
+        LlmTransport.AnthropicClaudeCli => "sign-in-claude",
+        _ => null
+    };
 
     private static bool UsesFixedEndpoint(LlmTransport transport) => transport is LlmTransport.OpenAiCodex or LlmTransport.GoogleVertexAi
         or LlmTransport.GoogleGeminiApi;
@@ -169,12 +188,11 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     protected override IReadOnlyList<SetupStep> CreateSteps()
     {
         var fields = new List<SetupField>();
-        if (UsesCli || UsesApple)
-        {
-            fields.Add(new SetupExecutableField(new("executable", UsesApple ? "Apple helper executable or absolute path" : "CLI executable or absolute path") { IsRequired = !UsesCli },
-                new(_draft.Endpoint), new(_definition.DefaultEndpoint), value => Edit(() => _draft = _draft with { Endpoint = value.Value })));
-        }
-        else if (UsesSelfHost)
+        SetupExecutableField? executable = UsesCli || UsesApple
+            ? new(new("executable", UsesApple ? "Apple helper executable or absolute path" : "CLI executable or absolute path") { IsRequired = !UsesCli },
+                new(_draft.Endpoint), new(_definition.DefaultEndpoint), value => Edit(() => _draft = _draft with { Endpoint = value.Value }))
+            : null;
+        if (UsesSelfHost)
         {
             fields.Add(new SetupChoiceField(new("engine", "Engine")
             {
@@ -189,7 +207,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             fields.Add(new SetupTextField(new("harness-arn", "Harness ARN") { IsRequired = true }, _draft.Endpoint,
                 _definition.DefaultEndpoint, value => Edit(() => _draft = _draft with { Endpoint = value })));
         }
-        else if (!UsesFixedEndpoint(_draft.Transport))
+        else if (executable is null && !UsesFixedEndpoint(_draft.Transport))
         {
             fields.Add(new SetupUriField(new("endpoint", "Endpoint") { IsRequired = true },
                 Uri.TryCreate(_draft.Endpoint, UriKind.Absolute, out Uri? uri) ? uri : null,
@@ -285,26 +303,34 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
                 SetupSideEffect.LocalVerification, SetupChoiceCapabilities.Searchable));
         }
         SetupStep connectionStep = _definition.SetupSteps.Count > 0 ? _definition.SetupSteps[0] : new("connection", "Connection", "Configure the provider.", []);
-        SetupStep modelStep = _definition.SetupSteps.Count > 1 ? _definition.SetupSteps[^2] : new("model", "Model", "Select a model.", []);
-        SetupStep testStep = _definition.SetupSteps.Count > 2 ? _definition.SetupSteps[^1] : new("test", "Test", "Explicitly test the model.", []);
+        SetupStep modelStep = _definition.SetupSteps.Count > 1 ? _definition.SetupSteps[1] : new("model", "Model", "Select a model.", []);
         if (UsesAzure)
         {
             fields.Add(new SetupTextField(new("azure-model-profile", "Underlying model profile"),
                 _azure!.Profile, string.Empty,
                 value => Edit(() => _azure.Profile = value)));
         }
+        var connectionSections = new List<SetupSection>();
+        if (_draft.Transport == LlmTransport.OpenAiCompatibleChat || UsesAzure)
+        {
+            connectionSections.Add(new("connection", "Connection", fields.AsReadOnly()));
+            connectionSections.Add(AdvancedCapabilities());
+        }
+        else if (fields.Count > 0) connectionSections.Add(new("connection", "Connection", fields.AsReadOnly()));
+        if (executable is not null) connectionSections.Add(new("more-options", "More options", [executable], IsAdvanced: true));
         return
         [
-            connectionStep with { Sections = _draft.Transport == LlmTransport.OpenAiCompatibleChat || UsesAzure
-                ? [new("connection", "Connection", fields.AsReadOnly()), AdvancedCapabilities()]
-                : fields.Count == 0 ? [] : [new("connection", "Connection", fields.AsReadOnly())] },
-            modelStep with { Sections = [new("model", "Model",
+            connectionStep with
+            {
+                Sections = connectionSections.AsReadOnly(),
+                ActionIds = SignInActionId is { } signIn ? [signIn, "check"] : ["check"]
+            },
+            modelStep with { ActionIds = ["test"], Sections = [new("model", "Model",
             [new SetupChoiceField(new("model", UsesAzure ? "Deployment" : "Model") { IsRequired = true,
                 HelpText = UsesAzure ? "Enter the exact Azure deployment name, not its underlying public model ID." : "Discover available models where supported, or enter an exact model ID." }, _model,
                 _definition.DefaultModelId, value => Edit(() => SetModel(value)), true,
                 UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesSelfHost || UsesAzure ? SetupSideEffect.None : SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
-                SetupChoiceCapabilities.Searchable)])] },
-            testStep
+                SetupChoiceCapabilities.Searchable)])] }
         ];
     }
 
@@ -872,12 +898,29 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
                     }
                     IReadOnlyList<LlmModel> models = await service.ListModelsAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
                     Fence(cancellationToken);
-                    return InferenceSettings.Page(query, models.Select(model => new SetupChoice(model.Id, model.DisplayName, model.AvailabilityReason ?? model.OwnedBy))
+                    if (fieldId == "model")
+                    {
+                        settings.ModelNames = models.DistinctBy(model => model.Id, StringComparer.Ordinal)
+                            .ToDictionary(model => model.Id, model => model.DisplayName, StringComparer.Ordinal);
+                    }
+                    return InferenceSettings.Page(query, models.Select(model => new SetupChoice(model.Id, model.DisplayName, model.AvailabilityReason ?? model.OwnedBy)
+                    { Tags = ModelTags(model) })
                         .OrderBy(choice => choice.Value, StringComparer.Ordinal));
                 }
             default:
                 return new([], State: SetupChoiceState.Unavailable);
         }
+    }
+
+    /// <summary>The model's chips: its context size, and Images and Thinking when its capabilities support them.</summary>
+    private static string[] ModelTags(LlmModel model)
+    {
+        if (model.Capabilities is not { } capabilities) return [];
+        var tags = new List<string>();
+        if (model.MaxContextTokens is { } context) tags.Add(string.Create(CultureInfo.InvariantCulture, $"{context / 1000}K context"));
+        if (capabilities.SupportsPromptImages == InferenceSupport.Supported) tags.Add("Images");
+        if (capabilities.SupportsReasoning == InferenceSupport.Supported) tags.Add("Thinking");
+        return [.. tags];
     }
 
     private async Task<SetupActionResult> ContinueAuthorizationAsync(LlmSettings settings, LlmProviderService service,
@@ -919,28 +962,46 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
     {
         Fence(token);
         settings.Status = settings.Status with { Authenticated = SetupObservation.Unknown, Verified = SetupObservation.Unknown };
-        bool authenticated;
-        if (settings.UsesCli)
+        if (settings.UsesCli) return await CheckCliAsync(settings, service, token).ConfigureAwait(false);
+        LlmProviderCapabilities capabilities = await service.GetCapabilitiesAsync(settings.Identity.Id, token).ConfigureAwait(false);
+        Fence(token);
+        if ((capabilities.SupportsModelListing == InferenceSupport.Unsupported))
         {
-            authenticated = await service.IsAuthenticatedAsync(settings.Identity.Id, token).ConfigureAwait(false);
-            Fence(token);
+            return new(SetupActionState.Unavailable, [new("explicit-test-required", "This provider requires an explicit inference test to confirm remote access.")]);
         }
-        else
+        await service.ListModelsAsync(settings.Identity.Id, token).ConfigureAwait(false);
+        Fence(token);
+        settings.Status = settings.Status with
         {
-            LlmProviderCapabilities capabilities = await service.GetCapabilitiesAsync(settings.Identity.Id, token).ConfigureAwait(false);
-            Fence(token);
-            if ((capabilities.SupportsModelListing == InferenceSupport.Unsupported))
-            {
-                return new(SetupActionState.Unavailable, [new("explicit-test-required", "This provider requires an explicit inference test to confirm remote access.")]);
-            }
-            await service.ListModelsAsync(settings.Identity.Id, token).ConfigureAwait(false);
-            Fence(token);
-            authenticated = true;
-        }
-        settings.Status = settings.Status with { Authenticated = SetupObservation.Known(authenticated), Verified = settings.Transport is LlmTransport.GoogleVertexAi or LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat ? SetupObservation.Unknown : SetupObservation.Known(authenticated) };
-        settings.CliPrerequisite = !authenticated;
+            Authenticated = SetupObservation.Known(true),
+            Verified = settings.Transport is LlmTransport.GoogleVertexAi or LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat
+                ? SetupObservation.Unknown : SetupObservation.Known(true)
+        };
+        settings.CliPrerequisite = false;
         settings.RefreshInteraction();
-        return authenticated ? SetupActionResult.Completed : new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);
+        return SetupActionResult.Completed;
+    }
+
+    /// <summary>
+    /// Checks a CLI provider's tool and sign-in. A missing tool, or a signed-out tool with no sign-in action of its own,
+    /// shows the provider's prerequisite; a signed-out tool with a sign-in action completes so its sign-in is offered.
+    /// </summary>
+    private async Task<SetupActionResult> CheckCliAsync(LlmSettings settings, LlmProviderService service, CancellationToken token)
+    {
+        settings.Status = settings.Status with { Installed = SetupObservation.Unknown };
+        ExternalAuthenticationState state = await service.CheckAuthenticationAsync(settings.Identity.Id, token).ConfigureAwait(false);
+        Fence(token);
+        bool installed = state != ExternalAuthenticationState.NotInstalled;
+        bool signedIn = state == ExternalAuthenticationState.SignedIn;
+        settings.Status = settings.Status with
+        {
+            Installed = SetupObservation.Known(installed),
+            Authenticated = SetupObservation.Known(signedIn),
+            Verified = SetupObservation.Known(signedIn)
+        };
+        settings.CliPrerequisite = !installed || !signedIn && !settings.HasSignInAction;
+        settings.RefreshInteraction();
+        return settings.CliPrerequisite ? new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction) : SetupActionResult.Completed;
     }
 
     private async Task<SetupActionResult> TestAsync(LlmSettings settings, LlmProviderService service, CancellationToken token)
@@ -948,6 +1009,8 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         Fence(token);
         settings.Status = settings.Status with { Ready = SetupObservation.Unknown };
         bool completed;
+        var reply = new System.Text.StringBuilder();
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
         if (settings.Transport == LlmTransport.AwsBedrockAgentCore && Client(settings.Transport) is ILlmAgentClient agent)
         {
             await using ILlmAgentSession session = await agent.StartSessionAsync(settings.Identity.Id, settings.CurrentConnection(), new()
@@ -962,6 +1025,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
             { Input = [new LlmAgentTextContent("Reply with OK. Do not use tools.")] }, token).ConfigureAwait(false))
             {
                 Fence(token);
+                if (item is LlmAgentTextDeltaEvent delta) { reply.Append(delta.Delta); }
                 if (item is LlmAgentTurnCompletedEvent done) { completed = done.Status == LlmAgentTurnStatus.Completed; }
             }
         }
@@ -972,10 +1036,19 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
             Fence(token);
             completed = result.Status == LlmCompletionStatus.Completed
                 || settings.UsesApple && result.Status == LlmCompletionStatus.Unknown && !string.IsNullOrWhiteSpace(result.Text);
+            reply.Append(result.Text);
         }
+        TimeSpan elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started);
         Fence(token);
         settings.Status = settings.Status with { Ready = SetupObservation.Known(completed), Verified = SetupObservation.Known(completed) };
-        return completed ? SetupActionResult.Completed : new(SetupActionState.Failed, [new("test-incomplete", "The provider did not complete the test.")]);
+        if (!completed) return new(SetupActionState.Failed, [new("test-incomplete", "The provider did not complete the test.")]) { Elapsed = elapsed };
+        string text = reply.ToString().Trim();
+        string name = settings.ModelNames.GetValueOrDefault(settings.ModelId) ?? settings.ModelId;
+        return new(SetupActionState.Completed)
+        {
+            Message = $"{name} answered \"{(text.Length > 120 ? text[..120] : text)}\"",
+            Elapsed = elapsed
+        };
     }
 
     private ILlmClient Client(LlmTransport transport) => _clients!.TryGetValue(transport, out ILlmClient? client)

@@ -12,6 +12,8 @@ internal static class ClaudeDefinition
         Transport = LlmTransport.AnthropicClaudeCli,
         DefaultEndpoint = "claude",
         DisplayOrder = 30,
+        Icon = SetupIcons.FromResource(typeof(ClaudeDefinition).Assembly, "Icons/claude.svg"),
+        Group = SetupProviderGroup.Subscription,
         SetupSteps =
         [
             new SetupStep
@@ -22,8 +24,7 @@ internal static class ClaudeDefinition
                 CompletionRequirement = "The claude auth status --json command must report a signed-in first-party Claude account.",
                 Troubleshooting = "Run claude auth status in a terminal. If it is signed out or uses a different provider, run claude and complete Claude sign-in."
             },
-            ProviderDefinitions.SelectModel,
-            ProviderDefinitions.TestConnection
+            ProviderDefinitions.SelectModel
         ]
     };
 }

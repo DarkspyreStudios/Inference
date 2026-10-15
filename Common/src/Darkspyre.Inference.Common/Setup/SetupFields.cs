@@ -206,7 +206,12 @@ public sealed record SetupChoiceInstall(bool IsInstalled, long Size);
 /// <param name="DisplayName">Label shown to the user.</param>
 /// <param name="Description">Optional text that describes the option.</param>
 /// <param name="Install">The option's install chip, or null for an option that has no local files.</param>
-public sealed record SetupChoice(string Value, string DisplayName, string? Description = null, SetupChoiceInstall? Install = null);
+public sealed record SetupChoice(string Value, string DisplayName, string? Description = null, SetupChoiceInstall? Install = null)
+{
+    /// <summary>Short facts drawn as chips, such as "200K context", "Images", "Thinking".</summary>
+    public IReadOnlyList<string> Tags { get; init; } = [];
+}
+
 /// <summary>A request for one page of a choice field's options.</summary>
 /// <param name="Search">Search text that filters the options; empty matches every option.</param>
 /// <param name="Continuation">Token from the previous page's <see cref="SetupChoicePage.Continuation"/>, or null for the first page.</param>

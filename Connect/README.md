@@ -3486,6 +3486,21 @@ atomically compare that version over configuration and credentials. Authenticati
 credentials before commit. Normal runtime credential refresh still uses the existing host seam unchanged.
 A Claude connection that is not signed in uses the CLI's own login; signing in to a Claude account
 marks the draft authenticated.
+Every LLM provider's settings have two steps. The connection step names its sign-in action
+(`authorize` for ChatGPT, `sign-in-claude` for Claude) and `check` in `SetupStep.ActionIds`; the
+model step names `test`. A CLI or Apple helper executable field sits in the connection step's
+advanced section, "More options". `LlmProviderDefinition.Icon` and `Group` carry the provider's logo
+and add-connection group, and `SetupDefinition` copies both. Claude embeds its own logo; ChatGPT and
+the OpenAI API use the shared OpenAI mark in Common (`SetupIcons.OpenAiResource`).
+
+The `check` action on a Claude or Antigravity connection asks the CLI for its sign-in. It reports the
+CLI as installed or not in `Status.Installed`, and signed in or not in `Status.Authenticated`. A
+missing CLI, or a signed-out Antigravity CLI, shows the provider's prerequisite instructions as the
+interaction. A signed-out Claude CLI completes the check, so its sign-in action is offered. An edit
+marks `Status.Installed` stale. Model choices carry `SetupChoice.Tags`: the context size in
+thousands of tokens, "Images" and "Thinking", from the model's listed capabilities. The `test`
+action's result carries the reply as `Message` and the request time as `Elapsed`.
+
 Claude and Antigravity executable fields accept blank values. Checks, discovery and Save resolve a
 blank executable to the provider's default through the same draft connection projection. The editor
 keeps the entered value unchanged. Executable inputs containing carriage returns, newlines or null

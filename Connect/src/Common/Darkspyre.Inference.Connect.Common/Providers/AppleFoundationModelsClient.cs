@@ -66,12 +66,12 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
         return result;
     }
 
-    public Task<bool> IsAuthenticatedAsync(LlmConnection connection, CancellationToken cancellationToken = default)
+    public Task<ExternalAuthenticationState> CheckAuthenticationAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ValidateConnection(connection);
         // This transport requires no authentication. Readiness is checked separately by probe.
-        return Task.FromResult(true);
+        return Task.FromResult(ExternalAuthenticationState.SignedIn);
     }
 
     internal async Task<JsonElement> ProbeAsync(LlmConnection connection, CancellationToken cancellationToken)

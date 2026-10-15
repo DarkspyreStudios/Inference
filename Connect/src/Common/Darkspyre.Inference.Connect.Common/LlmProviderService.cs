@@ -189,7 +189,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             && _clients.TryGetValue(connection.Transport, out ILlmClient? client)
             && client is IExternalLlmAuthenticationProbe externalProbe)
         {
-            return await externalProbe.IsAuthenticatedAsync(connection, cancellationToken);
+            return await externalProbe.CheckAuthenticationAsync(connection, cancellationToken) == ExternalAuthenticationState.SignedIn;
         }
 
         return credential is not null
@@ -197,6 +197,20 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
                 || !string.IsNullOrWhiteSpace(credential.OAuth?.AccessToken)
                 || credential.Aws is not null
                 || credential.SecretHeaders.Count > 0);
+    }
+
+    /// <summary>
+    /// Whether a provider that signs in outside Connect has its tool and an active sign-in. Throws
+    /// <see cref="NotSupportedException"/> for a transport that signs in through Connect.
+    /// </summary>
+    internal async Task<ExternalAuthenticationState> CheckAuthenticationAsync(string connectionId, CancellationToken cancellationToken)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        cancellationToken = operation.Token;
+        LlmConnection connection = await ResolveConnectionAsync(connectionId, cancellationToken).ConfigureAwait(false);
+        return ClientFor(connection.Transport) is IExternalLlmAuthenticationProbe probe
+            ? await probe.CheckAuthenticationAsync(connection, cancellationToken).ConfigureAwait(false)
+            : throw new NotSupportedException($"{connection.Transport} signs in through Connect, not an external tool.");
     }
 
     /// <summary>Saves an API key as the connection's credential. Throws when the connection's version is not <paramref name="expectedVersion"/>.</summary>
@@ -390,7 +404,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
                 if (_clients.TryGetValue(connection.Transport, out ILlmClient? claudeClient)
                     && claudeClient is IExternalLlmAuthenticationProbe claudeProbe)
                 {
-                    if (await claudeProbe.IsAuthenticatedAsync(connection, cancellationToken))
+                    if (await claudeProbe.CheckAuthenticationAsync(connection, cancellationToken) == ExternalAuthenticationState.SignedIn)
                     {
                         break;
                     }

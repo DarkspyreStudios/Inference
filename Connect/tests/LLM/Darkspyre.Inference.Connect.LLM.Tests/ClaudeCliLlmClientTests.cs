@@ -504,6 +504,34 @@ public sealed class ClaudeCliLlmClientTests
         Assert.Equal("account-token", credential.OAuth!.AccessToken);
     }
 
+    /// <summary>Only a first-party sign-in counts as signed in; a CLI that cannot start is not installed.</summary>
+    [Theory]
+    [InlineData(1, """{"loggedIn":true,"apiProvider":"firstParty"}""", "SignedOut")]
+    [InlineData(0, """{"loggedIn":true,"apiProvider":"bedrock"}""", "SignedOut")]
+    [InlineData(0, """{"loggedIn":false,"apiProvider":"firstParty"}""", "SignedOut")]
+    [InlineData(0, "not json", "SignedOut")]
+    [InlineData(0, """{"loggedIn":true,"apiProvider":"firstParty"}""", "SignedIn")]
+    public async Task CliProbeFailuresStaySignedOut(int exitCode, string output, string expected)
+    {
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, new RecordingRunner(new(exitCode, output, string.Empty)), new NoSessionProcesses());
+
+        Assert.Equal(Enum.Parse<ExternalAuthenticationState>(expected), await client.CheckAuthenticationAsync(CliConnection()));
+    }
+
+    [Fact]
+    public async Task ACliThatCannotStartIsNotInstalled()
+    {
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var runner = new RecordingRunner(new(0, string.Empty, string.Empty))
+        {
+            OnInvocation = invocation => throw new ClaudeCliUnavailableException(invocation.Executable, new FileNotFoundException())
+        };
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+
+        Assert.Equal(ExternalAuthenticationState.NotInstalled, await client.CheckAuthenticationAsync(CliConnection()));
+    }
+
     private static LlmConnection CliConnection() => new()
     {
         Version = "v1",

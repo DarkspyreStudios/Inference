@@ -32,14 +32,6 @@ internal static class BedrockProviderDefinitions
                 Instructions = "Load the Bedrock models available to the selected profile and region, then choose the model the application should use.",
                 CompletionRequirement = "A Bedrock model available to this profile and region must be selected.",
                 Troubleshooting = "Confirm the model is available in the selected region and that the AWS account has access to invoke it."
-            },
-            new SetupStep
-            {
-                Id = "test-connection",
-                Title = "Optional model test",
-                Instructions = "Explicitly test the selected model if desired; this can incur usage charges. Saving does not invoke AWS.",
-                CompletionRequirement = "A completed response verifies the selected model. Saving without a test leaves readiness unknown.",
-                Troubleshooting = "Check the profile's Bedrock permissions, region, model access, and any organization service-control policies."
             }
         ]
     };
@@ -73,14 +65,6 @@ internal static class BedrockProviderDefinitions
                 Instructions = "Use 'default' to keep the Harness model, or enter a Bedrock model ID to override it for each invocation.",
                 CompletionRequirement = "A model selection must be recorded; 'default' uses the model deployed with the Harness.",
                 Troubleshooting = "If an override fails, confirm the Harness role can invoke that Bedrock model or switch back to 'default'."
-            },
-            new SetupStep
-            {
-                Id = "test-connection",
-                Title = "Optional Harness test",
-                Instructions = "Explicitly start a test session and send a short prompt if desired; this can incur usage charges. Saving does not invoke the Harness.",
-                CompletionRequirement = "A completed turn verifies the Harness. Saving without a test leaves readiness unknown.",
-                Troubleshooting = "Check the profile, region, Harness ARN, InvokeHarness permission, Harness execution role, and model access."
             }
         ]
     };

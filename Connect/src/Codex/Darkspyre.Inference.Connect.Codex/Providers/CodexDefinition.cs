@@ -12,6 +12,8 @@ internal static class CodexDefinition
         Transport = LlmTransport.OpenAiCodex,
         DefaultEndpoint = OpenAiCodexLlmClient.DefaultEndpoint,
         DisplayOrder = 20,
+        Icon = SetupIcons.FromResource(typeof(SetupIcons).Assembly, SetupIcons.OpenAiResource),
+        Group = SetupProviderGroup.Subscription,
         SetupSteps =
         [
             new SetupStep
@@ -22,8 +24,7 @@ internal static class CodexDefinition
                 CompletionRequirement = "The draft contains a ChatGPT OAuth access token and account ID before saving an authenticated connection.",
                 Troubleshooting = "An existing Codex CLI login is separate and is not used. Run the ChatGPT sign-in action here."
             },
-            ProviderDefinitions.SelectModel,
-            ProviderDefinitions.TestConnection
+            ProviderDefinitions.SelectModel
         ]
     };
 }

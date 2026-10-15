@@ -27,13 +27,6 @@ internal static class VertexProviderDefinition
                 Instructions = "Choose a google/model text model or anthropic/claude-* model ID. Express mode requires manual Google model entry. Catalog entries have unknown invocation access until tested.",
                 CompletionRequirement = "Select a supported model in the configured location.",
                 Troubleshooting = "Model Garden catalog membership does not guarantee access in this project or region."
-            },
-            new SetupStep
-            {
-                Id = "test-connection", Title = "Optional metered model test",
-                Instructions = "Explicitly test the selected model to verify invocation. This can incur cloud charges. Saving performs no inference.",
-                CompletionRequirement = "A completed response verifies this model and connection.",
-                Troubleshooting = "Check model access, region eligibility, quotas and organization policies."
             }
         ])
     };

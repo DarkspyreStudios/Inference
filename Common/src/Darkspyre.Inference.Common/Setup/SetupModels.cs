@@ -18,6 +18,12 @@ public sealed record InferenceSetupDefinition(
 {
     /// <summary>Prerequisites the user must have in place before setup, as display text.</summary>
     public IReadOnlyList<string> Prerequisites { get; init; } = [];
+
+    /// <summary>The provider's or model family's logo, or null when it has none of its own.</summary>
+    public SetupIcon? Icon { get; init; }
+
+    /// <summary>The add-connection group the implementation is listed under.</summary>
+    public SetupProviderGroup Group { get; init; } = SetupProviderGroup.More;
 }
 
 /// <summary>How serious a setup issue is.</summary>
@@ -296,6 +302,12 @@ public sealed record SetupActionResult(
 {
     /// <summary>A completed result with no issues.</summary>
     public static SetupActionResult Completed { get; } = new(SetupActionState.Completed);
+
+    /// <summary>One line shown after the action, such as the test reply.</summary>
+    public string? Message { get; init; }
+
+    /// <summary>How long the action took.</summary>
+    public TimeSpan? Elapsed { get; init; }
 }
 
 /// <summary>A group of setup fields within a step.</summary>
@@ -334,4 +346,10 @@ public sealed record SetupStep(string Id, string Title, string Instructions, IRe
     public bool HasCompletionRequirement => !string.IsNullOrWhiteSpace(CompletionRequirement);
     /// <summary>True when troubleshooting help is present.</summary>
     public bool HasTroubleshooting => !string.IsNullOrWhiteSpace(Troubleshooting);
+
+    /// <summary>
+    /// Ids of the settings' actions shown on this step, in order. When no step of a settings object names any action,
+    /// every action shows on every step.
+    /// </summary>
+    public IReadOnlyList<string> ActionIds { get; init; } = [];
 }

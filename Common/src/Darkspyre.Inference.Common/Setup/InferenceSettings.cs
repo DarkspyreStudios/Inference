@@ -80,12 +80,13 @@ public abstract class InferenceSettings
         return SetupEditResult.Applied;
     }
 
-    /// <summary>Runs after each local edit. The base marks the authenticated, verified and ready observations stale.</summary>
+    /// <summary>Runs after each local edit. The base marks the authenticated, installed, verified and ready observations stale.</summary>
     protected virtual void OnDraftEdited()
     {
         Status = Status with
         {
             Authenticated = Stale(Status.Authenticated),
+            Installed = Stale(Status.Installed),
             Verified = Stale(Status.Verified),
             Ready = Stale(Status.Ready)
         };

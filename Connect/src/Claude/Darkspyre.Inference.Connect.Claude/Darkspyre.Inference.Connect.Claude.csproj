@@ -10,4 +10,7 @@
     <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
     <None Include="buildTransitive/Darkspyre.Inference.Connect.Claude.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Icons/*.svg" LogicalName="Icons/%(Filename)%(Extension)" />
+  </ItemGroup>
 </Project>

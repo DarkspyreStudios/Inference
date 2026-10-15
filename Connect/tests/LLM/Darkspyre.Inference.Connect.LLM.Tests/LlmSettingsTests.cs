@@ -215,6 +215,154 @@ public sealed class LlmSettingsTests
         }
     }
 
+    /// <summary>Each registered provider carries its add-connection group and its own logo in the subset the host's icon draws.</summary>
+    [Fact]
+    public void RegisteredProvidersHaveAGroupAndTheirIcon()
+    {
+        SetupIcon openAi = SetupIcons.FromResource(typeof(SetupIcons).Assembly, SetupIcons.OpenAiResource);
+        (LlmProviderDefinition Definition, SetupProviderGroup Group, string? Logo)[] registered =
+        [
+            (ClaudeDefinition.Value, SetupProviderGroup.Subscription, "claude"),
+            (CodexDefinition.Value, SetupProviderGroup.Subscription, "openai"),
+            (OpenAiApiDefinition.Value, SetupProviderGroup.ApiKey, "openai"),
+            (SelfHostDefinition.Value, SetupProviderGroup.More, null),
+        ];
+        foreach ((LlmProviderDefinition definition, SetupProviderGroup group, string? logo) in registered)
+        {
+            InferenceSetupDefinition setup = definition.SetupDefinition;
+            Assert.Equal(group, setup.Group);
+            Assert.Equal(definition.Icon, setup.Icon);
+            if (logo is null) { Assert.Null(setup.Icon); continue; }
+            SetupIcon icon = Assert.IsType<SetupIcon>(setup.Icon);
+            Assert.Equal("0 0 24 24", icon.ViewBox);
+            System.Xml.Linq.XElement[] elements = [.. System.Xml.Linq.XElement.Parse("<svg>" + icon.Markup + "</svg>").Elements()];
+            Assert.NotEmpty(elements);
+            Assert.All(elements, element =>
+            {
+                Assert.True(element.Name.LocalName is "path" or "rect" or "circle", element.Name.LocalName);
+                Assert.Empty(element.Elements());
+                Assert.Null(element.Attribute("transform"));
+                Assert.Matches("^#[0-9A-F]{6}$", (string?)element.Attribute("fill") ?? string.Empty);
+            });
+            if (logo == "openai") Assert.Equal(openAi, icon);
+            else Assert.NotEqual(openAi, icon);
+        }
+    }
+
+    /// <summary>Each LLM provider has two steps: the connection step offers its sign-in and check, the model step its test.</summary>
+    [Fact]
+    public async Task StepsNameTheirOwnActions()
+    {
+        var provider = new LlmProviderService(new UnusedSource(), [new Client(ClaudeDefinition.Value)], [new BrowserAuth()]);
+        var (_, claude) = await OpenAsync(provider, LlmTransport.AnthropicClaudeCli, new(SetupChangeIntent.Create, "id", null), new Target());
+        Assert.Equal([["sign-in-claude", "check"], ["test"]], claude.Steps.Select(step => step.ActionIds));
+        SetupSection more = Assert.Single(claude.Steps[0].Sections);
+        Assert.Equal(("More options", true), (more.Title, more.IsAdvanced));
+        Assert.Equal("executable", Assert.Single(more.Fields).Description.Id);
+
+        using var openAi = new LlmProviderService(new UnusedSource(), [new Client(OpenAiApiDefinition.Value)]);
+        var (_, key) = await OpenAsync(openAi, LlmTransport.OpenAiResponses, new(SetupChangeIntent.Create, "id", null), new Target());
+        Assert.Equal([["check"], ["test"]], key.Steps.Select(step => step.ActionIds));
+    }
+
+    /// <summary>The state table: a signed-out tool with its own sign-in shows installed and offers the sign-in, not the install prompt.</summary>
+    [Fact]
+    public async Task InstalledButSignedOutShowsInstalledAndSignIn()
+    {
+        var claude = new Client(ClaudeDefinition.Value) { State = ExternalAuthenticationState.SignedOut };
+        var provider = new LlmProviderService(new UnusedSource(), [claude], [new BrowserAuth()]);
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.AnthropicClaudeCli,
+            new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
+        Assert.Equal(SetupObservation.Unknown, settings.Status.Installed);
+
+        SetupActionResult result = await manager.RunAsync(settings, "check");
+
+        Assert.Equal(SetupActionState.Completed, result.State);
+        Assert.Equal((true, false), (settings.Status.Installed.Value, settings.Status.Authenticated.Value));
+        Assert.Null(settings.Interaction);
+        Assert.Contains(settings.Actions, action => action.Id == "sign-in-claude");
+
+        claude.State = ExternalAuthenticationState.NotInstalled;
+        result = await manager.RunAsync(settings, "check");
+        Assert.Equal(SetupActionState.NeedsInteraction, result.State);
+        Assert.Equal((false, false), (settings.Status.Installed.Value, settings.Status.Authenticated.Value));
+        Assert.IsType<SetupExternalPrerequisite>(settings.Interaction);
+
+        claude.State = ExternalAuthenticationState.SignedIn;
+        result = await manager.RunAsync(settings, "check");
+        Assert.Equal(SetupActionState.Completed, result.State);
+        Assert.Equal((true, true), (settings.Status.Installed.Value, settings.Status.Authenticated.Value));
+        Assert.Null(settings.Interaction);
+
+        Assert.Equal(SetupEditState.Applied, Assert.IsType<SetupExecutableField>(Fields(settings)
+            .Single(field => field.Description.Id == "executable")).SetValue(new("/opt/claude")).State);
+        Assert.True(settings.Status.Installed.IsStale);
+    }
+
+    /// <summary>A signed-out tool without a sign-in action of its own shows the prerequisite guidance.</summary>
+    [Fact]
+    public async Task SignedOutAntigravityShowsItsPrerequisite()
+    {
+        var antigravity = new Client(ProviderDefinitions.GeminiSubscription) { State = ExternalAuthenticationState.SignedOut };
+        using var provider = new LlmProviderService(new UnusedSource(), [antigravity]);
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.GoogleAntigravityCli,
+            new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
+        using (manager)
+        {
+            SetupActionResult result = await manager.RunAsync(settings, "check");
+
+            Assert.Equal(SetupActionState.NeedsInteraction, result.State);
+            Assert.Equal((true, false), (settings.Status.Installed.Value, settings.Status.Authenticated.Value));
+            Assert.Equal(ProviderDefinitions.GeminiSubscription.SetupSteps[0].Instructions,
+                Assert.IsType<SetupExternalPrerequisite>(settings.Interaction).Instructions);
+        }
+    }
+
+    [Fact]
+    public async Task ModelChoicesCarryContextImageAndThinkingTags()
+    {
+        var client = new Client(OpenAiApiDefinition.Value)
+        {
+            Models =
+            [
+                new("rich", "Rich", Capabilities: new()
+                {
+                    SupportsPromptImages = InferenceSupport.Supported,
+                    ReasoningLevels = new HashSet<LlmReasoningLevel> { LlmReasoningLevel.High }
+                }) { MaxContextTokens = 200_000 },
+                new("plain", "Plain", Capabilities: new() { SupportsPromptImages = InferenceSupport.Unsupported }),
+                new("unknown", "Unknown") { MaxContextTokens = 8_000 },
+            ]
+        };
+        using var provider = new LlmProviderService(new UnusedSource(), [client]);
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiResponses, new(SetupChangeIntent.Create, "id", null), new Target());
+        using (manager)
+        {
+            SetupChoicePage page = await manager.QueryChoicesAsync(settings, "model", new());
+
+            Assert.Equal([("plain", []), ("rich", ["200K context", "Images", "Thinking"]), ("unknown", [])],
+                page.Choices.Select(choice => (choice.Value, (IReadOnlyList<string>)choice.Tags)));
+        }
+    }
+
+    [Fact]
+    public async Task TestActionReportsTheReplyAndElapsedTime()
+    {
+        using var provider = new LlmProviderService(new UnusedSource(), [new Client(OpenAiApiDefinition.Value)]);
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiResponses, new(SetupChangeIntent.Create, "id", null),
+            new Target(), modelId: "model");
+        using (manager)
+        {
+            await manager.QueryChoicesAsync(settings, "model", new());
+
+            SetupActionResult result = await manager.RunAsync(settings, "test");
+
+            Assert.Equal(SetupActionState.Completed, result.State);
+            Assert.Equal("Model answered \"OK\"", result.Message);
+            Assert.NotNull(result.Elapsed);
+        }
+    }
+
     private static LlmConnection Connection(LlmTransport transport, string key) => new()
     { Version = "v1", Transport = transport, Endpoint = "https://example.test/v1", Credential = new LlmCredential { ApiKey = key }.Serialize() };
 
@@ -279,14 +427,16 @@ public sealed class LlmSettingsTests
 
     private sealed class Client(LlmProviderDefinition definition) : ILlmClient, IExternalLlmAuthenticationProbe
     {
-        public bool Authenticated { get; set; } = true;
-        public Task<bool> IsAuthenticatedAsync(LlmConnection connection, CancellationToken cancellationToken = default) => Task.FromResult(Authenticated);
+        public ExternalAuthenticationState State { get; set; } = ExternalAuthenticationState.SignedIn;
+        public Task<ExternalAuthenticationState> CheckAuthenticationAsync(LlmConnection connection, CancellationToken cancellationToken = default) =>
+            Task.FromResult(State);
+        public IReadOnlyList<LlmModel> Models { get; init; } = [new("model", "Model")];
         public int Calls { get; private set; }
         public LlmTransport Transport => definition.Transport;
         public LlmProviderDefinition ProviderDefinition => definition;
         public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => new() { SupportsModelListing = InferenceSupport.Supported };
         public Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
-        { Calls++; return Task.FromResult<IReadOnlyList<LlmModel>>([new("model", "Model")]); }
+        { Calls++; return Task.FromResult(Models); }
         public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {

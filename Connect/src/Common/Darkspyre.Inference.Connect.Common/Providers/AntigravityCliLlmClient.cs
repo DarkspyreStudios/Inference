@@ -387,7 +387,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         return [new LlmModel("auto", "Auto (Antigravity CLI)", "Google"), .. models];
     }
 
-    public async Task<bool> IsAuthenticatedAsync(
+    public async Task<ExternalAuthenticationState> CheckAuthenticationAsync(
         LlmConnection connection,
         CancellationToken cancellationToken = default)
     {
@@ -400,7 +400,9 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                 null,
                 null,
                 cancellationToken);
-            return result.ExitCode == 0 && ParseModels(result.StandardOutput).Count > 0;
+            return result.ExitCode == 0 && ParseModels(result.StandardOutput).Count > 0
+                ? ExternalAuthenticationState.SignedIn
+                : ExternalAuthenticationState.SignedOut;
         }
         catch (LlmProviderException exception)
             when (string.Equals(
@@ -408,7 +410,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
                 "antigravity_cli_not_found",
                 StringComparison.Ordinal))
         {
-            return false;
+            return ExternalAuthenticationState.NotInstalled;
         }
     }
 

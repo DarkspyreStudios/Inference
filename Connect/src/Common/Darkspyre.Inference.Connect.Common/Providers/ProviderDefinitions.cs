@@ -28,13 +28,6 @@ internal static class ProviderDefinitions
                 Instructions = "Load the locally available Apple system model.",
                 CompletionRequirement = "Select apple-system-default.",
                 Troubleshooting = "Recheck the helper and Apple Intelligence readiness."
-            },
-            new SetupStep
-            {
-                Id = "test-connection", Title = "Optional on-device test",
-                Instructions = "Explicitly generate a short response on this Mac. Saving does not generate a response.",
-                CompletionRequirement = "The model returns text. Apple does not report whether generation stopped naturally or reached its token limit.",
-                Troubleshooting = "Recheck local model readiness and retry when no other generation is using the model."
             }
         ]
     };
@@ -46,15 +39,6 @@ internal static class ProviderDefinitions
         Instructions = "Load the models available to this connection and choose the model the application should use.",
         CompletionRequirement = "A model ID must be selected before setup can continue.",
         Troubleshooting = "Reload the provider model list. If the provider does not support discovery, enter a model ID manually."
-    };
-
-    internal static readonly SetupStep TestConnection = new()
-    {
-        Id = "test-connection",
-        Title = "Optional model test",
-        Instructions = "Explicitly test the selected model if desired; this can incur usage charges. Saving configuration does not run a test.",
-        CompletionRequirement = "A completed response verifies the selected model. Saving without a test leaves readiness unknown.",
-        Troubleshooting = "Verify the credential, account entitlement, model access, endpoint, and network connection, then retry."
     };
 
 
@@ -78,8 +62,7 @@ internal static class ProviderDefinitions
                 CompletionRequirement = "The configured endpoint must accept the credential or explicitly allow unauthenticated requests.",
                 Troubleshooting = "Confirm the endpoint implements OpenAI-compatible Chat Completions and that its model-list route is enabled."
             },
-            SelectModel,
-            TestConnection
+            SelectModel
         ]
     };
 
@@ -101,8 +84,7 @@ internal static class ProviderDefinitions
                 CompletionRequirement = "The API key must authenticate successfully and allow the model list to be loaded.",
                 Troubleshooting = "Confirm the key belongs to an active Anthropic API account with billing enabled. A Claude subscription is not an API key."
             },
-            SelectModel,
-            TestConnection
+            SelectModel
         ]
     };
 
@@ -127,8 +109,7 @@ internal static class ProviderDefinitions
                 CompletionRequirement = "Complete Grok OAuth sign-in before saving an authenticated connection.",
                 Troubleshooting = "Restart an expired or denied authorization. Confirm that the account permits the selected model and API feature."
             },
-            SelectModel,
-            TestConnection
+            SelectModel
         ]
     };
 
@@ -154,8 +135,7 @@ internal static class ProviderDefinitions
                 MacOsInstructions = "In Terminal, run command -v agy to find the executable path.",
                 LinuxInstructions = "In a terminal, run command -v agy to find the executable path."
             },
-            SelectModel,
-            TestConnection
+            SelectModel
         ]
     };
 
@@ -178,8 +158,7 @@ internal static class ProviderDefinitions
                 CompletionRequirement = "An API key is required. Loading the model list confirms that Google accepts the key.",
                 Troubleshooting = "Check that the key is active, that the Generative Language API is enabled for its project, and that the project's billing tier allows the selected model."
             },
-            SelectModel,
-            TestConnection
+            SelectModel
         ]
     };
 }

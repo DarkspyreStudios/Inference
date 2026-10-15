@@ -22,8 +22,7 @@ internal static class SelfHostDefinition
                 CompletionRequirement = "An engine must be selected.",
                 Troubleshooting = "If no engine is listed, add and load one in the application's model settings."
             },
-            ProviderDefinitions.SelectModel,
-            ProviderDefinitions.TestConnection
+            ProviderDefinitions.SelectModel
         ]
     };
 }

@@ -12,6 +12,8 @@ internal static class OpenAiApiDefinition
         Transport = LlmTransport.OpenAiResponses,
         DefaultEndpoint = "https://api.openai.com/v1",
         DisplayOrder = 10,
+        Icon = SetupIcons.FromResource(typeof(SetupIcons).Assembly, SetupIcons.OpenAiResource),
+        Group = SetupProviderGroup.ApiKey,
         SetupSteps =
         [
             new SetupStep
@@ -22,8 +24,7 @@ internal static class OpenAiApiDefinition
                 CompletionRequirement = "The model list loads from the endpoint.",
                 Troubleshooting = "Check the endpoint and the key. A ChatGPT subscription alone is not an OpenAI API key."
             },
-            ProviderDefinitions.SelectModel,
-            ProviderDefinitions.TestConnection
+            ProviderDefinitions.SelectModel
         ]
     };
 }

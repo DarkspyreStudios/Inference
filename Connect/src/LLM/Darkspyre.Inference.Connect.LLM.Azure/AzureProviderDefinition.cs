@@ -30,13 +30,6 @@ internal static class AzureProviderDefinition
                 Instructions = "Enter the exact deployment name. An optional underlying model profile supplies validation, not model access.",
                 CompletionRequirement = "Supply the deployment routing identity.",
                 Troubleshooting = "Deployment names can differ from public model IDs. Discovery is not required."
-            },
-            new SetupStep
-            {
-                Id = "test-connection", Title = "Optional metered deployment test",
-                Instructions = "Explicitly test the selected deployment. This can incur cloud charges. Saving performs no inference.",
-                CompletionRequirement = "A completed response verifies this deployment and connection.",
-                Troubleshooting = "Verify the deployment's model, permissions, API support and quota."
             }
         ]
     };

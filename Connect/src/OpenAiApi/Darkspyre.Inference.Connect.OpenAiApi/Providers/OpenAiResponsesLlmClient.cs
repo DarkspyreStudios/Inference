@@ -102,9 +102,9 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
         })];
     }
 
-    /// <summary>Always true: the key is optional (B1). A missing or wrong key returns the service's real error.</summary>
-    public Task<bool> IsAuthenticatedAsync(LlmConnection connection, CancellationToken cancellationToken = default) =>
-        Task.FromResult(true);
+    /// <summary>Always signed in: the key is optional (B1). A missing or wrong key returns the service's real error.</summary>
+    public Task<ExternalAuthenticationState> CheckAuthenticationAsync(LlmConnection connection, CancellationToken cancellationToken = default) =>
+        Task.FromResult(ExternalAuthenticationState.SignedIn);
 
     /// <summary>Only a verified reasoning profile on OpenAI's endpoint reasons by default. Elsewhere a request with no
     /// level gets no reasoning object, so a cleared level after a reasoning refusal sends none (5.10).</summary>

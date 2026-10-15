@@ -468,7 +468,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         return false;
     }
 
-    public async Task<bool> IsAuthenticatedAsync(
+    public async Task<ExternalAuthenticationState> CheckAuthenticationAsync(
         LlmConnection connection,
         CancellationToken cancellationToken = default)
     {
@@ -484,7 +484,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 cancellationToken);
             if (result.ExitCode != 0 || result.StandardInputError is not null)
             {
-                return false;
+                return ExternalAuthenticationState.SignedOut;
             }
 
             using JsonDocument document = JsonDocument.Parse(result.StandardOutput);
@@ -492,15 +492,17 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             return root.TryGetProperty("loggedIn", out JsonElement loggedIn)
                 && loggedIn.ValueKind == JsonValueKind.True
                 && root.TryGetProperty("apiProvider", out JsonElement provider)
-                && string.Equals(provider.GetString(), "firstParty", StringComparison.OrdinalIgnoreCase);
+                && string.Equals(provider.GetString(), "firstParty", StringComparison.OrdinalIgnoreCase)
+                ? ExternalAuthenticationState.SignedIn
+                : ExternalAuthenticationState.SignedOut;
         }
         catch (ClaudeCliUnavailableException)
         {
-            return false;
+            return ExternalAuthenticationState.NotInstalled;
         }
         catch (JsonException)
         {
-            return false;
+            return ExternalAuthenticationState.SignedOut;
         }
     }
 
