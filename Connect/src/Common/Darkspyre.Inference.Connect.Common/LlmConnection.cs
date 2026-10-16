@@ -37,6 +37,9 @@ public sealed record LlmConnection
     /// </summary>
     public required string Endpoint { get; init; }
 
+    /// <summary>The explicit native llama.cpp tokenization URL for the Responses transport. Null leaves plain-text tokenization unavailable.</summary>
+    public Uri? LlamaCppTokenizationEndpoint { get; init; }
+
     /// <summary>Serialized <see cref="LlmCredential"/>.</summary>
     public string? Credential { get; init; }
 

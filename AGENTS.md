@@ -143,7 +143,7 @@ Phase 1 of the conversation contract builds only the native Codex client and the
 - **Excluded provider files.** The LLM provider files excluded with `Compile Remove` in `Connect/src/Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj`, and the xAI transport files excluded in the Image and TTS projects. Their source is unchanged.
 - **Projects out of the build.** The Bedrock, Vertex and Azure projects, and the STT, Realtime, Video and Resources projects. They are out of the solution, the package and the source references, and their source is unchanged.
 - **Tensor projects that do not compile.** Any Tensor project that does not compile against the phase-1 library is out of this phase's build.
-- **Facades with no built implementer.** The tokenizer facade (`TokenizeAsync`, `ILlmTextTokenizer`, `LlmTokenization`) and the context-cache facade stay compiled. Each refuses with its documented message until a provider that implements it returns.
+- **Facade with no built implementer.** The context-cache facade stays compiled. It refuses with its documented message until a provider that implements it returns.
 - **Background-work settings.** `LlmAgentHostRuntimePolicy.AllowRuntimeBackgroundWork` and `ResourceOutputRetentionBytes` stay public. The Host shows and stores them, and no phase-1 runtime reads them.
 
 When a provider returns, its files rejoin the build and the matching line here is deleted.

@@ -202,6 +202,168 @@ public sealed class SupportStateTests
     private static HttpResponseMessage ModelList(string body) => new(HttpStatusCode.OK)
     { Content = new StringContent(body, Encoding.UTF8, "application/json") };
 
+    [Theory]
+    [InlineData("café<|special|>")]
+    [InlineData("")]
+    public async Task NativeTokenizerUsesTheExistingFacadeAndPreservesExactPieces(string text)
+    {
+        using var handler = new TokenizerHandler("""{"tokens":[{"id":8,"piece":"café"},{"id":9,"piece":[195]},{"id":9,"piece":[169]}]}""");
+        using var http = new HttpClient(handler);
+        var client = new OpenAiResponsesLlmClient(http);
+        LlmConnection connection = TokenizerConnection();
+        await using var providers = new LlmProviderService(new Source(connection), [client]);
+
+        LlmTokenization result = await providers.TokenizeAsync("native", "qwen3.8-flash-next", text);
+
+        Assert.Equal(connection.LlamaCppTokenizationEndpoint, handler.Endpoint);
+        using JsonDocument payload = JsonDocument.Parse(handler.Payload!);
+        Assert.Equal(5, payload.RootElement.EnumerateObject().Count());
+        Assert.Equal("qwen3.8-flash-next", payload.RootElement.GetProperty("model").GetString());
+        Assert.Equal(text, payload.RootElement.GetProperty("content").GetString());
+        Assert.False(payload.RootElement.GetProperty("add_special").GetBoolean());
+        Assert.False(payload.RootElement.GetProperty("parse_special").GetBoolean());
+        Assert.True(payload.RootElement.GetProperty("with_pieces").GetBoolean());
+        Assert.Equal(new uint[] { 8, 9, 9 }, result.Tokens.Select(token => token.Id));
+        Assert.Equal("café", result.Tokens[0].Text);
+        Assert.Equal(Encoding.UTF8.GetBytes("café"), result.Tokens[0].Bytes.ToArray());
+        Assert.Null(result.Tokens[1].Text);
+        Assert.Null(result.Tokens[2].Text);
+        Assert.Equal(new byte[] { 195 }, result.Tokens[1].Bytes.ToArray());
+        Assert.Equal(new byte[] { 169 }, result.Tokens[2].Bytes.ToArray());
+        string json = JsonSerializer.Serialize(result, ConnectLlmJson.Tokenization);
+        var restored = JsonSerializer.Deserialize(json, ConnectLlmJson.Tokenization)!;
+        Assert.Null(restored.Tokens[1].Text);
+        Assert.Equal(new byte[] { 195 }, restored.Tokens[1].Bytes.ToArray());
+        string configured = JsonSerializer.Serialize(connection, ConnectLlmJson.Connection);
+        Assert.Equal(connection.LlamaCppTokenizationEndpoint,
+            JsonSerializer.Deserialize(configured, ConnectLlmJson.Connection)!.LlamaCppTokenizationEndpoint);
+    }
+
+    [Theory]
+    [InlineData("{broken")]
+    [InlineData("{}")]
+    [InlineData("""{"tokens":[{"id":-1,"piece":"x"}]}""")]
+    [InlineData("""{"tokens":[{"id":1}]}""")]
+    [InlineData("""{"tokens":[{"id":1,"piece":[256]}]}""")]
+    public async Task NativeTokenizerRejectsMalformedPiecesWithoutRawDiagnostics(string body)
+    {
+        using var handler = new TokenizerHandler(body);
+        using var http = new HttpClient(handler);
+        var client = new OpenAiResponsesLlmClient(http);
+
+        var error = await Assert.ThrowsAsync<LlmProviderException>(() => client.TokenizeAsync(TokenizerConnection(), "model", "text"));
+
+        Assert.Equal("llama.cpp tokenization returned an invalid token sequence.", error.Message);
+        Assert.Empty(error.SanitizedResponseBody!);
+        Assert.Null(error.InnerException);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task NativeTokenizerRedactsProtectedAndEffectiveHeaders(bool malformedSuccess)
+    {
+        const string apiKey = "fixture-native-key";
+        const string selected = "fixture-selected-secret";
+        const string borrowed = "fixture-default-secret";
+        string reflected = $"{apiKey}-{selected}-{borrowed}";
+        using var handler = new TokenizerHandler(malformedSuccess ? "{}" :
+            JsonSerializer.Serialize(new { error = new { code = reflected, message = reflected } }),
+            malformedSuccess ? HttpStatusCode.OK : HttpStatusCode.BadRequest) { RequestId = reflected };
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Authorization = new("Bearer", borrowed);
+        var connection = TokenizerConnection() with
+        {
+            Credential = new LlmCredential { SecretHeaders = new Dictionary<string, string> { ["X-Secret"] = apiKey } }.Serialize(),
+            AdditionalHeaders = new Dictionary<string, string> { ["X-Selected"] = selected }
+        };
+        var client = new OpenAiResponsesLlmClient(http);
+
+        var error = await Assert.ThrowsAsync<LlmProviderException>(() => client.TokenizeAsync(connection, "model", "text"));
+
+        Assert.Equal(borrowed, handler.Authorization);
+        Assert.Equal(apiKey, handler.Headers["X-Secret"]);
+        Assert.Equal(selected, handler.Headers["X-Selected"]);
+        Assert.DoesNotContain(apiKey, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(selected, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(borrowed, error.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(borrowed, error.RequestId!, StringComparison.Ordinal);
+        Assert.Equal(malformedSuccess ? HttpStatusCode.OK : HttpStatusCode.BadRequest, error.StatusCode);
+        Assert.Equal(1, handler.Sends);
+    }
+
+    [Fact]
+    public async Task NativeTokenizerSanitizesSendFailuresWithoutInventingResponseFacts()
+    {
+        const string secret = "borrowed-native-secret";
+        using var handler = new TokenizerHandler("") { Failure = new HttpRequestException("Transport failed: " + secret) };
+        using var http = new HttpClient(handler);
+        http.DefaultRequestHeaders.Authorization = new("Bearer", secret);
+        var client = new OpenAiResponsesLlmClient(http);
+
+        var error = await Assert.ThrowsAsync<LlmProviderException>(() => client.TokenizeAsync(TokenizerConnection(), "model", "text"));
+
+        Assert.Equal("Transport failed: [REDACTED]", error.Message);
+        Assert.Null(error.StatusCode);
+        Assert.Null(error.RequestId);
+        Assert.Null(error.RetryAfter);
+        Assert.Null(error.InnerException);
+        Assert.Equal(1, handler.Sends);
+    }
+
+    [Fact]
+    public async Task NativeTokenizerRequiresExplicitEndpointAndUsesCallerCancellation()
+    {
+        using var handler = new TokenizerHandler("{\"tokens\":[]}") { WaitForCancellation = true };
+        using var http = new HttpClient(handler);
+        var client = new OpenAiResponsesLlmClient(http);
+        await Assert.ThrowsAsync<NotSupportedException>(() => client.TokenizeAsync(
+            TokenizerConnection() with { LlamaCppTokenizationEndpoint = null }, "model", "text"));
+        Assert.Equal(0, handler.Sends);
+        using var cancellation = new CancellationTokenSource();
+        Task<LlmTokenization> operation = client.TokenizeAsync(TokenizerConnection(), "model", "text", cancellation.Token);
+        await handler.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        cancellation.Cancel();
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => operation.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(1, handler.Sends);
+    }
+
+    private static LlmConnection TokenizerConnection() => new()
+    {
+        Version = "1", Transport = LlmTransport.OpenAiResponses, Endpoint = "http://native.test/v1",
+        LlamaCppTokenizationEndpoint = new Uri("http://native.test/tokenize")
+    };
+
+    private sealed class TokenizerHandler(string body, HttpStatusCode status = HttpStatusCode.OK) : HttpMessageHandler
+    {
+        public int Sends { get; private set; }
+        public Uri? Endpoint { get; private set; }
+        public string? Payload { get; private set; }
+        public string? Authorization { get; private set; }
+        public Dictionary<string, string> Headers { get; private set; } = [];
+        public string RequestId { get; init; } = "native-request";
+        public bool WaitForCancellation { get; init; }
+        public HttpRequestException? Failure { get; init; }
+        public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Sends++;
+            Endpoint = request.RequestUri;
+            Payload = await request.Content!.ReadAsStringAsync(cancellationToken);
+            Authorization = request.Headers.Authorization?.Parameter;
+            Headers = request.Headers.ToDictionary(header => header.Key, header => string.Join(',', header.Value));
+            Entered.TrySetResult();
+            if (WaitForCancellation) await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            if (Failure is { } failure) throw failure;
+            var response = new HttpResponseMessage(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+            response.Headers.Add("x-request-id", RequestId);
+            return response;
+        }
+    }
+
     private static LlmConnection Connection() => new()
     {
         Version = "1",
