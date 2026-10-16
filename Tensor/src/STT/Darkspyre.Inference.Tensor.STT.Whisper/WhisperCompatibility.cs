@@ -31,9 +31,9 @@ internal static class WhisperCompatibility
         if (definition.Capability != TensorCapability.SpeechTranscription
             || definition.RuntimeArchitecture != TensorSpeechModels.WhisperRuntimeArchitecture
             || definition.Artifacts.Count != 1 || definition.Artifacts[0].Role != "model"
-            || definition.Artifacts[0].Length < 48 || definition.SupportedBackends.Count != 1
-            || !definition.SupportedBackends.Contains(TensorBackendKind.Cpu))
-            throw new ArgumentException("Whisper requires one self-contained GGML model and the CPU backend.", nameof(definition));
+            || definition.Artifacts[0].Length < 48 || !definition.SupportedBackends.Contains(TensorBackendKind.Cpu)
+            || definition.SupportedBackends.Any(backend => backend is not (TensorBackendKind.Cpu or TensorBackendKind.GgmlCuda)))
+            throw new ArgumentException("Whisper requires one self-contained GGML model, CPU support and optional GGML CUDA support.", nameof(definition));
     }
 
     internal static WhisperModelMetadata Inspect(Stream stream)
