@@ -60,10 +60,11 @@ parameters of `IImageTransport`, `ImageProviderService` and `ITtsProvider`; `Ima
 `ImageSetupConfiguration.Xai`, `TtsConnection.Xai`, `TtsConnection.XaiDefaults`, `TtsRequest.Xai`,
 `TtsStreamOptions.Xai` and `XaiTtsOptions`. `LlmProviderCapabilities.Files` always reports no Files operation.
 
-The tokenizer facade (`LlmProviderService.TokenizeAsync`, `ILlmTextTokenizer`) and the context-cache facade
-(`BindContextCacheAsync`, `ILlmContextCacheClient`) stay compiled with no implementing provider. Every call
-reaches the existing refusal: `This route does not implement plain-text tokenization.` and
-`No explicit context cache adapter is implemented.`
+The tokenizer facade (`LlmProviderService.TokenizeAsync`, `ILlmTextTokenizer`) supports the built Responses
+adapter when `LlmConnection.LlamaCppTokenizationEndpoint` explicitly selects a native llama.cpp tokenizer.
+An unset endpoint and other built adapters retain `This route does not implement plain-text tokenization.`
+The context-cache facade (`BindContextCacheAsync`, `ILlmContextCacheClient`) stays compiled with no implementing
+provider. Calls reach `No explicit context cache adapter is implemented.`
 
 The console tester has no `grok-probe` command and no `prompt --request` option, and `claude-probe` runs
 only its `cancel` case.
@@ -3882,11 +3883,18 @@ The region and tier premiums follow [xAI pricing](https://docs.x.ai/developers/p
 
 `LlmProviderService` implements Connect's `ILlmTextTokenizer`. `TokenizeAsync` accepts a connection
 ID, model ID and one plain string. Empty text is valid. Unsupported adapters fail before credential
-refresh. The Grok adapter sends only `model` and `text` to the selected region's
+refresh. The built Responses adapter requires an explicit absolute HTTP or HTTPS
+`LlmConnection.LlamaCppTokenizationEndpoint`, such as `http://127.0.0.1:8080/tokenize`. It sends the exact
+`model` and plain string `content`, with `add_special=false`, `parse_special=false` and `with_pieces=true`.
+It reads native `tokens` entries with `id` and `piece`. String pieces retain exact `Text` and UTF-8 `Bytes`.
+Byte-array pieces retain exact `Bytes` and set `Text=null`; consumers count tokens without decoding fragments.
+An unset endpoint refuses tokenization without guessing from the hostname or forwarding provider options.
+The kept, excluded Grok adapter sends only `model` and `text` to the selected region's
 [`/v1/tokenize-text`](https://docs.x.ai/developers/rest-api-reference/inference/other) endpoint.
-`LlmTokenization.Tokens` retains provider order, duplicate `uint` IDs, exact display text and copied
-bytes. A token's bytes need not decode independently as UTF-8 and are never reconstructed from its
-display text. Missing fields and invalid integer/byte representations fail with fixed protocol errors
+`LlmTokenization.Tokens` retains provider order and duplicate `uint` IDs. `Text` is nullable for byte-only
+pieces. A token's copied bytes need not decode independently as UTF-8. Grok's explicit bytes stay authoritative;
+the native llama.cpp string representation supplies UTF-8 bytes only when the piece is a string.
+Missing fields and invalid integer/byte representations fail with fixed protocol errors
 without retaining raw bodies. `ConnectLlmJson.Tokenization` and `Token` own result serialization.
 HTTP rejections and malformed-token errors redact reflected credential, selected-header and effective
 outgoing-header values, including borrowed HttpClient defaults, from public diagnostics and request IDs.

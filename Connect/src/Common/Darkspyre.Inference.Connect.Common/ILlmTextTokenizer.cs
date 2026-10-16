@@ -1,6 +1,6 @@
 namespace Darkspyre.Inference.Connect.LLM;
 
-/// <summary>Tokenizes one plain string through the selected provider. This is not a resolved-request counter. No phase-1 provider implements this; it is a forward seam under the L2 exception in Inference/AGENTS.md, tracked by DSA-121.</summary>
+/// <summary>Tokenizes one plain string through the selected provider. This is not a resolved-request counter.</summary>
 public interface ILlmTextTokenizer
 {
     /// <summary>Tokenizes <paramref name="text"/> with the model's tokenizer through the connection.</summary>
@@ -12,8 +12,8 @@ public interface ILlmTextTokenizer
 /// <param name="Tokens">The tokens, in order.</param>
 public sealed record LlmTokenization(IReadOnlyList<LlmToken> Tokens);
 
-/// <summary>A provider token with its exact display text and copied bytes. Bytes need not decode independently as UTF-8.</summary>
+/// <summary>A provider token with its exact text when available and copied bytes. Bytes need not decode independently as UTF-8.</summary>
 /// <param name="Id">The provider's token id.</param>
-/// <param name="Text">The token's exact display text.</param>
+/// <param name="Text">The token's exact text, or null when the provider returns a byte-only piece.</param>
 /// <param name="Bytes">A copy of the token's bytes.</param>
-public sealed record LlmToken(uint Id, string Text, ReadOnlyMemory<byte> Bytes);
+public sealed record LlmToken(uint Id, string? Text, ReadOnlyMemory<byte> Bytes);
