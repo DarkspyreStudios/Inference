@@ -1,13 +1,16 @@
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using System.Collections.Frozen;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>OpenAI API transport, and any service at another endpoint that serves the same API.</summary>
 internal sealed class OpenAiResponsesLlmClient(HttpClient http)
-    : ResponsesLlmClientBase(http), ILlmCatalogCapabilities, IExternalLlmAuthenticationProbe
+    : ResponsesLlmClientBase(http), ILlmCatalogCapabilities, IExternalLlmAuthenticationProbe, ILlmTextTokenizerClient
 {
     internal const string DefaultEndpoint = "https://api.openai.com/v1";
 
@@ -100,6 +103,102 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
             return LlmCapabilityOverrideLookup.ContextLength(connection, model.Id) is { } length
                 ? model with { MaxContextTokens = length } : model;
         })];
+    }
+
+    /// <summary>Tokenizes exact plain text through the explicitly configured native llama.cpp endpoint.</summary>
+    public async Task<LlmTokenization> TokenizeAsync(LlmConnection connection, string modelId, string text,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        ArgumentNullException.ThrowIfNull(text);
+        EnsureTransport(connection);
+        Uri endpoint = connection.LlamaCppTokenizationEndpoint
+            ?? throw new NotSupportedException("This route does not implement plain-text tokenization.");
+        if (!endpoint.IsAbsoluteUri || (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))
+            throw new InvalidOperationException("The llama.cpp tokenization endpoint must be an absolute HTTP or HTTPS URL.");
+
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken);
+        cancellationToken = consumption.Token;
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
+        ProviderHttp.ApplyHeaders(request, connection);
+        // Text and model identity are opaque data. Changing either changes the provider's tokens.
+        var payload = new JsonObject
+        {
+            ["model"] = modelId, ["content"] = text,
+            ["add_special"] = false, ["parse_special"] = false, ["with_pieces"] = true
+        };
+        request.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
+        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
+        string[] Secrets() => request.Headers.SelectMany(header => header.Value)
+            .Concat(request.Headers.Authorization?.Parameter is { } bearer ? [bearer] : []).ToArray();
+        HttpResponseMessage sent;
+        try
+        {
+            sent = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is HttpRequestException or IOException)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            throw new LlmProviderException(SecretRedactor.Sanitize(error.Message, credential, Secrets()), Transport,
+                (error as HttpRequestException)?.StatusCode);
+        }
+        using HttpResponseMessage response = sent;
+        cancellationToken.ThrowIfCancellationRequested();
+        string[] secrets = Secrets();
+        await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, credential, "llama.cpp tokenization",
+            secrets, cancellationToken).ConfigureAwait(false);
+        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        LlmTokenization result;
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind != JsonValueKind.Object
+                || !document.RootElement.TryGetProperty("tokens", out JsonElement entries)
+                || entries.ValueKind != JsonValueKind.Array)
+                throw InvalidTokens();
+            var tokens = new List<LlmToken>(entries.GetArrayLength());
+            foreach (JsonElement entry in entries.EnumerateArray())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (entry.ValueKind != JsonValueKind.Object
+                    || !entry.TryGetProperty("id", out JsonElement id) || !id.TryGetUInt32(out uint number)
+                    || !entry.TryGetProperty("piece", out JsonElement piece))
+                    throw InvalidTokens();
+                string? display;
+                byte[] bytes;
+                if (piece.ValueKind == JsonValueKind.String)
+                {
+                    display = piece.GetString()!;
+                    bytes = Encoding.UTF8.GetBytes(display);
+                }
+                else if (piece.ValueKind == JsonValueKind.Array)
+                {
+                    display = null;
+                    bytes = new byte[piece.GetArrayLength()];
+                    int index = 0;
+                    foreach (JsonElement item in piece.EnumerateArray())
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        if (!item.TryGetByte(out byte value)) throw InvalidTokens();
+                        bytes[index++] = value;
+                    }
+                }
+                else throw InvalidTokens();
+                tokens.Add(new(number, display, bytes));
+            }
+            result = new LlmTokenization(tokens.ToArray());
+        }
+        catch (Exception error) when (error is JsonException or InvalidOperationException or FormatException)
+        {
+            throw InvalidTokens();
+        }
+        return consumption.Publish(result);
+
+        LlmProviderException InvalidTokens() => ProtocolException(
+            "llama.cpp tokenization returned an invalid token sequence.", response, string.Empty, credential,
+            extraSecrets: secrets);
     }
 
     /// <summary>Always signed in: the key is optional (B1). A missing or wrong key returns the service's real error.</summary>
