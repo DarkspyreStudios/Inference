@@ -43,6 +43,10 @@ Library boundaries:
 - `Darkspyre.Inference.Tensor.STT.Whisper` — resident CPU/CUDA Whisper inference through the public
   Whisper.net runtime. Whisper.net, Whisper.net.Runtime, Whisper.net.Runtime.Cuda12.Linux and NAudio.Core remain declared NuGet
   dependencies, not third-party DLLs embedded by the Darkspyre package.
+  Loading performs one language-detection pass on one second of silence while observing native
+  initialization. Whisper.net creates execution state lazily; loading weights alone cannot identify
+  the selected execution backend. Loaded status and result provenance use that initialized backend.
+  The successful factory retains its weights across transcription requests.
 - `Darkspyre.Inference.Tensor.Embedding` — resident text embeddings through TensorSharp's GGUF
   embedding models. Models arrive by import; the resolver accepts a GGUF whose header is a BERT
   embedding model (mean, CLS or last-token pooling; managed CPU and GGML CPU, because TensorSharp's

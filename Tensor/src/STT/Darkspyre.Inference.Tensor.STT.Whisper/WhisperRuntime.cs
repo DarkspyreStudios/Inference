@@ -111,7 +111,12 @@ internal static class WhisperRuntime
                 try
                 {
                     factory = WhisperFactory.FromPath(path, new WhisperFactoryOptions { UseGpu = gpu, GpuDevice = gpuDevice, DelayInitialization = false });
-                    _ = factory.CreateBuilder();
+                    using var processor = factory.CreateBuilder().Build();
+                    // Whisper.net loads weights without execution state. One second of silence initializes
+                    // that state under this observer before Loaded publishes its actual backend.
+                    if (processor.DetectLanguage(new float[WhisperPcm.TargetRate]) is null)
+                        throw new WhisperModelLoadException("Whisper could not initialize an executable model.");
+                    token.ThrowIfCancellationRequested();
                     return new WhisperFactoryAllocation(factory, gpu ? observation.Backend : TensorBackendKind.Cpu);
                 }
                 catch { factory?.Dispose(); throw; }
