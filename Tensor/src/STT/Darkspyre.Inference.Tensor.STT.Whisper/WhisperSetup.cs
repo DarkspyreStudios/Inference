@@ -7,10 +7,10 @@ namespace Darkspyre.Inference.Tensor.STT.Whisper;
 /// <summary>The setup definition and settings manager factory for Whisper speech transcription.</summary>
 public static class WhisperSetup
 {
-    /// <summary>The Whisper implementation's identity, a resident CPU speech transcription engine, and its setup description.</summary>
+    /// <summary>The Whisper implementation's identity, a resident CPU/CUDA speech transcription engine, and its setup description.</summary>
     public static InferenceSetupDefinition Definition { get; } = new(
         new("darkspyre.tensor.whisper", "Darkspyre Tensor Whisper", InferenceImplementationKind.Tensor, InferenceTask.SpeechTranscription),
-        "Resident CPU speech transcription. Select and explicitly install a model; the host controls Load and Unload.")
+        "Resident speech transcription with GPU-first automatic selection and CPU fallback. Select and explicitly install a model; the host controls Load and Unload.")
     {
         Icon = SetupIcons.FromResource(typeof(SetupIcons).Assembly, SetupIcons.OpenAiResource),
         Group = SetupProviderGroup.ThisComputer
@@ -41,8 +41,8 @@ public sealed class WhisperModelResolver : TensorModelResolver
     {
         ArgumentNullException.ThrowIfNull(candidate); cancellationToken.ThrowIfCancellationRequested();
         static TensorModelResolution Failure(TensorCompatibilityState state, string code, string message) => new(new(state, [new(code, message)], []));
-        if (backend is not (TensorBackendKind.Auto or TensorBackendKind.Cpu))
-            return Failure(TensorCompatibilityState.Unsupported, "backend-unsupported", "This adapter supplies the CPU runtime only.");
+        if (backend is not (TensorBackendKind.Auto or TensorBackendKind.Cpu or TensorBackendKind.GgmlCuda))
+            return Failure(TensorCompatibilityState.Unsupported, "backend-unsupported", "This adapter supplies CPU and GGML CUDA runtimes.");
         TensorSourceArtifact[] selected = candidate.Artifacts.Where(item => item.Path == candidate.Selection.Variant).ToArray();
         if (selected.Length != 1)
             return Failure(TensorCompatibilityState.Unverified, "candidate-unavailable", "The selected source artifact is missing or ambiguous.");
