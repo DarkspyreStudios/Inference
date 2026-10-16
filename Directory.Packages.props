@@ -33,6 +33,7 @@
     <PackageVersion Include="Microsoft.ML.OnnxRuntime.EP.WebGpu" Version="0.4.0" />
     <PackageVersion Include="Whisper.net" Version="1.9.1" />
     <PackageVersion Include="Whisper.net.Runtime" Version="1.9.1" />
+    <PackageVersion Include="Whisper.net.Runtime.Cuda12.Linux" Version="1.9.1" />
     <PackageVersion Include="xunit" Version="2.9.3" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
     <PackageVersion Include="Avalonia" Version="12.1.4" />

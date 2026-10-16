@@ -39,8 +39,8 @@ Library boundaries:
   through ONNX Runtime: the Core ML execution provider on macOS, the CPU provider elsewhere. The BPE
   tokenizer, sequence framing and calibration run in C#. Neither PyTorch nor a Python runtime is
   used.
-- `Darkspyre.Inference.Tensor.STT.Whisper` — resident CPU Whisper inference through the public
-  Whisper.net runtime. Whisper.net, Whisper.net.Runtime and NAudio.Core remain declared NuGet
+- `Darkspyre.Inference.Tensor.STT.Whisper` — resident CPU/CUDA Whisper inference through the public
+  Whisper.net runtime. Whisper.net, Whisper.net.Runtime, Whisper.net.Runtime.Cuda12.Linux and NAudio.Core remain declared NuGet
   dependencies, not third-party DLLs embedded by the Darkspyre package.
 - `Darkspyre.Inference.Tensor.Embedding` — resident text embeddings through TensorSharp's GGUF
   embedding models. Models arrive by import; the resolver accepts a GGUF whose header is a Qwen3
@@ -918,8 +918,20 @@ releases a factory/storage lease while native processing still uses it.
 All twelve initial variants are declared: tiny/tiny.en, base/base.en, small/small.en,
 medium/medium.en, large-v1/v2/v3 and large-v3-turbo. Artifact lengths and SHA-256 values come from
 the [publisher's immutable revision](https://huggingface.co/ggerganov/whisper.cpp/tree/5359861c739e955e79d9a303bcbc70fb988958b1).
-Only CPU is supplied/advertised. Auto selects CPU; other backend values fail explicitly. The setup's
-backend check invokes the real native runtime without loading a model. Definition/model listing
+The packs advertise CPU and GGML CUDA execution. Auto prefers the published Whisper.net CUDA 12
+runtime and permits CPU fallback. Explicit Cpu disables GPU execution. The optional constructor
+`gpuDevice` argument selects the zero-based GPU in the process's visible GPU list. The native runtime
+is process-wide and remains loaded; a CPU library loaded earlier remains usable by Auto. Settings
+probes and model loading share one serialized initialization path. This path sets the runtime order
+to CUDA 12 followed by CPU before the first native call. The CUDA 12 Linux package supplies the
+published binaries; TensorSharp CUDA payloads do not supply Whisper's native runtime.
+
+Native initialization observations identify the selected CUDA backend or CPU fallback. Loaded
+status, model observations and transcription provenance report that observed backend. A callable
+runtime does not establish that a selected GPU can allocate a model. The setup's backend check
+reports this distinction without loading a model. Auto makes at most one additional CPU allocation
+attempt when GPU allocation cannot create a usable factory. A successful CPU factory stays resident
+across requests. The adapter does not retry allocation for each transcription request. Definition/model listing
 does not load native libraries, probe hardware, select a default pack or download anything.
 
 `WhisperSetup.CreateSettingsManager` uses the existing generic Tensor editor over the host's model list,
@@ -970,7 +982,7 @@ The registry's dependency-injection abstractions come from the .NET shared frame
 TensorSharp's managed package build does not embed GGML/MLX native libraries or certify native
 device availability. Explicit backend observations retain the documented available/unknown states;
 host native-runtime provisioning and full-weight/device validation are not inferred from package
-installation. Whisper's advertised CPU runtime and ONNX Runtime's native library, including its
+installation. Whisper's CPU/CUDA runtime assets and ONNX Runtime's native library, including its
 Core ML execution provider, are supplied by their public package dependencies.
 The CUDA dependency retains its committed PTX payload; disabling native builds does not remove that
 payload. Tensor's archive boundary excludes those foreign shader files. The strict

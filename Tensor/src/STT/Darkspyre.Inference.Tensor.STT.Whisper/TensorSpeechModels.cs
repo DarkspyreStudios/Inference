@@ -39,7 +39,7 @@ public static class TensorSpeechModels
             RuntimeArchitecture = WhisperRuntimeArchitecture,
             License = "MIT",
             ProjectUri = new($"https://huggingface.co/{Repository}"),
-            SupportedBackends = new[] { TensorBackendKind.Cpu }.ToFrozenSet(),
+            SupportedBackends = new[] { TensorBackendKind.Cpu, TensorBackendKind.GgmlCuda }.ToFrozenSet(),
             Artifacts = Array.AsReadOnly<TensorModelArtifactDefinition>([new()
             {
                 Role = "model", RelativePath = filename, Length = bytes, Sha256 = hash,

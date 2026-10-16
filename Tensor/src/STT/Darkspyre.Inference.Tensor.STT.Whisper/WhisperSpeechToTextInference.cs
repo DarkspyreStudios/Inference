@@ -12,18 +12,24 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
     private readonly ITensorModelPackManager _packs;
     private readonly IWhisperLoader _loader;
     private readonly TensorModelLifetime _lifetime;
+    private readonly int _gpuDevice;
     private IWhisperModel? _model;
     private TensorModelPackLease? _lease;
 
-    /// <summary>Creates an unloaded Whisper instance that reads packs from <paramref name="packs"/>. Load accepts only the CPU or automatic backend.</summary>
-    public WhisperSpeechToTextInference(ITensorModelPackManager packs, TensorBackendKind backend = TensorBackendKind.Auto)
-        : this(packs, new WhisperLoader(), backend) { }
+    /// <summary>Creates an unloaded Whisper instance. Auto prefers CUDA 12 and permits CPU fallback; Cpu disables GPU execution.</summary>
+    /// <param name="packs">The host-owned installed model packs.</param>
+    /// <param name="backend">Auto prefers CUDA 12; Cpu forces CPU execution; GgmlCuda requests CUDA execution.</param>
+    /// <param name="gpuDevice">The zero-based GPU index passed to Whisper. The index uses the process's visible GPU list.</param>
+    /// <gotcha>The native runtime is process-wide. An already-loaded CPU library remains in use until process exit. Observations and metrics report the backend selected by the native model.</gotcha>
+    public WhisperSpeechToTextInference(ITensorModelPackManager packs, TensorBackendKind backend = TensorBackendKind.Auto, int gpuDevice = 0)
+        : this(packs, new WhisperLoader(), backend, gpuDevice) { }
 
-    internal WhisperSpeechToTextInference(ITensorModelPackManager packs, IWhisperLoader loader, TensorBackendKind backend = TensorBackendKind.Auto)
+    internal WhisperSpeechToTextInference(ITensorModelPackManager packs, IWhisperLoader loader, TensorBackendKind backend = TensorBackendKind.Auto, int gpuDevice = 0)
     {
         ArgumentNullException.ThrowIfNull(packs);
         ArgumentNullException.ThrowIfNull(loader);
-        _packs = packs; _loader = loader; RequestedBackend = backend;
+        ArgumentOutOfRangeException.ThrowIfNegative(gpuDevice);
+        _packs = packs; _loader = loader; RequestedBackend = backend; _gpuDevice = gpuDevice;
         _lifetime = new(this);
     }
 
@@ -92,16 +98,20 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
         if (definition.Key != model) throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The pack manager returned another model.");
         try { WhisperCompatibility.Validate(definition); }
         catch (ArgumentException) { throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "This is not a compatible Whisper pack."); }
-        if (RequestedBackend is not (TensorBackendKind.Auto or TensorBackendKind.Cpu))
-            throw new InferenceException(InferenceFailureCode.BackendUnavailable, "This Whisper adapter supplies CPU inference only.");
+        if (RequestedBackend is not (TensorBackendKind.Auto or TensorBackendKind.Cpu or TensorBackendKind.GgmlCuda))
+            throw new InferenceException(InferenceFailureCode.BackendUnavailable, "This Whisper adapter supports CPU and GGML CUDA execution.");
+        TensorBackendKind backend = RequestedBackend == TensorBackendKind.Auto && !definition.SupportedBackends.Contains(TensorBackendKind.GgmlCuda)
+            ? TensorBackendKind.Cpu : RequestedBackend;
+        if (backend != TensorBackendKind.Auto && !definition.SupportedBackends.Contains(backend))
+            throw new InferenceException(InferenceFailureCode.BackendUnavailable, "This Whisper pack does not support the selected backend.");
         TensorModelPackStatus installed = await _packs.GetStatusAsync(model, cancellationToken).ConfigureAwait(false);
         if (installed.State != TensorModelPackState.Installed)
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Whisper pack must be installed and verified before Load.");
-        await _lifetime.AcceptAsync(TensorEngineState.Loading, model, TensorBackendKind.Cpu,
-            token => LoadCoreAsync(definition, model, token), cancellationToken).ConfigureAwait(false);
+        await _lifetime.AcceptAsync(TensorEngineState.Loading, model, backend == TensorBackendKind.Auto ? null : backend,
+            token => LoadCoreAsync(definition, model, backend, token), cancellationToken).ConfigureAwait(false);
     }
 
-    private async Task<TensorEngineStatus> LoadCoreAsync(TensorModelPackDefinition definition, TensorModelKey model, CancellationToken cancellationToken)
+    private async Task<TensorEngineStatus> LoadCoreAsync(TensorModelPackDefinition definition, TensorModelKey model, TensorBackendKind backend, CancellationToken cancellationToken)
     {
         using IDisposable loading = await _lifetime.EnterLoadAsync(cancellationToken).ConfigureAwait(false);
         TensorModelPackLease lease;
@@ -111,11 +121,11 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
         try
         {
             if (lease.Key != model) throw new InvalidDataException("The acquired Whisper pack identifies another model.");
-            loaded = await _loader.LoadAsync(definition, lease, cancellationToken).ConfigureAwait(false);
+            loaded = await _loader.LoadAsync(definition, lease, backend, _gpuDevice, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             _model = loaded; _lease = lease;
-            _lifetime.MarkLoaded(model, TensorBackendKind.Cpu);
-            return new TensorEngineStatus(model, TensorBackendKind.Cpu, TensorEngineState.Loaded, DateTimeOffset.UtcNow);
+            _lifetime.MarkLoaded(model, loaded.Backend);
+            return new TensorEngineStatus(model, loaded.Backend, TensorEngineState.Loaded, DateTimeOffset.UtcNow);
         }
         catch (Exception exception)
         {
@@ -185,7 +195,7 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
                 ModelRevision = key.Revision,
                 Runtime = "Whisper.net",
                 RuntimeVersion = typeof(WhisperFactory).Assembly.GetName().Version?.ToString(),
-                Backend = TensorBackendKind.Cpu.ToString(),
+                Backend = model.Backend.ToString(),
                 Elapsed = Stopwatch.GetElapsedTime(started)
             });
     }
