@@ -1,6 +1,6 @@
 # Darkspyre.Inference
 
-This repository builds the `Darkspyre.Inference.*` library family: four NuGet packages released together on the private DarkspyreStudios feed. Every Darkspyre rule lives in `~/.agents/`: AGENTS.md, CommonLaws.md and CommonDesign.md. Temporary restrictions are in `~/.agent-ds/current-restrictions.md`. This file holds only what is specific to Inference.
+This repository builds the `Darkspyre.Inference.*` library family: four NuGet packages released together on the private DarkspyreStudios feed. The Darkspyre Harness rules, including the current restrictions, are in agent-ds `AGENTS.md`. This file holds only what is specific to Inference.
 
 | Item | Value |
 | --- | --- |
@@ -8,11 +8,10 @@ This repository builds the `Darkspyre.Inference.*` library family: four NuGet pa
 | Assembly and namespace prefix | `Darkspyre.Inference` |
 | Version | One version for all four packages, declared in `/Directory.Build.props` |
 | Branches | `master` is primary; finished work merges into `dev` first |
-| Jira project | `DSA` |
 
 ## Design record (L8)
 
-Designs, plans and feature work live in DSA issues in Jira. These pages describe how the code works now, and a change to current behaviour updates the page that owns it:
+These pages describe how the code works now, and a change to current behaviour updates the page that owns it:
 
 | Area | Page |
 | --- | --- |
@@ -21,7 +20,7 @@ Designs, plans and feature work live in DSA issues in Jira. These pages describe
 | Settings editor | `UI/README.md` |
 | Release scripts and gates | `eng/README.md` |
 
-The `*.tech-design.md` files in `docs/` and `Connect/docs/` are design history. When one conflicts with a DSA ticket or a README above, stop and ask Brandon which shape is current.
+The `*.tech-design.md` files in `docs/` and `Connect/docs/` are design history. When one conflicts with a README above, the README is current.
 
 ## Public contracts (L1)
 
@@ -71,7 +70,7 @@ This boundary lets another operating system supply an implementation without cha
 
 ### Exception: Connect's in-library OS switching
 
-Connect keeps its platform handling for macOS, Linux and Windows inside its own libraries, and picks the right OS commands at runtime. This includes the CLI process launch and termination (`Connect/src/LLM/Darkspyre.Inference.Connect.LLM/Providers/CliProcessLauncher.cs`, `CliProcessTermination.cs`), `AppleProcessRunner.cs`, the CLI clients and `LlmAgentRuntimeProfile.cs`. It is not split behind a separate OS capability contract. The reason: this code is battle-tested and works on all three platforms today. Brandon approved this exception on 2026-10-12 (DSA-942).
+Connect keeps its platform handling for macOS, Linux and Windows inside its own libraries, and picks the right OS commands at runtime. This includes the CLI process launch and termination (`Connect/src/LLM/Darkspyre.Inference.Connect.LLM/Providers/CliProcessLauncher.cs`, `CliProcessTermination.cs`), `AppleProcessRunner.cs`, the CLI clients and `LlmAgentRuntimeProfile.cs`. It is not split behind a separate OS capability contract. The reason: this code is battle-tested and works on all three platforms today. Brandon approved this exception on 2026-10-12.
 
 ## Packages
 
@@ -127,11 +126,11 @@ Run Connect commands from `Connect/` so its `global.json` selects the SDK.
 | Focused test | `dotnet test <owning-test-project.csproj> --no-restore --filter <changed-behaviour>` |
 | Format | `dotnet format Darkspyre.Inference.Connect.slnx --verify-no-changes --no-restore` |
 | Dependency audit | `dotnet list Darkspyre.Inference.Connect.slnx package --vulnerable --include-transitive` |
-| Pack | `dotnet pack Darkspyre.Inference.Connect.slnx --no-build --no-restore`, only when Brandon says to publish |
+| Pack | `dotnet pack Darkspyre.Inference.Connect.slnx --no-build --no-restore`, only when the user says to publish |
 
 ## Testing
 
-These add to the Testing section of `~/.agents/AGENTS.md`:
+Testing rules for this repository:
 
 - Paid or metered model calls are never development or commit gates.
 - A conditional live experiment reports that it was skipped when its service or credential is absent. It never returns silently and appears to pass.
@@ -147,9 +146,9 @@ Every package carries a readable README and the repository license. `eng/VerifyP
 
 ## Law exceptions
 
-### L2 — Code kept unbuilt or unused during the DSA-919 phase
+### L2 — Code kept unbuilt or unused during phase 1 of the conversation contract
 
-Phase 1 of the conversation contract (DSA-919) builds only the native Codex client and the Claude CLI. These stay in the repository on purpose and are not dead code under L2. DSA-121 tracks bringing each one back:
+Phase 1 of the conversation contract builds only the native Codex client and the Claude CLI. These stay in the repository on purpose and are not dead code under L2:
 
 - **Excluded provider files.** The LLM provider files excluded with `Compile Remove` in `Connect/src/LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj`, and the xAI transport files excluded in the Image and TTS projects. Their source is unchanged.
 - **Projects out of the build.** The Bedrock, Vertex and Azure projects, and the STT, Realtime, Video and Resources projects. They are out of the solution, the package and the source references, and their source is unchanged.
@@ -165,4 +164,4 @@ When a provider returns, its files rejoin the build and the matching line here i
 
 An OpenAI API connection's `Context lengths` setting in the provider editor uses the existing repeatable group (`SetupRepeatableGroupField`, rendered by `SetupFieldInput.RenderGroup` in `UI/src/Settings/Darkspyre.Inference.UI.Settings/SetupFieldInput.cs`). Each row holds a model and its context length, edited inline, with `Add row` and `Remove row`. D6 asks for a list with an **Add** button that opens a layered editor.
 
-The reason: the repeatable group is the provider editor's one collection control (D3), and it shows no row until `Add row` is pressed, so no empty entry form appears. A layered row editor inside the provider editor's sheet would be a second collection control for the same job. Brandon approved this on 2026-10-11 (DSA-942).
+The reason: the repeatable group is the provider editor's one collection control (D3), and it shows no row until `Add row` is pressed, so no empty entry form appears. A layered row editor inside the provider editor's sheet would be a second collection control for the same job. Brandon approved this on 2026-10-11.
