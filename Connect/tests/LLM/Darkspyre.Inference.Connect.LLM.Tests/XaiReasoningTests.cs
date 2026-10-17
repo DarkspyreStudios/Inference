@@ -4,66 +4,56 @@ using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
-using Darkspyre.Inference.Connect.Resources;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
+/// <summary>Grok maps a requested reasoning level to the nearest level the model offers, from catalog facts first and
+/// the model-family profile second (DSA-1070 B8).</summary>
 public sealed class XaiReasoningTests
 {
     [Theory]
-    [InlineData(false, "grok-4.7", LlmReasoningLevel.Maximum, "xhigh")]
-    [InlineData(false, "grok-4.7", LlmReasoningLevel.None, "low")]
-    [InlineData(false, "grok-4.5", LlmReasoningLevel.ExtraHigh, "high")]
-    [InlineData(true, "grok-4.7", LlmReasoningLevel.Maximum, "xhigh")]
-    [InlineData(true, "grok-4.7", LlmReasoningLevel.Minimal, "low")]
-    [InlineData(true, "grok-4.5", LlmReasoningLevel.Maximum, "high")]
-    public async Task KnownModelMapsDesiredEffortInsideTheGrokWriter(bool deferred, string model,
-        LlmReasoningLevel desired, string expected)
+    [InlineData("grok-4.7", LlmReasoningLevel.Maximum, "xhigh")]
+    [InlineData("grok-4.7", LlmReasoningLevel.None, "low")]
+    [InlineData("grok-4.5", LlmReasoningLevel.ExtraHigh, "high")]
+    public async Task KnownModelMapsDesiredEffortInsideTheGrokWriter(string model, LlmReasoningLevel desired, string expected)
     {
-        JsonElement payload = await ProjectAsync(Connection(), Request(model, desired), deferred);
-        Assert.Equal(expected, Effort(payload, deferred));
+        JsonElement payload = await ProjectAsync(Connection(), Request(model, desired));
+        Assert.Equal(expected, Effort(payload));
         Assert.Equal(model, payload.GetProperty("model").GetString());
     }
 
     [Theory]
-    [InlineData(false, LlmReasoningLevel.Maximum, "max")]
-    [InlineData(false, LlmReasoningLevel.None, "none")]
-    [InlineData(true, LlmReasoningLevel.Maximum, "max")]
-    [InlineData(true, LlmReasoningLevel.None, "none")]
-    public async Task MissingModelFactsPermitTheRequestedNativeSpelling(bool deferred,
-        LlmReasoningLevel desired, string expected)
+    [InlineData(LlmReasoningLevel.Maximum, "max")]
+    [InlineData(LlmReasoningLevel.None, "none")]
+    public async Task MissingModelFactsPermitTheRequestedNativeSpelling(LlmReasoningLevel desired, string expected)
     {
         LlmConnection connection = Connection();
         using var http = new HttpClient();
-        Assert.Equal(InferenceSupport.Unknown, new XaiResponsesLlmClient(http)
+        Assert.Equal(InferenceSupport.Unknown, new GrokResponsesLlmClient(http)
             .GetCapabilities(connection, "grok-unlisted").SupportsReasoning);
-        JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", desired), deferred);
-        Assert.Equal(expected, Effort(payload, deferred));
+        JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", desired));
+        Assert.Equal(expected, Effort(payload));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task EmptyCatalogEffortsRemainUnknownAndPermitTheRequestedSpelling(bool deferred)
+    [Fact]
+    public async Task EmptyCatalogEffortsRemainUnknownAndPermitTheRequestedSpelling()
     {
         LlmConnection connection = Connection() with { Catalog = Catalog() };
-        JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.Maximum), deferred);
-        Assert.Equal("max", Effort(payload, deferred));
+        JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.Maximum));
+        Assert.Equal("max", Effort(payload));
         using var http = new HttpClient();
-        Assert.Equal(InferenceSupport.Unknown, new XaiResponsesLlmClient(http)
+        Assert.Equal(InferenceSupport.Unknown, new GrokResponsesLlmClient(http)
             .GetCapabilities(connection, "grok-unlisted").SupportsReasoning);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task CatalogNoneAndHighMapMediumDownToNoneWithoutLosingObservations(bool deferred)
+    [Fact]
+    public async Task CatalogNoneAndHighMapMediumDownToNoneWithoutLosingObservations()
     {
         LlmConnection connection = Connection() with { Catalog = Catalog("none", "high") };
-        JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.Medium), deferred);
-        Assert.Equal("none", Effort(payload, deferred));
+        JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.Medium));
+        Assert.Equal("none", Effort(payload));
         using var http = new HttpClient();
-        Assert.True(new XaiResponsesLlmClient(http).GetCapabilities(connection, "grok-unlisted")
+        Assert.True(new GrokResponsesLlmClient(http).GetCapabilities(connection, "grok-unlisted")
             .ReasoningLevels.SetEquals([LlmReasoningLevel.None, LlmReasoningLevel.High]));
     }
 
@@ -71,10 +61,10 @@ public sealed class XaiReasoningTests
     public async Task CatalogMinimalAndMaximumAreNativeFactsNotFilteredVocabulary()
     {
         LlmConnection connection = Connection() with { Catalog = Catalog("minimal", "max") };
-        JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.High), false);
-        Assert.Equal("minimal", Effort(payload, false));
+        JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.High));
+        Assert.Equal("minimal", Effort(payload));
         using var http = new HttpClient();
-        Assert.True(new XaiResponsesLlmClient(http).GetCapabilities(connection, "grok-unlisted")
+        Assert.True(new GrokResponsesLlmClient(http).GetCapabilities(connection, "grok-unlisted")
             .ReasoningLevels.SetEquals([LlmReasoningLevel.Minimal, LlmReasoningLevel.Maximum]));
     }
 
@@ -90,43 +80,16 @@ public sealed class XaiReasoningTests
             }
         };
         LlmChatRequest request = Request("grok-4.7", LlmReasoningLevel.Maximum);
-        JsonElement payload = await ProjectAsync(connection, request, false);
-        Assert.Equal("high", Effort(payload, false));
+        JsonElement payload = await ProjectAsync(connection, request);
+        Assert.Equal("high", Effort(payload));
         Assert.Equal(LlmReasoningLevel.Maximum, request.ReasoningLevel);
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task NullEffortLeavesTheKnownModelDefaultUnspecified(bool deferred)
-    {
-        JsonElement payload = await ProjectAsync(Connection(), Request("grok-4.7", null), deferred);
-        Assert.Null(Effort(payload, deferred));
-    }
-
     [Fact]
-    public void BatchProjectionRetainsDesiredEffortUntilItsNativePayload()
+    public async Task NullEffortLeavesTheKnownModelDefaultUnspecified()
     {
-        using var http = new HttpClient();
-        var client = new XaiResponsesLlmClient(http);
-        LlmConnection connection = Connection();
-        LlmChatRequest request = Request("grok-4.7", LlmReasoningLevel.Maximum);
-        LlmChatRequest projected = client.ProjectBatchRequest(connection, request);
-        JsonObject payload = client.BuildBatchPayload(connection, projected, null);
-        Assert.Equal(LlmReasoningLevel.Maximum, projected.ReasoningLevel);
-        Assert.Equal("xhigh", payload["reasoning"]!["effort"]!.GetValue<string>());
-    }
-
-    [Theory]
-    [InlineData(false, 4, "low")]
-    [InlineData(true, 16, "high")]
-    public async Task MultiAgentCountKeepsItsSeparateNativeMeaning(bool deferred, int count, string expected)
-    {
-        LlmChatRequest request = Request("grok-4.20-multi-agent", null) with
-        { ProviderControls = new XaiMultiAgentControls(count) };
-        JsonElement payload = await ProjectAsync(Connection(), request, deferred);
-        Assert.Equal(expected, Effort(payload, deferred));
-        Assert.False(payload.TryGetProperty("agent_count", out _));
+        JsonElement payload = await ProjectAsync(Connection(), Request("grok-4.7", null));
+        Assert.Null(Effort(payload));
     }
 
     private static LlmChatRequest Request(string model, LlmReasoningLevel? effort) => new()
@@ -149,48 +112,28 @@ public sealed class XaiReasoningTests
         }.ToJsonString())
     }];
 
-    private static string? Effort(JsonElement payload, bool deferred) => deferred
-        ? payload.TryGetProperty("reasoning_effort", out JsonElement word) ? word.GetString() : null
-        : payload.TryGetProperty("reasoning", out JsonElement reasoning)
+    private static string? Effort(JsonElement payload) =>
+        payload.TryGetProperty("reasoning", out JsonElement reasoning)
             && reasoning.TryGetProperty("effort", out JsonElement effort) ? effort.GetString() : null;
 
-    private static async Task<JsonElement> ProjectAsync(LlmConnection connection, LlmChatRequest request, bool deferred)
+    private static async Task<JsonElement> ProjectAsync(LlmConnection connection, LlmChatRequest request)
     {
         LlmReasoningLevel? desired = request.ReasoningLevel;
-        using var boundary = new Boundary(deferred, request.ModelId);
+        using var boundary = new Boundary(request.ModelId);
         using var http = new HttpClient(boundary);
-        var client = new XaiResponsesLlmClient(http);
+        var client = new GrokResponsesLlmClient(http);
         IReadOnlySet<LlmReasoningLevel> before = client.GetCapabilities(connection, request.ModelId).ReasoningLevels;
-        if (deferred)
-        {
-            var source = new Source(connection);
-            await using var access = new LlmConnectionAccess(source, [], [client]);
-            await using var core = new LlmProviderService(source, [client], [], connectionAccess: access);
-            await using var resources = new LlmResourceProviderService(access, core);
-            Assert.Equal("request-1", (await resources.SubmitDeferredAsync("connection", request)).RequestId);
-        }
-        else
-        {
-            LlmChatResult? result = null;
-            await foreach (LlmStreamEvent item in client.StreamAsync(connection, request))
-                if (item is LlmChatCompletionEvent completion) result = completion.Result;
-            Assert.Equal("answer", result!.Text);
-        }
+        LlmChatResult? result = null;
+        await foreach (LlmStreamEvent item in client.StreamAsync(connection, request))
+            if (item is LlmChatCompletionEvent completion) result = completion.Result;
+        Assert.Equal("answer", result!.Text);
         Assert.Equal(desired, request.ReasoningLevel);
         Assert.True(before.SetEquals(client.GetCapabilities(connection, request.ModelId).ReasoningLevels));
         Assert.Equal(1, boundary.Sends);
         return boundary.Body;
     }
 
-    private sealed class Source(LlmConnection connection) : ILlmConnectionSource
-    {
-        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) =>
-            Task.FromResult<LlmConnection?>(connection);
-        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion,
-            CancellationToken cancellationToken = default) => throw new NotSupportedException();
-    }
-
-    private sealed class Boundary(bool deferred, string model) : HttpMessageHandler
+    private sealed class Boundary(string model) : HttpMessageHandler
     {
         public int Sends { get; private set; }
         public JsonElement Body { get; private set; }
@@ -198,9 +141,9 @@ public sealed class XaiReasoningTests
         {
             Sends++;
             Assert.Equal(HttpMethod.Post, request.Method);
-            Assert.Equal("https://api.x.ai/v1/" + (deferred ? "chat/completions" : "responses"), request.RequestUri!.AbsoluteUri);
+            Assert.Equal("https://api.x.ai/v1/responses", request.RequestUri!.AbsoluteUri);
             Body = JsonElement.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
-            string response = deferred ? "{\"request_id\":\"request-1\"}" : new JsonObject
+            string response = new JsonObject
             {
                 ["id"] = "response-1", ["model"] = model, ["status"] = "completed",
                 ["output"] = new JsonArray(new JsonObject
