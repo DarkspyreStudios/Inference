@@ -10,6 +10,7 @@ The conversation libraries are independently consumable:
 | `Darkspyre.Inference.Connect.Codex` | Native Codex client and authentication |
 | `Darkspyre.Inference.Connect.Claude` | Official Claude CLI conversations and authentication |
 | `Darkspyre.Inference.Connect.Antigravity` | Official Antigravity CLI conversations, native resume, host tools and account usage |
+| `Darkspyre.Inference.Connect.Grok` | Grok (xAI) Responses conversations with a Grok subscription's device sign-in, hosted search, provider compaction and text embeddings |
 | `Darkspyre.Inference.Connect.HostTools` | The host-tools local service, bundled under `hosttools/service`, its client, and the `darkspyre-host-tools-mcp` program; source-only, built with Darkspyre.Common's local-service libraries |
 | `Darkspyre.Inference.Connect.OpenAiApi` | OpenAI Responses conversations and text embeddings |
 | `Darkspyre.Inference.Connect.SelfHost` | Conversations and text/image embeddings through caller-owned engines |
@@ -30,7 +31,7 @@ Common alone registers no provider. The catalog lists only the discovered provid
 Discovery registers services without reading credentials, calling providers or loading engines.
 The caller supplies `ILlmConnectionSource`. Including SelfHost also requires caller-owned
 `ILlmSelfHost` when resolving its clients. Connect borrows those engines through Common contracts;
-the caller owns their loading and disposal. Codex, OpenAiApi and SelfHost use the shared managed
+the caller owns their loading and disposal. Codex, OpenAiApi, Grok and SelfHost use the shared managed
 conversation implementation. Claude and Antigravity use their native universal conversation implementations.
 
 Every library is one managed artifact for Mac, Linux and Windows. Existing runtime OS handling
@@ -41,7 +42,7 @@ Provider package buildTransitive targets and source-mode targets preserve provid
 trimming. This rooting does not establish full application trimming or NativeAOT compatibility.
 
 Every other LLM provider is out of the build. `Darkspyre.Inference.Connect.Common.csproj` excludes the
-Anthropic API, Apple, OpenAI-compatible chat, Gemini API and xAI files with
+Anthropic API, Apple, OpenAI-compatible chat and Gemini API files with
 `Compile Remove`. The Image project excludes the xAI image transport and the TTS project
 excludes the xAI speech transport. The Bedrock, Vertex, Azure, STT, Realtime, Video, Resources and examples
 projects are out of the solution, the `Darkspyre.Inference.Connect` package and the source references in
@@ -49,9 +50,10 @@ projects are out of the solution, the `Darkspyre.Inference.Connect` package and 
 `Inference/AGENTS.md`. Sections of this page that describe an excluded provider, transport or project
 describe that kept source, which this build does not compile.
 
-Stored data keeps its shape. `LlmConnection.Xai`, `LlmTransport.XaiResponses`, `ImageTransport.XaiImagine`
-and `TtsTransport.XaiTts` stay, so a saved connection or setting that names them still reads. No adapter is
-registered for those transports, so a request through one fails with the existing missing-client refusal.
+Stored data keeps its shape. `LlmConnection.Xai`, `LlmTransport.XaiResponses`, `XaiConnectionOptions`,
+`XaiMultiAgentControls`, `ImageTransport.XaiImagine` and `TtsTransport.XaiTts` stay, so a saved connection or setting
+that names them still reads. The Grok library serves `XaiResponses`. No adapter is registered for the image and
+speech transports, so a request through one fails with the existing missing-client refusal.
 
 The phase-1 build removes these public surfaces: `ILlmFileClient`, `IXaiFilePublicUrlClient`,
 `IXaiSkillClient`, `IDocumentSearchClient` and their request and result types; `LlmProviderCapabilities.Skills`;
@@ -61,13 +63,12 @@ parameters of `IImageTransport`, `ImageProviderService` and `ITtsProvider`; `Ima
 `ImageSetupConfiguration.Xai`, `TtsConnection.Xai`, `TtsConnection.XaiDefaults`, `TtsRequest.Xai`,
 `TtsStreamOptions.Xai` and `XaiTtsOptions`. `LlmProviderCapabilities.Files` always reports no Files operation.
 
-The tokenizer facade (`LlmProviderService.TokenizeAsync`, `ILlmTextTokenizer`) and the context-cache facade
-(`BindContextCacheAsync`, `ILlmContextCacheClient`) stay compiled with no implementing provider. Every call
-reaches the existing refusal: `This route does not implement plain-text tokenization.` and
-`No explicit context cache adapter is implemented.`
+The tokenizer facade (`LlmProviderService.TokenizeAsync`, `ILlmTextTokenizer`) is implemented by Grok, through its
+`tokenize-text` endpoint; every other transport refuses with `This route does not implement plain-text tokenization.`
+The context-cache facade (`BindContextCacheAsync`, `ILlmContextCacheClient`) stays compiled with no implementing
+provider, and every call refuses with `No explicit context cache adapter is implemented.`
 
-The console tester has no `grok-probe` command and no `prompt --request` option, and `claude-probe` runs
-only its `cancel` case.
+The console tester has no `prompt --request` option, and `claude-probe` runs only its `cancel` case.
 
 ## Conversation contract
 
@@ -210,23 +211,23 @@ in its own message by the attachment notice, so any history opens.
 
 **Feature list.** `LlmAgentCapabilities` reports public features only. Values:
 
-| Member | Codex | OpenAI API | Claude | Antigravity |
-| --- | --- | --- | --- | --- |
-| HostedTools | ImageGeneration | ImageGeneration; on `api.openai.com` also WebSearch, CodeExecution, DocumentSearch, RemoteMcp | none | none |
-| SupportsShellTools | Unsupported | Unsupported | Unsupported | Unsupported |
-| SupportsContextCapture, SupportsContextReplacement | Supported | Supported | Unsupported | Unsupported |
-| SupportsContextStatus | Supported | Supported | Supported | Supported |
-| SupportsCompactionHandoff | Unsupported | Unsupported | Unsupported | Unsupported |
-| SupportsNativeResume | Unsupported | Unsupported | Supported | Supported |
-| SupportsSteering | Supported | Supported | Supported | Unsupported |
-| SupportsInterrupt | Supported | Supported | Supported | Unsupported |
-| SupportsExternalToolHandoff | Supported | Supported | Unknown | Unsupported |
-| ResourceObservation | Unsupported | Unsupported | Supported | Unsupported |
-| SupportsFallbackModels | Unsupported | Unsupported | Unknown | Unsupported |
-| SupportsTurnCap | Supported | Supported | Unknown | Unsupported |
-| SupportsSpendCap | Unsupported | Unsupported | Unknown | Unsupported |
-| SupportsCompactNow | Supported | Supported | Supported | Supported |
-| CompactionSide | Host | Host | Host | Host |
+| Member | Codex | OpenAI API | Claude | Antigravity | Grok |
+| --- | --- | --- | --- | --- | --- |
+| HostedTools | ImageGeneration | ImageGeneration; on `api.openai.com` also WebSearch, CodeExecution, DocumentSearch, RemoteMcp | none | none | ImageGeneration, WebSearch, SocialSearch, CodeExecution, DocumentSearch, RemoteMcp |
+| SupportsShellTools | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported |
+| SupportsContextCapture, SupportsContextReplacement | Supported | Supported | Unsupported | Unsupported | Supported |
+| SupportsContextStatus | Supported | Supported | Supported | Supported | Supported |
+| SupportsCompactionHandoff | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported |
+| SupportsNativeResume | Unsupported | Unsupported | Supported | Supported | Unsupported |
+| SupportsSteering | Supported | Supported | Supported | Unsupported | Supported |
+| SupportsInterrupt | Supported | Supported | Supported | Unsupported | Supported |
+| SupportsExternalToolHandoff | Supported | Supported | Unknown | Unsupported | Supported |
+| ResourceObservation | Unsupported | Unsupported | Supported | Unsupported | Unsupported |
+| SupportsFallbackModels | Unsupported | Unsupported | Unknown | Unsupported | Unsupported |
+| SupportsTurnCap | Supported | Supported | Unknown | Unsupported | Supported |
+| SupportsSpendCap | Unsupported | Unsupported | Unknown | Unsupported | Unsupported |
+| SupportsCompactNow | Supported | Supported | Supported | Supported | Supported |
+| CompactionSide | Host | Host | Host | Host | Provider |
 
 `CompactionSide` says which side compacts: `Host` is the library's compaction described below, and `Provider` is the
 model service's own. A managed session reports `Provider` for a model whose chat client compacts on the service side.
@@ -243,6 +244,31 @@ OpenAI's endpoint also lists web search, code execution, document search and rem
 The listing is the service's own `/models`; on OpenAI's endpoint a model with no listed window takes its published
 window and output limit, and elsewhere the listed values are used as they are.
 
+**Grok.** A Grok connection (`LlmTransport.XaiResponses`, provider id `grok-subscription`, in the Subscription group)
+signs in with a Grok subscription through the xAI device code and only that way; it has no API key field. Setup's
+`authorize` action (`Sign in with Grok`) starts the device grant at `auth.x.ai` and shows the code and the https
+link; its continuation polls at the device interval through the shared device-login seam, five seconds slower after
+`slow_down`. The approved token is saved only after `GET https://api.x.ai/v1/me` returns a `user_id` and the account
+is not team-blocked. A denied or expired code ends with `Grok sign-in was denied or expired. Start sign-in again.`
+and a team-blocked account with `This Grok account is not entitled to API access.`; neither saves anything. The
+check reports Signed in when the connection holds a usable OAuth token. Refresh goes through `LlmConnectionAccess`.
+
+The connection's `API region` field picks `XaiConnectionOptions.Region`, Global (`https://api.x.ai/v1`) or United
+States (`https://us.api.x.ai/v1`); a region edit sets the endpoint, and every request refuses before sending when the
+endpoint does not match the region. The model list joins xAI's `models` and `language-models` listings; each model's
+reasoning levels and image input come from the catalog first and the model-family profile second, and
+`grok-4.20-multi-agent` is a multi-agent model. Grok conversations run on the shared managed session with the
+feature list above. Every Grok model compacts on the provider side (see "Provider compaction"): the session posts
+`{"model","input":[...]}` to `responses/compact`, with the instructions as a leading system item, and the one returned
+`compaction` item becomes the context's only entry, an assistant message whose continuation state replays it. Grok's
+estimate counts the text of the messages after the last reply that carries a reported count with `tokenize-text`
+and the rest locally; a failed tokenizer call counts that text locally. Grok's continuation state keeps its output
+verbatim and in order: messages, reasoning, function calls, hosted calls (`web_search_call`, `x_search_call`,
+`code_interpreter_call`, `code_execution_call`, `file_search_call`, `mcp_call`, `image_generation_call`,
+`view_image_call`, `view_x_video_call`, `custom_tool_call`, `tool_search_call`, `tool_search_output`) and the
+compaction item. A `context_length_exceeded` code in an HTTP error or a stream `error` event is a too-long refusal.
+When the account lists an embedding model, `XaiEmbeddingClient` embeds text through the same connection.
+
 **Settings a model or service does not accept.** No setting refuses a turn. On OpenAI's endpoint a reasoning model
 that accepts temperature only at reasoning None loses temperature and top-p at any other level, and when the request
 names no level; a model with no reasoning gets no `reasoning` object. Elsewhere, and for a model with no profile, the
@@ -257,7 +283,9 @@ Standard, Fast; null is Auto). `LlmProviderCapabilities.ServiceTiers` lists the 
 normalizer maps the requested tier to the nearest offered one: Auto stays Auto, an offered tier is itself, and a
 missing Economy or Fast becomes Standard when offered, else Auto. A model that offers no tier gets none. The
 Responses payload sends `service_tier` `flex` for Economy, `default` for Standard and `priority` for Fast, and nothing
-for Auto. Codex and Claude offer no tiers, so a requested tier is dropped and the turn runs. An OpenAI API connection
+for Auto. Codex and Claude offer no tiers, so a requested tier is dropped and the turn runs. Grok offers Standard
+and Fast; a turn with no tier, or Auto, takes the connection's saved `XaiConnectionOptions.ServiceTier`, `Priority`
+as Fast and `Default` as Standard, so a Grok request always sends `service_tier`. An OpenAI API connection
 has a Service tiers switch, `CapabilityOverrides.SupportsServiceTiers`, shown as the `Service tiers` checkbox in its
 editor. Unset, it is on for `api.openai.com` and off elsewhere; a checkbox value equal to the endpoint's default
 stores null, so the default follows a later endpoint change. With the switch on, OpenAI's endpoint offers the
@@ -266,7 +294,10 @@ profile's tiers (the pricing page's) and another endpoint offers all four; with 
 **Agent count.** A turn asks a multi-agent model for a number of agents with `LlmAgentTurnRequest.AgentCount`; null
 leaves the provider's default in place. `LlmProviderCapabilities.AgentCounts` lists the counts the model accepts, and
 is empty for a model that takes none. The request normalizer maps the requested count to the nearest offered count,
-the larger of two equally near ones. A model that offers none gets none, and the turn runs.
+the larger of two equally near ones. A model that offers none gets none, and the turn runs. A Grok multi-agent model
+offers 4 and 16 and no reasoning levels, so a requested reasoning level is dropped there: 4 agents send
+`reasoning.effort` `low` and 16 send `high`. A turn that names no count takes the connection's saved
+`XaiConnectionOptions.MultiAgent` count, mapped to the nearer of the two; with neither, the provider's default runs.
 
 **Context lengths in the editor.** An OpenAI API connection's editor shows `Context lengths` rows, none until
 `Add row` is pressed (the CommonDesign D6 exception recorded in `AGENTS.md`). Each row names a model, chosen from the
@@ -305,6 +336,26 @@ fields are not sent there. `HostedIncludes` adds `web_search_call.action.sources
 `code_interpreter_call.outputs` to `include` when the matching tool is present. The hosted-turn limit is not sent
 on the OpenAI API: its Responses API has no `max_turns`. A provider whose wire differs overrides either hook per
 tool.
+
+Grok offers every hosted tool, X search included, and overrides the wire where xAI's differs:
+
+| Tool | Grok wire entry |
+| --- | --- |
+| Web search | `{"type":"web_search","enable_image_understanding","enable_image_search","allowed_domains"?,"excluded_domains"?}` |
+| X search | `{"type":"x_search","enable_image_understanding","enable_video_understanding","allowed_x_handles"?,"excluded_x_handles"?,"from_date"?,"to_date"?}` |
+| Code execution | `{"type":"code_interpreter"}` |
+| Remote MCP | the OpenAI entry without `require_approval`, with `server_description` and `defer_loading` when set; a deferred server adds `{"type":"tool_search"}` |
+
+Grok always adds `no_inline_citations` to `include` and sends `MaxHostedTurns` as `max_turns`. It refuses, by xAI's
+published limits, more than 350 wire tools, more than 10 collections in a document search, allowed and excluded
+domains together or more than 5 in either, a web-search user location, and allowed and excluded X handles together
+or more than 20 in either.
+
+A remote MCP server's `Authorization` is resolved before the payload is sent, on both the OpenAI API and Grok, by
+the shared `RemoteMcpAuthorization`: each authority is asked once per request, its bearer token is written as the
+`authorization` field of that server's `mcp` entry, and the token and the static MCP header values are removed
+from diagnostics. An authority that returns no header, or one that is not a bearer token, fails the request with
+`MCP authorization must be a bearer token.` or `MCP authorization returned no header.`
 
 One observer, `ResponsesHostedToolsObserver`, reads every Responses reply. A hosted item (`image_generation_call`,
 `web_search_call`, `x_search_call`, `file_search_call`, `code_interpreter_call`, `mcp_call`, and Grok's
@@ -453,9 +504,6 @@ a resource feed. Explicit Unsupported still refuses it. Grok document search doe
 generation tier; its payload omits a tier field and leaves the saved choice unchanged. Realtime MCP
 labels retain periods unchanged. Chat Auto tool choice and explicit parallel-call controls can be
 sent without tool definitions; Required still needs an available tool and Specific must name one.
-
-An explicit Grok null agent count suppresses the saved count without requiring a model profile.
-A non-null count still requires an implemented count-to-effort mapping.
 
 ## SDK HTTP composition
 
@@ -1362,9 +1410,8 @@ and explicit overrides retain all seven native spellings, including `none`, `min
 Missing or empty observations remain Unknown and send the requested spelling unchanged. Null sends
 no effort, leaving the provider default unspecified. Validation, batch projection and managed requests
 use the same adapter mapping without changing caller effort or reported model choices.
-The known multi-agent model's effort field selects agent count, not independent reasoning depth.
-Its existing typed agent-count control retains that meaning; neutral depth has no independent mapping
-on that model and reports that specific adapter limitation.
+The known multi-agent model's effort field selects agent count, not reasoning depth: it offers no
+reasoning levels, so a requested level is dropped there and `AgentCount` selects the effort (see "Agent count").
 
 Gemini API and Vertex Gemini use `GeminiModelProfiles.MapReasoning` before admission and native
 projection, including token counting. Its explicit rows map `ExtraHigh` and `Maximum` to `High`,
@@ -2543,52 +2590,6 @@ user-local CLI lookup and explicit paths with real filesystem entries. A shell f
 literal arguments without shell expansion. The test skips on Windows and does not qualify
 Windows batch or Node invocation.
 
-## Document search contracts
-
-`IDocumentSearchClient.SearchAsync` declares a connection-selected search over existing provider
-collections. `LlmProviderService` implements that exact operation. `AddLlmConnect` resolves the
-interface to the same scoped facade. Search dispatches only when the selected client is the built-in
-xAI Responses adapter. Other selected clients refuse before credential refresh or HTTP. The facade
-copies the request before connection resolution and uses one frozen connection for validation,
-credential refresh and search. Existing admission preserves caller cancellation and refuses calls
-after retirement. Supplied sources, authenticators and the selected HTTP client remain borrowed.
-
-Connect supplies the data contract and owned `ConnectLlmJson` metadata. The facade route does not
-establish OAuth or collection entitlement. Owned options
-reject non-null live `IDocumentSearchClient` values on read and write, including nested consumer-generated metadata;
-explicit null remains null. No runtime client is exported as portable data.
-
-The internal stateless xAI protocol maps typed search controls to `POST /v1/documents/search`.
-It uses a supplied immutable OAuth connection and the existing SDK consumption admission; it does
-not resolve or refresh credentials or register an adapter. Chat
-`ProviderOptions` are not copied into search JSON. Explicit non-default service tiers refuse
-before HTTP because the search route has no mapped tier control. Requests and responses have
-one cleanup owner; independent failures retain fixed-safe diagnostics and actual refused owners.
-Provider failures retain the redacted code, request ID, status and retry delay without exposing the response body.
-The facade applies the same connection validation before refresh and before saving refreshed
-credentials. It drains admitted search and retains actual cleanup refusals in its shared retirement
-result. Subscription OAuth acceptance and collection entitlement remain unqualified.
-
-`DocumentSearchRequest` carries ordered collection IDs, an opaque filter, optional grouping and a
-closed hybrid/semantic/keyword retrieval selection. Grouping supports `DocumentMinK` and
-`DocumentMaxK`. Hybrid retrieval accepts model or RRF rerankers; semantic and keyword retrieval
-accept model rerankers only. Optional values remain absent instead of inserting provider defaults.
-The typed xAI ranking and RAG options stay in Connect, not Common.
-
-The records copy supplied lists and metadata dictionaries, including assignments through `with`.
-They preserve order, duplicate collection IDs, raw strings and case-sensitive metadata keys.
-The native builder preserves collection, grouping and aggregate keys as string arrays without
-default reflection metadata.
-Grouping requires at least one key; aggregate keys may be empty. Aggregate K is positive,
-search multipliers are 1 through 100, and weights are finite values from 0 through 1.
-Weights are not normalized, and RRF K has no local lower bound.
-
-`DocumentSearchMatch` reports finite actual scores without range normalization. Missing `Fields`
-remains null; an observed empty map remains empty. JSON-looking field values remain strings, and
-page zero remains an actual value. Native file/chunk IDs and snippets do not establish workspace
-resource ownership or access to a complete source file. Serialization does not perform search,
-resolve credentials, fetch files, group results or evaluate filters.
-
 ## Image provider integration
 
 `ImageTransportJobSnapshot.ModelId` and `ModelRevision` are optional observed execution facts.
@@ -2885,52 +2886,6 @@ OpenAI Responses, direct Codex, Anthropic Messages, Claude CLI, and Bedrock use 
 image/document content blocks for prompt attachments. Direct Codex sends prompt attachments and
 tool-output binaries inline through Responses, with no CLI staging directory. The caller supplies kind,
 filename, and bytes; adapters own MIME detection, encoding, and wire representation.
-
-### Files and skills contracts
-
-`ILlmFileClient`, `IXaiFilePublicUrlClient` and `IXaiSkillClient` declare explicit native resource
-operations. Their metadata, options, pages, deletion results, transfer receipts and capability data
-have exact type-name getters on `ConnectLlmJson`. The provider facade implements these interfaces,
-with the selected routes described in [Files and Skills facade](#files-and-skills-facade).
-Borrowed Skills upload inputs carry explicit caller limits and remain runtime-only, not data-codec
-roots. Their nonnull serialization refuses without reading their streams or exposing their policy.
-Unimplemented operations report `Unsupported` capability values.
-
-Files pages preserve their returned token and an explicit `IsKnownLastPage` fact. Skills pages
-preserve their distinct first/last-ID and `HasMore` observations. Required response values do not
-become zero or false when absent. File bytes may be zero; missing MIME and expiry observations stay
-null. Public URLs retain their actual strings in data serialization but are absent from diagnostics.
-Files and Skills list limits are 1 through 100, matching the
-[published parameter schemas](https://docs.x.ai/openapi.json). Optional file/URL lifetimes retain
-whole seconds between one hour and thirty days; absent values remain absent.
-
-The private xAI Files adapter uses one HTTP exchange path for upload, list, metadata, download,
-delete and public-URL operations. It attempts owned response and request cleanup independently.
-An actual disposal refusal uses the typed Cleanup phase and retains the refused message through
-the operation error and the adapter's retirement result. Original operation failures remain first;
-response and request cleanup failures follow in that order. Retirement drains admitted operations,
-detaches borrowed HTTP and reports the same cleanup failures without retrying disposal. Upload
-content detaches its borrowed source and fence after the operation settles, including when a
-refused request retains its multipart content. Caller streams are not closed, rewound or flushed.
-Partial destination bytes and remote mutations are not rolled back by cleanup. The selected
-Grok facade exposes these implemented Files operations. Registration does not establish live
-OAuth qualification.
-
-`XaiFileStorageOptions` is separate provider-storage data. It preserves a required filename,
-optional whole-second expiry capped at thirty days, and explicit public-URL intent. It does not
-apply the standalone upload's one-hour minimum to storage. The closed public-URL union uses
-`flag` and `configuration` discriminators: absence, explicit false, explicit true and configured
-publication remain distinct. Configured publication reuses `XaiPublicUrlOptions` and its own
-expiry bounds. All four storage roots have exact `ConnectLlmJson` getters. These declarations
-do not upload content, publish a URL, authorize a request or enable a provider route.
-
-Skill uploads carry explicitly supplied borrowed streams and ordered directory entries. They do
-not enumerate paths, inspect archives, read streams or attach a skill to generation. Their runtime
-inputs and service interfaces have no public data-metadata getters; the owned serialization
-options reject non-null values without inspecting collaborators. Diagnostic strings omit paths,
-stream details and resource payloads. Operation-time path/duplicate/page consistency checks,
-transfer ownership, facade routing, native scope and provider qualification are not implemented
-by these declarations.
 
 ### Explicit cache contracts
 
@@ -3483,7 +3438,7 @@ Model retries are limited to three total attempts before any output, respect ret
 exposed output are not retried. Consume/dispose an enumeration fully before capture or another run.
 
 Device-code sign-in goes through one seam. A provider library registers an `ILlmDeviceLogin` as its
-transport's `ILlmAuthenticator`; Codex is the compiled implementation. `StartDeviceLoginAsync(transport)`
+transport's `ILlmAuthenticator`; Codex and Grok implement it. `StartDeviceLoginAsync(transport)`
 returns the code to show, and `CompleteDeviceLoginAsync(transport, connectionId, deviceAuthId, userCode,
 expectedVersion)` polls once and saves the credential on the connection. A poll that is still pending
 throws `LlmAuthPendingException` and saves nothing; its `SlowDown` flag adds five seconds to the polling
@@ -3626,22 +3581,16 @@ an arbitrary JSON settings payload.
 
 `XaiResponses` defines the Grok OAuth connection and settings contract. `LlmConnection.Xai` holds
 `XaiConnectionOptions`: `Global` selects `https://api.x.ai/v1`, and `UnitedStates` selects
-`https://us.api.x.ai/v1`. `GetEndpoint()` derives that fixed URL. Setup offers bounded region and
-`Default`/`Priority` service-tier choices, with no endpoint or API-key field. It retains unrelated
-headers, provider options and overrides. A kept OAuth access token or a completed draft sign-in
-satisfies Save; an API key or static secret header does not. Region edits replace the endpoint;
-tier edits require retesting but do not request reauthentication.
+`https://us.api.x.ai/v1`. `GetEndpoint()` derives that fixed URL. Setup offers the region choice and the
+`authorize` sign-in action, with no endpoint or API-key field; a region edit replaces the endpoint, and a draft
+whose endpoint does not match its region shows `Select an API region; the endpoint follows the region.` and
+blocks Save. Save needs a completed sign-in or a kept saved credential. The saved service tier and multi-agent
+count have no setup field; they are the defaults a turn without its own tier or agent count takes.
 
-Opening Grok settings preserves the supplied endpoint and typed options. Missing typed options or
-a route/region mismatch is shown locally and blocks Save, Check and model discovery until an
-explicit region selection fixes the draft. Read-only **Saved sign-in** and **Draft sign-in** fields
-report credential configuration without exposing secret values or claiming a fresh authentication
-check. A draft sign-in remains unsaved until Save commits; an uncertain save remains unknown.
-
-`XaiAuthenticator` implements `ILlmDeviceLogin`, which supplies the device grant to `StartDeviceLoginAsync`,
+`GrokAuthenticator` implements `ILlmDeviceLogin`, which supplies the device grant to `StartDeviceLoginAsync`,
 `CompleteDeviceLoginAsync` and `SignInAsync`. Completion performs one token poll; interactive sign-in owns the polling loop.
-Setup continuation and interactive sign-in respect the device interval, provider-reported expiry,
-and the five-second increase on RFC 8628 `slow_down`. `LlmDeviceCode.ExpiresAt` is null for a provider
+Setup continuation and interactive sign-in respect the device interval and the five-second increase on
+RFC 8628 `slow_down`; an expired code ends with the provider's `expired_token`. `LlmDeviceCode.ExpiresAt` is null for a provider
 that supplies no expiry. Device-code diagnostic text is redacted. Token saves use the captured
 connection version. Facade retirement cancels and drains sign-in and suppresses late results;
 it does not dispose the borrowed authenticator or undo a save already committed by the source.
@@ -3651,7 +3600,7 @@ Grok authentication status and sign-in saves use the shared OAuth-only credentia
 Status returns false for incompatible credentials or malformed bearer tokens; sign-in refuses them
 before saving. Both paths retain their rejection of a nonempty API-key field, including whitespace.
 
-The internal `XaiAuthenticator` implements the [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)
+The internal `GrokAuthenticator` implements the [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)
 device grant against `auth.x.ai` with form-encoded requests and a public client. A successful token
 exchange calls `GET https://api.x.ai/v1/me` once and requires a non-blocked account. Credentials contain
 only OAuth tokens. Expiry comes from `expires_in` or the access-token JWT; account identity comes from
@@ -3743,21 +3692,11 @@ the retry delay does not restart or extend it.
 
 The shared Responses pipeline retains xAI output as an ordered deep clone, including hosted-tool
 items and encrypted metadata. Continuation is bound to the transport, endpoint, account and model;
-token rotation on the same account does not break that binding. The terminal output is authoritative,
-including an empty array. Function completions use terminal calls, and a call without streamed arguments
-still emits its arguments once. Terminal function calls require a nonblank native `call_id`, a nonblank
-name and string arguments. The output item ID does not replace the call ID, and absent arguments do
-not become `{}`. Malformed fields report "Grok Responses returned invalid terminal output." before
-completed tool or chat events, including on failed, incomplete and unknown-status replies. Arguments
-retain their literal text; this shape check does not validate or repair their JSON. Valid unknown-status
-calls remain observable without continuation state. Provisional stream parsing is unchanged.
-The [xAI function-calling protocol](https://docs.x.ai/developers/tools/function-calling) uses
-`arguments` for execution and `call_id` to correlate the result.
-Known terminal statuses map to completion, action, refusal, failure or
-incomplete results. The [xAI response schema](https://docs.x.ai/developers/rest-api-reference/inference/responses)
-names `max_output_tokens`, `max_prompt_tokens` and `max_time_limit`; each maps to `Incomplete`.
-Unknown statuses and incomplete reasons map to `Unknown`. Recognized `context_length_exceeded`
-codes or reasons raise `LlmProviderException.IsContextOverflow` before completion without retrying.
+token rotation on the same account does not break that binding. Grok's replies go through the shared
+Responses result mapping: terminal statuses, streamed text and calls, and items reported only on
+`response.output_item.done` are read as for every Responses client. A `context_length_exceeded` code in an
+HTTP error body or a stream `error` event raises `LlmProviderException.IsContextOverflow`; a terminal reply
+that is only `incomplete` with that reason is `Incomplete`, not a too-long refusal.
 The named incomplete limits remain `Incomplete` when no recognized overflow code is present.
 Two small live requests against source `0dacacd` select Global/Default
 `grok-4.20-0309-non-reasoning`, request 32 output tokens and ask for the integers from 1 to 100.
@@ -3775,7 +3714,7 @@ continuation. These checks do not establish live OAuth entitlement or provider q
 Terminal annotations replace the citation snapshot without repeating citation events already
 observed at the same native item and annotation position.
 
-The internal `XaiResponsesLlmClient` sends OAuth-only streaming or genuine non-streaming requests
+The internal `GrokResponsesLlmClient` sends OAuth-only streaming or genuine non-streaming requests
 to the typed region's fixed endpoint. It rejects mixed static secret headers before dispatch and retains
 ordinary nonsecret additional headers. It sends the typed service tier and records the recognized applied
 tier in diagnostics. Typed protocol controls cannot be injected through raw provider options, even when
@@ -3964,20 +3903,14 @@ delivery, not decoded pixels, dimensions, streaming byte delivery or Session/Wor
 Neither run writes image bytes to a file or log, retries, changes account/route or establishes
 separate subscription billing from the reported cost.
 
-`LlmChatRequest.ProviderControls`, its Common request projection and `LlmAgentTurnRequest`
-carry `XaiMultiAgentControls`. An absent control inherits `XaiConnectionOptions.MultiAgent`;
-a present control with `AgentCount = null` suppresses the saved count and leaves the provider
-default unspecified. The existing `grok-4.20-multi-agent` profile supports 4 or 16 agents, encoded
-as REST `reasoning.effort = "low"` or `"high"`, never `agent_count`. Profile-backed setup offers
-those counts and a provider-default choice. Explicit unsupported models/counts, non-xAI routes,
-neutral or raw reasoning combined with a multi-agent control, and raw agent-count injection
-refuse before refresh, catalog access or generation. Managed turns retain their effective control
-through tool iterations; Connect and batch Resources metadata preserve the fixed
-`xai-multi-agent` discriminator, while Common metadata refuses this Connect subtype.
+`XaiMultiAgentControls` is stored data only: `XaiConnectionOptions.MultiAgent` keeps a saved agent count, which a
+turn whose `AgentCount` is null takes on a multi-agent model. The `grok-4.20-multi-agent` profile offers 4 or 16
+agents, sent as REST `reasoning.effort = "low"` or `"high"`, never `agent_count`. Connect metadata keeps the
+`xai-multi-agent` discriminator so a saved value still reads.
 
 `AddLlmConnect` registers the Grok provider, authenticator, Responses client and managed agent through
 the same finite SDK HTTP pipelines. Provider discovery performs no OAuth or model requests.
-`AddLlmConnectXai` uses the same registration path; calling it again does not duplicate Grok services.
+Referencing `Darkspyre.Inference.Connect.Grok` is what registers them; `AddLlmConnect` discovers the library.
 Registration alone does not qualify OAuth refresh or every provider capability. The selected live
 qualifications above do not change registration behavior.
 `LlmModelListCache` owns generic and lazy listings for all four model families. Agent counts are distinct from reasoning levels.
