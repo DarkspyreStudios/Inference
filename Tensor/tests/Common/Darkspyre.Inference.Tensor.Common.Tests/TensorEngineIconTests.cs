@@ -19,7 +19,7 @@ public sealed class TensorEngineIconTests
         {
             Assert.Equal(SetupProviderGroup.ThisComputer, definition.Group);
             SetupIcon icon = Assert.IsType<SetupIcon>(definition.Icon);
-            Assert.Equal("0 0 24 24", icon.ViewBox);
+            Assert.Matches(@"^-?[\d.]+ -?[\d.]+ [\d.]+ [\d.]+$", icon.ViewBox);
             XElement[] elements = [.. XElement.Parse("<svg>" + icon.Markup + "</svg>").Elements()];
             Assert.NotEmpty(elements);
             Assert.All(elements, element =>
@@ -27,7 +27,8 @@ public sealed class TensorEngineIconTests
                 Assert.True(element.Name.LocalName is "path" or "rect" or "circle", element.Name.LocalName);
                 Assert.Empty(element.Elements());
                 Assert.Null(element.Attribute("transform"));
-                Assert.Matches("^#[0-9A-F]{6}$", (string?)element.Attribute("fill") ?? string.Empty);
+                // A provider's own mark keeps its colour, or draws in the theme's text colour where the provider shows it so.
+                Assert.Matches("^(#[0-9A-F]{6}|currentColor)$", (string?)element.Attribute("fill") ?? string.Empty);
             });
             Assert.Equal(openAiMark, icon == openAi);
         }

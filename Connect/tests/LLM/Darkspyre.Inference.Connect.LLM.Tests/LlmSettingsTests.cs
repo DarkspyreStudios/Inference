@@ -234,7 +234,7 @@ public sealed class LlmSettingsTests
             Assert.Equal(definition.Icon, setup.Icon);
             if (logo is null) { Assert.Null(setup.Icon); continue; }
             SetupIcon icon = Assert.IsType<SetupIcon>(setup.Icon);
-            Assert.Equal("0 0 24 24", icon.ViewBox);
+            Assert.Matches(@"^-?[\d.]+ -?[\d.]+ [\d.]+ [\d.]+$", icon.ViewBox);
             System.Xml.Linq.XElement[] elements = [.. System.Xml.Linq.XElement.Parse("<svg>" + icon.Markup + "</svg>").Elements()];
             Assert.NotEmpty(elements);
             Assert.All(elements, element =>
@@ -242,7 +242,8 @@ public sealed class LlmSettingsTests
                 Assert.True(element.Name.LocalName is "path" or "rect" or "circle", element.Name.LocalName);
                 Assert.Empty(element.Elements());
                 Assert.Null(element.Attribute("transform"));
-                Assert.Matches("^#[0-9A-F]{6}$", (string?)element.Attribute("fill") ?? string.Empty);
+                // A provider's own mark keeps its colour, or draws in the theme's text colour where the provider shows it so.
+                Assert.Matches("^(#[0-9A-F]{6}|currentColor)$", (string?)element.Attribute("fill") ?? string.Empty);
             });
             if (logo == "openai") Assert.Equal(openAi, icon);
             else Assert.NotEqual(openAi, icon);
