@@ -235,6 +235,11 @@ internal static class ProviderContinuationStateCodec
                 (LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses, "function_call") =>
                     ["type", "id", "status", "call_id", "name", "arguments"],
                 (LlmTransport.OpenAiCodex or LlmTransport.OpenAiResponses, "image_generation_call") => ["type", "id", "status", "result"],
+                // Hosted tool calls are retained like the image tool's, so a replayed reasoning item keeps the call after it.
+                (LlmTransport.OpenAiResponses, "web_search_call") => ["type", "id", "status", "action"],
+                (LlmTransport.OpenAiResponses, "file_search_call") => ["type", "id", "status", "queries", "results"],
+                (LlmTransport.OpenAiResponses, "code_interpreter_call") => ["type", "id", "status", "code", "container_id", "outputs"],
+                (LlmTransport.OpenAiResponses, "mcp_call") => ["type", "id", "status", "server_label", "name", "arguments", "output", "error"],
                 (LlmTransport.AnthropicMessages, "text") => ["type", "text", "citations"],
                 (LlmTransport.AnthropicMessages, "thinking") => ["type", "thinking", "signature"],
                 (LlmTransport.AnthropicMessages, "redacted_thinking") => ["type", "data"],
@@ -280,6 +285,13 @@ internal static class ProviderContinuationStateCodec
                             throw new ArgumentException("Tool input in continuation state must be a JSON object.");
                         }
                         copy[field] = value.DeepClone();
+                    }
+                    else if (field is "action" or "queries" or "results" or "outputs")
+                    {
+                        // A hosted call's action, queries, results and outputs are opaque replay data, never interpreted.
+                        if (value is not (JsonObject or JsonArray or null))
+                        { throw new ArgumentException("Hosted-call continuation data must be a JSON object or array."); }
+                        copy[field] = value?.DeepClone();
                     }
                     else
                     {

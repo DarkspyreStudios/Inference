@@ -115,6 +115,28 @@ public sealed class HostedSearchTests
         Assert.All(calls, call => HostedTools.Snapshot(call));
     }
 
+    /// <summary>A reply that holds hosted tool calls keeps them in its continuation state, with their own fields.</summary>
+    [Fact]
+    public void ContinuationStateRetainsHostedToolCalls()
+    {
+        LlmConnection connection = DirectCodexTests.OpenAiConnection(OpenAiResponsesLlmClient.DefaultEndpoint);
+        var output = new JsonArray(
+            new JsonObject { ["type"] = "web_search_call", ["id"] = "ws", ["status"] = "completed", ["action"] = new JsonObject { ["query"] = "q" }, ["extra"] = 1 },
+            new JsonObject { ["type"] = "file_search_call", ["id"] = "fs", ["status"] = "completed", ["queries"] = new JsonArray("q"), ["results"] = new JsonArray() },
+            new JsonObject { ["type"] = "code_interpreter_call", ["id"] = "ci", ["status"] = "completed", ["code"] = "1", ["container_id"] = "c", ["outputs"] = new JsonArray() },
+            new JsonObject { ["type"] = "mcp_call", ["id"] = "mc", ["status"] = "completed", ["server_label"] = "s", ["name"] = "n", ["arguments"] = "{}", ["output"] = "o" },
+            new JsonObject { ["type"] = "message", ["id"] = "m", ["role"] = "assistant", ["status"] = "completed", ["content"] = new JsonArray() });
+
+        LlmContinuationState state = ProviderContinuationStateCodec.Encode(connection, "model", output);
+        JsonArray decoded = ProviderContinuationStateCodec.Decode(state, connection, "model");
+
+        Assert.Equal(["web_search_call", "file_search_call", "code_interpreter_call", "mcp_call", "message"],
+            decoded.Select(item => (string)item!["type"]!));
+        Assert.Equal("q", (string)decoded[0]!["action"]!["query"]!);
+        Assert.Null(decoded[0]!["extra"]);
+        Assert.Equal("o", (string)decoded[3]!["output"]!);
+    }
+
     private static LlmChatRequest Request(params LlmHostedTool[] tools) =>
         new() { ModelId = "gpt-5.5", Messages = [new("user", "hello")], HostedTools = tools };
 }
