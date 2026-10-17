@@ -111,6 +111,7 @@ internal static class PackageVerification
         ["Darkspyre.Inference.Connect.Codex"] = ["Darkspyre.Inference.Connect.Codex"],
         ["Darkspyre.Inference.Connect.Claude"] = ["Darkspyre.Inference.Connect.Claude"],
         ["Darkspyre.Inference.Connect.Antigravity"] = ["Darkspyre.Inference.Connect.Antigravity"],
+        ["Darkspyre.Inference.Connect.Grok"] = ["Darkspyre.Inference.Connect.Grok"],
         ["Darkspyre.Inference.Connect.OpenAiApi"] = ["Darkspyre.Inference.Connect.OpenAiApi"],
         ["Darkspyre.Inference.Connect.SelfHost"] = ["Darkspyre.Inference.Connect.SelfHost"],
         ["Darkspyre.Inference.Tensor.Common"] = ["Darkspyre.Inference.Tensor.Common"],

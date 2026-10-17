@@ -18,6 +18,7 @@
     <ProjectReference Include="../../src/Codex/Darkspyre.Inference.Connect.Codex/Darkspyre.Inference.Connect.Codex.csproj" />
     <ProjectReference Include="../../src/Claude/Darkspyre.Inference.Connect.Claude/Darkspyre.Inference.Connect.Claude.csproj" />
     <ProjectReference Include="../../src/Antigravity/Darkspyre.Inference.Connect.Antigravity/Darkspyre.Inference.Connect.Antigravity.csproj" />
+    <ProjectReference Include="../../src/Grok/Darkspyre.Inference.Connect.Grok/Darkspyre.Inference.Connect.Grok.csproj" />
     <ProjectReference Include="../../src/OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi.csproj" />
   </ItemGroup>
 </Project>

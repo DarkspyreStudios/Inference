@@ -90,29 +90,6 @@ internal static class ProviderDefinitions
 
 
 
-    public static LlmProviderDefinition GrokSubscription { get; } = new()
-    {
-        Id = "grok-subscription",
-        DisplayName = "Grok (SuperGrok / X Premium)",
-        Description = "Connect directly to xAI with a host-owned Grok OAuth credential.",
-        Transport = LlmTransport.XaiResponses,
-        DefaultEndpoint = new XaiConnectionOptions().GetEndpoint(),
-        DefaultModelId = "grok-4.7",
-        DisplayOrder = 35,
-        SetupSteps =
-        [
-            new SetupStep
-            {
-                Id = "authorize-grok",
-                Title = "Sign in with Grok",
-                Instructions = "Run sign-in and approve the displayed device code in your browser. Choose the API region and service tier. Authorization updates this draft; Save commits it through the host. No API key or Grok CLI login is used.",
-                CompletionRequirement = "Complete Grok OAuth sign-in before saving an authenticated connection.",
-                Troubleshooting = "Restart an expired or denied authorization. Confirm that the account permits the selected model and API feature."
-            },
-            SelectModel
-        ]
-    };
-
     public static LlmProviderDefinition GeminiApi { get; } = new()
     {
         Id = "gemini-api",

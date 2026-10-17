@@ -7,27 +7,17 @@ using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
-/// <summary>Checks schema guarantees and strict function roots without changing the schema.</summary>
+/// <summary>Checks whether Grok guarantees a structured-output schema, without changing the schema.</summary>
 internal static class XaiSchemaLimits
 {
     internal static LlmStructuredOutputEnforcement? ResolveEnforcement(LlmStructuredOutputRequest? output,
         LlmProviderCapabilities capabilities)
     {
         if (output is null) return null;
-        SchemaDisposition disposition = Analyze(output.Schema, requireObjectRoot: false);
+        SchemaDisposition disposition = Analyze(output.Schema);
         RefuseInvalid(disposition);
         return StructuredOutput.ResolveEnforcement(output, disposition == SchemaDisposition.Guaranteed
             ? capabilities : capabilities with { SupportsJsonSchema = InferenceSupport.Unsupported, SupportsJsonObject = InferenceSupport.Unsupported });
-    }
-
-    internal static void ValidateStrictTool(JsonElement schema)
-    {
-        SchemaDisposition disposition = Analyze(schema, requireObjectRoot: true);
-        RefuseInvalid(disposition);
-        if (schema.ValueKind == JsonValueKind.Object && schema.TryGetProperty("$ref", out _))
-            throw new NotSupportedException("Grok does not accept a strict tool schema with a root $ref. Use an explicit object root.");
-        if (disposition != SchemaDisposition.Guaranteed)
-            throw new NotSupportedException("A strict Grok tool schema is outside the supported native guarantees. The schema is not weakened or sent as non-strict.");
     }
 
     private enum SchemaDisposition { Guaranteed, OutsideGuarantee, ProviderRejected, InvalidSchema }
@@ -40,7 +30,7 @@ internal static class XaiSchemaLimits
 
     private static SchemaDisposition Merge(SchemaDisposition left, SchemaDisposition right) => left > right ? left : right;
 
-    private static SchemaDisposition Analyze(JsonElement root, bool requireObjectRoot)
+    private static SchemaDisposition Analyze(JsonElement root)
     {
         var index = new SchemaIndex();
         if (!index.Build(root)) return index.Disposition;
@@ -48,14 +38,12 @@ internal static class XaiSchemaLimits
         var pending = new Stack<(JsonElement Schema, bool Exit, bool AllowsBoolean)>();
         var active = new HashSet<JsonElement>();
         var done = new HashSet<JsonElement>();
-        Dictionary<JsonElement, bool>? objectRoots = requireObjectRoot ? [] : null;
         pending.Push((root, false, false));
         while (pending.TryPop(out var next))
         {
             JsonElement schema = next.Schema;
             if (next.Exit)
             {
-                if (objectRoots is not null) objectRoots[schema] = ProvesObject(schema, index, objectRoots);
                 active.Remove(schema);
                 done.Add(schema);
                 continue;
@@ -80,8 +68,6 @@ internal static class XaiSchemaLimits
                 disposition = Merge(disposition, ClassifyKeyword(property, location.Draft));
             foreach (JsonElement child in location.AppliedChildren) pending.Push((child, false, index.Locations[child].AllowsBoolean));
         }
-        if (objectRoots is not null && (!objectRoots.TryGetValue(root, out bool objectRoot) || !objectRoot))
-            disposition = Merge(disposition, SchemaDisposition.OutsideGuarantee);
         return disposition;
     }
 
@@ -264,26 +250,6 @@ internal static class XaiSchemaLimits
         && (char.IsAsciiLetter(value[0]) || !legacyFragment && value[0] == '_')
         && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.'
             || legacyFragment && character == ':');
-
-    private static bool ProvesObject(JsonElement schema, SchemaIndex index, Dictionary<JsonElement, bool> proofs)
-    {
-        SchemaLocation location = index.Locations[schema];
-        bool referencedObject = schema.TryGetProperty("$ref", out JsonElement reference)
-            && index.Resolve(location, reference, out JsonElement target) && KnownObject(target);
-        if (location.Draft == SchemaDraft.Draft7 && schema.TryGetProperty("$ref", out _)) return referencedObject;
-        if (schema.TryGetProperty("type", out JsonElement type))
-            return type.ValueKind == JsonValueKind.String ? TypeMask(type) == 8
-                : type.ValueKind == JsonValueKind.Array && type.GetArrayLength() > 0
-                    && type.EnumerateArray().All(alternative => TypeMask(alternative) == 8);
-        return referencedObject || ObjectUnion("anyOf") || ObjectUnion("oneOf")
-            || schema.TryGetProperty("allOf", out JsonElement intersection)
-                && intersection.GetArrayLength() == 1 && KnownObject(intersection[0]);
-
-        bool KnownObject(JsonElement candidate) => proofs.TryGetValue(candidate, out bool result) && result;
-
-        bool ObjectUnion(string keyword) => schema.TryGetProperty(keyword, out JsonElement branches)
-            && branches.GetArrayLength() > 0 && branches.EnumerateArray().All(KnownObject);
-    }
 
     private enum SchemaDraft { Draft7, Draft202012, RetainSiblings, Unknown }
     private enum ResourceOrigin { Implicit, Relative, Absolute }

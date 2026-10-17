@@ -15,8 +15,9 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 {
     public string? EstimateDiagnostic => null;
 
-    /// <summary>The local o200k estimate of the request; see <see cref="LocalEstimate"/>.</summary>
-    public ValueTask<ContextEstimate?> EstimateAsync(LlmConnection connection, LlmChatRequest request,
+    /// <summary>The local o200k estimate of the request; see <see cref="LocalEstimate"/>. A provider with its own
+    /// tokenizer overrides it.</summary>
+    public virtual ValueTask<ContextEstimate?> EstimateAsync(LlmConnection connection, LlmChatRequest request,
         IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources,
         CancellationToken cancellationToken) =>
         ValueTask.FromResult<ContextEstimate?>(LocalEstimate(connection, request, resources));
@@ -200,8 +201,11 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 }
                 JsonObject payload = BuildPayload(connection, request, enforcement, (capabilities.SupportsStreaming != InferenceSupport.Unsupported), resources);
                 RequestJson.ApplyProviderOptions(payload, connection, request);
+                IReadOnlyList<string> mcpSecrets = await RemoteMcpAuthorization.ApplyAsync(payload, request.HostedTools, cancellationToken)
+                    .ConfigureAwait(false);
                 Fence();
-                iterator = StreamResponseAsync(connection, request, payload, capabilities, enforcement, consumption, resources is not null, cancellationToken)
+                iterator = StreamResponseAsync(connection, request, payload, capabilities, enforcement, consumption, resources is not null,
+                        mcpSecrets, cancellationToken)
                     .GetAsyncEnumerator(cancellationToken);
             }
             catch (Exception error)
@@ -247,7 +251,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 
     private async IAsyncEnumerable<LlmStreamEvent> StreamResponseAsync(LlmConnection connection, LlmChatRequest request,
         JsonObject payload, LlmProviderCapabilities capabilities, LlmStructuredOutputEnforcement? enforcement,
-        SdkHttpConsumption.Operation consumption, bool resourceAdmitted,
+        SdkHttpConsumption.Operation consumption, bool resourceAdmitted, IReadOnlyList<string> payloadSecrets,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         HttpRequestMessage? httpRequest = null;
@@ -266,7 +270,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 ApplyRequestHeaders(httpRequest, connection, request);
                 credential = LlmCredential.Parse(connection.Credential);
                 response = await Http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-                secrets = httpRequest.Headers.SelectMany(header => header.Value).ToArray();
+                secrets = [.. httpRequest.Headers.SelectMany(header => header.Value), .. payloadSecrets];
                 observation = ObserveAccountUsage(response) is { } observed
                     ? consumption.Publish<LlmStreamEvent>(new AccountUsageObservedEvent(observed)) : null;
             }

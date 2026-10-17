@@ -1,4 +1,3 @@
-using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Embedding;
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
@@ -10,7 +9,7 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-/// <summary>Unregistered text/float protocol adapter. The supplied connection and HTTP client remain borrowed.</summary>
+/// <summary>Grok text embeddings through the xAI embeddings endpoint (B17). The model must be one the account lists.</summary>
 internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
 {
     public bool Supports(LlmTransport transport) => transport == LlmTransport.XaiResponses;
@@ -20,8 +19,6 @@ internal sealed class XaiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
         ArgumentNullException.ThrowIfNull(connection);
         ArgumentNullException.ThrowIfNull(request);
         XaiRequestHeaders.ValidateEndpoint(connection);
-        if ((connection.Xai?.ServiceTier ?? XaiServiceTier.Default) != XaiServiceTier.Default)
-            throw new NotSupportedException("This embedding adapter does not implement a service-tier control.");
         ProviderHttp.ValidateAdditionalHeaders(connection.AdditionalHeaders);
         _ = XaiAuthorization.Require(connection);
         if (string.IsNullOrWhiteSpace(request.ModelId))

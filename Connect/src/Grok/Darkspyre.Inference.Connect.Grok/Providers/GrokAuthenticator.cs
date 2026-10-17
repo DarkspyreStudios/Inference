@@ -1,10 +1,15 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-internal sealed class XaiAuthenticator(HttpClient http) : OAuthAuthenticatorBase(http), IXaiDeviceLogin
+/// <summary>
+/// Signs in to a Grok subscription with the xAI device-code flow (B2). A credential is returned only after
+/// <c>GET /v1/me</c> names the account and the account is not team-blocked.
+/// </summary>
+internal sealed class GrokAuthenticator(HttpClient http) : OAuthAuthenticatorBase(http), ILlmDeviceLogin
 {
     private const string AuthBase = "https://auth.x.ai";
     private const string Scopes = "openid profile email offline_access grok-cli:access api:access";
@@ -25,7 +30,7 @@ internal sealed class XaiAuthenticator(HttpClient http) : OAuthAuthenticatorBase
                 ["scope"] = Scopes
             });
             using HttpResponseMessage response = await Http.SendAsync(request, cancellationToken);
-            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, cancellationToken: cancellationToken);
+            await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, null, [], cancellationToken);
             using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             JsonElement root = document.RootElement;
@@ -85,7 +90,7 @@ internal sealed class XaiAuthenticator(HttpClient http) : OAuthAuthenticatorBase
 
                     if (code is "access_denied" or "expired_token")
                     {
-                        throw new LlmProviderException("Grok device authorization ended; start sign-in again.",
+                        throw new LlmProviderException("Grok sign-in was denied or expired. Start sign-in again.",
                             Transport, response.StatusCode, code,
                             requestId: ProviderHttp.ReadRequestId(response, null, [deviceAuthId, userCode]),
                             retryAfter: response.Headers.RetryAfter?.Delta,
@@ -113,8 +118,7 @@ internal sealed class XaiAuthenticator(HttpClient http) : OAuthAuthenticatorBase
                 if (blocked.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw ProtocolFailure();
                 if (blocked.GetBoolean())
                 {
-                    throw XaiErrorClassifier.EntitlementFailure(System.Net.HttpStatusCode.Forbidden,
-                        "The Grok account's team is blocked.");
+                    throw new InferenceException(InferenceFailureCode.AccessDenied, "This Grok account is not entitled to API access.");
                 }
             }
 

@@ -14,16 +14,6 @@ internal static class XaiUsage
         return EnrichUsage(observed, usage);
     }
 
-    internal static LlmUsage? Media(JsonElement? observed)
-    {
-        if (observed is not { } usage) return null;
-        return EnrichUsage(new(LlmJson.GetInt(usage, "input_tokens"), LlmJson.GetInt(usage, "output_tokens"), LlmJson.GetInt(usage, "total_tokens"))
-        {
-            CachedInputTokens = LlmJson.GetObject(usage, "input_tokens_details") is { } input ? LlmJson.GetInt(input, "cached_tokens") : null,
-            ReasoningOutputTokens = LlmJson.GetObject(usage, "output_tokens_details") is { } output ? LlmJson.GetInt(output, "reasoning_tokens") : null
-        }, usage);
-    }
-
     private static LlmUsage EnrichUsage(LlmUsage observed, JsonElement usage)
     {
         Dictionary<LlmHostedToolKind, int>? counts = null;

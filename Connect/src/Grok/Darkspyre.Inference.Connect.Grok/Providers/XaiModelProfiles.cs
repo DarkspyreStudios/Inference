@@ -5,7 +5,16 @@ using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-internal sealed record XaiMultiAgentProfile(IReadOnlyDictionary<string, int> AgentCounts);
+/// <summary>A multi-agent model's two agent counts: Low runs under reasoning effort low, High under high.</summary>
+internal sealed record XaiMultiAgentProfile(int Low, int High)
+{
+    /// <summary>The counts the model offers, in ascending order.</summary>
+    internal IReadOnlyList<int> AgentCounts => [Low, High];
+
+    /// <summary>The reasoning effort that runs the offered count nearest <paramref name="count"/>; between two equally
+    /// near counts, the larger, as the request normalizer chooses.</summary>
+    internal string Effort(int count) => Math.Abs((long)count - High) <= Math.Abs((long)count - Low) ? "high" : "low";
+}
 
 internal sealed record XaiModelProfile(
     IReadOnlySet<LlmReasoningLevel> ReasoningLevels,
@@ -14,7 +23,7 @@ internal sealed record XaiModelProfile(
     InferenceSupport AcceptsImages = InferenceSupport.Unknown,
     XaiMultiAgentProfile? MultiAgent = null);
 
-/// <summary>Catalog facts take precedence over documented model-family fallbacks.</summary>
+/// <summary>Grok model facts: catalog facts take precedence over documented model-family fallbacks.</summary>
 internal static class XaiModelProfiles
 {
     private static readonly XaiModelProfile Unknown = new(LlmReasoningEffort.Levels(), null, InferenceSupport.Unknown);
@@ -29,8 +38,7 @@ internal static class XaiModelProfiles
     [
         ("grok-4.20-0309-non-reasoning", NonReasoning),
         ("grok-4.20-non-reasoning", NonReasoning),
-        ("grok-4.20-multi-agent", new(LlmReasoningEffort.Levels(), null, InferenceSupport.Supported, MultiAgent: new(
-            new Dictionary<string, int>(StringComparer.Ordinal) { ["low"] = 4, ["medium"] = 4, ["high"] = 16, ["xhigh"] = 16 }.ToFrozenDictionary(StringComparer.Ordinal)))),
+        ("grok-4.20-multi-agent", new(LlmReasoningEffort.Levels(), null, InferenceSupport.Supported, MultiAgent: new(Low: 4, High: 16))),
         ("grok-4.7", Reasoning),
         ("grok-4.6", Reasoning),
         ("grok-4.5", new(LlmReasoningEffort.Levels(LlmReasoningLevel.Low, LlmReasoningLevel.Medium, LlmReasoningLevel.High), LlmReasoningLevel.High, InferenceSupport.Supported))
@@ -56,19 +64,11 @@ internal static class XaiModelProfiles
         return profile;
     }
 
-    internal static string MultiAgentEffort(XaiMultiAgentProfile profile, int count)
-    {
-        if (profile.AgentCounts.TryGetValue("low", out int low) && count == low) return "low";
-        if (profile.AgentCounts.TryGetValue("high", out int high) && count == high) return "high";
-        throw new NotSupportedException("The selected multi-agent profile does not support the requested agent count.");
-    }
-
     internal static LlmReasoningLevel? MapReasoning(XaiModelProfile profile,
         IReadOnlySet<LlmReasoningLevel> offered, LlmReasoningLevel? requested)
     {
-        if (requested is null) return null;
-        if (profile.MultiAgent is not null)
-            throw new NotSupportedException("Grok multi-agent effort selects agent count; this adapter has no independent reasoning-depth mapping. Use typed agent-count controls.");
+        // A multi-agent model's effort is its agent count, so a requested level is dropped (B8, B15).
+        if (requested is null || profile.MultiAgent is not null) return null;
         // Each row names Grok's downward mappings, then its below-minimum choices in ascending order.
         LlmReasoningLevel[] row = requested.Value switch
         {

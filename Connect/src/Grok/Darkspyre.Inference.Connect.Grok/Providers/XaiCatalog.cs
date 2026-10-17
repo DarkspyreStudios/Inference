@@ -7,7 +7,18 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-/// <summary>Stateless REST reader and observed-fact merger. LlmModelListCache owns shared production.</summary>
+/// <summary>The xAI model lists the Grok connection reads: the generic list and the chat and embedding lists.</summary>
+internal enum ModelCatalogPart
+{
+    /// <summary>GET models: every model the account can use.</summary>
+    Generic,
+    /// <summary>GET language-models: the chat models, with their modalities and reasoning facts.</summary>
+    Chat,
+    /// <summary>GET embedding-models: the embedding models.</summary>
+    Embedding
+}
+
+/// <summary>Reads the xAI model lists and merges the generic list's facts into each specific model.</summary>
 internal static class XaiCatalog
 {
     [SuppressMessage("Design", "CA1031", Justification = "Owned request/response cleanup preserves independent operation and cleanup failures.")]
@@ -18,8 +29,6 @@ internal static class XaiCatalog
         {
             ModelCatalogPart.Generic => ("models", "data"),
             ModelCatalogPart.Chat => ("language-models", "models"),
-            ModelCatalogPart.Image => ("image-generation-models", "models"),
-            ModelCatalogPart.Video => ("video-generation-models", "models"),
             ModelCatalogPart.Embedding => ("embedding-models", "models"),
             _ => throw new ArgumentOutOfRangeException(nameof(part))
         };

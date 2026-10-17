@@ -39,6 +39,9 @@
   <Folder Name="/src/Antigravity/">
     <Project Path="src/Antigravity/Darkspyre.Inference.Connect.Antigravity/Darkspyre.Inference.Connect.Antigravity.csproj" />
   </Folder>
+  <Folder Name="/src/Grok/">
+    <Project Path="src/Grok/Darkspyre.Inference.Connect.Grok/Darkspyre.Inference.Connect.Grok.csproj" />
+  </Folder>
   <Folder Name="/src/HostTools/">
     <Project Path="src/HostTools/Darkspyre.Inference.Connect.HostTools.Contracts/Darkspyre.Inference.Connect.HostTools.Contracts.csproj" />
     <Project Path="src/HostTools/Darkspyre.Inference.Connect.HostTools.Service/Darkspyre.Inference.Connect.HostTools.Service.csproj" />

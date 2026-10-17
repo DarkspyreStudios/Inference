@@ -5,7 +5,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>Darkspyre.Inference.Connect.Common</AssemblyName>
     <Description>Universal conversation and embedding contracts, shared provider infrastructure and automatic Connect discovery.</Description>
-    <PackageTags>llm;ai;openai;anthropic;claude;codex;gemini;antigravity;tool-use;structured-output</PackageTags>
+    <PackageTags>llm;ai;openai;anthropic;claude;codex;gemini;antigravity;grok;tool-use;structured-output</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -35,13 +35,10 @@
     <Compile Remove="Providers/Apple*.cs;Providers/ManagedAppleAgentClient.cs" />
     <Compile Remove="Providers/ChatCompletionsLlmClientBase.cs;Providers/OpenAiCompatibleChatLlmClient.cs;Providers/ManagedOpenAiCompatibleAgentClient.cs" />
     <Compile Remove="Providers/GeminiApiLlmClient*.cs;Providers/ManagedGeminiApiAgentClient.cs" />
-    <Compile Remove="Providers/Xai*.cs;Providers/ManagedXaiAgentClient.cs" />
     <Compile Remove="Internal/AnthropicContentStream.cs;Internal/AnthropicProgrammaticSchemas.cs;Internal/AnthropicPromptCache.cs;Internal/AnthropicSchemas.cs;Internal/AnthropicToolContinuation.cs;Internal/AnthropicTools.cs" />
     <Compile Remove="Internal/ChatReasoning.cs;Internal/OpenAiCompatibleChatContinuationCodec.cs;Internal/OpenRouter*.cs;Internal/ProviderTokenCounting.cs" />
     <Compile Remove="Internal/Gemini/**" />
     <Compile Include="Internal/Gemini/GeminiCacheBindings.cs;Internal/Gemini/GoogleCacheData.cs" />
-    <Compile Remove="Internal/Xai*.cs;Internal/DocumentSearchEnumConverters.cs" />
-    <Compile Remove="DocumentSearch.cs;XaiFamilyBinding.cs;XaiFileStorageOptions.cs;XaiSkills.cs;LlmProviderService.Xai.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -49,6 +46,7 @@
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Codex" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Claude" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Antigravity" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Grok" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.OpenAiApi" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.SelfHost" />
   </ItemGroup>

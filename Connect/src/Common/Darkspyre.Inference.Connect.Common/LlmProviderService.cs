@@ -394,6 +394,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         switch (connection.Transport)
         {
             case LlmTransport.OpenAiCodex:
+            case LlmTransport.XaiResponses:
                 ILlmDeviceLogin login = DeviceLogin(connection.Transport);
                 LlmDeviceCode code = await login.StartAsync(cancellationToken);
                 await prompt.ShowDeviceCodeAsync(code, cancellationToken);

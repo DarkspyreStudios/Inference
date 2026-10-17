@@ -28,7 +28,7 @@ internal static class LlmContextOverflow
     internal static bool Http(LlmTransport transport, string? code, string? type, string? message) => transport switch
     {
         LlmTransport.OpenAiResponses => OpenAiApi(code, type, message),
-        LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses => Responses(code),
+        LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses or LlmTransport.XaiResponses => Responses(code),
         LlmTransport.OpenAiCompatibleChat or LlmTransport.AzureOpenAiChat => Chat(code, message),
         // Vertex Claude reaches this boundary through the same Anthropic Messages adapter.
         LlmTransport.AnthropicMessages or LlmTransport.GoogleVertexAi => Anthropic(type, message),
