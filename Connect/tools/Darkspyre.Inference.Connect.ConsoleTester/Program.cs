@@ -96,6 +96,8 @@ internal static class Program
                 "managed-probe" when invocation.Provider.Transport == LlmTransport.OpenAiCodex =>
                     await ManagedAgentProbe.RunAsync(agent, invocation.Provider.ConnectionId,
                         ParsePromptOptions(invocation.CommandArguments).Model, cancellation.Token),
+                "grok-probe" when invocation.Provider.Transport == LlmTransport.XaiResponses =>
+                    await GrokProbe.RunAsync(llms, agent, invocation, cancellation.Token),
                 "limit-probe" => await LimitProbe.RunAsync(llms, agent, invocation, cancellation.Token),
                 "agent" => await RunAgentAsync(
                     llms,
@@ -894,7 +896,7 @@ internal static class Program
               darkspyre-inference-connect-tester apple-probe --provider apple [--helper <path>] [--case all|text|structured|tools|agent|cancel] [--repeat 1..20] [--timeout-seconds 1..600] [--model <id>]
               darkspyre-inference-connect-tester prompt --provider apple [--helper <path>] [--model <id>] [--schema <file>]
               darkspyre-inference-connect-tester agent --provider apple [--helper <path>] [--model <id>]
-              darkspyre-inference-connect-tester login  --provider <codex|claude|antigravity>
+              darkspyre-inference-connect-tester login  --provider <codex|claude|antigravity|grok>
               darkspyre-inference-connect-tester login  --provider bedrock --profile <aws-profile> --region <aws-region>
               darkspyre-inference-connect-tester login  --provider agentcore --harness-arn <arn> --profile <aws-profile> --region <aws-region>
               darkspyre-inference-connect-tester status --provider <codex|claude|antigravity|bedrock|agentcore> [--harness-arn <arn>]
@@ -905,6 +907,7 @@ internal static class Program
               darkspyre-inference-connect-tester codex-probe --provider codex --model <model-id>
               darkspyre-inference-connect-tester managed-probe --provider codex --model <model-id>
               darkspyre-inference-connect-tester limit-probe --provider claude [--model <id>]
+              darkspyre-inference-connect-tester grok-probe --provider grok [--model <id>] [--case all|strict|hosted-search|multi-agent|compaction] [--repeat 1..20] [--timeout-seconds 1..600]
               darkspyre-inference-connect-tester prompt --provider <codex|claude|antigravity|bedrock|agentcore> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--non-streaming]
               darkspyre-inference-connect-tester agent  --provider <codex|claude|agentcore|antigravity|bedrock> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--max-model-iterations <positive integer>]
 
@@ -934,7 +937,10 @@ internal static class Program
             runtime policy for Antigravity, whose own settings decide its permissions.
             Exit codes: 0 passed, 1 failed, 3 skipped prerequisites, 130 cancelled (invalid invocation: 2).
 
-            Codex login uses ChatGPT device OAuth, stored in Darkspyre.SecureStore for direct requests.
+            Codex login uses ChatGPT device OAuth, and Grok login uses xAI device OAuth; both are stored in
+            Darkspyre.SecureStore for direct requests.
+            grok-probe runs explicit subscription turns on Grok: a schema-checked host tool, hosted web and X search,
+            a 16-agent fast-tier turn and provider compaction. It never retries a failed case.
             Claude and Antigravity login verify the official CLI's existing login. Their CLI
             credentials remain owned by the official CLI and are not copied into Darkspyre.SecureStore.
             Bedrock and AgentCore login store only the AWS profile name and region; the AWS SDK resolves

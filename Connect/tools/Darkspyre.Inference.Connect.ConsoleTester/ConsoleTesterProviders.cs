@@ -42,6 +42,7 @@ internal sealed class ConsoleTesterProviders(IEnumerable<ILlmClient> clients)
         "chatgpt-subscription" => "codex",
         "claude-subscription" => "claude",
         "gemini-subscription" => "antigravity",
+        "grok-subscription" => "grok",
         "bedrock-aws-profile" => "bedrock",
         "bedrock-agentcore-harness" => "agentcore",
         "apple-foundation-models" => "apple",
