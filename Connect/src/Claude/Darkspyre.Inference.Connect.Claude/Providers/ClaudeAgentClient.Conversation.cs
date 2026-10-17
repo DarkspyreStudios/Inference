@@ -45,7 +45,7 @@ internal sealed partial class ClaudeAgentClient
         private readonly Lock _sync = new();
         // ModelId follows the model the turns select, so a reopened CLI starts on it.
         private LlmAgentSessionOptions _options;
-        private LlmAgentContext _saved;
+        private readonly SavedConversation _history;
         // Null when no CLI session is open: the next turn or compaction opens one with the saved history.
         private ClaudeAgentSession? _inner;
         private IReadOnlyList<LlmModel>? _catalog;
@@ -53,13 +53,6 @@ internal sealed partial class ClaudeAgentClient
         private int _generation = -1;
         private int _nextGeneration;
         private ActiveTurn? _turn;
-        // The last step's reported input and output, and the record sequence at that report.
-        private long? _reportedTokens;
-        private long _reportedMark;
-        private long _sequence;
-        private readonly Dictionary<string, long> _recordedAt = new(StringComparer.Ordinal);
-        // The local estimate of the first step of the open inner session, observed against its reported input.
-        private long? _firstStepEstimate;
         private Task? _retirement;
 
         internal ClaudeConversation(ClaudeAgentClient owner, string connectionId, LlmConnection connection,
@@ -81,7 +74,8 @@ internal sealed partial class ClaudeAgentClient
                 : string.IsNullOrEmpty(options.Instructions) ? toolList : $"{options.Instructions}\n\n{toolList}";
             _execution = options.ExecutionOptions ?? new();
             _options = options with { Context = null, ToolHandler = options.ToolHandler is null ? null : HandleToolAsync };
-            _saved = history;
+            _history = new SavedConversation(connectionId, connection, owner.Chat, owner.Learned, _execution, _framing,
+                options.CallerServices?.Resources, Model, history);
             _compactor = new(MeasureForCompactionAsync, SideRequestAsync, EstimateText, options.CallerServices?.Transcript);
         }
 
@@ -105,9 +99,7 @@ internal sealed partial class ClaudeAgentClient
             {
                 bool native = !_ephemeral
                     && _owner.Processes.SessionSaved(CliInfrastructure.NormalizeWorkingDirectory(_workingDirectory), id);
-                LlmAgentContext saved;
-                lock (_sync) { saved = _saved; }
-                _ = await OpenAndInstallAsync(native ? new() : saved, replaceHistory: false, cancellationToken, (id, native));
+                _ = await OpenAndInstallAsync(native ? new() : _history.Saved, replaceHistory: false, cancellationToken, (id, native));
             }
             else
             {
@@ -209,7 +201,7 @@ internal sealed partial class ClaudeAgentClient
             string modelId;
             lock (_sync) { modelId = prospectiveTurn?.ModelId ?? _turn?.ModelId ?? _options.ModelId; }
             LlmChatMessage? input = prospectiveTurn is null ? null : ManagedAgentSession.UserMessage(ClientTools.Snapshot(prospectiveTurn));
-            return (await MeasureAsync(modelId, input, observe: false, cancellationToken)).Status;
+            return await _history.StatusAsync(modelId, input, observe: false, cancellationToken);
         }
 
         public async Task InterruptAsync(string turnId, CancellationToken cancellationToken = default)
@@ -334,7 +326,7 @@ internal sealed partial class ClaudeAgentClient
                     bool midTurn = turn.Record.HasSteps;
                     if (!midTurn)
                     {
-                        RemoveEntry(turn.Record.InputId);
+                        _history.Remove(turn.Record.InputId);
                         turn.PendingInput = input;
                     }
                     await ObserveRefusalAsync(turn, completion.Error);
@@ -379,8 +371,8 @@ internal sealed partial class ClaudeAgentClient
                             break;
                         case LlmAgentUsageEvent usage:
                             // Each CLI process reports totals for its own turn only.
-                            turn.InnerTotals = usage.RunTotals;
-                            turn.Write(usage with { ThreadId = ThreadId, TurnId = turn.Id, RunTotals = turn.Totals(usage.RunTotals) });
+                            turn.Usage.InnerTotals = usage.RunTotals;
+                            turn.Write(usage with { ThreadId = ThreadId, TurnId = turn.Id, RunTotals = turn.Usage.Totals(usage.RunTotals) });
                             break;
                         default:
                             turn.Write(item with { ThreadId = ThreadId, TurnId = turn.Id });
@@ -391,7 +383,7 @@ internal sealed partial class ClaudeAgentClient
             finally
             {
                 lock (_sync) { turn.InnerTurnId = null; }
-                turn.FoldInnerTotals();
+                turn.Usage.FoldInner();
             }
             if (completion is null && !turn.TakeReopen())
                 throw new LlmProviderException("Claude CLI ended the turn without a result.", LlmTransport.AnthropicClaudeCli,
@@ -402,9 +394,9 @@ internal sealed partial class ClaudeAgentClient
         /// <summary>Decision point (a): measures, reports and compacts at or above the trigger. False when the turn ended.</summary>
         private async Task<bool> DecideAsync(ActiveTurn turn)
         {
-            Measurement measured = await MeasureAsync(turn.ModelId, turn.PendingInput, observe: true, turn.Token);
-            turn.Write(new LlmAgentContextStatusEvent(ThreadId, turn.Id, measured.Status));
-            return measured.Status.NeedsCompaction is not true || Preserve || await ReopenAsync(turn);
+            LlmAgentContextStatus measured = await _history.StatusAsync(turn.ModelId, turn.PendingInput, observe: true, turn.Token);
+            turn.Write(new LlmAgentContextStatusEvent(ThreadId, turn.Id, measured));
+            return measured.NeedsCompaction is not true || Preserve || await ReopenAsync(turn);
         }
 
         /// <summary>
@@ -420,11 +412,11 @@ internal sealed partial class ClaudeAgentClient
             }
             if (turn is null) return false;
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, turn.Token);
-            Measurement measured;
-            try { measured = await MeasureAsync(turn.ModelId, null, observe: false, linked.Token); }
+            LlmAgentContextStatus measured;
+            try { measured = await _history.StatusAsync(turn.ModelId, null, observe: false, linked.Token); }
             catch (OperationCanceledException) when (turn.Token.IsCancellationRequested) { return false; }
-            turn.Write(new LlmAgentContextStatusEvent(ThreadId, turn.Id, measured.Status));
-            if (measured.Status.NeedsCompaction is not true || Preserve) return false;
+            turn.Write(new LlmAgentContextStatusEvent(ThreadId, turn.Id, measured));
+            if (measured.NeedsCompaction is not true || Preserve) return false;
             turn.RequestReopen();
             return true;
         }
@@ -436,15 +428,10 @@ internal sealed partial class ClaudeAgentClient
         private async Task<bool> ReopenAsync(ActiveTurn turn)
         {
             CancellationToken token = turn.Token;
-            CompactionLimits? limits = Limits(turn.ModelId);
+            CompactionLimits? limits = _history.Limits(turn.ModelId);
             await CloseInnerAsync();
-            LlmAgentContext source;
-            HashSet<string> protectedIds;
-            lock (_sync)
-            {
-                source = _saved;
-                protectedIds = ConversationCompactor.ProtectedEntries(source, turn.Id, _toolsByName);
-            }
+            LlmAgentContext source = _history.Saved;
+            HashSet<string> protectedIds = ConversationCompactor.ProtectedEntries(source, turn.Id, _toolsByName);
             string itemId = Guid.NewGuid().ToString("N");
             CompactionResult? result = null;
             if (limits is not null)
@@ -460,8 +447,8 @@ internal sealed partial class ClaudeAgentClient
                     LlmUsage? failedUsage = error is CompactionFailedException failed ? failed.Usage : ((LlmProviderException)error).Usage;
                     if (failedUsage is not null)
                     {
-                        turn.AddUsage(failedUsage);
-                        turn.Write(new LlmAgentUsageEvent(ThreadId, turn.Id, Guid.NewGuid().ToString("N"), failedUsage, turn.Totals(null)));
+                        turn.Usage.Add(failedUsage);
+                        turn.Write(new LlmAgentUsageEvent(ThreadId, turn.Id, Guid.NewGuid().ToString("N"), failedUsage, turn.Usage.Totals(null)));
                     }
                     turn.Write(new LlmAgentTurnCompletedEvent(ThreadId, turn.Id, LlmAgentCompletionReason.ProviderFailure, error.Message));
                     return false;
@@ -479,13 +466,13 @@ internal sealed partial class ClaudeAgentClient
                 turn.Write(Compacted(turn.Id, requestId, revision, result!));
                 if (result!.Usage is not null)
                 {
-                    turn.AddUsage(result.Usage);
-                    turn.Write(new LlmAgentUsageEvent(ThreadId, turn.Id, requestId, result.Usage, turn.Totals(null)));
+                    turn.Usage.Add(result.Usage);
+                    turn.Write(new LlmAgentUsageEvent(ThreadId, turn.Id, requestId, result.Usage, turn.Usage.Totals(null)));
                 }
             }
             // The next send is the first step of the new CLI session: its measure is reported and observed.
-            Measurement measured = await MeasureAsync(turn.ModelId, turn.PendingInput, observe: true, token);
-            turn.Write(new LlmAgentContextStatusEvent(ThreadId, turn.Id, measured.Status));
+            LlmAgentContextStatus measured = await _history.StatusAsync(turn.ModelId, turn.PendingInput, observe: true, token);
+            turn.Write(new LlmAgentContextStatusEvent(ThreadId, turn.Id, measured));
             return true;
         }
 
@@ -501,14 +488,10 @@ internal sealed partial class ClaudeAgentClient
             try
             {
                 await EnsureOpenAsync(cancellationToken);
-                LlmAgentContext source;
+                LlmAgentContext source = _history.Saved;
                 string modelId;
-                lock (_sync)
-                {
-                    source = _saved;
-                    modelId = _options.ModelId;
-                }
-                CompactionLimits? limits = Limits(modelId);
+                lock (_sync) { modelId = _options.ModelId; }
+                CompactionLimits? limits = _history.Limits(modelId);
                 if (source.Entries.Count == 0 || limits is null) return null;
                 // No turn is running, so no result is protected and the last turn stays whole.
                 string lastTurnId = source.Entries[^1].TurnId;
@@ -562,9 +545,7 @@ internal sealed partial class ClaudeAgentClient
         private async Task EnsureOpenAsync(CancellationToken cancellationToken)
         {
             if (_inner is not null) return;
-            LlmAgentContext saved;
-            lock (_sync) { saved = _saved; }
-            _ = await OpenAndInstallAsync(saved, replaceHistory: false, cancellationToken);
+            _ = await OpenAndInstallAsync(_history.Saved, replaceHistory: false, cancellationToken);
         }
 
         /// <summary>
@@ -587,15 +568,11 @@ internal sealed partial class ClaudeAgentClient
                 retired = _retirement is not null;
                 if (!retired)
                 {
-                    if (replaceHistory) _saved = opening with { Revision = checked(_saved.Revision + 1) };
                     _inner = session;
                     _generation = generation;
                     _catalog = session.Connection.Catalog;
-                    _reportedTokens = null;
-                    _recordedAt.Clear();
-                    _firstStepEstimate = null;
                 }
-                revision = _saved.Revision;
+                revision = retired ? _history.Saved.Revision : _history.Install(opening, replaceHistory);
             }
             if (retired)
             {
@@ -633,15 +610,11 @@ internal sealed partial class ClaudeAgentClient
                 if (generation != _generation || _turn is not { } turn) return;
                 if (item is LlmAgentUsageEvent)
                 {
-                    if (_inner?.LastStepUsage is not { InputTokens: int input } step) return;
-                    _reportedTokens = (long)input + (step.OutputTokens ?? 0);
-                    _reportedMark = _sequence;
-                    if (_firstStepEstimate is long estimate && Limits(turn.ModelId) is { } limits)
-                        _owner.Learned.ObserveReport(_connectionId, turn.ModelId, estimate, input, limits.UsableWindow);
-                    _firstStepEstimate = null;
+                    if (_inner?.LastStepUsage is { InputTokens: int input } step)
+                        _history.ObserveReport(turn.ModelId, input, step.OutputTokens);
                     return;
                 }
-                foreach (LlmAgentContextEntry entry in turn.Record.Apply(item)) Upsert(entry);
+                foreach (LlmAgentContextEntry entry in turn.Record.Apply(item)) _history.Upsert(entry);
             }
         }
 
@@ -654,7 +627,7 @@ internal sealed partial class ClaudeAgentClient
             lock (_sync)
             {
                 if (generation != _generation || _turn is not { } turn || !turn.Steers.Remove(steerId, out LlmChatMessage? message)) return;
-                if (started) Upsert(new LlmAgentContextEntry(turn.Record.Steer(), turn.Id, message));
+                if (started) _history.Upsert(new LlmAgentContextEntry(turn.Record.Steer(), turn.Id, message));
             }
         }
 
@@ -667,7 +640,7 @@ internal sealed partial class ClaudeAgentClient
             lock (_sync)
             {
                 foreach (LlmChatMessage message in turn.Steers.Values)
-                    Upsert(new LlmAgentContextEntry(turn.Record.Steer(), turn.Id, message));
+                    _history.Upsert(new LlmAgentContextEntry(turn.Record.Steer(), turn.Id, message));
                 turn.Steers.Clear();
             }
         }
@@ -676,70 +649,13 @@ internal sealed partial class ClaudeAgentClient
         {
             lock (_sync)
             {
-                Upsert(new LlmAgentContextEntry(turn.Record.InputId, turn.Id, input));
+                _history.Upsert(new LlmAgentContextEntry(turn.Record.InputId, turn.Id, input));
                 turn.PendingInput = null;
             }
         }
 
-        /// <summary>Replaces the entry with the same id in place, or appends it. Caller holds _sync.</summary>
-        private void Upsert(LlmAgentContextEntry entry)
-        {
-            var entries = _saved.Entries.ToList();
-            int index = entries.FindIndex(existing => existing.Id == entry.Id);
-            if (index >= 0) entries[index] = entry;
-            else entries.Add(entry);
-            _saved = _saved with { Entries = entries, Revision = checked(_saved.Revision + 1) };
-            _recordedAt[entry.Id] = ++_sequence;
-        }
-
-        private void RemoveEntry(string id)
-        {
-            lock (_sync)
-            {
-                _saved = _saved with { Entries = [.. _saved.Entries.Where(entry => entry.Id != id)], Revision = checked(_saved.Revision + 1) };
-                _recordedAt.Remove(id);
-            }
-        }
-
-        /// <summary>
-        /// The corrected size of the next send. With a reported step, its input and output plus the entries recorded
-        /// after that report and the new input; otherwise the whole request the CLI would receive.
-        /// </summary>
-        private async Task<Measurement> MeasureAsync(string modelId, LlmChatMessage? input, bool observe,
-            CancellationToken cancellationToken)
-        {
-            LlmAgentContext saved;
-            long? reported;
-            LlmChatMessage[] after;
-            lock (_sync)
-            {
-                saved = _saved;
-                reported = _reportedTokens;
-                after = [.. saved.Entries.Where(entry => _recordedAt.TryGetValue(entry.Id, out long at) && at > _reportedMark)
-                    .Select(entry => entry.Message)];
-            }
-            LlmChatMessage[] added = input is null ? [] : [input];
-            var resources = await ResolveAsync(saved, added, cancellationToken);
-            ContextEstimate estimate;
-            if (reported is long tokens)
-            {
-                long local = Local(modelId, null, [.. after, .. added], resources);
-                estimate = new(tokens + Correct(modelId, local), IncludesProviderReport: true);
-            }
-            else
-            {
-                long local = Local(modelId, _framing, [.. saved.Entries.Select(entry => entry.Message), .. added], resources);
-                if (observe) lock (_sync) { _firstStepEstimate = local; }
-                estimate = new(Correct(modelId, local));
-            }
-            LlmModel model = Model(modelId);
-            LlmAgentContextPolicy policy = ManagedAgentPolicy.Normalize(_execution, model).ContextPolicy;
-            return new(ManagedAgentPolicy.Status(modelId, saved.Revision, estimate, policy, model,
-                _owner.Learned.Limit(_connectionId, modelId)));
-        }
-
         /// <summary>The corrected size of the whole request a CLI session opened with <paramref name="context"/> receives.</summary>
-        private async ValueTask<long> MeasureForCompactionAsync(LlmAgentContext context, CancellationToken cancellationToken)
+        private ValueTask<long> MeasureForCompactionAsync(LlmAgentContext context, CancellationToken cancellationToken)
         {
             string modelId;
             LlmChatMessage[] added;
@@ -748,22 +664,15 @@ internal sealed partial class ClaudeAgentClient
                 modelId = _turn?.ModelId ?? _options.ModelId;
                 added = _turn?.PendingInput is { } input ? [input] : [];
             }
-            var resources = await ResolveAsync(context, added, cancellationToken);
-            return Correct(modelId, Local(modelId, _framing, [.. context.Entries.Select(entry => entry.Message), .. added], resources));
+            return _history.MeasureAsync(context, modelId, added, cancellationToken);
         }
 
         /// <summary>The refused request's local size and the sizes the refusal names teach the model's rate and limit.</summary>
         private async Task ObserveRefusalAsync(ActiveTurn turn, string? detail)
         {
-            LlmAgentContext saved;
             LlmChatMessage[] added;
-            lock (_sync)
-            {
-                saved = _saved;
-                added = turn.PendingInput is { } input ? [input] : [];
-            }
-            var resources = await ResolveAsync(saved, added, turn.Token);
-            long estimate = Local(turn.ModelId, _framing, [.. saved.Entries.Select(entry => entry.Message), .. added], resources);
+            lock (_sync) { added = turn.PendingInput is { } input ? [input] : []; }
+            long estimate = await _history.EstimateAsync(_history.Saved, turn.ModelId, added, turn.Token);
             (long? reportedTokens, long? reportedLimit) = ReadRefusalSizes(detail);
             _owner.Learned.ObserveRefusal(_connectionId, turn.ModelId, estimate, reportedTokens, reportedLimit,
                 ClaudeModelLimits.Get(turn.ModelId).ContextTokens);
@@ -783,35 +692,7 @@ internal sealed partial class ClaudeAgentClient
         {
             string modelId;
             lock (_sync) { modelId = _turn?.ModelId ?? _options.ModelId; }
-            return Correct(modelId, Local(modelId, null, [new("user", text)], ResourceSizes.None));
-        }
-
-        private long Correct(string modelId, long local) => _owner.Learned.Correct(_connectionId, modelId, local);
-
-        /// <summary>
-        /// The local count of a request with these messages, as the Claude CLI client counts it. The chat route refuses
-        /// tool definitions, so a whole-request measure passes the tool list as text in <paramref name="instructions"/>.
-        /// </summary>
-        private long Local(string modelId, string? instructions, IReadOnlyList<LlmChatMessage> messages,
-            IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
-        {
-            if (messages.Count == 0 && string.IsNullOrWhiteSpace(instructions)) return 0;
-            return _owner.Chat.EstimateInputTokens(_connection, new LlmChatRequest
-            {
-                ModelId = modelId,
-                Instructions = instructions,
-                Messages = messages
-            }, resources)?.Tokens ?? 0;
-        }
-
-        private async Task<IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?>> ResolveAsync(
-            LlmAgentContext context, IReadOnlyList<LlmChatMessage> added, CancellationToken cancellationToken)
-        {
-            InferenceResourceReference[] references = [.. context.Entries.SelectMany(entry => ResourceSizes.References(entry.Message))
-                .Concat(context.SelectedResources).Concat(added.SelectMany(ResourceSizes.References))];
-            return _options.CallerServices?.Resources is { } access && references.Length > 0
-                ? await ResourceSizes.ResolveAsync(access, references, cancellationToken)
-                : ResourceSizes.None;
+            return _history.EstimateText(modelId, text);
         }
 
         /// <summary>The model's window and output limit: the open session's catalog entry when it has a size, else the
@@ -824,24 +705,10 @@ internal sealed partial class ClaudeAgentClient
             return new(modelId, modelId) { MaxContextTokens = limit.ContextTokens, MaxOutputTokens = limit.OutputTokens };
         }
 
-        private CompactionLimits? Limits(string modelId)
-        {
-            LlmModel model = Model(modelId);
-            return CompactionLimits.For(model.MaxContextTokens, _owner.Learned.Limit(_connectionId, modelId),
-                model.MaxOutputTokens, ManagedAgentPolicy.Normalize(_execution, model).ContextPolicy);
-        }
-
-        private sealed record Measurement(LlmAgentContextStatus Status);
-
         /// <summary>One running outer turn: its id, record, stream and cancellation, and the inner turn it forwards.</summary>
         private sealed class ActiveTurn(string id, TurnRecord record, ChannelWriter<LlmAgentEvent> writer,
             CancellationTokenSource cancellation)
         {
-            private readonly Lock _usage = new();
-            private LlmUsage? _base;
-            private bool _hasBase;
-            private LlmUsage? _innerTotals;
-            private bool _hasInnerTotals;
             private int _reopen;
 
             public string Id { get; } = id;
@@ -857,137 +724,13 @@ internal sealed partial class ClaudeAgentClient
             public bool Refused { get; set; }
             // The turn's input before it is recorded; measures and compaction count it.
             public LlmChatMessage? PendingInput { get; set; }
+            public TurnUsage Usage { get; } = new();
 
             public void Write(LlmAgentEvent item) => Writer.TryWrite(item);
 
             public void RequestReopen() => Volatile.Write(ref _reopen, 1);
 
             public bool TakeReopen() => Interlocked.Exchange(ref _reopen, 0) == 1;
-
-            public LlmUsage? InnerTotals
-            {
-                set { lock (_usage) { _innerTotals = value; _hasInnerTotals = true; } }
-            }
-
-            /// <summary>The turn's totals so far plus an inner session's own totals.</summary>
-            public LlmUsage? Totals(LlmUsage? inner)
-            {
-                lock (_usage)
-                {
-                    if (inner is null) return _hasBase ? _base : null;
-                    return _hasBase ? UsageTotals.Add(_base, inner, first: false) : inner;
-                }
-            }
-
-            public void AddUsage(LlmUsage? usage)
-            {
-                lock (_usage)
-                {
-                    _base = UsageTotals.Add(_base, usage, first: !_hasBase);
-                    _hasBase = true;
-                }
-            }
-
-            /// <summary>Adds an ended inner session's final totals to the turn's totals.</summary>
-            public void FoldInnerTotals()
-            {
-                LlmUsage? inner;
-                lock (_usage)
-                {
-                    if (!_hasInnerTotals) return;
-                    inner = _innerTotals;
-                    _hasInnerTotals = false;
-                    _innerTotals = null;
-                }
-                AddUsage(inner);
-            }
-        }
-
-        /// <summary>
-        /// One turn's entries in the shape the Host's native transcript uses: the input as one user message, each model
-        /// step as one assistant message with its calls, followed by one user message with their results in call order.
-        /// Entry ids are <c>{turnId}-{n}</c>, counted from 0 within the turn.
-        /// </summary>
-        private sealed class TurnRecord(string turnId, bool recordsCalls)
-        {
-            private int _next = 1;
-            private Step? _step;
-
-            public string InputId { get; } = $"{turnId}-0";
-
-            /// <summary>The turn recorded a model step.</summary>
-            public bool HasSteps { get; private set; }
-
-            /// <summary>The next arrival starts a new step: the current one is in a compacted history.</summary>
-            public void Close() => _step = null;
-
-            /// <summary>The id of a steer's user message. The model's next output starts a new step after it.</summary>
-            public string Steer()
-            {
-                _step = null;
-                return NextId();
-            }
-
-            /// <summary>The entries an event changed.</summary>
-            public IReadOnlyList<LlmAgentContextEntry> Apply(LlmAgentEvent item)
-            {
-                switch (item)
-                {
-                    case LlmAgentMessageCompletedEvent { Text.Length: > 0 } message:
-                        {
-                            Step step = Open();
-                            step.Text.Add(message.Text);
-                            return step.Entries(turnId);
-                        }
-                    case LlmAgentToolEvent { Status: "inProgress" } call when recordsCalls:
-                        {
-                            Step step = Open();
-                            if (step.Calls.Any(existing => existing.Id == call.ItemId)) return [];
-                            step.ResultsId ??= NextId();
-                            step.Calls.Add(new LlmToolCall(call.ItemId, call.Tool, call.Arguments.GetRawText()));
-                            return step.Entries(turnId);
-                        }
-                    case LlmAgentToolEvent ended when recordsCalls && _step is { } current
-                        && current.Calls.Any(existing => existing.Id == ended.ItemId):
-                        current.Results[ended.ItemId] = ended.Output;
-                        current.HasResult = true;
-                        return current.Entries(turnId);
-                    default:
-                        return [];
-                }
-            }
-
-            /// <summary>The current step; an arrival after one of its results starts the next.</summary>
-            private Step Open()
-            {
-                if (_step is null || _step.HasResult) _step = new Step(NextId());
-                HasSteps = true;
-                return _step;
-            }
-
-            private string NextId() => $"{turnId}-{_next++}";
-
-            private sealed class Step(string assistantId)
-            {
-                public List<string> Text { get; } = [];
-                public List<LlmToolCall> Calls { get; } = [];
-                public Dictionary<string, LlmToolOutput?> Results { get; } = new(StringComparer.Ordinal);
-                public string? ResultsId { get; set; }
-                public bool HasResult { get; set; }
-
-                public IReadOnlyList<LlmAgentContextEntry> Entries(string turnId)
-                {
-                    var assistant = new LlmAgentContextEntry(assistantId, turnId,
-                        new LlmChatMessage("assistant", string.Join('\n', Text)) { ToolCalls = [.. Calls] });
-                    if (ResultsId is null) return [assistant];
-                    return [assistant, new LlmAgentContextEntry(ResultsId, turnId, new LlmChatMessage("user", string.Empty)
-                    {
-                        ToolResults = [.. Calls.Select(call => new LlmToolResult(call.Id,
-                            Results.TryGetValue(call.Id, out LlmToolOutput? output) && output is not null ? output
-                                : LlmToolOutput.FromText("No result was delivered for this call.", isError: true)))]
-                    })];
-                }
-            }
         }
     }
 }
