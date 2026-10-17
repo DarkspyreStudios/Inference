@@ -30,7 +30,7 @@ internal static class ProviderContinuationStateCodec
     /// </summary>
     public static bool Retains(LlmTransport transport) =>
         transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses or LlmTransport.AnthropicMessages
-            or LlmTransport.AwsBedrockConverse;
+            or LlmTransport.AwsBedrockConverse or LlmTransport.XaiResponses;
 
     private const string NoOutput = "[]";
 

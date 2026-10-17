@@ -264,8 +264,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             if (observation is not null) yield return observation;
             try
             {
-                await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, credential, "OpenAI Responses request",
-                    secrets, cancellationToken).ConfigureAwait(false);
+                await ThrowIfUnsuccessfulAsync(response, credential, secrets, cancellationToken).ConfigureAwait(false);
                 if ((capabilities.SupportsStreaming != InferenceSupport.Unsupported))
                     stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken).ConfigureAwait(false);
                 body = ReadResponseBodyAsync(connection, request, response, stream, capabilities, enforcement, credential, consumption, secrets, cancellationToken)
@@ -497,6 +496,26 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         throw new LlmProviderException("The model response stream was interrupted.", Transport,
             statusCode: response.StatusCode, isResponseStreamInterrupted: true);
     }
+
+    /// <summary>
+    /// Throws the provider failure for an unsuccessful Responses request. The default reads the error through
+    /// <see cref="ProviderHttp"/>; a provider with its own error body overrides it.
+    /// </summary>
+    /// <param name="response">The provider response, read only when it is unsuccessful.</param>
+    /// <param name="credential">The connection credential, redacted from the failure.</param>
+    /// <param name="secrets">The request header values, redacted from the failure.</param>
+    /// <param name="cancellationToken">Cancels reading the error body.</param>
+    protected virtual Task ThrowIfUnsuccessfulAsync(HttpResponseMessage response, LlmCredential? credential,
+        IReadOnlyList<string> secrets, CancellationToken cancellationToken) =>
+        ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, credential, "OpenAI Responses request", secrets, cancellationToken);
+
+    /// <summary>
+    /// Maps the provider's terminal <c>status</c> to a completion status. A null result keeps the base mapping. A reply
+    /// with a refusal is <see cref="LlmCompletionStatus.Refused"/> before this hook runs.
+    /// </summary>
+    /// <param name="status">The terminal response's <c>status</c>.</param>
+    /// <param name="incompleteReason">The terminal response's <c>incomplete_details.reason</c>, or null.</param>
+    protected virtual LlmCompletionStatus? MapCompletionStatus(string status, string? incompleteReason) => null;
 
     protected virtual LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
         OpenAiRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
@@ -854,13 +873,15 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             : null;
         LlmCompletionStatus status = finalRefusal.Length > 0
             ? LlmCompletionStatus.Refused
-            : providerStatus switch
-            {
-                "incomplete" or "cancelled" => LlmCompletionStatus.Incomplete,
-                "failed" => LlmCompletionStatus.Failed,
-                "completed" => toolCalls.Length > 0 ? LlmCompletionStatus.RequiresAction : LlmCompletionStatus.Completed,
-                _ => LlmCompletionStatus.Unknown
-            };
+            : providerStatus is not null && MapCompletionStatus(providerStatus, incompleteReason) is { } mapped
+                ? mapped
+                : providerStatus switch
+                {
+                    "incomplete" or "cancelled" => LlmCompletionStatus.Incomplete,
+                    "failed" => LlmCompletionStatus.Failed,
+                    "completed" => toolCalls.Length > 0 ? LlmCompletionStatus.RequiresAction : LlmCompletionStatus.Completed,
+                    _ => LlmCompletionStatus.Unknown
+                };
 
         LlmStructuredOutputValidation? validation = null;
         if (structuredRequest is not null
