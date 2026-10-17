@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>The host-tools service's operation names and messages.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>

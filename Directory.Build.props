@@ -6,6 +6,10 @@
   <PropertyGroup Condition="'$(DarkspyreDependencyMode)' == 'Source'">
     <TensorSharpSourceRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../TensorSharp'))</TensorSharpSourceRoot>
   </PropertyGroup>
+  <PropertyGroup>
+    <!-- Darkspyre.Common's local-service libraries are not packages; the host-tools projects always build them from source. -->
+    <DarkspyreCommonSourceRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)../Darkspyre.Common'))</DarkspyreCommonSourceRoot>
+  </PropertyGroup>
 
   <PropertyGroup>
     <TargetFramework>net11.0</TargetFramework>

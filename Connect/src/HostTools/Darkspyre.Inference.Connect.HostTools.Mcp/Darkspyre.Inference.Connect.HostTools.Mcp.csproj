@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>The stdio MCP server an agent CLI starts to reach its session's host tools through the host-tools service.</Description>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>darkspyre-host-tools-mcp</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Darkspyre.Inference.Connect.HostTools/Darkspyre.Inference.Connect.HostTools.csproj" />
+    <PackageReference Include="ModelContextProtocol" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
+  </ItemGroup>
+</Project>

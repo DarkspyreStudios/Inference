@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="$(DarkspyreCommonSourceRoot)/build/LocalServices/ServicePlatform.props" />
+  <PropertyGroup>
+    <Description>Connects hosts and MCP programs to the host-tools local service, which it bundles.</Description>
+    <IsPackable>false</IsPackable>
+    <LocalServiceProject>$(MSBuildThisFileDirectory)../Darkspyre.Inference.Connect.HostTools.Service/Darkspyre.Inference.Connect.HostTools.Service.csproj</LocalServiceProject>
+    <LocalServiceEntryPoint>darkspyre-host-tools-service</LocalServiceEntryPoint>
+    <LocalServiceMetadataPrefix>HostTools</LocalServiceMetadataPrefix>
+    <LocalServiceLayoutId>host-tools</LocalServiceLayoutId>
+    <LocalServicePackageFolder>hosttools/service</LocalServicePackageFolder>
+  </PropertyGroup>
+  <Import Project="$(DarkspyreCommonSourceRoot)/build/LocalServices/SubscriberPackage.targets" />
+  <ItemGroup>
+    <Compile Remove="Composition/HostToolsRuntime.*.cs" />
+    <Compile Include="Composition/HostToolsRuntime.$(ServicePlatform).cs" />
+    <ProjectReference Include="../Darkspyre.Inference.Connect.HostTools.Contracts/Darkspyre.Inference.Connect.HostTools.Contracts.csproj" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Contracts/Darkspyre.LocalServices.Contracts.csproj" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices/Darkspyre.LocalServices.csproj" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Platform.$(ServicePlatform)/Darkspyre.LocalServices.Platform.$(ServicePlatform).csproj" />
+  </ItemGroup>
+</Project>

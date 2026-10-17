@@ -5,6 +5,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageVersion Include="ModelContextProtocol" Version="2.2.0" />
     <PackageVersion Include="Google.Apis.Auth" Version="1.76.0" />
     <PackageVersion Include="AWSSDK.Bedrock" Version="4.0.100.5" />
     <PackageVersion Include="AWSSDK.BedrockAgentCore" Version="4.0.111" />

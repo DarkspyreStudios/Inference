@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <Import Project="$(DarkspyreCommonSourceRoot)/build/LocalServices/ServicePlatform.props" />
+  <PropertyGroup>
+    <Description>The host-tools local service: routes agent CLI tool calls to the host session that owns them.</Description>
+    <OutputType>Exe</OutputType>
+    <IsPackable>false</IsPackable>
+    <AssemblyName>darkspyre-host-tools-service</AssemblyName>
+    <!-- Project references can remove the caller's RID. The executable still targets the selected service runtime. -->
+    <RuntimeIdentifier>$(ServiceRuntimeIdentifier)</RuntimeIdentifier>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="Composition/HostToolsBackend.*.cs" />
+    <Compile Include="Composition/HostToolsBackend.$(ServicePlatform).cs" />
+    <ProjectReference Include="../Darkspyre.Inference.Connect.HostTools.Contracts/Darkspyre.Inference.Connect.HostTools.Contracts.csproj" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices/Darkspyre.LocalServices.csproj" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Platform.$(ServicePlatform)/Darkspyre.LocalServices.Platform.$(ServicePlatform).csproj" />
+  </ItemGroup>
+</Project>
