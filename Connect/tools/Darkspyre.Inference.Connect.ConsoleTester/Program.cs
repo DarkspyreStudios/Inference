@@ -907,7 +907,7 @@ internal static class Program
               darkspyre-inference-connect-tester codex-probe --provider codex --model <model-id>
               darkspyre-inference-connect-tester managed-probe --provider codex --model <model-id>
               darkspyre-inference-connect-tester limit-probe --provider claude [--model <id>]
-              darkspyre-inference-connect-tester grok-probe --provider grok [--model <id>] [--case all|strict|hosted-search|multi-agent|compaction] [--repeat 1..20] [--timeout-seconds 1..600]
+              darkspyre-inference-connect-tester grok-probe --provider grok [--model <id>] [--case all|strict|hosted-search|fast-tier|compaction|estimate] [--repeat 1..20] [--timeout-seconds 1..600]
               darkspyre-inference-connect-tester prompt --provider <codex|claude|antigravity|bedrock|agentcore> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--non-streaming]
               darkspyre-inference-connect-tester agent  --provider <codex|claude|agentcore|antigravity|bedrock> --model <model-id> [--harness-arn <arn>] [--effort <level>] [--schema <file>] [--attach-image <file>] [--attach-document <file>] [--max-model-iterations <positive integer>]
 
@@ -940,7 +940,7 @@ internal static class Program
             Codex login uses ChatGPT device OAuth, and Grok login uses xAI device OAuth; both are stored in
             Darkspyre.SecureStore for direct requests.
             grok-probe runs explicit subscription turns on Grok: a schema-checked host tool, hosted web and X search,
-            a 16-agent fast-tier turn and provider compaction. It never retries a failed case.
+            a fast-tier turn, host compaction and the context estimate. It never retries a failed case.
             Claude and Antigravity login verify the official CLI's existing login. Their CLI
             credentials remain owned by the official CLI and are not copied into Darkspyre.SecureStore.
             Bedrock and AgentCore login store only the AWS profile name and region; the AWS SDK resolves

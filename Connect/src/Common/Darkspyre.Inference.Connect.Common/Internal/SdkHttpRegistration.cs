@@ -11,7 +11,7 @@ internal static class SdkHttpRegistration
     internal static readonly string[] Names = ["AppleFoundationModelsClient", "GeminiApiLlmClient", "OpenAiResponsesLlmClient",
         "OpenAiCompatibleChatLlmClient", "AnthropicMessagesLlmClient", "ClaudeCliLlmClient", "OpenAiEmbeddingClient", "OpenAiCodexLlmClient",
         "CodexAuthenticator", "ClaudeAuthenticator", "AzureResponsesLlmClient", "AzureChatLlmClient", "VertexLlmClient", "", "PocketTtsHttpProvider", "TangoFluxHttpProvider",
-        "GrokResponsesLlmClient", "GrokAuthenticator", "XaiMediaDownloadClient", "XaiTtsProvider", "XaiSttProvider", "XaiRealtimeProvider", "XaiEmbeddingClient"];
+        "GrokResponsesLlmClient", "GrokAuthenticator", "XaiMediaDownloadClient", "XaiTtsProvider", "XaiSttProvider", "XaiRealtimeProvider"];
     internal static void ValidateName(string name)
     {
         ArgumentNullException.ThrowIfNull(name);

@@ -19,17 +19,6 @@ internal static class XaiErrorClassifier
         ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
             diagnosticBody, "Provider rejected the request.", cancellationToken);
 
-    internal static Task ThrowIfUnsuccessfulCompactionAsync(HttpResponseMessage response, LlmCredential? credential,
-        IEnumerable<string> additionalSecrets, CancellationToken cancellationToken) =>
-        ThrowIfUnsuccessfulCoreAsync(response, credential, additionalSecrets,
-            false, "Provider rejected the context-compaction request.", cancellationToken);
-
-    internal static Task ThrowIfUnsuccessfulEmbeddingAsync(HttpResponseMessage response, CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(response);
-        return ThrowIfUnsuccessfulCoreAsync(response, null, [], false, "Provider rejected the embedding request.", cancellationToken);
-    }
-
     private static async Task ThrowIfUnsuccessfulCoreAsync(HttpResponseMessage response, LlmCredential? credential,
         IEnumerable<string> additionalSecrets, bool diagnosticBody, string diagnosticMessage,
         CancellationToken cancellationToken)

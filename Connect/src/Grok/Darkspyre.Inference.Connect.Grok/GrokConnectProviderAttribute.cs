@@ -20,7 +20,5 @@ internal sealed class GrokConnectProviderAttribute : LlmConnectProviderAttribute
             provider.GetRequiredService<LearnedModelContext>()));
         services.AddInferenceHttpClient<GrokAuthenticator>();
         services.AddTransient<ILlmAuthenticator>(provider => provider.GetRequiredService<GrokAuthenticator>());
-        services.AddInferenceHttpClient<XaiEmbeddingClient>();
-        services.AddTransient<ILlmEmbeddingClient>(provider => provider.GetRequiredService<XaiEmbeddingClient>());
     }
 }

@@ -10,7 +10,7 @@ The conversation libraries are independently consumable:
 | `Darkspyre.Inference.Connect.Codex` | Native Codex client and authentication |
 | `Darkspyre.Inference.Connect.Claude` | Official Claude CLI conversations and authentication |
 | `Darkspyre.Inference.Connect.Antigravity` | Official Antigravity CLI conversations, native resume, host tools and account usage |
-| `Darkspyre.Inference.Connect.Grok` | Grok (xAI) Responses conversations with a Grok subscription's device sign-in, hosted search, provider compaction and text embeddings |
+| `Darkspyre.Inference.Connect.Grok` | Grok (xAI) Responses conversations on xAI's subscription proxy, with a Grok subscription's device sign-in and hosted search |
 | `Darkspyre.Inference.Connect.HostTools` | The host-tools local service, bundled under `hosttools/service`, its client, and the `darkspyre-host-tools-mcp` program; source-only, built with Darkspyre.Common's local-service libraries |
 | `Darkspyre.Inference.Connect.OpenAiApi` | OpenAI Responses conversations and text embeddings |
 | `Darkspyre.Inference.Connect.SelfHost` | Conversations and text/image embeddings through caller-owned engines |
@@ -63,8 +63,8 @@ parameters of `IImageTransport`, `ImageProviderService` and `ITtsProvider`; `Ima
 `ImageSetupConfiguration.Xai`, `TtsConnection.Xai`, `TtsConnection.XaiDefaults`, `TtsRequest.Xai`,
 `TtsStreamOptions.Xai` and `XaiTtsOptions`. `LlmProviderCapabilities.Files` always reports no Files operation.
 
-The tokenizer facade (`LlmProviderService.TokenizeAsync`, `ILlmTextTokenizer`) is implemented by Grok, through its
-`tokenize-text` endpoint; every other transport refuses with `This route does not implement plain-text tokenization.`
+The tokenizer facade (`LlmProviderService.TokenizeAsync`, `ILlmTextTokenizer`) has no implementation: every transport
+refuses with `This route does not implement plain-text tokenization.`
 The context-cache facade (`BindContextCacheAsync`, `ILlmContextCacheClient`) stays compiled with no implementing
 provider, and every call refuses with `No explicit context cache adapter is implemented.`
 
@@ -227,7 +227,7 @@ in its own message by the attachment notice, so any history opens.
 | SupportsTurnCap | Supported | Supported | Unknown | Unsupported | Supported |
 | SupportsSpendCap | Unsupported | Unsupported | Unknown | Unsupported | Unsupported |
 | SupportsCompactNow | Supported | Supported | Supported | Supported | Supported |
-| CompactionSide | Host | Host | Host | Host | Provider |
+| CompactionSide | Host | Host | Host | Host | Host |
 
 `CompactionSide` says which side compacts: `Host` is the library's compaction described below, and `Provider` is the
 model service's own. A managed session reports `Provider` for a model whose chat client compacts on the service side.
@@ -253,21 +253,27 @@ is not team-blocked. A denied or expired code ends with `Grok sign-in was denied
 and a team-blocked account with `This Grok account is not entitled to API access.`; neither saves anything. The
 check reports Signed in when the connection holds a usable OAuth token. Refresh goes through `LlmConnectionAccess`.
 
-The connection's `API region` field picks `XaiConnectionOptions.Region`, Global (`https://api.x.ai/v1`) or United
-States (`https://us.api.x.ai/v1`); a region edit sets the endpoint, and every request refuses before sending when the
-endpoint does not match the region. The model list joins xAI's `models` and `language-models` listings; each model's
-reasoning levels and image input come from the catalog first and the model-family profile second, and
-`grok-4.20-multi-agent` is a multi-agent model. Grok conversations run on the shared managed session with the
-feature list above. Every Grok model compacts on the provider side (see "Provider compaction"): the session posts
-`{"model","input":[...]}` to `responses/compact`, with the instructions as a leading system item, and the one returned
-`compaction` item becomes the context's only entry, an assistant message whose continuation state replays it. Grok's
-estimate counts the text of the messages after the last reply that carries a reported count with `tokenize-text`
-and the rest locally; a failed tokenizer call counts that text locally. Grok's continuation state keeps its output
-verbatim and in order: messages, reasoning, function calls, hosted calls (`web_search_call`, `x_search_call`,
+Every Grok request goes to xAI's subscription proxy, `https://cli-chat-proxy.grok.com/v1`, the host the Grok Build CLI
+uses for a Grok sign-in; `api.x.ai` serves API keys only. Each request carries the bearer token and the headers the
+proxy's auth middleware reads: `X-XAI-Token-Auth: xai-grok-cli`, `x-authenticateresponse: authenticate-response`,
+`x-grok-client-version` (the Grok Build version, `1.0.45`, because the proxy refuses clients it does not know),
+`x-grok-client-identifier: darkspyre-agent` and `x-grok-client-mode: headless`. A connection saved with another
+endpoint refuses before sending with `This Grok connection uses an old endpoint. Open its settings and save it to move
+it to the Grok subscription service.`; opening its settings sets the proxy endpoint. Setup has no region field.
+
+The model list is the proxy's `GET models`. Each row's `context_window` is the model's window, and its
+`reasoning_efforts` objects are its reasoning levels, the one marked `default` being the level the proxy uses when a
+request names none. A model the list does not name offers no levels. The proxy lists no multi-agent model, so Grok
+offers no agent counts. Grok conversations run on the shared managed session with the feature list above. The proxy
+serves no `responses/compact` or `tokenize-text` route (both answer 404), so the host compacts Grok conversations and
+the estimate is the local count. The proxy adds framing the request does not show, about 1,400 tokens on `grok-4.7`
+and 360 on `grok-4.5`, so a short request is underestimated by that much; on a request of about 55,000 tokens the
+local count was 1,200 to 3,900 tokens over the reported count. Grok's continuation state keeps its output verbatim and
+in order: messages, reasoning, function calls, hosted calls (`web_search_call`, `x_search_call`,
 `code_interpreter_call`, `code_execution_call`, `file_search_call`, `mcp_call`, `image_generation_call`,
-`view_image_call`, `view_x_video_call`, `custom_tool_call`, `tool_search_call`, `tool_search_output`) and the
-compaction item. A `context_length_exceeded` code in an HTTP error or a stream `error` event is a too-long refusal.
-When the account lists an embedding model, `XaiEmbeddingClient` embeds text through the same connection.
+`view_image_call`, `view_x_video_call`, `custom_tool_call`, `tool_search_call`, `tool_search_output`). A
+`context_length_exceeded` code in an HTTP error or a stream `error` event is a too-long refusal. The proxy lists no
+embedding model, so Grok offers no embeddings.
 
 **Settings a model or service does not accept.** No setting refuses a turn. On OpenAI's endpoint a reasoning model
 that accepts temperature only at reasoning None loses temperature and top-p at any other level, and when the request
@@ -294,10 +300,7 @@ profile's tiers (the pricing page's) and another endpoint offers all four; with 
 **Agent count.** A turn asks a multi-agent model for a number of agents with `LlmAgentTurnRequest.AgentCount`; null
 leaves the provider's default in place. `LlmProviderCapabilities.AgentCounts` lists the counts the model accepts, and
 is empty for a model that takes none. The request normalizer maps the requested count to the nearest offered count,
-the larger of two equally near ones. A model that offers none gets none, and the turn runs. A Grok multi-agent model
-offers 4 and 16 and no reasoning levels, so a requested reasoning level is dropped there: 4 agents send
-`reasoning.effort` `low` and 16 send `high`. A turn that names no count takes the connection's saved
-`XaiConnectionOptions.MultiAgent` count, mapped to the nearer of the two; with neither, the provider's default runs.
+the larger of two equally near ones. A model that offers none gets none, and the turn runs. No provider offers a count.
 
 **Context lengths in the editor.** An OpenAI API connection's editor shows `Context lengths` rows, none until
 `Add row` is pressed (the CommonDesign D6 exception recorded in `AGENTS.md`). Each row names a model, chosen from the
@@ -428,7 +431,7 @@ turn with the provider's message after the usage it reported; the context is unc
 compacted on the service side gets that model's compactions, at the same trigger and on `CompactNowAsync`: the
 session sends the request it would send to the service's compaction, and the returned entries replace every entry of
 the context. `LlmAgentCompactedEvent` then counts every replaced entry as dropped. A failed compaction call compacts
-with the library's compaction above, for that compaction only.
+with the library's compaction above, for that compaction only. No chat client implements it.
 
 A too-long refusal teaches the model's size, compacts whatever the measure says and sends the same step again once; on
 the OpenAI API the refusal is OpenAI's `context_length_exceeded` code, the llama.cpp server's
@@ -3908,10 +3911,9 @@ delivery, not decoded pixels, dimensions, streaming byte delivery or Session/Wor
 Neither run writes image bytes to a file or log, retries, changes account/route or establishes
 separate subscription billing from the reported cost.
 
-`XaiMultiAgentControls` is stored data only: `XaiConnectionOptions.MultiAgent` keeps a saved agent count, which a
-turn whose `AgentCount` is null takes on a multi-agent model. The `grok-4.20-multi-agent` profile offers 4 or 16
-agents, sent as REST `reasoning.effort = "low"` or `"high"`, never `agent_count`. Connect metadata keeps the
-`xai-multi-agent` discriminator so a saved value still reads.
+`XaiMultiAgentControls` is the provider-controls type the xAI deferred chat codec reads. Connect metadata keeps the
+`xai-multi-agent` discriminator so a saved value still reads. A saved Grok connection's former `MultiAgent` count is
+ignored when it is read.
 
 `AddLlmConnect` registers the Grok provider, authenticator, Responses client and managed agent through
 the same finite SDK HTTP pipelines. Provider discovery performs no OAuth or model requests.

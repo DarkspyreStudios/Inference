@@ -97,9 +97,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
                 ProviderOptions = existing.ProviderOptions.ToDictionary(pair => pair.Key, pair => pair.Value.Clone(), StringComparer.Ordinal),
                 ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>(existing.ModelCapabilityOverrides, StringComparer.Ordinal)
             };
-        // Grok routing changes only through an explicit region edit; preserve supplied configuration on open.
-        _draft = UsesFixedEndpoint(transport) && transport != LlmTransport.XaiResponses
-            ? opened with { Endpoint = definition.DefaultEndpoint } : opened;
+        _draft = UsesFixedEndpoint(transport) ? opened with { Endpoint = definition.DefaultEndpoint } : opened;
         _model = _originalModel = modelId ?? (UsesAzure ? existing?.Azure?.DeploymentId : null) ?? definition.DefaultModelId;
         if (UsesAzure && _draft.Azure is null) _draft = _draft with { Azure = new() { DeploymentId = _model } };
         if (UsesAzure) _azure = new(_draft.Azure!, LlmCredential.Parse(existing?.Credential) ?? new());
@@ -158,7 +156,6 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     private static bool UsesFixedEndpoint(LlmTransport transport) => transport is LlmTransport.OpenAiCodex or LlmTransport.GoogleVertexAi
         or LlmTransport.GoogleGeminiApi or LlmTransport.XaiResponses;
     private bool UsesXai => _draft.Transport == LlmTransport.XaiResponses;
-    private XaiConnectionOptions Xai => _draft.Xai ?? new();
     private bool UsesVertex => _draft.Transport == LlmTransport.GoogleVertexAi;
     private bool UsesAzure => _draft.Transport is LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat;
     private LlmVertexConfiguration Vertex => _draft.Vertex ?? new();
@@ -303,21 +300,6 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             fields.Add(new SetupChoiceField(new("aws-region", "AWS region") { IsRequired = true, IsEnabled = _hasEnvironment }, aws.Region ?? string.Empty,
                 string.Empty, value => Edit(() => SetAws((Credential.Aws ?? new()) with { Region = value })), true,
                 SetupSideEffect.LocalVerification, SetupChoiceCapabilities.Searchable));
-        }
-        if (UsesXai)
-        {
-            // The region is the endpoint: a region edit moves every request of the connection (B3).
-            fields.Add(new SetupChoiceField(new("xai-region", "API region") { IsRequired = true }, Xai.Region.ToString(),
-                XaiRegion.Global.ToString(), value =>
-                {
-                    if (!Enum.TryParse(value, out XaiRegion region) || !Enum.IsDefined(region))
-                        return new(SetupEditState.Invalid, [new("xai-region-invalid", "Select an xAI region.", "xai-region")]);
-                    return Edit(() =>
-                    {
-                        XaiConnectionOptions options = Xai with { Region = region };
-                        _draft = _draft with { Xai = options, Endpoint = options.GetEndpoint() };
-                    });
-                }, false));
         }
         SetupStep connectionStep = _definition.SetupSteps.Count > 0 ? _definition.SetupSteps[0] : new("connection", "Connection", "Configure the provider.", []);
         SetupStep modelStep = _definition.SetupSteps.Count > 1 ? _definition.SetupSteps[1] : new("model", "Model", "Select a model.", []);
@@ -574,8 +556,6 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     {
         _ = CreateSteps(); // Registers the override field IDs for the current transport.
         if (UsesAzure && AzureEditorDraft.Choices(fieldId) is { } azureChoices) return Page(query, azureChoices);
-        if (UsesXai && fieldId == "xai-region")
-            return Page(query, [new(XaiRegion.Global.ToString(), "Global"), new(XaiRegion.UnitedStates.ToString(), "United States")]);
         return fieldId == "google-authentication" && UsesVertex
             ? Page(query, [new(LlmGoogleAuthenticationMode.ApplicationDefault.ToString(), "Application default credentials"),
                 new(LlmGoogleAuthenticationMode.ServiceAccount.ToString(), "Service-account key"),
@@ -731,9 +711,6 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             && (!Uri.TryCreate(_draft.Endpoint, UriKind.Absolute, out Uri? endpoint) || endpoint.Scheme is not ("http" or "https")
                 || endpoint.UserInfo.Length > 0 || endpoint.Query.Length > 0 || endpoint.Fragment.Length > 0))
         { issues.Add(new("endpoint-invalid", "Use an HTTP(S) base URL without credentials, query or fragment.", "endpoint")); }
-        if (UsesXai && (_draft.Xai is null || !Enum.IsDefined(_draft.Xai.Region)
-            || !string.Equals(_draft.Endpoint.TrimEnd('/'), _draft.Xai.GetEndpoint(), StringComparison.Ordinal)))
-        { issues.Add(new("xai-region-invalid", "Select an API region; the endpoint follows the region.", "xai-region")); }
         if (UsesApiKey && !UsesAzure && _draft.Transport != LlmTransport.OpenAiCompatibleChat
             && _draft.Transport != LlmTransport.OpenAiResponses
             && string.IsNullOrWhiteSpace(Credential.ApiKey) && Credential.SecretHeaders.Count == 0)

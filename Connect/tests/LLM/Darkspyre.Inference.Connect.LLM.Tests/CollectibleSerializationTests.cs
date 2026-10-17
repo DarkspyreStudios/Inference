@@ -63,7 +63,6 @@ public sealed class CollectibleSerializationTests
         LlmConnection connection = JsonSerializer.Deserialize(DevConnection, ConnectLlmJson.Connection)!;
         Assert.Equal(LlmTransport.XaiResponses, connection.Transport);
         Assert.Equal(XaiRegion.UnitedStates, connection.Xai!.Region);
-        Assert.Equal(4, connection.Xai.MultiAgent!.AgentCount);
         Assert.Equal(InferenceSupport.Unsupported, connection.CapabilityOverrides!.SupportsTemperature);
         Assert.Equal(InferenceSupport.Unsupported, connection.ModelCapabilityOverrides["grok-4"].SupportsSeed);
     }

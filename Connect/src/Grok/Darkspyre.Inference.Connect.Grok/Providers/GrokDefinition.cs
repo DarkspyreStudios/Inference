@@ -10,7 +10,7 @@ internal static class GrokDefinition
         DisplayName = "Grok Subscription",
         Description = "Use an eligible Grok subscription directly, with host-owned OAuth and managed agent execution.",
         Transport = LlmTransport.XaiResponses,
-        DefaultEndpoint = new XaiConnectionOptions().GetEndpoint(),
+        DefaultEndpoint = Internal.XaiRequestHeaders.SubscriptionEndpoint,
         DefaultModelId = "grok-4.7",
         DisplayOrder = 35,
         Icon = SetupIcons.FromResource(typeof(GrokDefinition).Assembly, "Icons/grok.svg"),
@@ -21,9 +21,9 @@ internal static class GrokDefinition
             {
                 Id = "authorize-grok",
                 Title = "Sign in with Grok",
-                Instructions = "Choose the API region, run the sign-in action, open the displayed x.ai link and approve the device code. Every request of this connection goes to the chosen region. Authorization updates this draft; Save commits it through the host. No API key is used.",
+                Instructions = "Run the sign-in action, open the displayed x.ai link and approve the device code. Requests go to the Grok subscription service. Authorization updates this draft; Save commits it through the host. No API key is used.",
                 CompletionRequirement = "The draft contains a Grok OAuth access token before saving an authenticated connection.",
-                Troubleshooting = "Start sign-in again after a denied or expired code. Confirm that the account is entitled to API access.",
+                Troubleshooting = "Start sign-in again after a denied or expired code. Confirm that the account has an active Grok subscription.",
                 ActionIds = ["authorize", "check"]
             },
             ProviderDefinitions.SelectModel

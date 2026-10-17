@@ -12,8 +12,8 @@ using Handler = Darkspyre.Inference.Connect.LLM.Tests.DirectCodexTests.Handler;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
-/// <summary>The Grok library (DSA-1070): device sign-in, hosted search, agent count, speed tier, provider compaction,
-/// tokenizer estimates and continuation of hosted calls.</summary>
+/// <summary>The Grok library (DSA-1070): device sign-in, the subscription proxy route and model list, hosted search, speed
+/// tier and continuation of hosted calls.</summary>
 public sealed class GrokTests
 {
     private const string DeviceCode = """
@@ -52,10 +52,10 @@ public sealed class GrokTests
         Assert.Equal(("grok-access", "user-1"), (source.Saved!.OAuth!.AccessToken, source.Saved.OAuth.AccountId));
     }
 
-    /// <summary>Setup offers Grok's device sign-in and its API region; the region moves the endpoint, and the check
-    /// after approval marks the connection signed in (B1, B2, B3, S1).</summary>
+    /// <summary>Setup offers Grok's device sign-in and no region; the connection uses the subscription proxy, and the check
+    /// after approval marks the connection signed in (B1, B2, S1).</summary>
     [Fact]
-    public async Task SetupSignsInWithTheDeviceCodeAndRoutesToTheChosenRegion()
+    public async Task SetupSignsInWithTheDeviceCodeAndUsesTheSubscriptionProxy()
     {
         using var handler = new Handler(request => request.RequestUri!.AbsolutePath switch
         {
@@ -69,16 +69,15 @@ public sealed class GrokTests
         LlmSettings settings = await manager.OpenAsync(LlmTransport.XaiResponses,
             new(SetupChangeIntent.Create, "grok", null), null, "grok-4.7");
 
-        var region = Assert.IsType<SetupChoiceField>(settings.Steps.SelectMany(step => step.Sections)
-            .SelectMany(section => section.Fields).Single(field => field.Description.Id == "xai-region"));
-        Assert.Equal(SetupEditState.Applied, region.SetValue(nameof(XaiRegion.UnitedStates)).State);
         SetupActionDescriptor signIn = Assert.Single(settings.Actions, action => action.Purpose == SetupActionPurpose.Authenticate);
         await manager.RunAsync(settings, signIn.Id);
         SetupActionResult approved = await manager.RunAsync(settings,
             Assert.IsType<SetupDeviceAuthorization>(settings.Interaction).Continue.Id);
 
         Assert.Equal(("authorize", "Sign in with Grok"), (signIn.Id, signIn.DisplayName));
-        Assert.Equal("https://us.api.x.ai/v1", settings.CurrentConnection().Endpoint);
+        Assert.DoesNotContain(settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields),
+            field => field.Description.Id == "xai-region");
+        Assert.Equal("https://cli-chat-proxy.grok.com/v1", settings.CurrentConnection().Endpoint);
         Assert.Equal(SetupActionState.Completed, approved.State);
         Assert.True(settings.Status.Authenticated.Value);
         Assert.Equal(SetupProviderGroup.Subscription, GrokDefinition.Value.Group);
@@ -109,7 +108,8 @@ public sealed class GrokTests
     }
 
     /// <summary>Grok writes its own hosted-tool shapes and X search, adds tool search for a deferred MCP server, always asks
-    /// for no inline citations and sends the hosted-turn cap (Tech Design 5.3).</summary>
+    /// for no inline citations and sends the hosted-turn cap (Tech Design 5.3). The request goes to the subscription proxy
+    /// with the headers its auth middleware reads.</summary>
     [Fact]
     public async Task GrokPayloadWritesItsHostedShapesAndXSearch()
     {
@@ -145,43 +145,9 @@ public sealed class GrokTests
             ["reasoning.encrypted_content","web_search_call.action.sources","file_search_call.results","code_interpreter_call.outputs","no_inline_citations"]
             """), sent["include"]), sent["include"]!.ToJsonString());
         Assert.Equal(3, (int)sent["max_turns"]!);
-        Assert.Equal("https://api.x.ai/v1/responses", handler.Uri!.AbsoluteUri);
-    }
-
-    /// <summary>On a multi-agent model 4 agents run under effort low and 16 under high; a turn that names none takes the
-    /// saved count, and with neither the provider default runs (B15, S5).</summary>
-    [Theory]
-    [InlineData(4, null, "low")]
-    [InlineData(16, null, "high")]
-    [InlineData(null, 16, "high")]
-    [InlineData(null, null, null)]
-    public async Task AgentCountMapsToReasoningEffort(int? count, int? saved, string? effort)
-    {
-        using var handler = new Handler(_ => DirectCodexTests.Sse(DirectCodexTests.Completed));
-        var client = new GrokResponsesLlmClient(new HttpClient(handler));
-        LlmConnection connection = Connection(new() { MultiAgent = saved is null ? null : new XaiMultiAgentControls(saved) });
-
-        await Complete(client, connection, Request("grok-4.20-multi-agent") with { AgentCount = count, ReasoningLevel = LlmReasoningLevel.Maximum });
-
-        JsonNode sent = JsonNode.Parse(handler.Body!)!;
-        Assert.Equal(effort, (string?)sent["reasoning"]?["effort"]);
-        Assert.False(sent.AsObject().ContainsKey("agent_count"));
-    }
-
-    /// <summary>A multi-agent model offers 4 and 16 agents and no reasoning levels; any other model offers no count, so the
-    /// normalizer drops a requested count and the turn still runs (B15, S5 step 2).</summary>
-    [Fact]
-    public void OnlyMultiAgentModelsOfferAgentCounts()
-    {
-        var client = new GrokResponsesLlmClient(new HttpClient());
-        LlmProviderCapabilities multi = client.GetCapabilities(Connection(), "grok-4.20-multi-agent");
-        LlmProviderCapabilities single = client.GetCapabilities(Connection(), "grok-4.7");
-
-        Assert.Equal([4, 16], multi.AgentCounts);
-        Assert.Empty(multi.ReasoningLevels);
-        Assert.Empty(single.AgentCounts);
-        Assert.Equal(16, LlmRequestNormalizer.Normalize(Connection(), Request("grok-4.20-multi-agent") with { AgentCount = 12 }, multi).AgentCount);
-        Assert.Null(LlmRequestNormalizer.Normalize(Connection(), Request("grok-4.7") with { AgentCount = 16 }, single).AgentCount);
+        Assert.Equal("https://cli-chat-proxy.grok.com/v1/responses", handler.Uri!.AbsoluteUri);
+        Assert.Equal(("Bearer test-token", "xai-grok-cli", "authenticate-response"),
+            (handler.Headers["Authorization"], handler.Headers["X-XAI-Token-Auth"], handler.Headers["x-authenticateresponse"]));
     }
 
     /// <summary>The fast tier is sent as priority; a turn that names no tier takes the saved tier (B16, S5).</summary>
@@ -203,66 +169,23 @@ public sealed class GrokTests
         Assert.Equal([LlmServiceTier.Standard, LlmServiceTier.Fast], capabilities.ServiceTiers.Order());
     }
 
-    /// <summary>Grok compacts through responses/compact: the instructions lead the input, the compacted context is one
-    /// entry whose continuation state replays the compaction item, and the feature list reports the provider side. A
-    /// failed call throws, so the session falls back to the host summary (B10, B11, S3).</summary>
+    /// <summary>The model list is the proxy's GET models: each row's context_window is the model's window and its
+    /// reasoning_efforts are its levels. The proxy serves no compaction route, so the host compacts (B4, B10).</summary>
     [Fact]
-    public async Task ProviderCompactionReplacesTheContextWithTheCompactionItem()
+    public async Task ModelListReadsTheProxyCatalogAndTheHostCompacts()
     {
-        bool fail = false;
-        using var handler = new Handler(request => request.RequestUri!.AbsolutePath.EndsWith("/responses/compact", StringComparison.Ordinal)
-            ? fail ? new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("{}") }
-                : Json("""{"object":"response.compaction","id":"c","model":"grok-4.7","output":[{"type":"compaction","encrypted_content":"sealed"}]}""")
-            : DirectCodexTests.Sse(DirectCodexTests.Completed));
+        using var handler = new Handler(_ => Json("""
+            {"data":[{"id":"grok-4.7","name":"Grok 4.7","owned_by":"xAI","context_window":256000,
+              "reasoning_efforts":[{"value":"xhigh","default":false},{"value":"high","default":true},{"value":"low","default":false}]}]}
+            """));
         var client = new GrokResponsesLlmClient(new HttpClient(handler));
-        LlmConnection connection = Connection();
 
-        LlmAgentContext compacted = await client.CompactAsync(connection,
-            Request("grok-4.7") with { Instructions = "Be brief." }, CancellationToken.None);
-        JsonNode compactBody = JsonNode.Parse(handler.Body!)!;
-        LlmChatMessage summary = Assert.Single(compacted.Entries).Message;
-        await Complete(client, connection, Request("grok-4.7") with { Messages = [summary, new("user", "next")] });
-        JsonNode replay = JsonNode.Parse(handler.Body!)!;
-        fail = true;
+        LlmModel model = Assert.Single(await client.ListModelsAsync(Connection()));
 
-        Assert.Equal("grok-4.7", (string?)compactBody["model"]);
-        Assert.Equal(("system", "Be brief."), ((string?)compactBody["input"]![0]!["role"], (string?)compactBody["input"]![0]!["content"]));
-        Assert.Equal(("compaction", "sealed"), ((string?)replay["input"]![0]!["type"], (string?)replay["input"]![0]!["encrypted_content"]));
-        Assert.Equal(LlmCompactionSide.Provider, client.GetCapabilities(connection, "grok-4.7").Agent.CompactionSide);
-        Assert.True(client.CompactsProviderSide(connection, "grok-4.7"));
-        await Assert.ThrowsAsync<LlmProviderException>(() => client.CompactAsync(connection, Request("grok-4.7"), CancellationToken.None));
-    }
-
-    /// <summary>The text after the last reported reply is counted by Grok's tokenizer; a failed tokenizer call keeps the
-    /// local count of that text (B12).</summary>
-    [Fact]
-    public async Task TokenizerCountsTheUnreportedTextAndFallsBackToTheLocalCount()
-    {
-        bool fail = false;
-        using var handler = new Handler(_ => fail
-            ? new HttpResponseMessage(HttpStatusCode.ServiceUnavailable) { Content = new StringContent("{}") }
-            : Json("""{"token_ids":[{"token_id":1,"string_token":"a","token_bytes":[97]},{"token_id":2,"string_token":"b","token_bytes":[98]},{"token_id":3,"string_token":"c","token_bytes":[99]}]}"""));
-        var client = new GrokResponsesLlmClient(new HttpClient(handler));
-        LlmConnection connection = Connection();
-        LlmContinuationState reported = ProviderContinuationStateCodec.Encode(connection, "grok-4.7", new JsonArray(new JsonObject
-        {
-            ["type"] = "message", ["role"] = "assistant",
-            ["content"] = new JsonArray(new JsonObject { ["type"] = "output_text", ["text"] = "earlier answer" })
-        })) with { InputTokens = 40, OutputTokens = 2 };
-        LlmChatRequest request = Request("grok-4.7") with
-        {
-            Messages = [new("user", "earlier question"), new("assistant", "earlier answer") { ContinuationState = reported },
-                new("user", "the new question that the tokenizer counts")]
-        };
-
-        ContextEstimate counted = (await client.EstimateAsync(connection, request, ResourceSizes.None, CancellationToken.None))!.Value;
-        string sent = (string)JsonNode.Parse(handler.Body!)!["text"]!;
-        fail = true;
-        ContextEstimate local = (await client.EstimateAsync(connection, request, ResourceSizes.None, CancellationToken.None))!.Value;
-
-        Assert.Equal("the new question that the tokenizer counts\n", sent);
-        Assert.Equal(local.Tokens - LocalTokenCount.Count(sent) + 3, counted.Tokens);
-        Assert.False(counted.IncludesProviderReport);
+        Assert.Equal("https://cli-chat-proxy.grok.com/v1/models", handler.Uri!.AbsoluteUri);
+        Assert.Equal(("grok-4.7", "Grok 4.7", 256000L), (model.Id, model.DisplayName, model.MaxContextTokens));
+        Assert.True(model.Capabilities!.ReasoningLevels.SetEquals([LlmReasoningLevel.ExtraHigh, LlmReasoningLevel.High, LlmReasoningLevel.Low]));
+        Assert.Equal(LlmCompactionSide.Host, model.Capabilities.Agent.CompactionSide);
     }
 
     /// <summary>A Grok reply holding reasoning, hosted calls and Grok's custom X-search call keeps them in its continuation
@@ -330,7 +253,7 @@ public sealed class GrokTests
         {
             Version = "1",
             Transport = LlmTransport.XaiResponses,
-            Endpoint = options.GetEndpoint(),
+            Endpoint = XaiRequestHeaders.SubscriptionEndpoint,
             Xai = options,
             Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token", AccountId = "account" } }.Serialize()
         };

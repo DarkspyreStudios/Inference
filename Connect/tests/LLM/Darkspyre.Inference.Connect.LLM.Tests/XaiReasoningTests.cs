@@ -3,12 +3,13 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
-/// <summary>Grok maps a requested reasoning level to the nearest level the model offers, from catalog facts first and
-/// the model-family profile second (DSA-1070 B8).</summary>
+/// <summary>Grok maps a requested reasoning level to the nearest level the model's entry in the subscription proxy's
+/// model list offers (DSA-1070 B8).</summary>
 public sealed class XaiReasoningTests
 {
     [Theory]
@@ -17,7 +18,8 @@ public sealed class XaiReasoningTests
     [InlineData("grok-4.5", LlmReasoningLevel.ExtraHigh, "high")]
     public async Task KnownModelMapsDesiredEffortInsideTheGrokWriter(string model, LlmReasoningLevel desired, string expected)
     {
-        JsonElement payload = await ProjectAsync(Connection(), Request(model, desired));
+        string[] levels = model == "grok-4.5" ? ["high", "medium", "low"] : ["xhigh", "high", "medium", "low"];
+        JsonElement payload = await ProjectAsync(Connection() with { Catalog = Catalog(model, levels) }, Request(model, desired));
         Assert.Equal(expected, Effort(payload));
         Assert.Equal(model, payload.GetProperty("model").GetString());
     }
@@ -38,7 +40,7 @@ public sealed class XaiReasoningTests
     [Fact]
     public async Task EmptyCatalogEffortsRemainUnknownAndPermitTheRequestedSpelling()
     {
-        LlmConnection connection = Connection() with { Catalog = Catalog() };
+        LlmConnection connection = Connection() with { Catalog = Catalog("grok-unlisted") };
         JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.Maximum));
         Assert.Equal("max", Effort(payload));
         using var http = new HttpClient();
@@ -49,7 +51,7 @@ public sealed class XaiReasoningTests
     [Fact]
     public async Task CatalogNoneAndHighMapMediumDownToNoneWithoutLosingObservations()
     {
-        LlmConnection connection = Connection() with { Catalog = Catalog("none", "high") };
+        LlmConnection connection = Connection() with { Catalog = Catalog("grok-unlisted", "none", "high") };
         JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.Medium));
         Assert.Equal("none", Effort(payload));
         using var http = new HttpClient();
@@ -60,7 +62,7 @@ public sealed class XaiReasoningTests
     [Fact]
     public async Task CatalogMinimalAndMaximumAreNativeFactsNotFilteredVocabulary()
     {
-        LlmConnection connection = Connection() with { Catalog = Catalog("minimal", "max") };
+        LlmConnection connection = Connection() with { Catalog = Catalog("grok-unlisted", "minimal", "max") };
         JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.High));
         Assert.Equal("minimal", Effort(payload));
         using var http = new HttpClient();
@@ -97,18 +99,18 @@ public sealed class XaiReasoningTests
 
     private static LlmConnection Connection() => new()
     {
-        Version = "1", Transport = LlmTransport.XaiResponses, Endpoint = "https://api.x.ai/v1", Xai = new(),
+        Version = "1", Transport = LlmTransport.XaiResponses, Endpoint = XaiRequestHeaders.SubscriptionEndpoint, Xai = new(),
         Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
         CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported }
     };
 
-    private static IReadOnlyList<LlmModel> Catalog(params string[] words) =>
-    [new("grok-unlisted", "Unlisted")
+    /// <summary>A one-model catalog in the proxy's shape: reasoning_efforts objects whose value names the level.</summary>
+    private static IReadOnlyList<LlmModel> Catalog(string model, params string[] words) =>
+    [new(model, model)
     {
         CatalogEntry = JsonElement.Parse(new JsonObject
         {
-            ["capabilities"] = new JsonObject
-            { ["reasoning_effort"] = new JsonArray(words.Select(word => (JsonNode?)JsonValue.Create(word)).ToArray()) }
+            ["reasoning_efforts"] = new JsonArray(words.Select(word => (JsonNode?)new JsonObject { ["value"] = word, ["default"] = false }).ToArray())
         }.ToJsonString())
     }];
 
@@ -141,7 +143,7 @@ public sealed class XaiReasoningTests
         {
             Sends++;
             Assert.Equal(HttpMethod.Post, request.Method);
-            Assert.Equal("https://api.x.ai/v1/responses", request.RequestUri!.AbsoluteUri);
+            Assert.Equal("https://cli-chat-proxy.grok.com/v1/responses", request.RequestUri!.AbsoluteUri);
             Body = JsonElement.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
             string response = new JsonObject
             {

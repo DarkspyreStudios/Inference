@@ -1,37 +1,18 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Runtime.ExceptionServices;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-/// <summary>The xAI model lists the Grok connection reads: the generic list and the chat and embedding lists.</summary>
-internal enum ModelCatalogPart
-{
-    /// <summary>GET models: every model the account can use.</summary>
-    Generic,
-    /// <summary>GET language-models: the chat models, with their modalities and reasoning facts.</summary>
-    Chat,
-    /// <summary>GET embedding-models: the embedding models.</summary>
-    Embedding
-}
-
-/// <summary>Reads the xAI model lists and merges the generic list's facts into each specific model.</summary>
+/// <summary>Reads the subscription proxy's model list: GET models, whose data rows are the account's models.</summary>
 internal static class XaiCatalog
 {
     [SuppressMessage("Design", "CA1031", Justification = "Owned request/response cleanup preserves independent operation and cleanup failures.")]
     internal static async Task<IReadOnlyList<JsonElement>> ReadAsync(HttpClient http, LlmConnection connection,
-        ModelCatalogPart part, Action ownerFence, CancellationToken cancellationToken)
+        Action ownerFence, CancellationToken cancellationToken)
     {
-        (string path, string array) = part switch
-        {
-            ModelCatalogPart.Generic => ("models", "data"),
-            ModelCatalogPart.Chat => ("language-models", "models"),
-            ModelCatalogPart.Embedding => ("embedding-models", "models"),
-            _ => throw new ArgumentOutOfRangeException(nameof(part))
-        };
         using var consumption = SdkHttpConsumption.Enter(http, cancellationToken);
         void Fence() { consumption.Token.ThrowIfCancellationRequested(); consumption.Fence(); ownerFence(); }
         HttpRequestMessage? request = null;
@@ -41,7 +22,7 @@ internal static class XaiCatalog
         try
         {
             Fence();
-            request = new(HttpMethod.Get, ProviderHttp.BuildUri(connection, path));
+            request = new(HttpMethod.Get, ProviderHttp.BuildUri(connection, "models"));
             XaiRequestHeaders.Apply(request, connection, false);
             Fence();
             try
@@ -63,7 +44,7 @@ internal static class XaiCatalog
             {
                 using JsonDocument document = JsonDocument.Parse(body);
                 if (document.RootElement.ValueKind == JsonValueKind.Object
-                    && document.RootElement.TryGetProperty(array, out JsonElement rows) && rows.ValueKind == JsonValueKind.Array
+                    && document.RootElement.TryGetProperty("data", out JsonElement rows) && rows.ValueKind == JsonValueKind.Array
                     && rows.EnumerateArray().All(row => row.ValueKind == JsonValueKind.Object))
                     result = Array.AsReadOnly(rows.EnumerateArray().Select(row => row.Clone()).ToArray());
             }
@@ -105,64 +86,30 @@ internal static class XaiCatalog
         internal Exception Original { get; } = original;
     }
 
-    internal static IReadOnlyList<LlmModel> Project(IReadOnlyList<JsonElement> generic, IReadOnlyList<JsonElement> specific)
+    /// <summary>The models of the list's rows, by display name. A row without an id is skipped.</summary>
+    internal static IReadOnlyList<LlmModel> Project(IReadOnlyList<JsonElement> rows)
     {
         var results = new List<LlmModel>();
         var ids = new HashSet<string>(StringComparer.Ordinal);
-        foreach (JsonElement row in specific)
+        foreach (JsonElement row in rows)
         {
             string? id = String(row, "id");
             if (string.IsNullOrWhiteSpace(id)) continue;
             if (!ids.Add(id)) throw new LlmProviderException("Grok model discovery returned duplicate model identifiers.", LlmTransport.XaiResponses);
-            JsonObject metadata = (JsonObject)JsonNode.Parse(row.GetRawText())!;
-            JsonElement? match = generic.Where(candidate => String(candidate, "id") == id).Cast<JsonElement?>().FirstOrDefault();
-            if (match is null)
-            {
-                JsonElement[] candidates = [.. generic.Where(candidate => Aliases(candidate).Contains(id, StringComparer.Ordinal)
-                    || String(candidate, "id") is { } genericId && Aliases(row).Contains(genericId, StringComparer.Ordinal))];
-                if (candidates.Length == 1) match = candidates[0];
-            }
-            if (match is { } observed)
-            {
-                JsonObject other = (JsonObject)JsonNode.Parse(observed.GetRawText())!;
-                foreach ((string key, JsonNode? value) in other)
-                    if (!metadata.ContainsKey(key)) metadata[key] = value?.DeepClone();
-                if (metadata["capabilities"] is JsonObject capabilities && other["capabilities"] is JsonObject genericCapabilities)
-                    foreach ((string key, JsonNode? value) in genericCapabilities)
-                        if (!capabilities.ContainsKey(key)) capabilities[key] = value?.DeepClone();
-                string[] aliases = [.. Aliases(row).Concat(Aliases(observed)).Distinct(StringComparer.Ordinal)];
-                if (aliases.Length > 0) metadata["aliases"] = new JsonArray([.. aliases.Select(alias => JsonValue.Create(alias))]);
-            }
-            JsonElement entry = JsonElement.Parse(metadata.ToJsonString());
             results.Add(new(id, String(row, "name") ?? id, String(row, "owned_by"))
             {
-                CatalogEntry = entry,
-                MaxContextTokens = entry.TryGetProperty("context_length", out JsonElement length) && length.ValueKind == JsonValueKind.Number
+                CatalogEntry = row,
+                // The proxy publishes the default window as context_window.
+                MaxContextTokens = row.TryGetProperty("context_window", out JsonElement length) && length.ValueKind == JsonValueKind.Number
                     && length.TryGetInt64(out long count) && count > 0 ? count : null
             });
         }
         return Array.AsReadOnly(results.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase).ToArray());
     }
 
-    internal static LlmModel? FindModel(IReadOnlyList<LlmModel>? models, string? id)
-    {
-        if (models is null || id is null) return null;
-        LlmModel? exact = models.FirstOrDefault(model => model.Id == id);
-        if (exact is not null) return exact;
-        LlmModel? found = null;
-        foreach (LlmModel model in models)
-        {
-            if (model.CatalogEntry is not { } entry || !Aliases(entry).Contains(id, StringComparer.Ordinal)) continue;
-            if (found is not null && found.Id != model.Id) return null;
-            found = model;
-        }
-        return found;
-    }
+    internal static LlmModel? FindModel(IReadOnlyList<LlmModel>? models, string? id) =>
+        models is null || id is null ? null : models.FirstOrDefault(model => model.Id == id);
 
     private static string? String(JsonElement item, string name) => item.TryGetProperty(name, out JsonElement value)
         && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
-
-    private static IEnumerable<string> Aliases(JsonElement item) => item.TryGetProperty("aliases", out JsonElement aliases)
-        && aliases.ValueKind == JsonValueKind.Array
-        ? aliases.EnumerateArray().Where(value => value.ValueKind == JsonValueKind.String).Select(value => value.GetString()!) : [];
 }

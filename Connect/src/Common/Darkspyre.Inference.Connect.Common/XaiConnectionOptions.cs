@@ -26,9 +26,6 @@ public sealed record XaiConnectionOptions
     /// <summary>The service tier sent with requests.</summary>
     public XaiServiceTier ServiceTier { get; init; }
 
-    /// <summary>Saved multi-agent count used only when a request supplies no provider controls.</summary>
-    public XaiMultiAgentControls? MultiAgent { get; init; }
-
     /// <summary>The fixed API base URL for the selected region.</summary>
     public string GetEndpoint() => Region switch
     {
