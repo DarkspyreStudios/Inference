@@ -303,7 +303,7 @@ public sealed class LlmSettingsTests
     [Fact]
     public async Task SignedOutAntigravityShowsItsPrerequisite()
     {
-        var antigravity = new Client(ProviderDefinitions.GeminiSubscription) { State = ExternalAuthenticationState.SignedOut };
+        var antigravity = new Client(AntigravityDefinition.Value) { State = ExternalAuthenticationState.SignedOut };
         using var provider = new LlmProviderService(new UnusedSource(), [antigravity]);
         var (manager, settings) = await OpenAsync(provider, LlmTransport.GoogleAntigravityCli,
             new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
@@ -313,7 +313,7 @@ public sealed class LlmSettingsTests
 
             Assert.Equal(SetupActionState.NeedsInteraction, result.State);
             Assert.Equal((true, false), (settings.Status.Installed.Value, settings.Status.Authenticated.Value));
-            Assert.Equal(ProviderDefinitions.GeminiSubscription.SetupSteps[0].Instructions,
+            Assert.Equal(AntigravityDefinition.Value.SetupSteps[0].Instructions,
                 Assert.IsType<SetupExternalPrerequisite>(settings.Interaction).Instructions);
         }
     }

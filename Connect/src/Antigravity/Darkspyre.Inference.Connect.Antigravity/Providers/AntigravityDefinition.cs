@@ -13,6 +13,7 @@ internal static class AntigravityDefinition
         DefaultEndpoint = "agy",
         DefaultModelId = "auto",
         DisplayOrder = 40,
+        Group = SetupProviderGroup.Subscription,
         SetupSteps =
         [
             new SetupStep
@@ -26,8 +27,7 @@ internal static class AntigravityDefinition
                 MacOsInstructions = "In Terminal, run command -v agy to find the executable path.",
                 LinuxInstructions = "In a terminal, run command -v agy to find the executable path."
             },
-            ProviderDefinitions.SelectModel,
-            ProviderDefinitions.TestConnection
+            ProviderDefinitions.SelectModel
         ]
     };
 }
