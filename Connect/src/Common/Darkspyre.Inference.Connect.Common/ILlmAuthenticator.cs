@@ -12,13 +12,14 @@ public interface ILlmAuthenticator
         CancellationToken cancellationToken = default);
 }
 
-/// <summary>Signs in to ChatGPT for the Codex transport with the device-code flow.</summary>
-public interface ICodexDeviceLogin : ILlmAuthenticator
+/// <summary>Signs in to a subscription with the OAuth device-code flow.</summary>
+/// <remarks><see cref="LlmProviderService"/> finds the device login for a transport by its <see cref="ILlmAuthenticator.Transport"/>.</remarks>
+public interface ILlmDeviceLogin : ILlmAuthenticator
 {
     /// <summary>Requests a device login code and returns the verification URL and user code to show the user.</summary>
     Task<LlmDeviceCode> StartAsync(CancellationToken cancellationToken = default);
 
-    /// <summary>Exchanges an approved device login for a credential. Throws <see cref="LlmAuthPendingException"/> while the browser approval is still pending.</summary>
+    /// <summary>Exchanges an approved device login for a credential. Throws <see cref="LlmAuthPendingException"/> while the browser approval is still pending, with <see cref="LlmAuthPendingException.SlowDown"/> set when the provider asks for slower polling.</summary>
     Task<LlmCredential> CompleteAsync(
         string deviceAuthId,
         string userCode,

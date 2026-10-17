@@ -55,8 +55,7 @@ registered for those transports, so a request through one fails with the existin
 
 The phase-1 build removes these public surfaces: `ILlmFileClient`, `IXaiFilePublicUrlClient`,
 `IXaiSkillClient`, `IDocumentSearchClient` and their request and result types; `LlmProviderCapabilities.Skills`;
-`LlmProviderService.CreatePublicUrlAsync`, `RevokePublicUrlAsync`, `StartXaiLoginAsync` and
-`CompleteXaiLoginAsync`; `AddLlmConnectXai`;
+`LlmProviderService.CreatePublicUrlAsync` and `RevokePublicUrlAsync`; `AddLlmConnectXai`;
 `LlmEmbeddingProviderService.ListModelsAsync` and its `providerService` constructor parameter; the `xai`
 parameters of `IImageTransport`, `ImageProviderService` and `ITtsProvider`; `ImageConnection.Xai`,
 `ImageSetupConfiguration.Xai`, `TtsConnection.Xai`, `TtsConnection.XaiDefaults`, `TtsRequest.Xai`,
@@ -3433,6 +3432,15 @@ Model retries are limited to three total attempts before any output, respect ret
 30 seconds, and leave aggregate usage unknown if an attempt's usage was unreported. Streams with
 exposed output are not retried. Consume/dispose an enumeration fully before capture or another run.
 
+Device-code sign-in goes through one seam. A provider library registers an `ILlmDeviceLogin` as its
+transport's `ILlmAuthenticator`; Codex is the compiled implementation. `StartDeviceLoginAsync(transport)`
+returns the code to show, and `CompleteDeviceLoginAsync(transport, connectionId, deviceAuthId, userCode,
+expectedVersion)` polls once and saves the credential on the connection. A poll that is still pending
+throws `LlmAuthPendingException` and saves nothing; its `SlowDown` flag adds five seconds to the polling
+interval. Setup's `authorize` action and its continuation, and `SignInAsync`, use the connection's
+transport to find the device login. A transport with no registered device login is refused with
+`NotSupportedException`.
+
 Interactive completion methods accept the connection version captured before authentication began.
 The `SignInAsync` convenience method captures that version internally. In both cases, the final save is
 still conditional, so a connection change during the external authentication round trip is rejected.
@@ -3580,8 +3588,8 @@ explicit region selection fixes the draft. Read-only **Saved sign-in** and **Dra
 report credential configuration without exposing secret values or claiming a fresh authentication
 check. A draft sign-in remains unsaved until Save commits; an uncertain save remains unknown.
 
-`IXaiDeviceLogin` supplies the device grant to `StartXaiLoginAsync`, `CompleteXaiLoginAsync` and
-`SignInAsync`. Completion performs one token poll; interactive sign-in owns the polling loop.
+`XaiAuthenticator` implements `ILlmDeviceLogin`, which supplies the device grant to `StartDeviceLoginAsync`,
+`CompleteDeviceLoginAsync` and `SignInAsync`. Completion performs one token poll; interactive sign-in owns the polling loop.
 Setup continuation and interactive sign-in respect the device interval, provider-reported expiry,
 and the five-second increase on RFC 8628 `slow_down`. `LlmDeviceCode.ExpiresAt` is null for a provider
 that supplies no expiry. Device-code diagnostic text is redacted. Token saves use the captured

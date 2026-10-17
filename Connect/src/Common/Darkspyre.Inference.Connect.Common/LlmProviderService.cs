@@ -241,15 +241,21 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             cancellationToken);
     }
 
-    /// <summary>Starts a Codex device-code sign-in and returns the code the person enters.</summary>
-    public async Task<LlmDeviceCode> StartCodexLoginAsync(CancellationToken cancellationToken = default)
+    /// <summary>Starts a device-code sign-in for the transport and returns the code the person enters.</summary>
+    /// <exception cref="NotSupportedException">No device login is registered for <paramref name="transport"/>.</exception>
+    public async Task<LlmDeviceCode> StartDeviceLoginAsync(
+        LlmTransport transport,
+        CancellationToken cancellationToken = default)
     {
         using var operation = _lifetime.Enter(cancellationToken);
-        return await CodexLogin().StartAsync(operation.Token).ConfigureAwait(false);
+        return await DeviceLogin(transport).StartAsync(operation.Token).ConfigureAwait(false);
     }
 
-    /// <summary>Completes a Codex device-code sign-in and saves the resulting credential on the connection.</summary>
-    public async Task CompleteCodexLoginAsync(
+    /// <summary>Polls a device-code sign-in once and saves the resulting credential on the connection.</summary>
+    /// <exception cref="LlmAuthPendingException">The person has not approved the code yet. Nothing is saved.</exception>
+    /// <exception cref="NotSupportedException">No device login is registered for <paramref name="transport"/>.</exception>
+    public async Task CompleteDeviceLoginAsync(
+        LlmTransport transport,
         string connectionId,
         string deviceAuthId,
         string userCode,
@@ -262,7 +268,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             connectionId,
             expectedVersion,
             cancellationToken);
-        LlmCredential credential = await CodexLogin().CompleteAsync(
+        LlmCredential credential = await DeviceLogin(transport).CompleteAsync(
             deviceAuthId,
             userCode,
             cancellationToken);
@@ -388,14 +394,15 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         switch (connection.Transport)
         {
             case LlmTransport.OpenAiCodex:
-                LlmDeviceCode code = await CodexLogin().StartAsync(cancellationToken);
+                ILlmDeviceLogin login = DeviceLogin(connection.Transport);
+                LlmDeviceCode code = await login.StartAsync(cancellationToken);
                 await prompt.ShowDeviceCodeAsync(code, cancellationToken);
-                LlmCredential codexCredential = await PollCodexAsync(code, cancellationToken);
+                LlmCredential deviceCredential = await PollDeviceLoginAsync(login, code, cancellationToken);
                 ThrowIfOperationCanceled(cancellationToken);
-                RuntimeInputAdmission.ValidateCredential(connection.Transport, codexCredential);
+                RuntimeInputAdmission.ValidateCredential(connection.Transport, deviceCredential);
                 await Connections.SaveCredentialAsync(
                     connectionId,
-                    codexCredential.Serialize(),
+                    deviceCredential.Serialize(),
                     connection.Version,
                     cancellationToken);
                 break;
@@ -864,7 +871,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             : throw new InvalidOperationException("The LLM connection changed during authentication.");
     }
 
-    private async Task<LlmCredential> PollCodexAsync(
+    private static async Task<LlmCredential> PollDeviceLoginAsync(
+        ILlmDeviceLogin login,
         LlmDeviceCode code,
         CancellationToken cancellationToken)
     {
@@ -874,14 +882,15 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             await Task.Delay(TimeSpan.FromSeconds(code.IntervalSeconds), cancellationToken);
             try
             {
-                return await CodexLogin().CompleteAsync(
+                return await login.CompleteAsync(
                     code.DeviceAuthId,
                     code.UserCode,
                     cancellationToken);
             }
-            catch (LlmAuthPendingException)
+            catch (LlmAuthPendingException pending)
             {
                 // Device authorization is intentionally polled until approval or cancellation.
+                code = code.AfterPending(pending);
             }
         }
     }
@@ -920,11 +929,11 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         };
     }
 
-    private ICodexDeviceLogin CodexLogin() =>
-        _authenticators.TryGetValue(LlmTransport.OpenAiCodex, out ILlmAuthenticator? authenticator)
-            && authenticator is ICodexDeviceLogin login
+    private ILlmDeviceLogin DeviceLogin(LlmTransport transport) =>
+        _authenticators.TryGetValue(transport, out ILlmAuthenticator? authenticator)
+            && authenticator is ILlmDeviceLogin login
                 ? login
-                : throw new NotSupportedException("Codex login is not registered.");
+                : throw new NotSupportedException($"No device login is registered for transport {transport}.");
 
     private IClaudePkceLogin ClaudeLogin() =>
         _authenticators.TryGetValue(LlmTransport.AnthropicClaudeCli, out ILlmAuthenticator? authenticator)

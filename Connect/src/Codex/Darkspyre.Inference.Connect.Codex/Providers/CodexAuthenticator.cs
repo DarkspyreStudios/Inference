@@ -6,7 +6,7 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal sealed class CodexAuthenticator(HttpClient http)
-    : OAuthAuthenticatorBase(http), ICodexDeviceLogin
+    : OAuthAuthenticatorBase(http), ILlmDeviceLogin
 {
     private const string AuthBaseUrl = "https://auth.openai.com";
     private const int DefaultIntervalSeconds = 5;

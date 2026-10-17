@@ -408,6 +408,49 @@ public sealed class LlmSettingsTests
     }
 
     [Fact]
+    public async Task DeviceLoginKeepsPollingAPendingCodeAndWidensTheIntervalOnSlowDown()
+    {
+        var login = new DeviceAuth();
+        login.Polls.Enqueue(new LlmAuthPendingException("pending"));
+        login.Polls.Enqueue(new LlmAuthPendingException("slow down") { SlowDown = true });
+        var provider = new LlmProviderService(new UnusedSource(), [new Client(CodexDefinition.Value)], [login]);
+        var created = new Target();
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiCodex,
+            new(SetupChangeIntent.Create, "id", null), created, modelId: "model");
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Authenticate).Id);
+        string check = Assert.IsType<SetupDeviceAuthorization>(settings.Interaction).Continue.Id;
+
+        Assert.Equal(SetupActionState.NeedsInteraction, (await manager.RunAsync(settings, check)).State);
+        Assert.Equal(1, settings.DeviceCode!.IntervalSeconds);
+        Assert.Equal(SetupActionState.NeedsInteraction, (await manager.RunAsync(settings, check)).State);
+        Assert.Equal(6, settings.DeviceCode!.IntervalSeconds);
+        Assert.False(settings.CanSave);
+        Assert.Equal(2, login.Completed);
+    }
+
+    [Fact]
+    public async Task DeviceLoginWithADeniedCodeSavesNothing()
+    {
+        var login = new DeviceAuth();
+        login.Polls.Enqueue(new LlmProviderException("Sign-in was denied or expired. Start sign-in again.",
+            LlmTransport.OpenAiCodex, providerCode: "access_denied"));
+        var provider = new LlmProviderService(new UnusedSource(), [new Client(CodexDefinition.Value)], [login]);
+        var created = new Target();
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiCodex,
+            new(SetupChangeIntent.Create, "id", null), created, modelId: "model");
+        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Authenticate).Id);
+
+        SetupActionResult result = await manager.RunAsync(settings,
+            Assert.IsType<SetupDeviceAuthorization>(settings.Interaction).Continue.Id);
+
+        Assert.NotEqual(SetupActionState.Completed, result.State);
+        Assert.NotEqual(true, settings.Status.Authenticated.Value);
+        Assert.False(settings.CanSave);
+        Assert.Equal(SetupCommitState.Invalid, (await manager.SaveAsync(settings)).State);
+        Assert.Equal(0, created.Calls);
+    }
+
+    [Fact]
     public async Task ClaudeSignInSavesTheTokenAsTheConnectionCredentialAndMarksItAuthenticated()
     {
         var provider = new LlmProviderService(new UnusedSource(), [new Client(ClaudeDefinition.Value)], [new BrowserAuth()]);
@@ -459,12 +502,20 @@ public sealed class LlmSettingsTests
         public Task<LlmCredential> EnsureFreshAsync(LlmCredential credential, CancellationToken cancellationToken = default) => Task.FromResult(credential);
     }
 
-    private sealed class DeviceAuth : ICodexDeviceLogin
+    private sealed class DeviceAuth : ILlmDeviceLogin
     {
+        /// <summary>Exceptions the next polls throw, in order; a poll with none left approves the code.</summary>
+        public Queue<Exception> Polls { get; } = new();
+        public int Completed { get; private set; }
         public LlmTransport Transport => LlmTransport.OpenAiCodex;
         public Task<LlmDeviceCode> StartAsync(CancellationToken cancellationToken = default) => Task.FromResult(new LlmDeviceCode("https://example.test/authorize", "code", "private-id", 1));
         public Task<LlmCredential> CompleteAsync(string deviceAuthId, string userCode, CancellationToken cancellationToken = default)
-            => Task.FromResult(new LlmCredential { OAuth = new() { AccessToken = "device-token" } });
+        {
+            Completed++;
+            return Polls.TryDequeue(out Exception? error)
+                ? Task.FromException<LlmCredential>(error)
+                : Task.FromResult(new LlmCredential { OAuth = new() { AccessToken = "device-token" } });
+        }
         public Task<LlmCredential> EnsureFreshAsync(LlmCredential credential, CancellationToken cancellationToken = default) => Task.FromResult(credential);
     }
 }

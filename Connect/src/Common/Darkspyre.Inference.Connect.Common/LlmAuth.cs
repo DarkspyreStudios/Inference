@@ -16,6 +16,10 @@ public sealed record LlmDeviceCode(
 
     /// <summary>Returns a diagnostic string without authorization secrets.</summary>
     public override string ToString() => "LlmDeviceCode { Redacted }";
+
+    /// <summary>Returns the code to poll next: five seconds slower after an RFC 8628 slow_down, otherwise unchanged.</summary>
+    internal LlmDeviceCode AfterPending(LlmAuthPendingException pending) =>
+        pending.SlowDown ? this with { IntervalSeconds = checked(IntervalSeconds + 5) } : this;
 }
 
 /// <summary>An in-progress browser authorization with PKCE.</summary>

@@ -643,6 +643,13 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         RefreshInteraction();
     }
 
+    /// <summary>Keeps the device authorization open with the code to poll next.</summary>
+    internal void ContinueDeviceAuthorization(LlmDeviceCode code)
+    {
+        DeviceCode = code;
+        RefreshInteraction();
+    }
+
     internal void BeginBrowserAuthorization(LlmAuthorizationSession authorization)
     {
         ClearAuthorization();
@@ -845,7 +852,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         switch (action.Id)
         {
             case "authorize":
-                LlmDeviceCode code = await service.StartCodexLoginAsync(cancellationToken).ConfigureAwait(false);
+                LlmDeviceCode code = await service.StartDeviceLoginAsync(settings.Transport, cancellationToken).ConfigureAwait(false);
                 Fence(cancellationToken);
                 settings.BeginDeviceAuthorization(code);
                 return new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);
@@ -934,12 +941,13 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
             {
                 await Task.Delay(TimeSpan.FromSeconds(Math.Max(1, code.IntervalSeconds)), token).ConfigureAwait(false);
                 Fence(token);
-                await service.CompleteCodexLoginAsync(settings.Identity.Id, code.DeviceAuthId, code.UserCode,
-                    LlmSettings.DraftVersion, token).ConfigureAwait(false);
+                await service.CompleteDeviceLoginAsync(settings.Transport, settings.Identity.Id, code.DeviceAuthId,
+                    code.UserCode, LlmSettings.DraftVersion, token).ConfigureAwait(false);
             }
-            catch (LlmAuthPendingException)
+            catch (LlmAuthPendingException pending)
             {
                 Fence(token);
+                settings.ContinueDeviceAuthorization(code.AfterPending(pending));
                 return new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);
             }
         }
