@@ -7,10 +7,10 @@ namespace Darkspyre.Inference.Connect.ConsoleTester;
 
 internal sealed record ProviderProbeOptions(string Model, string Case, int Repeat, int TimeoutSeconds)
 {
-    public static ProviderProbeOptions Parse(string[] args, string defaultModel)
+    public static ProviderProbeOptions Parse(string[] args, string defaultModel, int defaultTimeoutSeconds = 180)
     {
         string model = defaultModel, selected = "all";
-        int repeat = 1, timeout = 180;
+        int repeat = 1, timeout = defaultTimeoutSeconds;
         var seen = new HashSet<string>(StringComparer.Ordinal);
         for (int i = 0; i < args.Length; i++)
         {

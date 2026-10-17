@@ -40,7 +40,10 @@ internal sealed class NativeCliProbe(LlmAgentProviderService agents, string conn
     public static async Task<int> RunAsync(LlmProviderService llms, LlmAgentProviderService agents,
         ConsoleInvocation invocation, ClaudeCliRecorder? recorder, CancellationToken token)
     {
-        var options = ProviderProbeOptions.Parse(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId);
+        // AGY can hold a schema turn about 156 s after the model's reply before its own forced invocation, and the controls
+        // case reopens the conversation twice, each reopen allowed 60 s for its handshake: 360 s covers both.
+        var options = ProviderProbeOptions.Parse(invocation.CommandArguments, invocation.Provider.Definition.DefaultModelId,
+            invocation.Provider.Transport == LlmTransport.AnthropicClaudeCli ? 180 : 360);
         bool ready;
         try
         {
