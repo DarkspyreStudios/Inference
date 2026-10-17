@@ -19,6 +19,9 @@ internal static class HostedTools
                 case LlmWebSearchTool web:
                     Strings(web.AllowedDomains); Strings(web.ExcludedDomains);
                     break;
+                case LlmSocialSearchTool social:
+                    Strings(social.AllowedHandles); Strings(social.ExcludedHandles);
+                    break;
                 case LlmCodeExecutionTool:
                     break;
                 case LlmImageGenerationTool image when Enum.IsDefined(image.Action):
@@ -37,7 +40,7 @@ internal static class HostedTools
                 default:
                     throw new NotSupportedException("This hosted-tool definition is not a supported contract variant.");
             }
-            if (!supported.Contains(tool.Kind)) { throw new NotSupportedException("This route does not implement the requested hosted tool."); }
+            if (!supported.Contains(tool.Kind)) { throw new NotSupportedException($"This route does not implement {Name(tool.Kind)}."); }
         }
     }
 
@@ -55,6 +58,7 @@ internal static class HostedTools
         Array.AsReadOnly(tools.Select<LlmHostedTool, LlmHostedTool>(tool => tool switch
         {
             LlmWebSearchTool web => web with { AllowedDomains = Copy(web.AllowedDomains), ExcludedDomains = Copy(web.ExcludedDomains), Location = web.Location is { } location ? location with { } : null },
+            LlmSocialSearchTool social => social with { AllowedHandles = Copy(social.AllowedHandles)!, ExcludedHandles = Copy(social.ExcludedHandles)! },
             LlmCodeExecutionTool code => code,
             LlmImageGenerationTool image => image,
             LlmDocumentSearchTool document => document with { CollectionIds = Copy(document.CollectionIds)! },
@@ -83,6 +87,18 @@ internal static class HostedTools
         if (output is not null) { output = output with { Resources = Copy(output.Resources) }; }
         return call with { Input = Clone(call.Input), Output = output };
     }
+
+    /// <summary>The feature name a refusal shows for a hosted tool kind.</summary>
+    internal static string Name(LlmHostedToolKind kind) => kind switch
+    {
+        LlmHostedToolKind.WebSearch => "web search",
+        LlmHostedToolKind.SocialSearch => "X search",
+        LlmHostedToolKind.CodeExecution => "code execution",
+        LlmHostedToolKind.ImageGeneration => "image generation",
+        LlmHostedToolKind.DocumentSearch => "document search",
+        LlmHostedToolKind.RemoteMcp => "remote MCP",
+        _ => kind.ToString()
+    };
 
     private static JsonElement? Clone(JsonElement? value) => value?.Clone();
     private static System.Collections.ObjectModel.ReadOnlyCollection<T>? Copy<T>(IReadOnlyList<T>? values)

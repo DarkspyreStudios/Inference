@@ -330,6 +330,8 @@ public static class InferenceJson
     public static JsonTypeInfo<LlmDocumentSearchTool> LlmDocumentSearchTool => Metadata<LlmDocumentSearchTool>();
     /// <summary>JSON metadata for <see cref="LlmRemoteMcpTool"/>.</summary>
     public static JsonTypeInfo<LlmRemoteMcpTool> LlmRemoteMcpTool => Metadata<LlmRemoteMcpTool>();
+    /// <summary>JSON metadata for <see cref="LlmSocialSearchTool"/>.</summary>
+    public static JsonTypeInfo<LlmSocialSearchTool> LlmSocialSearchTool => Metadata<LlmSocialSearchTool>();
     /// <summary>JSON metadata for <see cref="LlmHostedToolOutput"/>.</summary>
     public static JsonTypeInfo<LlmHostedToolOutput> LlmHostedToolOutput => Metadata<LlmHostedToolOutput>();
     /// <summary>JSON metadata for <see cref="LlmHostedSearchSource"/>.</summary>
@@ -567,6 +569,7 @@ public static class InferenceJson
 [JsonSerializable(typeof(LlmImageGenerationTool))]
 [JsonSerializable(typeof(LlmDocumentSearchTool))]
 [JsonSerializable(typeof(LlmRemoteMcpTool))]
+[JsonSerializable(typeof(LlmSocialSearchTool))]
 [JsonSerializable(typeof(LlmHostedToolOutput))]
 [JsonSerializable(typeof(LlmHostedSearchSource))]
 [JsonSerializable(typeof(LlmHostedSearchOutput))]

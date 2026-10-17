@@ -40,6 +40,13 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
         RichContentSupported = RichContentRoutes.Responses
     };
 
+    /// <summary>The hosted tools OpenAI's endpoint runs (B14). X search is Grok's alone.</summary>
+    private static readonly IReadOnlySet<LlmHostedToolKind> OpenAiHostedTools = new[]
+    {
+        LlmHostedToolKind.ImageGeneration, LlmHostedToolKind.WebSearch, LlmHostedToolKind.CodeExecution,
+        LlmHostedToolKind.DocumentSearch, LlmHostedToolKind.RemoteMcp
+    }.ToFrozenSet();
+
     private static readonly IReadOnlySet<LlmServiceTier> AllServiceTiers = Enum.GetValues<LlmServiceTier>().ToFrozenSet();
 
     /// <summary>The feature list for the connection's endpoint and the model's profile (B11, B12).</summary>
@@ -74,6 +81,7 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
                     SupportsParallelCallControl = InferenceSupport.Supported,
                     SupportsArgumentStreaming = InferenceSupport.Supported
                 },
+                HostedTools = OpenAiHostedTools,
                 ReasoningLevels = profile.ReasoningLevels,
                 SupportsTemperature = sampling,
                 SupportsTopP = sampling,

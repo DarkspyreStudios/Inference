@@ -520,9 +520,9 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
     protected virtual LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
         OpenAiRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
 
-    /// <summary>Reports image_generation_call items; the payload carries the image tool only when the request asks for it.</summary>
-    private static ResponsesImageGenerationObserver CreateHostedToolObserver(Func<Exception> malformed) =>
-        new ResponsesImageGenerationObserver(malformed);
+    /// <summary>Reports the hosted calls and citations of one reply; the payload carries a hosted tool only when the request asks for it.</summary>
+    private static ResponsesHostedToolsObserver CreateHostedToolObserver(Func<Exception> malformed) =>
+        new ResponsesHostedToolsObserver(malformed);
 
     private const string ResponseName = "OpenAI Responses";
 
@@ -692,7 +692,9 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         }
 
         // Stateless ordinary responses need their reasoning state just as tool responses do.
-        payload["include"] = new JsonArray("reasoning.encrypted_content");
+        // Primitive nodes avoid Add<T>'s dependency on default serializer metadata.
+        payload["include"] = new JsonArray([(JsonNode?)"reasoning.encrypted_content",
+            .. HostedIncludes(request.HostedTools).Select(entry => (JsonNode?)entry)]);
         if (request.Tools.Count > 0)
         {
             payload["tools"] = OpenAiResponsesTools.BuildTools(request.Tools);
@@ -739,16 +741,61 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         {
             call["name"] = names.Native(call["name"]!.GetValue<string>());
         }
-        foreach (LlmImageGenerationTool image in request.HostedTools.OfType<LlmImageGenerationTool>())
+        foreach (LlmHostedTool hosted in request.HostedTools)
         {
-            var tool = new JsonObject { ["type"] = "image_generation" };
-            if (image.Action != LlmImageGenerationAction.Auto)
-                tool["action"] = image.Action == LlmImageGenerationAction.Edit ? "edit" : "generate";
             if (payload["tools"] is not JsonArray tools) payload["tools"] = tools = [];
-            tools.Add(tool);
+            tools.Add(WriteHostedTool(hosted));
         }
         return payload;
     }
+
+    /// <summary>The wire entry of one hosted tool, in the OpenAI Responses shape. A provider overrides it for each
+    /// tool whose wire differs. X search has no OpenAI shape; validation refuses it before the payload is built.</summary>
+    protected virtual JsonObject WriteHostedTool(LlmHostedTool tool)
+    {
+        switch (tool)
+        {
+            case LlmImageGenerationTool image:
+                var generation = new JsonObject { ["type"] = "image_generation" };
+                if (image.Action != LlmImageGenerationAction.Auto)
+                    generation["action"] = image.Action == LlmImageGenerationAction.Edit ? "edit" : "generate";
+                return generation;
+            case LlmWebSearchTool web:
+                var search = new JsonObject { ["type"] = "web_search" };
+                if (web.AllowedDomains is { Count: > 0 } domains)
+                    search["filters"] = new JsonObject { ["allowed_domains"] = Strings(domains) };
+                return search;
+            case LlmCodeExecutionTool:
+                return new JsonObject { ["type"] = "code_interpreter", ["container"] = new JsonObject { ["type"] = "auto" } };
+            case LlmDocumentSearchTool document:
+                var files = new JsonObject { ["type"] = "file_search", ["vector_store_ids"] = Strings(document.CollectionIds) };
+                if (document.MaxResults is { } maximum) files["max_num_results"] = maximum;
+                return files;
+            case LlmRemoteMcpTool mcp:
+                var remote = new JsonObject { ["type"] = "mcp", ["server_label"] = mcp.ServerLabel, ["server_url"] = mcp.ServerUrl };
+                if (mcp.AllowedTools is { } allowed) remote["allowed_tools"] = Strings(allowed);
+                if (mcp.Headers is { } headers)
+                    remote["headers"] = new JsonObject(headers.Select(pair => KeyValuePair.Create<string, JsonNode?>(pair.Key, pair.Value)));
+                remote["require_approval"] = "never";
+                return remote;
+            default:
+                throw new NotSupportedException($"This route does not implement {HostedTools.Name(tool.Kind)}.");
+        }
+    }
+
+    /// <summary>The include entries that return the hosted tools' sources, results and outputs: one for each of web
+    /// search, document search and code execution present in <paramref name="tools"/>.</summary>
+    protected virtual IReadOnlyList<string> HostedIncludes(IReadOnlyList<LlmHostedTool> tools)
+    {
+        var include = new List<string>();
+        if (tools.OfType<LlmWebSearchTool>().Any()) include.Add("web_search_call.action.sources");
+        if (tools.OfType<LlmDocumentSearchTool>().Any()) include.Add("file_search_call.results");
+        if (tools.OfType<LlmCodeExecutionTool>().Any()) include.Add("code_interpreter_call.outputs");
+        return include;
+    }
+
+    /// <summary>A JSON array of the strings, built from primitive nodes.</summary>
+    protected static JsonArray Strings(IEnumerable<string> values) => new([.. values.Select(value => (JsonNode?)value)]);
 
     protected virtual LlmStructuredOutputEnforcement? ResolveStructuredOutputEnforcement(
         LlmConnection connection, LlmChatRequest request, LlmProviderCapabilities capabilities) =>

@@ -34,6 +34,7 @@ public enum LlmImageGenerationAction
 [JsonDerivedType(typeof(LlmImageGenerationTool), "image-generation")]
 [JsonDerivedType(typeof(LlmDocumentSearchTool), "document-search")]
 [JsonDerivedType(typeof(LlmRemoteMcpTool), "remote-mcp")]
+[JsonDerivedType(typeof(LlmSocialSearchTool), "social-search")]
 public abstract record LlmHostedTool
 {
     /// <summary>Initializes a hosted tool for a derived record.</summary>
@@ -67,6 +68,25 @@ public sealed record LlmWebSearchTool(
     public LlmWebSearchLocation? Location { get; init; }
     /// <inheritdoc />
     [JsonIgnore] public override LlmHostedToolKind Kind => LlmHostedToolKind.WebSearch;
+}
+
+/// <summary>The provider-hosted search over X posts.</summary>
+public sealed record LlmSocialSearchTool : LlmHostedTool
+{
+    /// <summary>The X handles search is limited to, as a read-only copy; empty means no limit.</summary>
+    public IReadOnlyList<string> AllowedHandles { get; init => field = HostedSnapshot.List(HostedSnapshot.Required(value))!; } = [];
+    /// <summary>The X handles search leaves out, as a read-only copy; empty means none.</summary>
+    public IReadOnlyList<string> ExcludedHandles { get; init => field = HostedSnapshot.List(HostedSnapshot.Required(value))!; } = [];
+    /// <summary>The first day of posts search covers, or null for no lower bound.</summary>
+    public DateOnly? FromDate { get; init; }
+    /// <summary>The last day of posts search covers, or null for no upper bound.</summary>
+    public DateOnly? ToDate { get; init; }
+    /// <summary>True lets the provider read images in the posts it finds.</summary>
+    public bool IncludeImageUnderstanding { get; init; }
+    /// <summary>True lets the provider read videos in the posts it finds.</summary>
+    public bool IncludeVideoUnderstanding { get; init; }
+    /// <inheritdoc />
+    [JsonIgnore] public override LlmHostedToolKind Kind => LlmHostedToolKind.SocialSearch;
 }
 
 /// <summary>The provider-hosted code execution tool.</summary>

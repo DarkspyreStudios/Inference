@@ -41,7 +41,7 @@
     <Compile Remove="Internal/Gemini/**" />
     <Compile Include="Internal/Gemini/GeminiCacheBindings.cs;Internal/Gemini/GoogleCacheData.cs" />
     <Compile Remove="Internal/Xai*.cs;Internal/DocumentSearchEnumConverters.cs" />
-    <Compile Remove="DocumentSearch.cs;XaiFamilyBinding.cs;XaiFileStorageOptions.cs;XaiHostedTools.cs;XaiSkills.cs;LlmProviderService.Xai.cs" />
+    <Compile Remove="DocumentSearch.cs;XaiFamilyBinding.cs;XaiFileStorageOptions.cs;XaiSkills.cs;LlmProviderService.Xai.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -132,7 +132,7 @@ session normalizes each request it builds, so its measure sees what is sent. A d
 
 A refusal remains only for an operation the conversation marks Unsupported, and it names the feature: resume on
 Codex (`{transport} agent sessions cannot resume a provider thread.`); a hosted tool kind the route does
-not implement; context capture, replacement or compaction handoff where unsupported; tool use on a model without
+not implement (`This route does not implement X search.`); context capture, replacement or compaction handoff where unsupported; tool use on a model without
 it; and an opening on a model that marks agent sessions or agent tool use Unsupported
 (`The selected model does not support agent sessions.` or `... agent tool use.`).
 
@@ -212,7 +212,7 @@ in its own message by the attachment notice, so any history opens.
 
 | Member | Codex | OpenAI API | Claude | Antigravity |
 | --- | --- | --- | --- | --- |
-| HostedTools | ImageGeneration | ImageGeneration | none | none |
+| HostedTools | ImageGeneration | ImageGeneration; on `api.openai.com` also WebSearch, CodeExecution, DocumentSearch, RemoteMcp | none | none |
 | SupportsShellTools | Unsupported | Unsupported | Unsupported | Unsupported |
 | SupportsContextCapture, SupportsContextReplacement | Supported | Supported | Unsupported | Unsupported |
 | SupportsContextStatus | Supported | Supported | Supported | Supported |
@@ -234,7 +234,8 @@ a key is set. Requests send `store: false` and the whole history every time. The
 endpoint's host. On `api.openai.com` it comes from the built-in model profiles (`OpenAiModelProfiles`): reasoning
 levels, temperature and top-p, prompt-cache options, and the published context window and output limit. On any other
 host the profiles are not read, so a local model named like an OpenAI model gets no OpenAI facts: every service
-feature is Unknown, the reasoning level set is empty, and the prompt cache reports Unknown. Both list the image tool.
+feature is Unknown, the reasoning level set is empty, and the prompt cache reports Unknown. Both list the image tool;
+OpenAI's endpoint also lists web search, code execution, document search and remote MCP (see "Hosted search").
 The listing is the service's own `/models`; on OpenAI's endpoint a model with no listed window takes its published
 window and output limit, and elsewhere the listed values are used as they are.
 
@@ -275,6 +276,35 @@ context whose selection came from an earlier run opens without a refusal; a mess
 resolve still refuses. A committed image joins the selection, and a Responses request is prepared without the
 selection, so the image is not sent again as an attachment: the next Codex or OpenAI API turn replays it from the
 `image_generation_call` item in continuation state.
+
+**Hosted search.** `HostedTools` can also ask for web search (`LlmWebSearchTool`), X search (`LlmSocialSearchTool`),
+code execution (`LlmCodeExecutionTool`), document search over stored collections (`LlmDocumentSearchTool`) and a
+remote MCP server (`LlmRemoteMcpTool`). The OpenAI API offers all of them except X search on `api.openai.com`; a kind
+the model's `HostedTools` lacks is refused with its name, such as `This route does not implement X search.`. The
+shared Responses client writes one wire tool per hosted tool through `WriteHostedTool`, in OpenAI's shape:
+
+| Tool | Wire entry |
+| --- | --- |
+| Web search | `{"type":"web_search","filters":{"allowed_domains":[...]}}`, `filters` only when domains are listed |
+| Code execution | `{"type":"code_interpreter","container":{"type":"auto"}}` |
+| Document search | `{"type":"file_search","vector_store_ids":[...],"max_num_results"?}` |
+| Remote MCP | `{"type":"mcp","server_label","server_url","allowed_tools"?,"headers"?,"require_approval":"never"}` |
+| Image generation | `{"type":"image_generation","action"?}` |
+
+The OpenAI shape has no excluded domains, image-search flags, user location or MCP server description, so those
+fields are not sent there. `HostedIncludes` adds `web_search_call.action.sources`, `file_search_call.results` and
+`code_interpreter_call.outputs` to `include` when the matching tool is present. The hosted-turn limit is not sent
+on the OpenAI API: its Responses API has no `max_turns`. A provider whose wire differs overrides either hook per
+tool.
+
+One observer, `ResponsesHostedToolsObserver`, reads every Responses reply. A hosted item (`image_generation_call`,
+`web_search_call`, `x_search_call`, `file_search_call`, `code_interpreter_call`, `mcp_call`, and Grok's
+`custom_tool_call` X-search calls, identified by an `xs_` call id or an X-search tool name) raises a started event on
+`response.output_item.added` and a completed event with its output on `response.output_item.done`. A hosted item
+that appears only in the terminal output completes there. Web search reports its sources, document search its
+matches, code execution its code, logs and image URLs, and MCP its arguments, output and error. Each `url_citation`
+annotation of a message raises one citation event, keyed by the message, its content part and the annotation, and
+a top-level `citations` list adds each URL no annotation cited. The completed result carries every citation once.
 
 **Fallback models, caps and retries.** Codex refuses a non-empty `FallbackModelIds` and a `MaxSpendUsd` greater
 than 0 at opening. Claude passes `FallbackModelIds`, without the session model and without repeats, as
@@ -927,8 +957,8 @@ Retained chat adapters append request, replay, tool and embedding JSON nodes thr
 or payload values. Typed HTTP registration declares the public constructors required by the framework's
 typed-client factory so trimming preserves its construction path.
 
-`ConnectLlmJson.PortableRequest` closes the Common request graph with the fixed `XaiXSearchTool`
-variant, also supported by `ChatRequest` metadata. It adds no arbitrary CLR subtype registry and
+`ConnectLlmJson.PortableRequest` closes the Common request graph, also supported by `ChatRequest`
+metadata. It adds no arbitrary CLR subtype registry and
 does not change Common's metadata. Owned options compose Common's exact runtime-resource and
 authorization refusal converters; live authorization cannot be serialized or reconstructed as
 data, and serialization never invokes its callback. The separate credential codec keeps its
