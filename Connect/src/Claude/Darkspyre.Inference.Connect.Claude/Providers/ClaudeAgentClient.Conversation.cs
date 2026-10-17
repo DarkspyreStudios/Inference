@@ -509,11 +509,7 @@ internal sealed partial class ClaudeAgentClient
         }
 
         private LlmAgentCompactedEvent Compacted(string turnId, string requestId, long revision, CompactionResult result) =>
-            new(ThreadId, turnId, requestId, revision, result.DroppedMessageCount, result.Usage)
-            {
-                ShortenedToolOutputCount = result.ShortenedToolOutputCount,
-                RemovedImageCount = result.RemovedImageCount
-            };
+            result.ToEvent(ThreadId, turnId, requestId, revision);
 
         public ValueTask DisposeAsync()
         {
@@ -679,13 +675,8 @@ internal sealed partial class ClaudeAgentClient
         }
 
         /// <summary>Sends one summary request in print mode on the conversation's connection and returns its result.</summary>
-        private async Task<LlmChatResult> SideRequestAsync(LlmChatRequest request, CancellationToken cancellationToken)
-        {
-            LlmChatResult? result = null;
-            await foreach (LlmStreamEvent item in _owner.Chat.StreamAsync(_connection, request, cancellationToken).WithCancellation(cancellationToken))
-                if (item is LlmChatCompletionEvent completion) result = completion.Result;
-            return result ?? throw new InvalidOperationException("The summary request ended without completion.");
-        }
+        private Task<LlmChatResult> SideRequestAsync(LlmChatRequest request, CancellationToken cancellationToken) =>
+            SummaryRequest.ReadAsync(_owner.Chat.StreamAsync(_connection, request, cancellationToken), cancellationToken);
 
         /// <summary>The corrected size of a text sent as one user message.</summary>
         private long? EstimateText(string text)

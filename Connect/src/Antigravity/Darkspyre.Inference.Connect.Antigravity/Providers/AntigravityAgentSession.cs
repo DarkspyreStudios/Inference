@@ -16,7 +16,8 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 internal sealed record AntigravityLaunch(string? ModelId, LlmReasoningLevel? Effort, string? SchemaJson);
 
 /// <summary>
-/// One native AGY conversation. It owns one process generation at a time and one reader per generation.
+/// One native AGY conversation. The Host holds an <see cref="AntigravityConversation"/>, which runs this session and
+/// answers the context operations. It owns one process generation at a time and one reader per generation.
 /// One turn runs at a time. Output that arrives while no turn or handshake is waiting faults the session,
 /// because it cannot be attributed to a host turn.
 /// </summary>
@@ -57,6 +58,10 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     private AntigravityUsage? _baseline;
     private int _baselineGeneration;
 
+    // The usage of the current or last turn's first and last model responses; _sync guards both.
+    private LlmUsage? _firstStepUsage;
+    private LlmUsage? _lastStepUsage;
+
     private AntigravityAgentSession(
         IAntigravityCliSessionProcessFactory factory,
         string executable,
@@ -88,9 +93,21 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
 
     public string SessionId => ThreadId;
 
+    /// <summary>The usage AGY reported for the first model response of the current or last turn; null until it reports one.</summary>
+    internal LlmUsage? FirstStepUsage
+    {
+        get { lock (_sync) { return _firstStepUsage; } }
+    }
+
+    /// <summary>The usage AGY reported for the last model response of the current or last turn; null until it reports one.</summary>
+    internal LlmUsage? LastStepUsage
+    {
+        get { lock (_sync) { return _lastStepUsage; } }
+    }
+
     /// <summary>Starts a process, waits for its handshake and returns the session under its real conversation ID.</summary>
     [SuppressMessage("Design", "CA1031", Justification = "Failed opening preserves both the original failure and a genuine retirement failure.")]
-    public static async Task<ILlmAgentSession> OpenAsync(
+    public static async Task<AntigravityAgentSession> OpenAsync(
         IAntigravityCliSessionProcessFactory factory,
         string executable,
         string workingDirectory,
@@ -212,6 +229,8 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             {
                 throw new InvalidOperationException("An Antigravity session runs one turn at a time.");
             }
+            _firstStepUsage = null;
+            _lastStepUsage = null;
             if (_lines.Reader.TryPeek(out _))
             {
                 FaultLocked("The Antigravity CLI produced output while no turn was active.");
@@ -929,8 +948,20 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             {
                 events.Add(new LlmAgentActivityEvent(ThreadId, turnId, itemId, $"Model activity: {step.StepType.Replace('_', ' ')}"));
             }
+            if (step.IsDone && string.Equals(step.StepType, "checkpoint", StringComparison.Ordinal))
+            {
+                // A checkpoint is AGY's own compaction: a model-written summary that replaces the earlier steps in its
+                // context. The stream reports no message counts; the conversation sets the context revision.
+                events.Add(new LlmAgentCompactedEvent(ThreadId, turnId, itemId, 0, null, AntigravityStepLedger.Normalize(step.Usage)));
+            }
             if (string.Equals(step.StepType, "agent_response", StringComparison.Ordinal))
             {
+                if (step.IsDone && AntigravityStepLedger.Normalize(step.Usage) is { InputTokens: not null } reported)
+                {
+                    // The caller holds _sync while mapping.
+                    session._firstStepUsage ??= reported;
+                    session._lastStepUsage = reported;
+                }
                 // A schema turn publishes only the validated canonical result.
                 if (schema is null && !string.IsNullOrEmpty(step.TextDelta))
                 {

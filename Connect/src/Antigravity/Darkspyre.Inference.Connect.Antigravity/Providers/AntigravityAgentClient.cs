@@ -4,12 +4,13 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>
-/// Native Antigravity CLI sessions. AGY owns the conversation, its Google sign-in, its native tools and its configured
-/// permission policy; Connect owns one local process per open session. A start opens a new AGY conversation and a
-/// resume reopens one by its conversation ID.
+/// Native Antigravity CLI sessions. AGY owns its Google sign-in, its native tools and its configured permission policy;
+/// Connect owns one local process per open AGY conversation. The Host holds an <see cref="AntigravityConversation"/>,
+/// which keeps the saved history, measures it and compacts it. A start opens a new AGY conversation from the host's
+/// history and a resume reopens one by its conversation ID.
 /// </summary>
-internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactory processFactory)
-    : ILlmAgentResumeClient
+internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactory processFactory,
+    AntigravityCliLlmClient chat, LearnedModelContext learned) : ILlmAgentResumeClient
 {
     public LlmTransport Transport => LlmTransport.GoogleAntigravityCli;
 
@@ -25,21 +26,15 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
         // AGY assigns the conversation ID, so ThreadId and SessionId are not read.
         ValidateOpening(connection, options.ModelId, options.Tools, options.ToolHandler, options.HostedTools, options.MaxHostedTurns);
         LlmAgentNativeRuntimeOptions runtime = ValidateRuntime(options.Runtime);
-        AgentOpeningContext? opening = AgentOpeningContext.For(
-            options.Context is null ? options : options with { Context = TextOnly(connection, options.ModelId, options.Context) },
-            carriesAttachments: false);
-        return await AntigravityAgentSession.OpenAsync(
-            processFactory,
-            AntigravityCliLlmClient.ResolveExecutable(connection.Endpoint),
-            CliInfrastructure.NormalizeWorkingDirectory(runtime.WorkingDirectory),
-            new AntigravityLaunch(options.ModelId, null, null),
-            conversationId: null,
-            connection,
-            Introduction(options.Instructions, opening?.Text),
-            opening?.Notice,
-            cancellationToken);
+        LlmAgentContext history = options.Context is null ? new() : TextOnly(connection, options.ModelId, options.Context);
+        return await OpenConversationAsync(connectionId, connection, options.ModelId, options.Instructions, options.ExecutionOptions,
+            options.CallerServices?.Transcript, runtime, history, resumeConversationId: null, cancellationToken);
     }
 
+    /// <summary>
+    /// Reopens the AGY conversation <paramref name="threadId"/> names. <see cref="LlmAgentResumeOptions.Context"/> is the
+    /// saved history the conversation measures and compacts from; AGY already holds it, so none of it is sent.
+    /// </summary>
     public async Task<ILlmAgentSession> ResumeSessionAsync(
         string connectionId,
         LlmConnection connection,
@@ -54,16 +49,40 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
         options ??= new LlmAgentResumeOptions();
         ValidateOpening(connection, options.ModelId, options.Tools, options.ToolHandler, options.HostedTools, options.MaxHostedTurns);
         LlmAgentNativeRuntimeOptions runtime = ValidateRuntime(options.Runtime);
-        return await AntigravityAgentSession.OpenAsync(
-            processFactory,
-            AntigravityCliLlmClient.ResolveExecutable(connection.Endpoint),
-            CliInfrastructure.NormalizeWorkingDirectory(runtime.WorkingDirectory),
-            new AntigravityLaunch(options.ModelId, null, null),
-            conversationId,
-            connection,
-            Introduction(options.Instructions, null),
-            openingNotice: null,
-            cancellationToken);
+        // The session default; the CLI picks the model when none is named.
+        string modelId = options.ModelId ?? AntigravityDefinition.Value.DefaultModelId;
+        LlmAgentContext history = options.Context is null ? new() : TextOnly(connection, modelId, options.Context);
+        return await OpenConversationAsync(connectionId, connection, modelId, options.Instructions, options.ExecutionOptions,
+            options.CallerServices?.Transcript, runtime, history, conversationId, cancellationToken);
+    }
+
+    private async Task<ILlmAgentSession> OpenConversationAsync(string connectionId, LlmConnection connection, string modelId,
+        string? instructions, LlmAgentExecutionOptions? execution, ILlmConversationTranscript? transcript,
+        LlmAgentNativeRuntimeOptions runtime, LlmAgentContext history, string? resumeConversationId,
+        CancellationToken cancellationToken)
+    {
+        string executable = AntigravityCliLlmClient.ResolveExecutable(connection.Endpoint);
+        string workingDirectory = CliInfrastructure.NormalizeWorkingDirectory(runtime.WorkingDirectory);
+        var conversation = new AntigravityConversation(connectionId, connection, chat, learned, modelId, execution, transcript,
+            history, resumeConversationId, (opening, conversationId, token) =>
+            {
+                // A reopened conversation already holds its history; a new one receives it once, before its first input.
+                AgentOpeningContext? text = conversationId is not null ? null
+                    : AgentOpeningContext.For(new LlmAgentSessionOptions { ModelId = modelId, Context = opening }, carriesAttachments: false);
+                return AntigravityAgentSession.OpenAsync(processFactory, executable, workingDirectory,
+                    new AntigravityLaunch(modelId, null, null), conversationId, connection, Introduction(instructions, text?.Text),
+                    text?.Notice, token);
+            });
+        try
+        {
+            await conversation.OpenAsync(cancellationToken);
+            return conversation;
+        }
+        catch
+        {
+            await conversation.DisposeAsync();
+            throw;
+        }
     }
 
     /// <summary>

@@ -187,7 +187,8 @@ connection continues, including one whose connection was removed.
 
 `LlmAgentProviderService.ResumeSessionAsync` routes to the transport's internal `ILlmAgentResumeClient`; Codex has
 none and refuses. Antigravity resumes natively: AGY keeps the conversation and reopens it with
-`--conversation <id>`. Claude resumes by the conversation's thread id with `LlmAgentResumeOptions.Context`, the
+`--conversation <id>`; `LlmAgentResumeOptions.Context` is the saved history its conversation measures and compacts
+from, and none of it is sent. Claude resumes by the conversation's thread id with `LlmAgentResumeOptions.Context`, the
 caller's history, and the session settings `ExecutionOptions`, `ToolHandling`, `SkillFolders` and `FallbackModelIds`:
 
 - When the CLI saved that session for the working folder (`<config folder>/projects/<working folder>/<id>.jsonl`,
@@ -214,7 +215,7 @@ in its own message by the attachment notice, so any history opens.
 | HostedTools | ImageGeneration | ImageGeneration | none | none |
 | SupportsShellTools | Unsupported | Unsupported | Unsupported | Unsupported |
 | SupportsContextCapture, SupportsContextReplacement | Supported | Supported | Unsupported | Unsupported |
-| SupportsContextStatus | Supported | Supported | Supported | Unsupported |
+| SupportsContextStatus | Supported | Supported | Supported | Supported |
 | SupportsCompactionHandoff | Unsupported | Unsupported | Unsupported | Unsupported |
 | SupportsNativeResume | Unsupported | Unsupported | Supported | Supported |
 | SupportsSteering | Supported | Supported | Supported | Unsupported |
@@ -224,7 +225,7 @@ in its own message by the attachment notice, so any history opens.
 | SupportsFallbackModels | Unsupported | Unsupported | Unknown | Unsupported |
 | SupportsTurnCap | Supported | Supported | Unknown | Unsupported |
 | SupportsSpendCap | Unsupported | Unsupported | Unknown | Unsupported |
-| SupportsCompactNow | Supported | Supported | Supported | Unsupported |
+| SupportsCompactNow | Supported | Supported | Supported | Supported |
 
 **The OpenAI API and its endpoint.** An OpenAI API connection has an endpoint, `https://api.openai.com/v1` by
 default, and may point at any service that serves the same API, such as a local llama.cpp server or OpenRouter. The
@@ -356,6 +357,26 @@ results above are complete; do not repeat finished tool calls.` when the turn al
 keeps its thread id and the turn keeps its id across CLI sessions; usage totals add up across them. A second refusal
 ends the turn with the provider's reason. `GetContextStatusAsync` answers from the same measure, and `CompactNowAsync`
 compacts an idle conversation and reopens from the result. Stages, events and failures are those of Codex.
+
+**Compaction on Antigravity.** An Antigravity start or resume returns a conversation that owns the saved history and
+one AGY conversation at a time. The saved history is the opening history, or a resume's `Context`, then each turn's
+input as one user message and its final answer as one assistant message. AGY runs its own tools inside a turn, so the
+conversation measures only before the turn's input is sent, the first turn's opening included. A measure with a
+reported model response is that response's input and output plus the corrected estimate of the entries recorded after
+it; otherwise it is the corrected estimate of the whole history and the input. AGY reports no window, so the window and
+output limit come from a published table: 1,048,576 and 65,536 tokens for `gemini-3.8-flash-low`, `-medium` and
+`-high`, 1,000,000 and 128,000 for `claude-sonnet-4-6` and `claude-opus-4-6-thinking`, and 131,072 with the default
+reserve for `gpt-oss-120b-medium`. Any other model, `auto` included, has no known window, so its status reports no
+trigger and the conversation never compacts it. At or above the trigger the conversation compacts the saved history
+with the turn's input as the current turn, summarizing in print mode on the same connection, then closes the AGY
+conversation and opens a new one with the compacted history as its opening transcript, followed by the turn's input.
+A failed compaction ends the turn and keeps the open AGY conversation. The conversation keeps its thread id and the
+turn keeps its id; usage totals add up across the summary requests and the turn. `GetContextStatusAsync` answers from
+the same measure, and `CompactNowAsync` compacts an idle conversation and reopens from the result. AGY also compacts on
+its own with a `checkpoint` step, a model-written summary that replaces earlier steps in its context; the conversation
+reports it as `LlmAgentCompactedEvent` with no counts and the step's usage. The conversation reports
+`SupportsNativeResume` Unsupported once a compaction opened a new AGY conversation, because a resume by the thread id
+reopens the first one.
 
 An unclassified managed failure ends the turn with `{exception type}: {message}`, the message with credentials
 removed. Provider errors keep `LlmProviderException.Message`.
@@ -5210,7 +5231,7 @@ per open session, with an open standard input and one output reader.
   working directory; it is not a filesystem boundary. `Ephemeral = true` is rejected: AGY persists every
   conversation.
 - Start waits up to 60 seconds for the CLI handshake and returns its conversation ID as both
-  `ThreadId` and `SessionId`. No hidden prompt is sent.
+  `ThreadId` and `SessionId`. The IDs stay fixed when a compaction moves the session to a new AGY conversation. No hidden prompt is sent.
 - `ResumeSessionAsync` passes that exact ID with `--conversation` and fails if the handshake reports
   another. Resume without `Runtime` fails, so the host must supply its stored working directory and
   provider policy. `--continue` is never used.
@@ -5247,8 +5268,10 @@ per open session, with an open standard input and one output reader.
   cancellation; a failed local termination also faults the session with its PID and remains visible
   to disposal. Failed opening preserves both the opening and cleanup errors when both occur.
 - `SupportsAgentToolUse` is `Unsupported`, AGY runs only its own tools, `ResourceObservation` is Unsupported
-  and resource operations throw. Interrupt, steering, fork and context capture, status, replacement and
-  compaction handoff are unsupported. `SupportsNativeResume` is Supported.
+  and resource operations throw. Interrupt, steering, fork and context capture, replacement and compaction
+  handoff are unsupported. `SupportsContextStatus` and `SupportsCompactNow` are Supported: the session the host
+  holds measures and compacts its own saved history, as "Compaction on Antigravity" describes.
+  `SupportsNativeResume` is Supported until a compaction opens a new AGY conversation.
 
 The ConsoleTester `agy-probe` command runs bounded live qualification cases; see
 [Subscription and AWS smoke tests](#subscription-and-aws-smoke-tests).

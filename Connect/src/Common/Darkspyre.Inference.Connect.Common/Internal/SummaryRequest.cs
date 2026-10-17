@@ -1,3 +1,5 @@
+using Darkspyre.Inference.Common.LLM;
+
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 /// <summary>
@@ -16,4 +18,14 @@ internal static class SummaryRequest
             + $"Write at most {maxWords} words.",
         Messages = [new("user", material)]
     };
+
+    /// <summary>The completed result of one summary request's stream.</summary>
+    /// <exception cref="InvalidOperationException">The stream ended without a completion.</exception>
+    internal static async Task<LlmChatResult> ReadAsync(IAsyncEnumerable<LlmStreamEvent> stream, CancellationToken cancellationToken)
+    {
+        LlmChatResult? result = null;
+        await foreach (LlmStreamEvent item in stream.WithCancellation(cancellationToken).ConfigureAwait(false))
+            if (item is LlmChatCompletionEvent completion) result = completion.Result;
+        return result ?? throw new InvalidOperationException("The summary request ended without completion.");
+    }
 }

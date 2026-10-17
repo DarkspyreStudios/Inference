@@ -50,6 +50,14 @@ internal sealed record CompactionResult(LlmAgentContext Context, int? DroppedMes
 {
     /// <summary>False for a compaction that shortened nothing and summarized nothing; it is not reported.</summary>
     internal bool Changed => this is not { DroppedMessageCount: null, ShortenedToolOutputCount: 0, RemovedImageCount: 0 };
+
+    /// <summary>The event that reports this compaction, with the context revision it produced.</summary>
+    internal LlmAgentCompactedEvent ToEvent(string threadId, string turnId, string requestId, long revision) =>
+        new(threadId, turnId, requestId, revision, DroppedMessageCount, Usage)
+        {
+            ShortenedToolOutputCount = ShortenedToolOutputCount,
+            RemovedImageCount = RemovedImageCount
+        };
 }
 
 /// <summary>Compaction cannot bring a request under the usable window, so the request is not sent.</summary>

@@ -135,7 +135,7 @@ public sealed class AntigravityCliLlmClientTests
     public async Task NativeTerminalFailurePreservesSanitizedProviderDetail()
     {
         var process = new TerminalProcess();
-        await using ILlmAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
+        await using AntigravityAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
             Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, CancellationToken.None);
 
         IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(
@@ -276,7 +276,7 @@ public sealed class AntigravityCliLlmClientTests
     public async Task NativeTurnUsesTheSameModelMappingBeforeReopening(string model, LlmReasoningLevel effort, string word)
     {
         var process = new TerminalProcess();
-        await using ILlmAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
+        await using AntigravityAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
             Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, CancellationToken.None);
         var request = new LlmAgentTurnRequest { ModelId = model, ReasoningLevel = effort, Input = [new LlmAgentTextContent("answer")] };
 
@@ -294,7 +294,7 @@ public sealed class AntigravityCliLlmClientTests
     {
         var process = new TerminalProcess();
         await using var providers = new LlmAgentProviderService(new ResourcePreparationTests.Source(Connection()),
-            [new AntigravityAgentClient(process)]);
+            [Agents(process)]);
 
         await using ILlmAgentSession session = await providers.ResumeSessionAsync("connection", "conversation-1",
             new() { Runtime = ProviderRuntime() });
@@ -309,7 +309,7 @@ public sealed class AntigravityCliLlmClientTests
     public async Task FirstTurnCarriesSessionInstructionsAndOpeningHistoryOnce()
     {
         var process = new TerminalProcess();
-        await using ILlmAgentSession session = await new AntigravityAgentClient(process).StartSessionAsync("connection",
+        await using ILlmAgentSession session = await Agents(process).StartSessionAsync("connection",
             Connection(), new()
             {
                 ModelId = "auto",
@@ -340,7 +340,7 @@ public sealed class AntigravityCliLlmClientTests
         var process = new TerminalProcess();
         var image = new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "chart.png", MediaType = "image/png", Data = new byte[] { 1 } };
         var resource = new LlmResourceAttachment(new Darkspyre.Inference.Common.Resources.InferenceResourceReference("workspace", "notes"));
-        await using ILlmAgentSession session = await new AntigravityAgentClient(process).StartSessionAsync("connection",
+        await using ILlmAgentSession session = await Agents(process).StartSessionAsync("connection",
             Connection(), new()
             {
                 ModelId = "auto",
@@ -377,7 +377,7 @@ public sealed class AntigravityCliLlmClientTests
     public async Task TurnInstructionsAndUncarriedAttachmentsReachThePromptAsText()
     {
         var process = new TerminalProcess();
-        await using ILlmAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
+        await using AntigravityAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
             Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, CancellationToken.None);
         var image = new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "chart.png", MediaType = "image/png", Data = new byte[] { 1 } };
 
@@ -396,7 +396,7 @@ public sealed class AntigravityCliLlmClientTests
     public async Task EmptyTurnCompletesWithoutWritingToTheCli()
     {
         var process = new TerminalProcess();
-        await using ILlmAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
+        await using AntigravityAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
             Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, CancellationToken.None);
 
         IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(new()));
@@ -439,6 +439,10 @@ public sealed class AntigravityCliLlmClientTests
         new LlmChatMessage("user", string.Empty) { ToolResults = [new LlmToolResult("c1", LlmToolOutput.FromText("522,250"))] },
         new LlmChatMessage("user", "Round it."),
     ];
+
+    private static AntigravityAgentClient Agents(TerminalProcess process) =>
+        new(process, new AntigravityCliLlmClient(new RecordingRunner(new(1, string.Empty, "no side request is expected"))),
+            new LearnedModelContext());
 
     private static LlmConnection Connection() => new()
     {

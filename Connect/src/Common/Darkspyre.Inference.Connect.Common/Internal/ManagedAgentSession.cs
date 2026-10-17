@@ -1276,11 +1276,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         (text, token) => writer.WriteAsync(new LlmAgentActivityEvent(ThreadId, run.Id, itemId, text), token);
 
     private LlmAgentCompactedEvent Compacted(string turnId, string requestId, long revision, CompactionResult result) =>
-        new(ThreadId, turnId, requestId, revision, result.DroppedMessageCount, result.Usage)
-        {
-            ShortenedToolOutputCount = result.ShortenedToolOutputCount,
-            RemovedImageCount = result.RemovedImageCount
-        };
+        result.ToEvent(ThreadId, turnId, requestId, revision);
 
     /// <summary>
     /// The entries whose only content was continuation state the import omitted, such as a native compaction from
@@ -1335,10 +1331,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         {
             try
             {
-                LlmChatResult? result = null;
-                await foreach (LlmStreamEvent item in _stream(request, token).WithCancellation(token).ConfigureAwait(false))
-                    if (item is LlmChatCompletionEvent completion) result = completion.Result;
-                return result ?? throw new InvalidOperationException("The summary request ended without completion.");
+                return await SummaryRequest.ReadAsync(_stream(request, token), token).ConfigureAwait(false);
             }
             catch (Exception error) when (!token.IsCancellationRequested && attempt < 2
                 && (RetryDelay(error, attempt) is not null || error is LlmProviderException { IsResponseStreamInterrupted: true }))
