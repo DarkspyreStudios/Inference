@@ -267,8 +267,8 @@ request names none. A model the list does not name offers no levels. The proxy l
 offers no agent counts. Grok conversations run on the shared managed session with the feature list above. The proxy
 serves no `responses/compact` or `tokenize-text` route (both answer 404), so the host compacts Grok conversations and
 the estimate is the local count. The proxy adds framing the request does not show, about 1,400 tokens on `grok-4.7`
-and 360 on `grok-4.5`, so a short request is underestimated by that much; on a request of about 55,000 tokens the
-local count was 1,200 to 3,900 tokens over the reported count. Grok's continuation state keeps its output verbatim and
+and 360 on `grok-4.5`. The first reported step teaches it, and later estimates add it; the first request after the
+process starts is underestimated by that much. Grok's continuation state keeps its output verbatim and
 in order: messages, reasoning, function calls, hosted calls (`web_search_call`, `x_search_call`,
 `code_interpreter_call`, `code_execution_call`, `file_search_call`, `mcp_call`, `image_generation_call`,
 `view_image_call`, `view_x_video_call`, `custom_tool_call`, `tool_search_call`, `tool_search_output`). A
@@ -403,7 +403,11 @@ reserve or cap is ignored, and a cap above the model limit uses the model limit.
 Inference and never pause for the host, and their `ContinueTurnAsync` refuses because `SupportsCompactionHandoff` is
 Unsupported. Codex's own compaction is never requested. Before every model step the session measures the request and
 emits `LlmAgentContextStatusEvent`. A local estimate that does not rest on a provider-reported count is corrected
-with the rate the model's reported counts taught. Every measurement that is not entirely provider-reported then adds
+with what the model's reported counts taught. A reported step under a quarter of the usable window teaches the
+model's framing: the reported input above the local estimate, which is text the service adds that the request does not
+show, such as a hidden system prompt. A local count above the report teaches no framing. A step at a quarter of the
+window or more teaches the rate, taken with the framing removed. The correction is the estimate times the rate, plus
+the framing. A model's first request after the process starts has nothing learned. Every measurement that is not entirely provider-reported then adds
 300 tokens (`ManagedAgentPolicy.EstimateMargin`) to its estimated part, because a local tokenizer is not the model's
 own and an estimate must err high; a count the provider reported in full gets no margin. The status, the request
 accounting and the compaction measures all carry it. The estimate is asynchronous, so a chat client may ask its model

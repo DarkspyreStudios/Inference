@@ -113,18 +113,19 @@ internal static class GrokProbe
     }
 
     /// <summary>
-    /// The session's estimate for a turn of 40,000 words (about a fifth of the window), taken before that turn, is at least
-    /// the input tokens Grok then reports for it. An estimate under the reported count fails; the difference is reported
-    /// either way. The proxy adds framing the request does not show (about 1,400 tokens on grok-4.7), so a short turn is
-    /// underestimated by that much; at this size the local count's surplus covers it.
+    /// After a one-line turn, the session's estimate for a turn of 3,000 words, taken before that turn, is at least the
+    /// input tokens Grok then reports for it. The proxy adds framing the request does not show (about 1,400 tokens on
+    /// grok-4.7); the first turn's report teaches it, and later estimates add it. An estimate under the reported count
+    /// fails; the difference is reported either way.
     /// </summary>
     internal static async Task<string> EstimateAsync(LlmAgentProviderService agents, string connectionId, string model,
         TextWriter output, CancellationToken token)
     {
         await using ILlmAgentSession session = await agents.StartSessionAsync(connectionId, new() { ModelId = model }, token);
+        await RunAsync(session, "Reply only with the word READY.", output, token);
         var turn = new LlmAgentTurnRequest
         {
-            Input = [new LlmAgentTextContent("Read these notes and reply only with the word DONE.\n" + Notes(40000))]
+            Input = [new LlmAgentTextContent("Read these notes and reply only with the word DONE.\n" + Notes(3000))]
         };
         LlmAgentContextStatus status = await session.GetContextStatusAsync(turn, token);
         long estimate = status.UsedContextTokens ?? throw new ProbeFailure("The session must estimate the turn.");

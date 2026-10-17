@@ -2,7 +2,8 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 /// <summary>
 /// What reported counts and too-long refusals taught about each model on each connection. A local server's limit is
-/// its own setting, so nothing learned on one connection applies to another. Nothing is stored.
+/// its own setting, so nothing learned on one connection applies to another. Nothing is stored, so a model's first
+/// request after the process starts has nothing learned.
 /// </summary>
 internal sealed class LearnedModelContext
 {
@@ -13,11 +14,21 @@ internal sealed class LearnedModelContext
     private readonly Lock _sync = new();
     private readonly Dictionary<(string ConnectionId, string ModelId), Facts> _facts = [];
 
-    /// <summary>A step's full local estimate and the input tokens the provider reported for it.</summary>
+    /// <summary>
+    /// A step's full local estimate and the input tokens the provider reported for it. At a quarter of the usable window
+    /// or more the pair teaches the rate. Below it, the reported surplus over the estimate is the provider's framing: text
+    /// the service adds to every request that the request does not show, such as a hidden system prompt.
+    /// </summary>
     internal void ObserveReport(string connectionId, string modelId, long estimated, long reported, long usableWindow)
     {
-        if (estimated <= 0 || reported <= 0 || estimated < MinimumReportShare * usableWindow) return;
-        lock (_sync) { For(connectionId, modelId).Pair = (estimated, reported); }
+        if (estimated <= 0 || reported <= 0) return;
+        lock (_sync)
+        {
+            Facts facts = For(connectionId, modelId);
+            if (estimated >= MinimumReportShare * usableWindow) facts.Pair = (estimated, reported);
+            // A surplus below zero is the local count running high, which an estimate may do; it teaches no framing.
+            else facts.Framing = Math.Max(0, reported - estimated);
+        }
     }
 
     /// <summary>A too-long refusal. Reported values come from the refusal text when present.</summary>
@@ -46,7 +57,11 @@ internal sealed class LearnedModelContext
         }
     }
 
-    /// <summary>The estimate times the learned rate; the estimate unchanged when nothing was learned.</summary>
+    /// <summary>
+    /// The estimate times the learned rate, plus the learned framing; the estimate unchanged when nothing was learned.
+    /// The rate is taken with the framing removed from the reported count, so a rate learned on a small capped window
+    /// does not absorb the framing and leave a short request low.
+    /// </summary>
     internal long Correct(string connectionId, string modelId, long estimated)
     {
         lock (_sync) { return _facts.TryGetValue((connectionId, modelId), out Facts? facts) ? Correct(facts, estimated) : estimated; }
@@ -76,14 +91,15 @@ internal sealed class LearnedModelContext
         return facts;
     }
 
-    private static double Rate(Facts facts) => facts.Pair is (long estimated, long reported) ? (double)reported / estimated : 1;
+    private static double Rate(Facts facts) =>
+        facts.Pair is (long estimated, long reported) ? (double)Math.Max(1, reported - facts.Framing) / estimated : 1;
 
-    private static long Correct(Facts facts, long estimated) =>
-        facts.Pair is null ? estimated : (long)Math.Ceiling(estimated * Rate(facts));
+    private static long Correct(Facts facts, long estimated) => checked((long)Math.Ceiling(estimated * Rate(facts)) + facts.Framing);
 
     private sealed class Facts
     {
         internal (long Estimated, long Reported)? Pair { get; set; }
+        internal long Framing { get; set; }
         internal long? Limit { get; set; }
         internal LlmRefusedSettings Refused { get; set; }
     }
