@@ -154,6 +154,7 @@ internal sealed class SecureConnectionSource(
 
     private static bool StoresHostCredential(LlmTransport transport) => transport is
         LlmTransport.OpenAiCodex
+        or LlmTransport.XaiResponses
         or LlmTransport.OpenAiResponses
         or LlmTransport.OpenAiCompatibleChat
         or LlmTransport.AnthropicMessages
