@@ -313,15 +313,8 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         private LlmConnection _connection;
         private readonly HashSet<string> _accountedCalls = new(StringComparer.Ordinal);
         private readonly HashSet<string> _completedResults = new(StringComparer.Ordinal);
-        private readonly IReadOnlyList<LlmAgentToolDefinition> _tools;
-        private readonly Dictionary<string, LlmAgentToolDefinition> _toolsByName;
-        private readonly LlmToolNames _names;
-        private readonly LlmAgentToolHandler? _toolHandler;
-        // Held around each call to a tool that requires sequential execution, so two such calls never overlap.
-        private readonly SemaphoreSlim _sequential = new(1, 1);
-        // The agent lane's tool-output support after the connection's overrides, and after the model's too.
-        private readonly LlmRichContentSupported _richRoute;
-        private readonly LlmRichContentSupported _richContent;
+        // The host tools the CLI reaches through its in-process MCP server.
+        private readonly McpToolBridge _bridge;
         private readonly SemaphoreSlim _turnGate = new(1, 1);
         private readonly SemaphoreSlim _writeLock = new(1, 1);
         private readonly List<PendingToolCall> _pendingToolCalls = [];
@@ -389,8 +382,6 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             _steerSettled = steerSettled;
             _beforeResults = beforeResults;
             _returnRequests = returnRequests;
-            _richRoute = richRoute;
-            _richContent = richContent;
             (_openingContext, _openingOmitted) = opening;
             _resourceAccess = resourceAccess;
             _resourceScope = resourceScope;
@@ -398,10 +389,9 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             SessionId = sessionId;
             _selectedModelId = initialModelId;
             _connection = connection;
-            _tools = tools;
-            _toolsByName = tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
-            _names = names;
-            _toolHandler = toolHandler;
+            // The agent lane's tool-output support is after the connection's overrides, and after the model's too.
+            _bridge = new McpToolBridge(McpServerName, tools, names, toolHandler, richRoute, richContent,
+                () => _connection, () => _resourceAccess, resourceScope);
         }
 
         public string ThreadId { get; }
@@ -491,7 +481,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             };
             if (!string.IsNullOrWhiteSpace(instructions))
                 request["systemPrompt"] = new JsonArray(instructions);
-            if (_tools.Count > 0)
+            if (_bridge.Tools.Count > 0)
             {
                 request["sdkMcpServers"] = new JsonArray(McpServerName);
                 request["sdkMcpServerManifests"] = new JsonObject
@@ -499,7 +489,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                     [McpServerName] = new JsonObject
                     {
                         ["initializeResult"] = McpInitializeResult("2025-06-18"),
-                        ["toolsListResult"] = McpToolsListResult(_tools, _names)
+                        ["toolsListResult"] = McpToolsListResult(_bridge.Tools, _bridge.Names)
                     }
                 };
             }
@@ -860,7 +850,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             _openingContext = null;
             _readerStop.Dispose();
             _turnGate.Dispose();
-            _sequential.Dispose();
+            _bridge.Dispose();
             _writeLock.Dispose();
             if (failures.Count == 1) ExceptionDispatchInfo.Throw(failures[0]);
             if (failures.Count > 1) throw new AggregateException("The Claude CLI session did not retire cleanly.", failures);
@@ -1002,7 +992,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                 case "ping":
                     return new McpResponse(McpResult(id, new JsonObject()), null);
                 case "tools/list":
-                    return new McpResponse(McpResult(id, McpToolsListResult(_tools, _names)), null);
+                    return new McpResponse(McpResult(id, McpToolsListResult(_bridge.Tools, _bridge.Names)), null);
                 default:
                     return new McpResponse(McpError(id, -32601, "Method not found."), null);
             }
@@ -1018,39 +1008,14 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             string controlRequestId,
             out LlmAgentToolCall? call)
         {
-            call = null;
-            if (!message.TryGetProperty("params", out JsonElement parameters)
-                || parameters.ValueKind != JsonValueKind.Object)
-            {
-                return new McpResponse(McpError(id, -32602, "Invalid tool parameters."), null);
-            }
-
-            string? name = OptionalString(parameters, "name") is { } native ? _names.Logical(native) : null;
-            if (name is null || !_toolsByName.TryGetValue(name, out LlmAgentToolDefinition? definition))
-            {
-                return new McpResponse(McpError(id, -32602, "Unknown tool."), null);
-            }
-
-            JsonElement arguments = parameters.TryGetProperty("arguments", out JsonElement suppliedArguments)
-                ? suppliedArguments.Clone()
-                : JsonElement.Parse("{}");
-            PendingToolCall? pending = TakePendingToolCall(name, arguments);
-            string callId = pending?.Id ?? ReadJsonRpcId(id) ?? controlRequestId;
-            // A wrapped schema's value is checked against the tool's own schema and is what the handler receives.
-            StructuredOutput.Evaluation evaluation = ToolSchemas.EvaluateArguments(definition.InputSchema, arguments.GetRawText());
-            if (ClientTools.ArgumentRejection(name, evaluation) is { } rejection)
-            {
-                // The handler does not run; the model receives the errors and the turn continues.
-                return new McpResponse(
-                    McpResult(id, new JsonObject
-                    {
-                        ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = rejection }),
-                        ["isError"] = true
-                    }),
-                    new LlmAgentToolEvent(ThreadId, _activeTurnId ?? string.Empty, callId, McpServerName, name, arguments,
-                        false, "failed", LlmToolOutput.FromText(rejection, isError: true)));
-            }
-            call = new LlmAgentToolCall(ThreadId, _activeTurnId ?? string.Empty, callId, McpServerName, name, evaluation.Instance);
+            McpToolRequest request = _bridge.Prepare(
+                message.TryGetProperty("params", out JsonElement parameters) ? parameters : default,
+                ThreadId,
+                _activeTurnId ?? string.Empty,
+                (name, arguments) => TakePendingToolCall(name, arguments)?.Id ?? ReadJsonRpcId(id) ?? controlRequestId);
+            call = request.Call;
+            if (request.InvalidParameters is { } invalid) return new McpResponse(McpError(id, -32602, invalid), null);
+            if (request.Rejected is { } rejected) return new McpResponse(McpResult(id, rejected.Result), rejected.Event);
             return null;
         }
 
@@ -1068,7 +1033,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             }
             foreach (PendingToolCall call in calls)
             {
-                string? rejection = _toolsByName.TryGetValue(call.Name, out LlmAgentToolDefinition? definition)
+                string? rejection = _bridge.Find(call.Name) is { } definition
                     ? ClientTools.ArgumentRejection(call.Name, ToolSchemas.EvaluateArguments(definition.InputSchema, call.Arguments.GetRawText()))
                     : "Unknown tool.";
                 Emit(rejection is null
@@ -1189,81 +1154,8 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
 
         private async Task<McpResponse> RunToolCallAsync(LlmAgentToolCall call, JsonElement id, CancellationToken cancellationToken)
         {
-            LlmToolOutput output;
-            bool sequential = _toolsByName[call.Name].RequiresSequentialExecution;
-            bool entered = false;
-            try
-            {
-                if (_toolHandler is not { } handler)
-                {
-                    output = LlmToolOutput.FromText(ClientTools.NoHandler(call.Name), isError: true);
-                }
-                else
-                {
-                    if (sequential)
-                    {
-                        await _sequential.WaitAsync(cancellationToken);
-                        entered = true;
-                    }
-                    output = await handler(call, cancellationToken);
-                }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception error)
-            {
-                output = LlmToolOutput.FromText(ClientTools.HandlerFailure(error, _connection), isError: true);
-            }
-            finally
-            {
-                if (entered) _sequential.Release();
-            }
-
-            cancellationToken.ThrowIfCancellationRequested();
-            output = ManagedAgentContext.CopyOutput(output);
-            if (output.Parts.Any(part => part is LlmToolOutputSessionResource))
-            {
-                IInferenceResourceAccess access = _resourceAccess ?? throw new NotSupportedException("Tool resources require caller-owned access.");
-                LlmResourcePreparation.ValidateScope(access, _resourceScope!, static () => { }, cancellationToken);
-                var request = new LlmChatRequest
-                {
-                    ModelId = string.Empty,
-                    Resources = access,
-                    Messages = [new("user", string.Empty) { ToolResults = [new LlmToolResult(call.CallId, output)] }]
-                };
-                // A resource part the MCP route cannot carry is left out with the projection's notice.
-                return await LlmResourcePreparation.ProjectInlineAsync(request, prepared => ToolResponse(call, id, output,
-                    ToolOutputProjector.Project(ClientTools.Functions(prepared.Messages[0].ToolResults)[0].Output, _richRoute, _richContent)),
-                    static () => { }, cancellationToken, includeSelection: false);
-            }
-            // Unsupported parts are omitted by the projection; they never fail the tool or the turn.
-            ProjectedToolOutput projected = ToolOutputProjector.Project(output, _richRoute, _richContent);
-            return ToolResponse(call, id, output, projected);
-        }
-
-        private McpResponse ToolResponse(LlmAgentToolCall call, JsonElement id, LlmToolOutput output, ProjectedToolOutput projected)
-        {
-            var toolEvent = new LlmAgentToolEvent(
-                ThreadId,
-                call.TurnId,
-                call.CallId,
-                McpServerName,
-                call.Name,
-                call.Arguments,
-                !output.IsError,
-                output.IsError ? "failed" : "completed",
-                output);
-            return new McpResponse(
-                McpResult(
-                    id,
-                    new JsonObject
-                    {
-                        ["content"] = SerializeToolResult(projected),
-                        ["isError"] = projected.IsError
-                    }),
-                toolEvent);
+            McpToolOutcome outcome = await _bridge.RunAsync(call, cancellationToken);
+            return new McpResponse(McpResult(id, outcome.Result), outcome.Event);
         }
 
         /// <summary>The CLI cancels a call it no longer waits for, as when its turn is interrupted.</summary>
@@ -1973,44 +1865,6 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             };
         }
 
-        private static JsonArray SerializeToolResult(ProjectedToolOutput projected) => new(
-        [
-            .. projected.Parts.Select(part => part switch
-            {
-                SentText text => new JsonObject { ["type"] = "text", ["text"] = text.Text },
-                SentImage image => new JsonObject
-                {
-                    ["type"] = "image",
-                    ["mimeType"] = image.MediaType,
-                    ["data"] = Convert.ToBase64String(image.Data.Span)
-                },
-                SentResourceLink { MediaType: null } link => new JsonObject
-                {
-                    ["type"] = "resource_link",
-                    ["uri"] = link.Uri,
-                    ["name"] = link.Name ?? link.Uri
-                },
-                SentResourceLink link => new JsonObject
-                {
-                    ["type"] = "resource_link",
-                    ["uri"] = link.Uri,
-                    ["name"] = link.Name ?? link.Uri,
-                    ["mimeType"] = link.MediaType
-                },
-                SentEmbeddedText embedded => new JsonObject
-                {
-                    ["type"] = "resource",
-                    ["resource"] = new JsonObject
-                    {
-                        ["uri"] = embedded.Uri,
-                        ["mimeType"] = embedded.MediaType ?? "text/plain",
-                        ["text"] = embedded.Text
-                    }
-                },
-                _ => throw new InvalidOperationException("The Claude MCP route does not carry this part natively.")
-            })
-        ]);
-
         private static bool TryParseDataUrl(
             string value,
             out string mediaType,
@@ -2054,18 +1908,17 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         /// <summary>The bridge's MCP tool list: the text the CLI receives for the tools, so the conversation measure counts it too.</summary>
         internal static JsonObject McpToolsListResult(IReadOnlyList<LlmAgentToolDefinition> tools, LlmToolNames names) => new()
         {
-            ["tools"] = new JsonArray([.. tools.Select(tool => new JsonObject
+            ["tools"] = new JsonArray([.. tools.Select(tool =>
             {
-                ["name"] = names.Native(tool.Name),
-                ["description"] = tool.Description ?? string.Empty,
-                ["inputSchema"] = JsonNode.Parse(ToolSchemas.Wire(tool.InputSchema).GetRawText()),
-                ["_meta"] = new JsonObject
+                JsonObject entry = McpToolBridge.ToolEntry(tool, names);
+                entry["_meta"] = new JsonObject
                 {
                     ["anthropic/alwaysLoad"] = !tool.DeferLoading,
                     // The CLI files a result over a tool's size cap, which the model cannot read back with Read off.
                     // 4,000,000 characters is the largest Claude window, 1,000,000 tokens, at four characters a token.
                     ["anthropic/maxResultSizeChars"] = 4_000_000
-                }
+                };
+                return entry;
             })])
         };
 
@@ -2090,7 +1943,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             string prefix = $"mcp__{McpServerName}__";
             if (!name.StartsWith(prefix, StringComparison.Ordinal)) return name;
             string native = name[prefix.Length..];
-            return _names.Logical(native) ?? native;
+            return _bridge.Names.Logical(native) ?? native;
         }
 
         private static string? ReadJsonRpcId(JsonElement id) => id.ValueKind switch
