@@ -35,7 +35,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         SupportsTemperature = InferenceSupport.Unsupported,
         SupportsToolUse = InferenceSupport.Unsupported,
         SupportsAgentSessions = InferenceSupport.Supported,
-        SupportsAgentToolUse = InferenceSupport.Unsupported,
+        SupportsAgentToolUse = InferenceSupport.Supported,
         Agent = NativeAgentContract.Antigravity
     };
 

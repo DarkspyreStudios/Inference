@@ -69,7 +69,7 @@ internal sealed partial class ClaudeAgentClient
             LlmAgentToolDefinition[] tools = [.. ClientTools.Functions(options.Tools).DistinctBy(tool => tool.Name, StringComparer.Ordinal)];
             _toolsByName = tools.ToDictionary(tool => tool.Name, StringComparer.Ordinal);
             string? toolList = tools.Length == 0 ? null : ClaudeAgentSession.McpToolsListResult(tools,
-                LlmToolNames.Create(tools.Select(tool => tool.Name), IsValidMcpToolName)).ToJsonString();
+                LlmToolNames.Create(tools.Select(tool => tool.Name), McpToolBridge.IsValidToolName)).ToJsonString();
             _framing = toolList is null ? options.Instructions
                 : string.IsNullOrEmpty(options.Instructions) ? toolList : $"{options.Instructions}\n\n{toolList}";
             _execution = options.ExecutionOptions ?? new();

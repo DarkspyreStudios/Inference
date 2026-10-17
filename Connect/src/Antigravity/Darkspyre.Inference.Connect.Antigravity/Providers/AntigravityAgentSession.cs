@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.HostTools;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
@@ -33,6 +34,8 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     private readonly string _workingDirectory;
     private readonly AntigravityLaunch _defaults;
     private readonly LlmConnection _connection;
+    // The session's host tools, when it offers any; their session ID reaches AGY's MCP program through the environment.
+    private readonly AntigravityHostTools? _hostTools;
     private readonly HashSet<(int Generation, int Index)> _accountedSteps = [];
     private readonly NoAgentResources _resources = new(LlmAgentResourceStopStatus.Unknown);
     private readonly LlmOperationLifetime _retirement = new();
@@ -68,10 +71,12 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         string workingDirectory,
         AntigravityLaunch defaults,
         LlmConnection connection,
+        AntigravityHostTools? hostTools,
         string? introduction,
         string? openingNotice)
     {
         _factory = factory;
+        _hostTools = hostTools;
         _executable = executable;
         _workingDirectory = workingDirectory;
         _defaults = defaults;
@@ -105,7 +110,10 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         get { lock (_sync) { return _lastStepUsage; } }
     }
 
-    /// <summary>Starts a process, waits for its handshake and returns the session under its real conversation ID.</summary>
+    /// <summary>
+    /// Starts a process, waits for its handshake and returns the session under its real conversation ID. The session owns
+    /// <paramref name="hostTools"/>, also when opening fails.
+    /// </summary>
     [SuppressMessage("Design", "CA1031", Justification = "Failed opening preserves both the original failure and a genuine retirement failure.")]
     public static async Task<AntigravityAgentSession> OpenAsync(
         IAntigravityCliSessionProcessFactory factory,
@@ -114,12 +122,13 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         AntigravityLaunch launch,
         string? conversationId,
         LlmConnection connection,
+        AntigravityHostTools? hostTools,
         string? introduction,
         string? openingNotice,
         CancellationToken cancellationToken)
     {
         AntigravityCliLlmClient.ResolveCapabilities(connection, launch.ModelId);
-        var session = new AntigravityAgentSession(factory, executable, workingDirectory, launch, connection,
+        var session = new AntigravityAgentSession(factory, executable, workingDirectory, launch, connection, hostTools,
             introduction, openingNotice);
         try
         {
@@ -249,6 +258,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
                 await ReopenAsync(launch, cancellationToken).ConfigureAwait(false);
             }
 
+            _hostTools?.BeginTurn(ThreadId, turnId, _generation);
             var turn = new TurnMapper(this, turnId, schema, request.OutputSchema, usageDeltas);
             lock (_sync)
             {
@@ -418,7 +428,11 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
 
     private async Task RetireSessionAsync()
     {
-        await CloseProcessAsync(graceful: true).ConfigureAwait(false);
+        try { await CloseProcessAsync(graceful: true).ConfigureAwait(false); }
+        finally
+        {
+            if (_hostTools is not null) await _hostTools.DisposeAsync().ConfigureAwait(false);
+        }
         ThrowCleanupFailures();
     }
 
@@ -529,7 +543,9 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 ThrowIfUnavailable();
-                process = _factory.Start(_executable, arguments, _workingDirectory);
+                process = _factory.Start(_executable, arguments, _workingDirectory, _hostTools is null
+                    ? new Dictionary<string, string>()
+                    : new Dictionary<string, string> { [HostToolsProtocol.SessionVariable] = _hostTools.SessionId });
                 _process = process;
                 _lines = lines;
                 generation = ++_generation;
@@ -966,6 +982,23 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
                 if (schema is null && !string.IsNullOrEmpty(step.TextDelta))
                 {
                     events.Add(new LlmAgentTextDeltaEvent(ThreadId, turnId, itemId, step.TextDelta));
+                }
+            }
+            else if (step.Tool is { } host && session._hostTools is { } hostTools && AntigravityHostTools.IsHostCall(host))
+            {
+                // A host tool call: the host ran it and recorded its full output; AGY's step carries only its text.
+                LlmAgentToolEvent started = hostTools.Started(ThreadId, turnId, itemId, host);
+                if (_toolsStarted.Add(step.StepIndex) && !step.IsDone) events.Add(started);
+                if (step.IsDone)
+                {
+                    bool failed = host.ErrorMessage is not null;
+                    events.Add(hostTools.Completed(step.StepIndex) ?? started with
+                    {
+                        Success = !failed,
+                        Status = failed ? "failed" : "completed",
+                        Output = host.Output is null && host.ErrorMessage is null ? null
+                            : LlmToolOutput.FromText(host.ErrorMessage ?? host.Output!, isError: failed)
+                    });
                 }
             }
             else if (step.Tool is { } tool)

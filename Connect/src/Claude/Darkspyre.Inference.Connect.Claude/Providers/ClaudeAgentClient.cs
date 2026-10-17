@@ -137,7 +137,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         IInferenceResourceAccess? resourceAccess = options.CallerServices?.Resources;
         string normalizedDirectory = CliInfrastructure.NormalizeWorkingDirectory(workingDirectory);
         LlmProviderCapabilities capabilities = ClaudeCliLlmClient.ResolveCapabilities(connection, modelId);
-        LlmToolNames names = LlmToolNames.Create(tools.Select(tool => tool.Name), IsValidMcpToolName);
+        LlmToolNames names = LlmToolNames.Create(tools.Select(tool => tool.Name), McpToolBridge.IsValidToolName);
         IReadOnlyList<string> arguments = BuildArguments(
             threadId,
             identity?.Resume ?? false,
@@ -287,17 +287,6 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
 
     [GeneratedRegex(@"~?(\d+) tokens \(limit (\d+)\)")]
     private static partial Regex RefusalSizes();
-
-    /// <summary>The MCP tool-name rule. A name outside it is sent as its <see cref="LlmToolNames.Alias"/>.</summary>
-    private static bool IsValidMcpToolName(string name) =>
-        name.Length is > 0 and <= 128
-        && name.All(character =>
-            character is >= 'a' and <= 'z'
-            or >= 'A' and <= 'Z'
-            or >= '0' and <= '9'
-            or '_'
-            or '-'
-            or '.');
 
     private static string McpToolName(string toolName) => $"mcp__{McpServerName}__{toolName}";
 

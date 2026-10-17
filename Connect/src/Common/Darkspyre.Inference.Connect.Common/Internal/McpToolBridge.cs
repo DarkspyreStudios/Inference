@@ -44,6 +44,17 @@ internal sealed class McpToolBridge(
     /// <summary>The logical-to-native tool name map.</summary>
     public LlmToolNames Names { get; } = names;
 
+    /// <summary>The MCP tool-name rule. A name outside it is sent as its <see cref="LlmToolNames.Alias"/>.</summary>
+    public static bool IsValidToolName(string name) =>
+        name.Length is > 0 and <= 128
+        && name.All(character =>
+            character is >= 'a' and <= 'z'
+            or >= 'A' and <= 'Z'
+            or >= '0' and <= '9'
+            or '_'
+            or '-'
+            or '.');
+
     /// <summary>The session's definition of <paramref name="name"/>, or null for a tool it does not offer.</summary>
     public LlmAgentToolDefinition? Find(string name) => _byName.GetValueOrDefault(name);
 

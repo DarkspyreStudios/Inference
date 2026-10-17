@@ -9,7 +9,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// which keeps the saved history, measures it and compacts it. A start opens a new AGY conversation from the host's
 /// history and a resume reopens one by its conversation ID.
 /// </summary>
-internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactory processFactory,
+internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactory processFactory, IAntigravityCliRunner runner,
     AntigravityCliLlmClient chat, LearnedModelContext learned) : ILlmAgentResumeClient
 {
     public LlmTransport Transport => LlmTransport.GoogleAntigravityCli;
@@ -24,11 +24,13 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
         AntigravityCliLlmClient.ValidateConnection(connection);
         ArgumentException.ThrowIfNullOrWhiteSpace(options.ModelId);
         // AGY assigns the conversation ID, so ThreadId and SessionId are not read.
-        ValidateOpening(connection, options.ModelId, options.Tools, options.ToolHandler, options.HostedTools, options.MaxHostedTurns);
+        ValidateOpening(connection, options.ModelId, options.Tools, options.ToolHandler, options.ToolHandling, options.HostedTools,
+            options.MaxHostedTurns);
         LlmAgentNativeRuntimeOptions runtime = ValidateRuntime(options.Runtime);
         LlmAgentContext history = options.Context is null ? new() : TextOnly(connection, options.ModelId, options.Context);
         return await OpenConversationAsync(connectionId, connection, options.ModelId, options.Instructions, options.ExecutionOptions,
-            options.CallerServices?.Transcript, runtime, history, resumeConversationId: null, cancellationToken);
+            options.CallerServices, new(options.Tools, options.ToolHandler), runtime, history, resumeConversationId: null,
+            cancellationToken);
     }
 
     /// <summary>
@@ -47,30 +49,34 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
         string conversationId = AntigravityProtocol.ConversationId(threadId)
             ?? throw new ArgumentException("The Antigravity conversation ID is not a valid identifier.", nameof(threadId));
         options ??= new LlmAgentResumeOptions();
-        ValidateOpening(connection, options.ModelId, options.Tools, options.ToolHandler, options.HostedTools, options.MaxHostedTurns);
+        ValidateOpening(connection, options.ModelId, options.Tools, options.ToolHandler, options.ToolHandling, options.HostedTools,
+            options.MaxHostedTurns);
         LlmAgentNativeRuntimeOptions runtime = ValidateRuntime(options.Runtime);
         // The session default; the CLI picks the model when none is named.
         string modelId = options.ModelId ?? AntigravityDefinition.Value.DefaultModelId;
         LlmAgentContext history = options.Context is null ? new() : TextOnly(connection, modelId, options.Context);
         return await OpenConversationAsync(connectionId, connection, modelId, options.Instructions, options.ExecutionOptions,
-            options.CallerServices?.Transcript, runtime, history, conversationId, cancellationToken);
+            options.CallerServices, new(options.Tools, options.ToolHandler), runtime, history, conversationId, cancellationToken);
     }
 
     private async Task<ILlmAgentSession> OpenConversationAsync(string connectionId, LlmConnection connection, string modelId,
-        string? instructions, LlmAgentExecutionOptions? execution, ILlmConversationTranscript? transcript,
+        string? instructions, LlmAgentExecutionOptions? execution, LlmAgentCallerServices? callerServices, HostToolSet hostTools,
         LlmAgentNativeRuntimeOptions runtime, LlmAgentContext history, string? resumeConversationId,
         CancellationToken cancellationToken)
     {
         string executable = AntigravityCliLlmClient.ResolveExecutable(connection.Endpoint);
         string workingDirectory = CliInfrastructure.NormalizeWorkingDirectory(runtime.WorkingDirectory);
-        var conversation = new AntigravityConversation(connectionId, connection, chat, learned, modelId, execution, transcript,
-            history, resumeConversationId, (opening, conversationId, token) =>
+        var conversation = new AntigravityConversation(connectionId, connection, chat, learned, modelId, execution,
+            callerServices?.Transcript, history, resumeConversationId, async (opening, conversationId, token) =>
             {
                 // A reopened conversation already holds its history; a new one receives it once, before its first input.
                 AgentOpeningContext? text = conversationId is not null ? null
                     : AgentOpeningContext.For(new LlmAgentSessionOptions { ModelId = modelId, Context = opening }, carriesAttachments: false);
-                return AntigravityAgentSession.OpenAsync(processFactory, executable, workingDirectory,
-                    new AntigravityLaunch(modelId, null, null), conversationId, connection, Introduction(instructions, text?.Text),
+                // Each AGY process generation registers the tools under its own session ID; the session owns the registration.
+                AntigravityHostTools? tools = await AntigravityHostTools.OpenAsync(connection, modelId, hostTools.Tools, hostTools.Handler,
+                    callerServices?.Resources, runner, executable, workingDirectory, token);
+                return await AntigravityAgentSession.OpenAsync(processFactory, executable, workingDirectory,
+                    new AntigravityLaunch(modelId, null, null), conversationId, connection, tools, Introduction(instructions, text?.Text),
                     text?.Notice, token);
             });
         try
@@ -107,14 +113,19 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
         };
     }
 
-    /// <summary>Refuses host tools, which AGY cannot call, and hosted tools it does not offer. An image tool is dropped.</summary>
+    /// <summary>
+    /// Refuses host tools on a connection that turns agent tool use off, returned tool requests, which AGY cannot hand back,
+    /// and hosted tools it does not offer. An image tool is dropped.
+    /// </summary>
     private static void ValidateOpening(LlmConnection connection, string? modelId,
-        IReadOnlyList<LlmAgentClientToolDefinition> tools, LlmAgentToolHandler? toolHandler,
+        IReadOnlyList<LlmAgentClientToolDefinition> tools, LlmAgentToolHandler? toolHandler, LlmAgentToolHandling toolHandling,
         IReadOnlyList<LlmHostedTool> hostedTools, int? maxHostedTurns)
     {
         ArgumentNullException.ThrowIfNull(tools);
-        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Antigravity, supportsAgentToolUse: false,
+        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Antigravity, supportsAgentToolUse: true,
             modelId, tools, toolHandler);
+        if (toolHandling == LlmAgentToolHandling.ReturnRequests)
+            throw new NotSupportedException("Antigravity CLI runs each host tool call to its result; SupportsExternalToolHandoff is Unsupported.");
         HostedTools.Validate(HostedTools.WithoutUnofferedImages(hostedTools, NativeAgentContract.Antigravity.HostedTools),
             maxHostedTurns, NativeAgentContract.Antigravity.HostedTools);
     }
@@ -151,4 +162,7 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
         ];
         return parts.Length == 0 ? null : string.Join("\n\n", parts);
     }
+
+    /// <summary>The host tools an opening offers and the handler that runs them.</summary>
+    private sealed record HostToolSet(IReadOnlyList<LlmAgentClientToolDefinition> Tools, LlmAgentToolHandler? Handler);
 }

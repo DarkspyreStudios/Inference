@@ -136,7 +136,7 @@ public sealed class AntigravityCliLlmClientTests
     {
         var process = new TerminalProcess();
         await using AntigravityAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
-            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, CancellationToken.None);
+            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, null, CancellationToken.None);
 
         IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(
             new() { Input = [new LlmAgentTextContent("test")] }));
@@ -277,7 +277,7 @@ public sealed class AntigravityCliLlmClientTests
     {
         var process = new TerminalProcess();
         await using AntigravityAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
-            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, CancellationToken.None);
+            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, null, CancellationToken.None);
         var request = new LlmAgentTurnRequest { ModelId = model, ReasoningLevel = effort, Input = [new LlmAgentTextContent("answer")] };
 
         IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(request));
@@ -378,7 +378,7 @@ public sealed class AntigravityCliLlmClientTests
     {
         var process = new TerminalProcess();
         await using AntigravityAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
-            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, CancellationToken.None);
+            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, null, CancellationToken.None);
         var image = new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "chart.png", MediaType = "image/png", Data = new byte[] { 1 } };
 
         await ReadAllAsync(session.RunTurnAsync(new()
@@ -397,7 +397,7 @@ public sealed class AntigravityCliLlmClientTests
     {
         var process = new TerminalProcess();
         await using AntigravityAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
-            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, CancellationToken.None);
+            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, null, CancellationToken.None);
 
         IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(new()));
 
@@ -440,9 +440,11 @@ public sealed class AntigravityCliLlmClientTests
         new LlmChatMessage("user", "Round it."),
     ];
 
-    private static AntigravityAgentClient Agents(TerminalProcess process) =>
-        new(process, new AntigravityCliLlmClient(new RecordingRunner(new(1, string.Empty, "no side request is expected"))),
-            new LearnedModelContext());
+    private static AntigravityAgentClient Agents(TerminalProcess process)
+    {
+        var runner = new RecordingRunner(new(1, string.Empty, "no side request is expected"));
+        return new(process, runner, new AntigravityCliLlmClient(runner), new LearnedModelContext());
+    }
 
     private static LlmConnection Connection() => new()
     {
@@ -495,7 +497,8 @@ public sealed class AntigravityCliLlmClientTests
 
         public List<string> Writes => _writes;
 
-        public IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory)
+        public IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory,
+            IReadOnlyDictionary<string, string> environment)
         {
             Invocations.Add(arguments);
             var process = new TerminalProcess(_writes);

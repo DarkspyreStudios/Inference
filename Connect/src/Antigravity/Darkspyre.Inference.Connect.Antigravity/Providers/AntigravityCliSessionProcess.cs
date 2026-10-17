@@ -6,8 +6,10 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// <summary>Starts the one owner of an Antigravity CLI process with an open standard input pipe.</summary>
 internal interface IAntigravityCliSessionProcessFactory
 {
+    /// <summary>Starts the CLI with <paramref name="environment"/> added to the inherited environment.</summary>
     /// <exception cref="AntigravityCliUnavailableException">The executable could not be started.</exception>
-    IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory);
+    IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory,
+        IReadOnlyDictionary<string, string> environment);
 }
 
 /// <summary>
@@ -37,12 +39,14 @@ internal interface IAntigravityCliSessionProcess : IAsyncDisposable
 
 internal sealed class AntigravityCliSessionProcessFactory : IAntigravityCliSessionProcessFactory
 {
-    public IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory)
+    public IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory,
+        IReadOnlyDictionary<string, string> environment)
     {
         var process = new Process
         {
             StartInfo = CliProcessLauncher.CreateStartInfo(executable, arguments, workingDirectory)
         };
+        foreach ((string name, string value) in environment) process.StartInfo.Environment[name] = value;
         try
         {
             if (!process.Start())

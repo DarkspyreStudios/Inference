@@ -96,8 +96,8 @@ public sealed class AntigravityConversationTests
     private static Task<ILlmAgentSession> StartAsync(ScriptedAgy agy, LlmAgentContext context, bool capped = true)
     {
         // A 20,000-token cap with a 1,000-token reserve puts the trigger at 16,150 tokens; uncapped, the model's window applies.
-        var chat = new AntigravityCliLlmClient(new SummaryRunner());
-        return new AntigravityAgentClient(agy, chat, new LearnedModelContext()).StartSessionAsync("connection", Connection(), new()
+        var runner = new SummaryRunner();
+        return new AntigravityAgentClient(agy, runner, new AntigravityCliLlmClient(runner), new LearnedModelContext()).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = Model,
             Runtime = new() { WorkingDirectory = Environment.CurrentDirectory, Policy = new LlmAgentProviderRuntimePolicy() },
@@ -160,7 +160,8 @@ public sealed class AntigravityConversationTests
 
         public bool Checkpoint { get; init; }
 
-        public IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory)
+        public IAntigravityCliSessionProcess Start(string executable, IReadOnlyList<string> arguments, string workingDirectory,
+            IReadOnlyDictionary<string, string> environment)
         {
             Invocations.Add(arguments);
             var writes = new List<string>();

@@ -4,6 +4,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
+    <ProjectReference Include="../../HostTools/Darkspyre.Inference.Connect.HostTools/Darkspyre.Inference.Connect.HostTools.csproj" />
+    <!-- AGY starts the host-tools MCP program from beside this library. -->
+    <ProjectReference Include="../../HostTools/Darkspyre.Inference.Connect.HostTools.Mcp/Darkspyre.Inference.Connect.HostTools.Mcp.csproj" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.ConsoleTester" />
     <None Include="../../../README.md" Pack="true" PackagePath="README.md" />

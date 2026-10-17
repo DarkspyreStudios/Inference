@@ -34,7 +34,8 @@ internal sealed class AntigravityCliProcessRunner(IAntigravityCliSessionProcessF
         IAntigravityCliSessionProcess process = processFactory.Start(
             invocation.Executable,
             invocation.Arguments,
-            invocation.WorkingDirectory);
+            invocation.WorkingDirectory,
+            new Dictionary<string, string>());
         bool exited = false;
         try
         {
