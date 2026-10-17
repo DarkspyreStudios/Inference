@@ -3,7 +3,10 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-/// <summary>The common conversation opening for managed provider adapters and in-process engines.</summary>
+/// <summary>
+/// The common conversation opening for managed provider adapters and in-process engines. A client that implements
+/// <see cref="ILlmProviderCompaction"/> compacts its sessions on the provider side for the models it reports.
+/// </summary>
 internal sealed class ManagedLlmAgentClient<TClient>(TClient client, LlmProviderService providers,
     LearnedModelContext learned) : ILlmAgentClient where TClient : ILlmClient, ILlmContextEstimator
 {
@@ -40,6 +43,6 @@ internal sealed class ManagedLlmAgentClient<TClient>(TClient client, LlmProvider
         return await ManagedAgentSession.CreateAsync(connectionId, connection, options, connection.Catalog ?? [], client,
             (request, token) => providers.StreamAgentAsync(connectionId, request, scope, token),
             model => client.GetCapabilities(connection, model), learned, openingFence: Fence,
-            cancellationToken: opening.Token).ConfigureAwait(false);
+            providerCompaction: client as ILlmProviderCompaction, cancellationToken: opening.Token).ConfigureAwait(false);
     }
 }

@@ -74,8 +74,13 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
         }
     }
 
+    public ValueTask<ContextEstimate?> EstimateAsync(LlmConnection connection, LlmChatRequest request,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult(Estimate(connection, request, resources));
+
     /// <summary>Counts the request's text locally. The engine's own tokenizer can differ.</summary>
-    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request,
+    private ContextEstimate? Estimate(LlmConnection connection, LlmChatRequest request,
         IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
     {
         ArgumentNullException.ThrowIfNull(connection);

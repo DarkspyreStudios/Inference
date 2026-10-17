@@ -626,8 +626,13 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
 
     public string? EstimateDiagnostic => LocalTokenCount.CliDiagnostic;
 
+    public ValueTask<ContextEstimate?> EstimateAsync(LlmConnection connection, LlmChatRequest request,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult(Estimate(connection, request, resources));
+
     /// <summary>Counts the prompt this client would send. The CLI takes text only, so no caller-owned resource is counted.</summary>
-    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request,
+    private ContextEstimate? Estimate(LlmConnection connection, LlmChatRequest request,
         IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
     {
         ArgumentNullException.ThrowIfNull(request);

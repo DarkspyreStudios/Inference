@@ -836,7 +836,7 @@ public sealed class ManagedAgentTests
         LlmToolResult sent = Assert.IsType<LlmToolResult>(
             Assert.Single(harness.Requests[1].Messages.SelectMany(message => message.ToolResults)));
         Assert.Contains("of 9000 characters removed by compaction.]", Assert.IsType<LlmToolOutputText>(Assert.Single(sent.Output.Parts)).Text);
-        Assert.InRange(harness.EstimateInputTokens(Harness.Connection, harness.Requests[1], ResourceSizes.None)!.Value.Tokens, 0, 3465);
+        Assert.InRange((await harness.EstimateAsync(Harness.Connection, harness.Requests[1], ResourceSizes.None, CancellationToken.None))!.Value.Tokens, 0, 3465);
     }
 
     [Theory]
@@ -851,8 +851,10 @@ public sealed class ManagedAgentTests
         };
         LlmConnection connection = Harness.Connection with { Transport = transport };
         // The first refusal is compacted and the step sent again; the Host never sees it.
+        // A 2,000-token window keeps the opening history, with the estimate margin, under the trigger.
         var recovered = new Harness
         {
+            Window = 2000,
             RequestFailure = request => request == 1 ? TooLong() : null,
             SummaryText = "summary of turn one",
             SessionConnection = connection
@@ -873,7 +875,7 @@ public sealed class ManagedAgentTests
         }
 
         // A second refusal in the same turn ends it with the provider's message and is not sent again.
-        var refused = new Harness { RequestFailure = _ => TooLong(), SessionConnection = connection };
+        var refused = new Harness { Window = 2000, RequestFailure = _ => TooLong(), SessionConnection = connection };
         await using (var session = refused.Create(Options() with { Context = History(("t1", new string('a', 600), "first answer")) }))
         {
             List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
@@ -1102,6 +1104,113 @@ public sealed class ManagedAgentTests
         Assert.Single(running.Requests);
     }
 
+    [Fact]
+    public async Task ProviderCompactionReplacesTheContextAndReportsTheProviderSide()
+    {
+        var provider = new ProviderCompactor();
+        var harness = new Harness { ProviderCompaction = provider };
+        LlmAgentContext history = History(("t1", new string('a', 400), "first answer"), ("t2", new string('b', 300), "second answer"));
+        await using var session = harness.Create(Options() with { Context = history });
+
+        Assert.Equal(LlmCompactionSide.Provider, (await session.GetCapabilitiesAsync()).CompactionSide);
+        LlmAgentCompactedEvent? compacted = await session.CompactNowAsync();
+
+        Assert.Equal(4, compacted!.DroppedMessageCount);
+        Assert.Equal(history.Entries.Select(entry => entry.Message.Content),
+            Assert.Single(provider.Requests).Messages.Select(message => message.Content));
+        Assert.Equal(["compacted state"], (await session.CaptureContextAsync()).Entries.Select(entry => entry.Message.Content));
+        Assert.Empty(harness.Summaries);
+    }
+
+    [Fact]
+    public async Task FailedProviderCompactionFallsBackToTheHostSummary()
+    {
+        var provider = new ProviderCompactor(new LlmProviderException("Compaction failed.", LlmTransport.OpenAiResponses));
+        var harness = new Harness { ProviderCompaction = provider, SummaryText = "summary of t1" };
+        LlmAgentContext history = History(("t1", new string('a', 400), "first answer"), ("t2", new string('b', 300), "second answer"));
+        await using var session = harness.Create(Options() with { Context = history });
+
+        LlmAgentCompactedEvent? compacted = await session.CompactNowAsync();
+
+        Assert.Single(provider.Requests);
+        Assert.Equal(2, compacted!.DroppedMessageCount);
+        Assert.Equal(["Summary of the earlier conversation:\nsummary of t1", new string('b', 300), "second answer"],
+            (await session.CaptureContextAsync()).Entries.Select(entry => entry.Message.Content));
+    }
+
+    [Theory]
+    [InlineData(new[] { 4, 16 }, 5, 4)]
+    [InlineData(new int[0], 5, null)]
+    public async Task AgentCountIsTheNearestOfferedCount(int[] offered, int requested, int? expected)
+    {
+        var harness = new Harness
+        {
+            Capabilities = new()
+            {
+                SupportsAgentSessions = InferenceSupport.Supported,
+                SupportsAgentToolUse = InferenceSupport.Supported,
+                RichContentSupported = RichContentRoutes.Responses,
+                Agent = ManagedAgentPolicy.Capabilities,
+                AgentCounts = offered
+            }
+        };
+        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "answer", Status = LlmCompletionStatus.Completed });
+        await using var session = harness.Create();
+
+        await Read(session.RunTurnAsync(Turn("hello") with { AgentCount = requested }));
+
+        Assert.Equal(expected, Assert.Single(harness.Requests).AgentCount);
+    }
+
+    [Fact]
+    public async Task EstimatedStatusCarriesTheMarginAfterTheLearnedCorrection()
+    {
+        var harness = new Harness { Window = 100_000 };
+        harness.Learned.ObserveReport(harness.ConnectionId, "test", 1000, 2000, 1000);
+        await using var session = harness.Create(Options() with { Context = History(("t1", new string('a', 400), "first answer")) });
+
+        LlmAgentContextStatus status = await session.GetContextStatusAsync();
+
+        // The harness counts 412 characters; the learned rate corrects them before the margin is added.
+        long corrected = harness.Learned.Correct(harness.ConnectionId, "test", 412);
+        Assert.NotEqual(412, corrected);
+        Assert.Equal(corrected + ManagedAgentPolicy.EstimateMargin, status.UsedContextTokens);
+        Assert.Equal(LlmContextMeasurementSource.Estimated, status.Source);
+    }
+
+    [Fact]
+    public async Task FullyReportedStatusHasNoMargin()
+    {
+        var harness = new Harness();
+        var saved = new SavedConversation(harness.ConnectionId, Harness.Connection, harness, harness.Learned, new(),
+            framing: null, resources: null, _ => new LlmModel("test", "Test") { MaxContextTokens = 100_000, MaxOutputTokens = 100 },
+            History(("t1", "question", "answer")));
+        saved.ObserveReport("test", 500, 20);
+
+        LlmAgentContextStatus reported = await saved.StatusAsync("test", null, observe: false, CancellationToken.None);
+        LlmAgentContextStatus pending = await saved.StatusAsync("test", new("user", "next"), observe: false, CancellationToken.None);
+
+        Assert.Equal(520, reported.UsedContextTokens);
+        Assert.Equal(LlmContextMeasurementSource.Mixed, reported.Source);
+        // The pending input is estimated, so that measurement carries the margin.
+        Assert.Equal(520 + 4 + ManagedAgentPolicy.EstimateMargin, pending.UsedContextTokens);
+    }
+
+    /// <summary>A model service that compacts model "test"; it returns one entry, or throws <paramref name="failure"/>.</summary>
+    private sealed class ProviderCompactor(Exception? failure = null) : ILlmProviderCompaction
+    {
+        public List<LlmChatRequest> Requests { get; } = [];
+
+        public bool CompactsProviderSide(LlmConnection connection, string modelId) => modelId == "test";
+
+        public Task<LlmAgentContext> CompactAsync(LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken)
+        {
+            Requests.Add(request);
+            return failure is not null ? Task.FromException<LlmAgentContext>(failure)
+                : Task.FromResult(new LlmAgentContext { Entries = [new("compacted", "compaction", new("user", "compacted state"))] });
+        }
+    }
+
     /// <summary>A context of whole turns, each a user message and the assistant's answer.</summary>
     private static LlmAgentContext History(params (string TurnId, string Question, string Answer)[] turns) => new()
     {
@@ -1186,7 +1295,9 @@ public sealed class ManagedAgentTests
                 RichContentSupported = RichContentRoutes.Responses,
                 HostedTools = HostedKinds,
                 Agent = ManagedAgentPolicy.Capabilities
-            }, Learned).GetAwaiter().GetResult();
+            }, Learned, providerCompaction: ProviderCompaction).GetAwaiter().GetResult();
+        /// <summary>The model service's own compaction the session uses; null compacts with the library only.</summary>
+        public ILlmProviderCompaction? ProviderCompaction { get; init; }
         public LearnedModelContext Learned { get; } = new();
         /// <summary>The connection id the session learns under.</summary>
         public string ConnectionId { get; init; } = "test-connection";
@@ -1194,14 +1305,15 @@ public sealed class ManagedAgentTests
         public long Window { get; init; } = 1000;
         public string? EstimateDiagnostic => null;
 
-        public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request,
-            IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
+        public ValueTask<ContextEstimate?> EstimateAsync(LlmConnection connection, LlmChatRequest request,
+            IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources,
+            CancellationToken cancellationToken)
         {
-            Estimates.Add(request);
-            return UnknownEstimate ? null
+            lock (Estimates) Estimates.Add(request);
+            return ValueTask.FromResult<ContextEstimate?>(UnknownEstimate ? null
                 : new ContextEstimate(request.Messages.Sum(message => message.Content.Length + message.ToolResults
                     .OfType<LlmToolResult>().SelectMany(result => result.Output.Parts).OfType<LlmToolOutputText>()
-                    .Sum(part => part.Text.Length)) + (request.Instructions?.Length ?? 0));
+                    .Sum(part => part.Text.Length)) + (request.Instructions?.Length ?? 0)));
         }
         private async IAsyncEnumerable<LlmStreamEvent> Stream(LlmChatRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken)

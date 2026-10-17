@@ -217,7 +217,7 @@ public sealed class DirectCodexTests
                 new("user", "") { ToolResults = [new LlmToolResult("call", LlmToolOutput.FromText("answer"))] }]
         };
 
-        ContextEstimate estimate = client.EstimateInputTokens(Connection(), followup, ResourceSizes.None)!.Value;
+        ContextEstimate estimate = (await client.EstimateAsync(Connection(), followup, ResourceSizes.None, CancellationToken.None))!.Value;
 
         // The earlier request's 1,280 reported tokens are not this request; the estimate tokenizes what is sent.
         Assert.False(estimate.IncludesProviderReport);
@@ -234,7 +234,7 @@ public sealed class DirectCodexTests
         """;
 
     [Fact]
-    public void FilesAndResourcesAreCounted()
+    public async Task FilesAndResourcesAreCounted()
     {
         using var handler = new Handler(_ => Json("{\"models\":[{\"slug\":\"model\",\"context_window\":272000}]}"));
         using var http = new HttpClient(handler);
@@ -254,8 +254,8 @@ public sealed class DirectCodexTests
         ];
         var plain = new LlmChatRequest { ModelId = "model", Messages = Messages(media: false) };
 
-        long baseline = client.EstimateInputTokens(Connection(), plain, ResourceSizes.None)!.Value.Tokens;
-        long counted = client.EstimateInputTokens(Connection(), plain with { Messages = Messages(media: true) }, resources)!.Value.Tokens;
+        long baseline = (await client.EstimateAsync(Connection(), plain, ResourceSizes.None, CancellationToken.None))!.Value.Tokens;
+        long counted = (await client.EstimateAsync(Connection(), plain with { Messages = Messages(media: true) }, resources, CancellationToken.None))!.Value.Tokens;
 
         // Two images at 1,600 each and the selected text resource at four bytes per token.
         Assert.Equal(baseline + 1_600 + 1_600 + 1_000, counted);
@@ -293,7 +293,7 @@ public sealed class DirectCodexTests
         var request = new LlmChatRequest { ModelId = "model", Messages = messages, Instructions = "Answer briefly." };
         var policy = new LlmAgentContextPolicy { ReservedOutputTokens = 8000 };
         LlmContextMeasurementSource source = LlmContextMeasurementSource.Estimated;
-        ContextEstimate expected = client.EstimateInputTokens(connection, request, ResourceSizes.None)!.Value;
+        ContextEstimate expected = (await client.EstimateAsync(connection, request, ResourceSizes.None, CancellationToken.None))!.Value;
         var context = new LlmAgentContext
         {
             Revision = 7,
@@ -311,8 +311,9 @@ public sealed class DirectCodexTests
         LlmRequestAccounting measured = await session.MeasureContextAsync(context);
         LlmAgentContextStatus status = await session.GetContextStatusAsync();
 
-        Assert.Equal(expected.Tokens, measured.UsedContextTokens);
-        Assert.Equal(expected.Tokens, status.UsedContextTokens);
+        // The local estimate plus the margin every estimated measurement carries.
+        Assert.Equal(expected.Tokens + ManagedAgentPolicy.EstimateMargin, measured.UsedContextTokens);
+        Assert.Equal(expected.Tokens + ManagedAgentPolicy.EstimateMargin, status.UsedContextTokens);
         Assert.Equal(source, measured.Source);
         Assert.Equal(source, status.Source);
         Assert.Equal(7, measured.ContextRevision);
@@ -656,14 +657,14 @@ public sealed class DirectCodexTests
     /// <summary>Text full of characters the wire JSON escapes, such as a tool result holding JSON, is counted as the
     /// model reads it, not as its escape sequences.</summary>
     [Fact]
-    public void EscapedTextIsEstimatedAtItsDecodedSize()
+    public async Task EscapedTextIsEstimatedAtItsDecodedSize()
     {
         var client = new OpenAiCodexLlmClient(new HttpClient(new Handler(_ => Sse(Completed))));
         string text = string.Concat(Enumerable.Repeat("{\"key\":\"value+<&>\"} ", 500));
         LlmChatRequest request = Request();
 
-        long empty = client.EstimateInputTokens(Connection(), request, ResourceSizes.None)!.Value.Tokens;
-        long full = client.EstimateInputTokens(Connection(), request with { Messages = [new("user", text)] }, ResourceSizes.None)!.Value.Tokens;
+        long empty = (await client.EstimateAsync(Connection(), request, ResourceSizes.None, CancellationToken.None))!.Value.Tokens;
+        long full = (await client.EstimateAsync(Connection(), request with { Messages = [new("user", text)] }, ResourceSizes.None, CancellationToken.None))!.Value.Tokens;
 
         Assert.InRange(full - empty, 0, LocalTokenCount.Count(text) * 11 / 10);
     }

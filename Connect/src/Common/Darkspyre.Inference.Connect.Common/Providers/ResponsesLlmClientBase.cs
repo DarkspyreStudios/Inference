@@ -15,7 +15,17 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
 {
     public string? EstimateDiagnostic => null;
 
-    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request,
+    /// <summary>The local o200k estimate of the request; see <see cref="LocalEstimate"/>.</summary>
+    public ValueTask<ContextEstimate?> EstimateAsync(LlmConnection connection, LlmChatRequest request,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult<ContextEstimate?>(LocalEstimate(connection, request, resources));
+
+    /// <summary>
+    /// Validates the request and counts its Responses projection with the bundled o200k encoding, without I/O. Media and
+    /// caller-owned resources are counted from their sizes.
+    /// </summary>
+    protected ContextEstimate LocalEstimate(LlmConnection connection, LlmChatRequest request,
         IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);

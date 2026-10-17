@@ -20,6 +20,16 @@ public enum LlmAgentContextImport
     OpeningContext
 }
 
+/// <summary>Which side compacts a conversation's context when it reaches the compaction trigger or on CompactNowAsync.</summary>
+public enum LlmCompactionSide
+{
+    /// <summary>The library compacts: it shortens tool output and summarizes older turns with side requests.</summary>
+    Host,
+
+    /// <summary>The model service compacts the context itself and returns the compacted state.</summary>
+    Provider
+}
+
 /// <summary>
 /// Operations implemented by the selected agent runtime. Unsupported methods fail before effects.
 /// Native runtime memory is not equivalent to a host-owned, exportable conversation.
@@ -62,6 +72,9 @@ public sealed record LlmAgentCapabilities
     /// <summary>CompactNowAsync compacts this conversation.</summary>
     public InferenceSupport SupportsCompactNow { get; init; }
 
+    /// <summary>Which side compacts this conversation's context.</summary>
+    public LlmCompactionSide CompactionSide { get; init; } = LlmCompactionSide.Host;
+
     /// <summary>FallbackModelIds is honoured.</summary>
     public InferenceSupport SupportsFallbackModels { get; init; }
 
@@ -96,7 +109,7 @@ public sealed record LlmAgentCapabilities
 
     internal void Validate()
     {
-        if (!Enum.IsDefined(ContextImport)
+        if (!Enum.IsDefined(ContextImport) || !Enum.IsDefined(CompactionSide)
             || SupportedRuntimePolicies is null || SupportedRuntimePolicies.Any(kind => !Enum.IsDefined(kind))
             || HostedTools.Any(kind => !Enum.IsDefined(kind))
             || ((SupportsCompactionHandoff == InferenceSupport.Supported)

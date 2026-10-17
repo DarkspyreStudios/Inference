@@ -134,12 +134,14 @@ internal sealed class SavedConversation
         ContextEstimate estimate;
         if (reported is long tokens)
         {
-            long local = Local(modelId, null, [.. after, .. added], resources);
-            estimate = new(tokens + Correct(modelId, local), IncludesProviderReport: true);
+            LlmChatMessage[] tail = [.. after, .. added];
+            long local = await LocalAsync(modelId, null, tail, resources, cancellationToken).ConfigureAwait(false);
+            estimate = new(tokens + Correct(modelId, local), IncludesProviderReport: true, EntirelyReported: tail.Length == 0);
         }
         else
         {
-            long local = Local(modelId, _framing, [.. saved.Entries.Select(entry => entry.Message), .. added], resources);
+            long local = await LocalAsync(modelId, _framing, [.. saved.Entries.Select(entry => entry.Message), .. added],
+                resources, cancellationToken).ConfigureAwait(false);
             if (observe) lock (_sync) { _firstStepEstimate = local; }
             estimate = new(Correct(modelId, local));
         }
@@ -148,22 +150,28 @@ internal sealed class SavedConversation
         return ManagedAgentPolicy.Status(modelId, saved.Revision, estimate, policy, model, _learned.Limit(_connectionId, modelId));
     }
 
-    /// <summary>The corrected size of the whole request a provider session opened with <paramref name="context"/> receives.</summary>
+    /// <summary>
+    /// The corrected size of the whole request a provider session opened with <paramref name="context"/> receives, with
+    /// the estimate margin.
+    /// </summary>
     internal async ValueTask<long> MeasureAsync(LlmAgentContext context, string modelId, IReadOnlyList<LlmChatMessage> added,
         CancellationToken cancellationToken) =>
-        Correct(modelId, await EstimateAsync(context, modelId, added, cancellationToken).ConfigureAwait(false));
+        ManagedAgentPolicy.WithMargin(new ContextEstimate(
+            Correct(modelId, await EstimateAsync(context, modelId, added, cancellationToken).ConfigureAwait(false)))).Tokens;
 
     /// <summary>The local, uncorrected size of the whole request a provider session opened with <paramref name="context"/> receives.</summary>
     internal async ValueTask<long> EstimateAsync(LlmAgentContext context, string modelId, IReadOnlyList<LlmChatMessage> added,
         CancellationToken cancellationToken)
     {
         var resources = await ResolveAsync(context, added, cancellationToken).ConfigureAwait(false);
-        return Local(modelId, _framing, [.. context.Entries.Select(entry => entry.Message), .. added], resources);
+        return await LocalAsync(modelId, _framing, [.. context.Entries.Select(entry => entry.Message), .. added], resources,
+            cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>The corrected size of a text sent as one user message.</summary>
-    internal long? EstimateText(string modelId, string text) =>
-        Correct(modelId, Local(modelId, null, [new("user", text)], ResourceSizes.None));
+    internal async ValueTask<long?> EstimateTextAsync(string modelId, string text, CancellationToken cancellationToken) =>
+        Correct(modelId, await LocalAsync(modelId, null, [new("user", text)], ResourceSizes.None, cancellationToken)
+            .ConfigureAwait(false));
 
     /// <summary>The compaction limits of a model under the one limit rule; null when no window is known.</summary>
     internal CompactionLimits? Limits(string modelId)
@@ -179,16 +187,17 @@ internal sealed class SavedConversation
     /// The local count of a request with these messages, as the provider's chat client counts it. A whole-request
     /// measure passes the framing as instructions.
     /// </summary>
-    private long Local(string modelId, string? instructions, IReadOnlyList<LlmChatMessage> messages,
-        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
+    private async ValueTask<long> LocalAsync(string modelId, string? instructions, LlmChatMessage[] messages,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources,
+        CancellationToken cancellationToken)
     {
-        if (messages.Count == 0 && string.IsNullOrWhiteSpace(instructions)) return 0;
-        return _estimator.EstimateInputTokens(_connection, new LlmChatRequest
+        if (messages.Length == 0 && string.IsNullOrWhiteSpace(instructions)) return 0;
+        return (await _estimator.EstimateAsync(_connection, new LlmChatRequest
         {
             ModelId = modelId,
             Instructions = instructions,
             Messages = messages
-        }, resources)?.Tokens ?? 0;
+        }, resources, cancellationToken).ConfigureAwait(false))?.Tokens ?? 0;
     }
 
     private async Task<IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?>> ResolveAsync(

@@ -68,6 +68,9 @@ internal sealed record LlmChatRequest
     /// <summary>The requested tier after normalization: one the model offers, or null when none is sent.</summary>
     public LlmServiceTier? ServiceTier { get; init; }
 
+    /// <summary>The requested agent count after normalization: one the model offers, or null when none is sent.</summary>
+    public int? AgentCount { get; init; }
+
     public LlmStructuredOutputRequest? StructuredOutput { get; init; }
 
     public IReadOnlyList<LlmClientToolDefinition> Tools { get; init; } = [];

@@ -64,6 +64,9 @@ public sealed record LlmProviderCapabilities
     /// <summary>The tiers the model offers. Empty means the model offers none and a requested tier is not sent.</summary>
     public IReadOnlySet<LlmServiceTier> ServiceTiers { get; init; } = FrozenSet<LlmServiceTier>.Empty;
 
+    /// <summary>The agent counts a multi-agent model accepts. Empty means the model takes no agent count and none is sent.</summary>
+    public IReadOnlyList<int> AgentCounts { get; init; } = [];
+
     /// <summary>The route accepts a sampling temperature.</summary>
     public InferenceSupport SupportsTemperature { get; init; }
 

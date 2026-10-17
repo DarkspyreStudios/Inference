@@ -30,6 +30,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     // What the session learns is kept under this connection id (DSA-942 B6).
     private readonly string _connectionId;
     private readonly ConversationCompactor _compactor;
+    // The model service's own compaction, used for the models it reports; null when the client has none.
+    private readonly ILlmProviderCompaction? _providerCompaction;
     // Entries an opening left empty by omitting their native compaction state; summarized at the first decision point.
     private HashSet<string> _emptiedByOmission;
     private IReadOnlyList<LlmHostedTool> _hostedTools;
@@ -51,7 +53,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         IReadOnlyList<LlmModel> models, ILlmContextEstimator estimator,
         Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> stream,
         Func<string, LlmProviderCapabilities> capabilities, LearnedModelContext learned, Action? openingFence = null,
-        CancellationToken cancellationToken = default)
+        ILlmProviderCompaction? providerCompaction = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         openingFence?.Invoke();
@@ -61,10 +63,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         cancellationToken.ThrowIfCancellationRequested();
         openingFence?.Invoke();
         var session = new ManagedAgentSession(connectionId, connection, options, models, estimator, stream, capabilities,
-            supportsResources, learned);
+            supportsResources, learned, providerCompaction);
         try
         {
             using var operation = session._resourceCallbacks.Enter(cancellationToken);
+            // Validates the opening's projected request.
+            _ = await session.EstimateAsync(session.Request(session._context, session.BaseTurn()), ResourceSizes.None,
+                operation.Token).ConfigureAwait(false);
             void Fence() { session.FenceResourceCallback(operation.Token); openingFence?.Invoke(); }
             if (options.CallerServices?.Resources is { } access)
             {
@@ -90,13 +95,15 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private ManagedAgentSession(string connectionId, LlmConnection connection, LlmAgentSessionOptions options,
         IReadOnlyList<LlmModel> models, ILlmContextEstimator estimator,
         Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> stream,
-        Func<string, LlmProviderCapabilities> capabilities, bool supportsResources, LearnedModelContext learned)
+        Func<string, LlmProviderCapabilities> capabilities, bool supportsResources, LearnedModelContext learned,
+        ILlmProviderCompaction? providerCompaction)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(options.ModelId);
         _supportsResources = supportsResources;
         _connectionId = connectionId;
         _learned = learned;
-        _compactor = new(MeasureForCompactionAsync, SideRequestAsync, EstimateText, options.CallerServices?.Transcript);
+        _compactor = new(MeasureForCompactionAsync, SideRequestAsync, EstimateTextAsync, options.CallerServices?.Transcript);
+        _providerCompaction = providerCompaction;
         _connection = connection;
         _models = Array.AsReadOnly(models.ToArray());
         _estimator = estimator;
@@ -130,7 +137,6 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         SessionId = options.SessionId ?? ThreadId;
         ArgumentException.ThrowIfNullOrWhiteSpace(ThreadId);
         ArgumentException.ThrowIfNullOrWhiteSpace(SessionId);
-        _ = Measure(_context, BaseTurn(), ResourceSizes.None);
     }
 
     public string ThreadId { get; }
@@ -144,6 +150,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         cancellationToken = operation.Token;
         LlmAgentContext source;
         CompactionLimits? limits;
+        LlmAgentTurnRequest turn;
         lock (_sync)
         {
             ThrowIfDisposed();
@@ -152,12 +159,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             source = _context;
             limits = Limits(_options.ModelId);
             if (source.Entries.Count == 0 || limits is null) return null;
+            turn = BaseTurn();
             _segmentActive = true;
         }
         try
         {
             string lastTurnId = source.Entries[^1].TurnId;
-            CompactionResult result = await _compactor.CompactAsync(source, _options.ModelId, lastTurnId,
+            CompactionResult result = await CompactAsync(source, turn, lastTurnId,
                 new HashSet<string>(StringComparer.Ordinal), limits, static (_, _) => ValueTask.CompletedTask,
                 cancellationToken).ConfigureAwait(false);
             if (!result.Changed) return null;
@@ -206,41 +214,56 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             references = [.. ResourceReferences(_context, prospective ?? _run?.Turn ?? BaseTurn())];
         }
         var resources = await ResolveResourcesAsync(access, references, cancellationToken).ConfigureAwait(false);
+        LlmAgentContext measured;
+        LlmAgentTurnRequest measuredTurn;
+        LlmChatRequest request;
         lock (_sync)
         {
             ThrowIfDisposed();
             if (prospective is { } turn)
             {
                 RequireIdle();
-                var preview = Append(_context, new("preview", "preview", UserMessage(turn)), increment: false);
-                return Measure(preview, turn, resources);
+                measured = Append(_context, new("preview", "preview", UserMessage(turn)), increment: false);
+                measuredTurn = turn;
             }
-            return _segmentActive && _latestStatus is not null
-                ? _latestStatus : Measure(_run is null ? _context : WithQueuedSteering(_context, _run), _run?.Turn ?? BaseTurn(), resources);
+            else
+            {
+                if (_segmentActive && _latestStatus is not null) return _latestStatus;
+                measured = _run is null ? _context : WithQueuedSteering(_context, _run);
+                measuredTurn = _run?.Turn ?? BaseTurn();
+            }
+            request = Request(measured, measuredTurn);
         }
+        return Status(measured, measuredTurn, await EstimateAsync(request, resources, cancellationToken).ConfigureAwait(false));
     }
 
-    public Task<LlmRequestAccounting> MeasureContextAsync(LlmAgentContext proposedContext,
+    public async Task<LlmRequestAccounting> MeasureContextAsync(LlmAgentContext proposedContext,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        LlmAgentTurnRequest turn;
+        LlmChatRequest request;
+        long revision;
         lock (_sync)
         {
             ThrowIfDisposed();
             RequireCapability(Capabilities.SupportsContextStatus);
             if (_segmentActive) { throw new InvalidOperationException("Proposal accounting requires idle or paused execution."); }
-            var turn = _run?.Turn ?? BaseTurn();
+            turn = _run?.Turn ?? BaseTurn();
             var proposal = ManagedAgentContext.Import(proposedContext, _connection, turn.ModelId!, _supportsResources).Context;
             if (_run is not null) { proposal = WithQueuedSteering(proposal, _run); }
-            ContextEstimate? used = Corrected(EstimateInputTokens(proposal, turn, ResourceSizes.None), turn.ModelId!);
-            cancellationToken.ThrowIfCancellationRequested();
-            return Task.FromResult(ManagedAgentPolicy.Account(turn.ModelId!, used,
-                _execution.ContextPolicy, Model(turn.ModelId!), LearnedLimit(turn.ModelId!)) with
-            {
-                ContextRevision = _context.Revision,
-                OutputLimitEnforcement = _capabilities(turn.ModelId!).OutputLimitEnforcement
-            });
+            request = Request(proposal, turn);
+            revision = _context.Revision;
         }
+        ContextEstimate? used = Corrected(await EstimateAsync(request, ResourceSizes.None, cancellationToken).ConfigureAwait(false),
+            turn.ModelId!);
+        cancellationToken.ThrowIfCancellationRequested();
+        return ManagedAgentPolicy.Account(turn.ModelId!, used,
+            _execution.ContextPolicy, Model(turn.ModelId!), LearnedLimit(turn.ModelId!)) with
+        {
+            ContextRevision = revision,
+            OutputLimitEnforcement = _capabilities(turn.ModelId!).OutputLimitEnforcement
+        };
     }
 
     public async Task<LlmAgentContext> CaptureContextAsync(LlmAgentContextCaptureOptions? options = null,
@@ -295,12 +318,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             await LlmResourcePreparation.ValidateContextAsync(replacement, selection, access,
                 () => FenceResourceCallback(cancellationToken), cancellationToken).ConfigureAwait(false);
         }
+        // Validates the replacement's projected request.
+        _ = await EstimateAsync(Request(replacement, BaseTurn()), ResourceSizes.None, cancellationToken).ConfigureAwait(false);
         lock (_sync)
         {
             FenceResourceCallback(cancellationToken);
             RequireIdle();
             RequireRevision(expectedRevision);
-            _ = Measure(replacement, BaseTurn(), ResourceSizes.None);
             _context = replacement with { Revision = checked(_context.Revision + 1) };
             _latestStatus = null;
         }
@@ -317,25 +341,46 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             LlmResourcePreparation.ValidateScope(access, scope, () => FenceResourceCallback(admission.Token), admission.Token);
         LiveRun run;
         Segment segment;
+        LlmAgentTurnRequest turn;
+        string turnId;
+        LlmAgentContext projected;
         lock (_sync)
         {
             cancellationToken.ThrowIfCancellationRequested();
             ThrowIfDisposed();
             RequireIdle();
-            var turn = FreezeTurn(request);
+            turn = FreezeTurn(request);
             // Validate the entire projected request before mutating context or emitting start.
             _ = ManagedAgentContext.Import(_context, _connection, turn.ModelId!, _supportsResources);
-            string turnId = NewId();
+            turnId = NewId();
             // Empty input appends no user entry: the turn sends the context as it is.
             LlmAgentContextEntry? user = turn.Input.Count == 0 && turn.Attachments.Count == 0
                 ? null : new LlmAgentContextEntry(NewId(), turnId, UserMessage(turn));
-            var projected = user is null ? _context : Append(_context, user);
-            _latestStatus = Measure(projected, turn, ResourceSizes.None);
-            run = new(turn, turnId);
-            _context = projected;
-            _run = run;
+            projected = user is null ? _context : Append(_context, user);
+            // The turn holds the session while its request is measured, so the context cannot change meanwhile.
             _segmentActive = true;
-            segment = StartSegment(run, cancellationToken);
+            _latestStatus = null;
+        }
+        bool started = false;
+        try
+        {
+            LlmAgentContextStatus status = Status(projected, turn,
+                await EstimateAsync(Request(projected, turn), ResourceSizes.None, cancellationToken).ConfigureAwait(false));
+            lock (_sync)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                ThrowIfDisposed();
+                _latestStatus = status;
+                run = new(turn, turnId);
+                _context = projected;
+                _run = run;
+                segment = StartSegment(run, cancellationToken);
+                started = true;
+            }
+        }
+        finally
+        {
+            if (!started) lock (_sync) { _segmentActive = false; }
         }
         admission.Dispose();
         await foreach (var item in ReadSegmentAsync(run, segment, cancellationToken)) { yield return item; }
@@ -558,23 +603,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     references = [.. ResourceReferences(_context, run.Turn)];
                 }
                 var resources = await ResolveResourcesAsync(access, references, token).ConfigureAwait(false);
-                lock (_sync)
-                {
-                    AdmitSteering(run);
-                    request = Request(_context, run.Turn, firstStep: run.Iterations == 0);
-                    estimate = EstimateInputTokens(_context, run.Turn, resources);
-                    status = _latestStatus = Status(_context, run.Turn, estimate);
-                }
+                lock (_sync) { AdmitSteering(run); }
+                (request, estimate, status) = await MeasureStepAsync(run, resources, token).ConfigureAwait(false);
                 await writer.WriteAsync(new LlmAgentContextStatusEvent(ThreadId, run.Id, status), token);
                 if (status.NeedsCompaction is true && !preserve)
                 {
                     if (!await CompactRunAsync(run, writer, token).ConfigureAwait(false)) return;
-                    lock (_sync)
-                    {
-                        request = Request(_context, run.Turn, firstStep: run.Iterations == 0);
-                        estimate = EstimateInputTokens(_context, run.Turn, resources);
-                        status = _latestStatus = Status(_context, run.Turn, estimate);
-                    }
+                    (request, estimate, status) = await MeasureStepAsync(run, resources, token).ConfigureAwait(false);
                     await writer.WriteAsync(new LlmAgentContextStatusEvent(ThreadId, run.Id, status), token);
                 }
                 string stepId = NewId();
@@ -1110,6 +1145,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             PromptCache = new LlmPromptCacheHint { Scope = LlmPromptCacheScope.Conversation },
             ReasoningLevel = turn.ReasoningLevel,
             ServiceTier = turn.ServiceTier,
+            AgentCount = turn.AgentCount,
             Temperature = turn.Temperature,
             MaxOutputTokens = turn.MaxOutputTokens,
             ToolChoice = turn.ToolChoice is null || firstStep ? turn.ToolChoice : new LlmToolChoice { Mode = LlmToolChoiceMode.Auto },
@@ -1141,9 +1177,27 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         };
     }
 
-    private LlmAgentContextStatus Measure(LlmAgentContext context, LlmAgentTurnRequest turn,
-        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources) =>
-        Status(context, turn, EstimateInputTokens(context, turn, resources));
+    /// <summary>
+    /// The running turn's next step request, the local estimate of its context and the status it gives, recorded as the
+    /// latest status. Only the producer changes the context during a run, so the context does not change meanwhile.
+    /// </summary>
+    private async Task<(LlmChatRequest Request, ContextEstimate? Estimate, LlmAgentContextStatus Status)> MeasureStepAsync(
+        LiveRun run, IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources,
+        CancellationToken token)
+    {
+        LlmAgentContext context;
+        LlmChatRequest request, measured;
+        lock (_sync)
+        {
+            context = _context;
+            request = Request(context, run.Turn, firstStep: run.Iterations == 0);
+            measured = Request(context, run.Turn);
+        }
+        ContextEstimate? estimate = await EstimateAsync(measured, resources, token).ConfigureAwait(false);
+        LlmAgentContextStatus status = Status(context, run.Turn, estimate);
+        lock (_sync) { _latestStatus = status; }
+        return (request, estimate, status);
+    }
 
     /// <summary>The status of a request whose local estimate is <paramref name="estimate"/>, corrected with what the model taught.</summary>
     private LlmAgentContextStatus Status(LlmAgentContext context, LlmAgentTurnRequest turn, ContextEstimate? estimate)
@@ -1189,10 +1243,38 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         }
         if (limits is null) return true;
         string itemId = NewId();
-        return await ReportCompactionAsync(run, itemId, writer, () => _compactor.CompactAsync(source,
-            run.Turn.ModelId!, run.Id, protectedIds, limits, Stage(run, itemId, writer), token), installUnchanged: false, token)
+        return await ReportCompactionAsync(run, itemId, writer, () => CompactAsync(source,
+            run.Turn, run.Id, protectedIds, limits, Stage(run, itemId, writer), token), installUnchanged: false, token)
             .ConfigureAwait(false);
     }
+
+    /// <summary>
+    /// Compacts <paramref name="source"/> for <paramref name="turn"/>'s model. A model whose service compacts is compacted
+    /// there, and its compacted entries replace every entry; a failed provider call compacts with the library compactor
+    /// instead, as every other model does.
+    /// </summary>
+    private async Task<CompactionResult> CompactAsync(LlmAgentContext source, LlmAgentTurnRequest turn, string currentTurnId,
+        IReadOnlySet<string> protectedIds, CompactionLimits limits, Func<string, CancellationToken, ValueTask> stage,
+        CancellationToken token)
+    {
+        if (ProviderCompaction(turn.ModelId!) is { } provider)
+        {
+            try
+            {
+                LlmAgentContext compacted = await provider.CompactAsync(_connection, Request(source, turn), token)
+                    .ConfigureAwait(false);
+                return new(source with { Entries = compacted.Entries }, DroppedMessageCount: source.Entries.Count, Usage: null,
+                    ShortenedToolOutputCount: 0, RemovedImageCount: 0);
+            }
+            catch (Exception) when (!token.IsCancellationRequested) { }
+        }
+        return await _compactor.CompactAsync(source, turn.ModelId!, currentTurnId, protectedIds, limits, stage, token)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>The client's own compaction when its service compacts this model, otherwise null.</summary>
+    private ILlmProviderCompaction? ProviderCompaction(string modelId) =>
+        _providerCompaction is { } provider && provider.CompactsProviderSide(_connection, modelId) ? provider : null;
 
     /// <summary>
     /// Replaces the entries an opening left empty by omitting native compaction state with a summary of the transcript
@@ -1299,7 +1381,10 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         return emptied;
     }
 
-    /// <summary>The corrected size of the request the current turn would send with <paramref name="context"/>.</summary>
+    /// <summary>
+    /// The corrected size of the request the current turn would send with <paramref name="context"/>, with the estimate
+    /// margin.
+    /// </summary>
     private async ValueTask<long> MeasureForCompactionAsync(LlmAgentContext context, CancellationToken token)
     {
         IInferenceResourceAccess? access;
@@ -1312,11 +1397,10 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             references = [.. ResourceReferences(context, turn)];
         }
         var resources = await ResolveResourcesAsync(access, references, token).ConfigureAwait(false);
-        lock (_sync)
-        {
-            return Corrected(EstimateInputTokens(context, turn, resources), turn.ModelId!)?.Tokens
-                ?? throw new InvalidOperationException("The request size is unknown.");
-        }
+        ContextEstimate? estimate = Corrected(await EstimateAsync(Request(context, turn), resources, token).ConfigureAwait(false),
+            turn.ModelId!);
+        return estimate is { } known ? ManagedAgentPolicy.WithMargin(known).Tokens
+            : throw new InvalidOperationException("The request size is unknown.");
     }
 
     /// <summary>
@@ -1342,12 +1426,12 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     }
 
     /// <summary>The corrected size of a text sent as one user message.</summary>
-    private long? EstimateText(string text)
+    private async ValueTask<long?> EstimateTextAsync(string text, CancellationToken token)
     {
         string modelId;
         lock (_sync) { modelId = _run?.Turn.ModelId ?? _options.ModelId; }
-        return Corrected(_estimator.EstimateInputTokens(_connection,
-            new LlmChatRequest { ModelId = modelId, Messages = [new("user", text)] }, ResourceSizes.None), modelId)?.Tokens;
+        return Corrected(await EstimateAsync(new LlmChatRequest { ModelId = modelId, Messages = [new("user", text)] },
+            ResourceSizes.None, token).ConfigureAwait(false), modelId)?.Tokens;
     }
 
     private static void AddUsage(LiveRun run, LlmUsage? usage)
@@ -1356,9 +1440,10 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         run.UsageCalls++;
     }
 
-    private ContextEstimate? EstimateInputTokens(LlmAgentContext context, LlmAgentTurnRequest turn,
-        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources) =>
-        _estimator.EstimateInputTokens(_connection, Request(context, turn), resources);
+    /// <summary>The adapter's estimate of <paramref name="request"/>; it may ask the model service to count text.</summary>
+    private ValueTask<ContextEstimate?> EstimateAsync(LlmChatRequest request,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources, CancellationToken token) =>
+        _estimator.EstimateAsync(_connection, request, resources, token);
 
     /// <summary>The caller-owned resources a request built from the context and turn sends.</summary>
     private static IEnumerable<InferenceResourceReference> ResourceReferences(LlmAgentContext context, LlmAgentTurnRequest turn) =>
@@ -1401,8 +1486,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     {
         get
         {
-            var capabilities = _capabilities(_run?.Turn.ModelId ?? _options.ModelId);
-            return ClientTools.ManagedCapabilities(capabilities) with { HostedTools = capabilities.HostedTools };
+            string modelId = _run?.Turn.ModelId ?? _options.ModelId;
+            var capabilities = _capabilities(modelId);
+            return ClientTools.ManagedCapabilities(capabilities) with
+            {
+                HostedTools = capabilities.HostedTools,
+                CompactionSide = ProviderCompaction(modelId) is null ? LlmCompactionSide.Host : LlmCompactionSide.Provider
+            };
         }
     }
     private static void RequireCapability(InferenceSupport supported)

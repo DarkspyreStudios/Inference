@@ -314,6 +314,12 @@ public sealed record LlmAgentTurnRequest
     /// <summary>The requested tier; null is Auto.</summary>
     public LlmServiceTier? ServiceTier { get; init; }
 
+    /// <summary>
+    /// The number of agents a multi-agent model runs for this turn; null leaves the provider's default in place. The
+    /// nearest count the model offers is sent; a model that offers none gets none.
+    /// </summary>
+    public int? AgentCount { get; init; }
+
     /// <summary>JSON Schema the final answer must match; null requests free-form output.</summary>
     public JsonElement? OutputSchema { get; init; }
 

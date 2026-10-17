@@ -95,7 +95,7 @@ These public surfaces are deleted: `LlmProviderService.MeasureRequestAsync`, `Co
 `LlmAgentCapabilities.SupportsSteering` replaces `Steering`.
 
 **Turn settings.** `LlmAgentTurnRequest` carries `Instructions`, `Input` (may be empty), `Attachments`, `ModelId`,
-`ReasoningLevel`, `OutputSchema`, `Temperature`, `MaxOutputTokens` and `ToolChoice`. A managed session applies
+`ReasoningLevel`, `ServiceTier`, `AgentCount`, `OutputSchema`, `Temperature`, `MaxOutputTokens` and `ToolChoice`. A managed session applies
 `ToolChoice` to the turn's first model step and `Auto` after it. Empty `Input` appends no user message: the turn
 sends the context as it is, and with an empty context the turn completes at once as `Completed`. A Claude turn
 with empty `Input` and no attachments sends the opening context alone, or completes at once when there is none.
@@ -226,6 +226,10 @@ in its own message by the attachment notice, so any history opens.
 | SupportsTurnCap | Supported | Supported | Unknown | Unsupported |
 | SupportsSpendCap | Unsupported | Unsupported | Unknown | Unsupported |
 | SupportsCompactNow | Supported | Supported | Supported | Supported |
+| CompactionSide | Host | Host | Host | Host |
+
+`CompactionSide` says which side compacts: `Host` is the library's compaction described below, and `Provider` is the
+model service's own. A managed session reports `Provider` for a model whose chat client compacts on the service side.
 
 **The OpenAI API and its endpoint.** An OpenAI API connection has an endpoint, `https://api.openai.com/v1` by
 default, and may point at any service that serves the same API, such as a local llama.cpp server or OpenRouter. The
@@ -258,6 +262,11 @@ has a Service tiers switch, `CapabilityOverrides.SupportsServiceTiers`, shown as
 editor. Unset, it is on for `api.openai.com` and off elsewhere; a checkbox value equal to the endpoint's default
 stores null, so the default follows a later endpoint change. With the switch on, OpenAI's endpoint offers the
 profile's tiers (the pricing page's) and another endpoint offers all four; with it off, the model offers none.
+
+**Agent count.** A turn asks a multi-agent model for a number of agents with `LlmAgentTurnRequest.AgentCount`; null
+leaves the provider's default in place. `LlmProviderCapabilities.AgentCounts` lists the counts the model accepts, and
+is empty for a model that takes none. The request normalizer maps the requested count to the nearest offered count,
+the larger of two equally near ones. A model that offers none gets none, and the turn runs.
 
 **Context lengths in the editor.** An OpenAI API connection's editor shows `Context lengths` rows, none until
 `Add row` is pressed (the CommonDesign D6 exception recorded in `AGENTS.md`). Each row names a model, chosen from the
@@ -340,8 +349,12 @@ reserve or cap is ignored, and a cap above the model limit uses the model limit.
 Inference and never pause for the host, and their `ContinueTurnAsync` refuses because `SupportsCompactionHandoff` is
 Unsupported. Codex's own compaction is never requested. Before every model step the session measures the request and
 emits `LlmAgentContextStatusEvent`. A local estimate that does not rest on a provider-reported count is corrected
-with the rate the model's reported counts taught; the rate and any learned limit are kept per connection id and model
-for the process and never stored, so a limit learned on one service never applies to another connection. At or above the trigger the session compacts toward the target: it cuts each
+with the rate the model's reported counts taught. Every measurement that is not entirely provider-reported then adds
+300 tokens (`ManagedAgentPolicy.EstimateMargin`) to its estimated part, because a local tokenizer is not the model's
+own and an estimate must err high; a count the provider reported in full gets no margin. The status, the request
+accounting and the compaction measures all carry it. The estimate is asynchronous, so a chat client may ask its model
+service to count text, and a failed count uses the local estimate for that text. The rate and any learned limit are
+kept per connection id and model for the process and never stored, so a limit learned on one service never applies to another connection. At or above the trigger the session compacts toward the target: it cuts each
 unprotected tool-result text part and structured content to its first and last 1,000 characters, sending cut structured
 content as text, and replaces binary parts with a notice,
 then keeps the current turn and the newest whole turns that fit in the room under the target that a 3,000-word
@@ -359,6 +372,12 @@ context emits `LlmAgentCompactedEvent` with the dropped-entry, shortened-output 
 `ProviderFailure` and `Compaction could not bring this request under the limit: {measured} tokens remain in a
 {usable}-token usable window. The current turn alone measures {mandatory} tokens.` A failed summary request ends the
 turn with the provider's message after the usage it reported; the context is unchanged.
+
+**Provider compaction.** A chat client that implements the internal `ILlmProviderCompaction` and reports a model as
+compacted on the service side gets that model's compactions, at the same trigger and on `CompactNowAsync`: the
+session sends the request it would send to the service's compaction, and the returned entries replace every entry of
+the context. `LlmAgentCompactedEvent` then counts every replaced entry as dropped. A failed compaction call compacts
+with the library's compaction above, for that compaction only.
 
 A too-long refusal teaches the model's size, compacts whatever the measure says and sends the same step again once; on
 the OpenAI API the refusal is OpenAI's `context_length_exceeded` code, the llama.cpp server's
@@ -3431,7 +3450,8 @@ separate persistence projection. Omitted metadata cannot recreate an attachment 
 See the [compiled host-context example](examples/Darkspyre.Inference.Connect.LLM.Examples/HostOwnedAgentContext.cs).
 
 Text-only occupancy is estimated from the actual projected request using the bundled o200k
-tokenizer, including instructions and schemas. It is not an exact current-model token count.
+tokenizer, including instructions and schemas. It is a reasonably close estimate, not an exact current-model token
+count, and the accounting adds the 300-token estimate margin to it.
 Anthropic and compatible Chat use the same validated plaintext generation mapper without provider I/O.
 Actual media, selected resources and their opaque continuation make occupancy unknown.
 Responses, direct Codex and Bedrock Converse record the provider's reported input

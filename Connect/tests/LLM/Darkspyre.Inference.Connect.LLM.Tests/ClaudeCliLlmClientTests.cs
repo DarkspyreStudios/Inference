@@ -403,7 +403,7 @@ public sealed class ClaudeCliLlmClientTests
         Assert.Equal(restricted ? LlmToolPartDelivery.Omitted : LlmToolPartDelivery.Delivered, projected.Report.Parts[1].Delivery);
         Assert.Equal(restricted ? LlmToolPartDelivery.Omitted : LlmToolPartDelivery.Delivered, projected.Report.Parts[2].Delivery);
         // A delivered image costs about 1,600 tokens and each PDF page its text plus its page image.
-        if (!restricted) Assert.True(client.EstimateInputTokens(connection, request, ResourceSizes.None)!.Value.Tokens >= 1_600 + 4_600);
+        if (!restricted) Assert.True((await client.EstimateAsync(connection, request, ResourceSizes.None, CancellationToken.None))!.Value.Tokens >= 1_600 + 4_600);
         IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(connection, request));
         Assert.Equal("answer", Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result.Text);
         using JsonDocument input = JsonDocument.Parse(Assert.Single(runner.Invocations).StandardInput!);

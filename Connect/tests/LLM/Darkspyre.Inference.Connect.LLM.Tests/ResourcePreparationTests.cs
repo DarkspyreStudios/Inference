@@ -221,12 +221,12 @@ public sealed class ResourcePreparationTests
             Messages = [new("user", "Read the file")]
         };
         var resources = await ResourceSizes.ResolveAsync(access, [reference], CancellationToken.None);
-        long withoutResource = estimator.EstimateInputTokens(connection, request with { Resources = null }, ResourceSizes.None)!.Value.Tokens;
+        long withoutResource = (await estimator.EstimateAsync(connection, request with { Resources = null }, ResourceSizes.None, CancellationToken.None))!.Value.Tokens;
         long resourceTokens = AttachmentTokens.Estimate(null, "reference text"u8.Length);
         // The selected file counts once, whether only the selection or also an attachment names it.
-        Assert.Equal(withoutResource + resourceTokens, estimator.EstimateInputTokens(connection, request, resources)!.Value.Tokens);
-        Assert.Equal(withoutResource + resourceTokens, estimator.EstimateInputTokens(connection, request with
-        { Messages = [new("user", "Read the file") { Attachments = [new LlmResourceAttachment(reference)] }] }, resources)!.Value.Tokens);
+        Assert.Equal(withoutResource + resourceTokens, (await estimator.EstimateAsync(connection, request, resources, CancellationToken.None))!.Value.Tokens);
+        Assert.Equal(withoutResource + resourceTokens, (await estimator.EstimateAsync(connection, request with
+        { Messages = [new("user", "Read the file") { Attachments = [new LlmResourceAttachment(reference)] }] }, resources, CancellationToken.None))!.Value.Tokens);
         Assert.Equal(0, handler.Requests);
         Assert.Empty(access.Reads);
         Assert.Equal(0, access.ReleaseAttempts);

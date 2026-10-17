@@ -5,6 +5,13 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 internal static class ManagedAgentPolicy
 {
+    /// <summary>
+    /// Tokens added to the estimated part of every measurement that is not entirely provider-reported, after the
+    /// learned correction. A local tokenizer is not the model's own, and a measure a few hundred tokens over is
+    /// acceptable where one under is not (Brandon, 2026-10-17).
+    /// </summary>
+    internal const long EstimateMargin = 300;
+
     public static LlmAgentCapabilities Capabilities { get; } = new()
     {
         ContextImport = LlmAgentContextImport.Structured,
@@ -58,10 +65,18 @@ internal static class ManagedAgentPolicy
         };
     }
 
-    /// <summary>The request's accounting under the one limit rule, <see cref="CompactionLimits.For"/>.</summary>
+    /// <summary>The estimate with <see cref="EstimateMargin"/> added, unless the provider reported all of it.</summary>
+    internal static ContextEstimate WithMargin(ContextEstimate estimate) =>
+        estimate.EntirelyReported ? estimate : estimate with { Tokens = checked(estimate.Tokens + EstimateMargin) };
+
+    /// <summary>
+    /// The request's accounting under the one limit rule, <see cref="CompactionLimits.For"/>. <paramref name="estimate"/>
+    /// is corrected; the estimate margin is added here.
+    /// </summary>
     public static LlmRequestAccounting Account(string modelId, ContextEstimate? estimate, LlmAgentContextPolicy policy,
         LlmModel? model, long? learnedLimit)
     {
+        estimate = estimate is { } given ? WithMargin(given) : null;
         long? used = estimate?.Tokens;
         CompactionLimits? limits = CompactionLimits.For(model?.MaxContextTokens, learnedLimit, model?.MaxOutputTokens, policy);
         return new()

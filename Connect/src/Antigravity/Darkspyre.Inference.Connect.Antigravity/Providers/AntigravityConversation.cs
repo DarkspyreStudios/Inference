@@ -49,7 +49,7 @@ internal sealed class AntigravityConversation : ILlmAgentSession
         // AGY takes text only, so no caller resource is counted; the instructions are counted once AGY reports usage.
         _history = new SavedConversation(connectionId, connection, chat, learned, _execution, framing: null, resources: null,
             AntigravityModelLimits.Get, history);
-        _compactor = new(MeasureForCompactionAsync, SideRequestAsync, EstimateText, transcript);
+        _compactor = new(MeasureForCompactionAsync, SideRequestAsync, EstimateTextAsync, transcript);
     }
 
     /// <summary>The first AGY conversation's ID, fixed for this conversation.</summary>
@@ -400,11 +400,11 @@ internal sealed class AntigravityConversation : ILlmAgentSession
         SummaryRequest.ReadAsync(_chat.StreamAsync(_connection, request, cancellationToken), cancellationToken);
 
     /// <summary>The corrected size of a text sent as one user message.</summary>
-    private long? EstimateText(string text)
+    private ValueTask<long?> EstimateTextAsync(string text, CancellationToken cancellationToken)
     {
         ActiveTurn? turn;
         lock (_sync) { turn = _turn; }
-        return _history.EstimateText(turn?.ModelId ?? _modelId, text);
+        return _history.EstimateTextAsync(turn?.ModelId ?? _modelId, text, cancellationToken);
     }
 
     /// <summary>One running turn: its id, model, record, stream and cancellation.</summary>

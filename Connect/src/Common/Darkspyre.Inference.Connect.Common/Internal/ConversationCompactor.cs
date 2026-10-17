@@ -78,7 +78,7 @@ internal sealed class CompactionFailedException(string message, LlmUsage? usage)
 internal sealed class ConversationCompactor(
     Func<LlmAgentContext, CancellationToken, ValueTask<long>> measure,
     Func<LlmChatRequest, CancellationToken, Task<LlmChatResult>> sideRequest,
-    Func<string, long?> estimateText,
+    Func<string, CancellationToken, ValueTask<long?>> estimateText,
     ILlmConversationTranscript? transcript)
 {
     /// <summary>The TurnId of a summary entry. A summary entry is never kept as a turn and never summarized.</summary>
@@ -287,7 +287,10 @@ internal sealed class ConversationCompactor(
         int shortened = 0, removedImages = 0;
         // The summary input cuts tool output as step 1 does; the counts describe the context, not the input.
         foreach (LlmAgentContextEntry entry in source)
-            pieces.AddRange(Split(Render(Shorten(entry, ref shortened, ref removedImages).Message), partLimit));
+        {
+            string rendered = Render(Shorten(entry, ref shortened, ref removedImages).Message);
+            pieces.AddRange(await SplitAsync(rendered, partLimit, cancellationToken).ConfigureAwait(false));
+        }
         var usage = new UsageSum();
         List<(string Text, long Tokens)> summaries = await SummarizePartsAsync(Group(pieces, partLimit), modelId, words,
             usage, cancellationToken).ConfigureAwait(false);
@@ -337,7 +340,10 @@ internal sealed class ConversationCompactor(
             throw;
         }
         foreach (LlmChatResult result in results) usage.Add(result.Usage);
-        return [.. results.Select(result => (result.Text, Estimate(result.Text)))];
+        var summaries = new List<(string Text, long Tokens)>(results.Length);
+        foreach (LlmChatResult result in results)
+            summaries.Add((result.Text, await EstimateAsync(result.Text, cancellationToken).ConfigureAwait(false)));
+        return summaries;
     }
 
     /// <summary>Joins pieces in order into parts whose estimates stay within the part limit.</summary>
@@ -363,18 +369,26 @@ internal sealed class ConversationCompactor(
     }
 
     /// <summary>A text within the part limit as one piece; a larger one split at line boundaries, then by characters.</summary>
-    private List<(string Text, long Tokens)> Split(string text, long partLimit)
+    private async Task<List<(string Text, long Tokens)>> SplitAsync(string text, long partLimit,
+        CancellationToken cancellationToken)
     {
-        long tokens = Estimate(text);
+        long tokens = await EstimateAsync(text, cancellationToken).ConfigureAwait(false);
         if (tokens <= partLimit) return [(text, tokens)];
         string[] lines = text.Split('\n');
-        if (lines.Length > 1) return Group([.. lines.SelectMany(line => Split(line, partLimit))], partLimit);
+        if (lines.Length > 1)
+        {
+            var pieces = new List<(string Text, long Tokens)>();
+            foreach (string line in lines) pieces.AddRange(await SplitAsync(line, partLimit, cancellationToken).ConfigureAwait(false));
+            return Group(pieces, partLimit);
+        }
         int half = text.Length / 2;
         if (half == 0) return [(text, tokens)];
-        return [.. Split(text[..half], partLimit), .. Split(text[half..], partLimit)];
+        return [.. await SplitAsync(text[..half], partLimit, cancellationToken).ConfigureAwait(false),
+            .. await SplitAsync(text[half..], partLimit, cancellationToken).ConfigureAwait(false)];
     }
 
-    private long Estimate(string text) => estimateText(text) ?? 0;
+    private async ValueTask<long> EstimateAsync(string text, CancellationToken cancellationToken) =>
+        await estimateText(text, cancellationToken).ConfigureAwait(false) ?? 0;
 
     /// <summary>The entry's transcript text, attachments as names. A reference attachment carries no name here.</summary>
     private static string Render(LlmChatMessage message)

@@ -221,7 +221,7 @@ public sealed class ConversationCompactorTests
                 Requests.Add(request);
                 return Task.FromResult(new LlmChatResult { Diagnostics = new(200, null, null), Text = "summary " + Requests.Count, Status = LlmCompletionStatus.Completed, Usage = new(1, 1, 2) });
             },
-            text => Tokens(text),
+            (text, _) => ValueTask.FromResult<long?>(Tokens(text)),
             transcript);
 
         public static long Tokens(string text) => text.Length / 4;

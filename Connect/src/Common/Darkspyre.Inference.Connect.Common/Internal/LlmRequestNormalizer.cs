@@ -25,6 +25,7 @@ internal static class LlmRequestNormalizer
         {
             ReasoningLevel = level,
             ServiceTier = NearestTier(request.ServiceTier, capabilities.ServiceTiers),
+            AgentCount = NearestAgentCount(request.AgentCount, capabilities.AgentCounts),
             Temperature = sampling ? Usable(request.Temperature, capabilities.SupportsTemperature, double.IsFinite) : null,
             TopP = sampling ? Usable(request.TopP, capabilities.SupportsTopP, value => double.IsFinite(value) && value is > 0 and <= 1) : null,
             TopK = Usable(request.TopK, capabilities.SupportsTopK, value => value > 0),
@@ -55,6 +56,14 @@ internal static class LlmRequestNormalizer
         if (tier == LlmServiceTier.Auto || offered.Contains(tier)) return tier;
         return offered.Contains(LlmServiceTier.Standard) ? LlmServiceTier.Standard : LlmServiceTier.Auto;
     }
+
+    /// <summary>
+    /// Null stays null. A model that offers no count gets none. Otherwise the offered count closest to the request;
+    /// between two equally close counts, the larger.
+    /// </summary>
+    private static int? NearestAgentCount(int? requested, IReadOnlyList<int> offered) =>
+        requested is not int count || offered.Count == 0 ? null
+            : offered.OrderBy(option => Math.Abs((long)option - count)).ThenByDescending(option => option).First();
 
     private static T? Usable<T>(T? value, InferenceSupport support, Func<T, bool> valid) where T : struct =>
         value is { } known && support != InferenceSupport.Unsupported && valid(known) ? known : null;

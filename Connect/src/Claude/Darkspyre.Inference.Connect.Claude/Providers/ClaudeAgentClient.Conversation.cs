@@ -76,7 +76,7 @@ internal sealed partial class ClaudeAgentClient
             _options = options with { Context = null, ToolHandler = options.ToolHandler is null ? null : HandleToolAsync };
             _history = new SavedConversation(connectionId, connection, owner.Chat, owner.Learned, _execution, _framing,
                 options.CallerServices?.Resources, Model, history);
-            _compactor = new(MeasureForCompactionAsync, SideRequestAsync, EstimateText, options.CallerServices?.Transcript);
+            _compactor = new(MeasureForCompactionAsync, SideRequestAsync, EstimateTextAsync, options.CallerServices?.Transcript);
         }
 
         /// <summary>The first CLI session's id, fixed for this conversation.</summary>
@@ -679,11 +679,11 @@ internal sealed partial class ClaudeAgentClient
             SummaryRequest.ReadAsync(_owner.Chat.StreamAsync(_connection, request, cancellationToken), cancellationToken);
 
         /// <summary>The corrected size of a text sent as one user message.</summary>
-        private long? EstimateText(string text)
+        private ValueTask<long?> EstimateTextAsync(string text, CancellationToken cancellationToken)
         {
             string modelId;
             lock (_sync) { modelId = _turn?.ModelId ?? _options.ModelId; }
-            return _history.EstimateText(modelId, text);
+            return _history.EstimateTextAsync(modelId, text, cancellationToken);
         }
 
         /// <summary>The model's window and output limit: the open session's catalog entry when it has a size, else the

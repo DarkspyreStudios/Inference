@@ -682,12 +682,17 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
     public string? EstimateDiagnostic => LocalTokenCount.CliDiagnostic;
 
+    public ValueTask<ContextEstimate?> EstimateAsync(LlmConnection connection, LlmChatRequest request,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources,
+        CancellationToken cancellationToken) =>
+        ValueTask.FromResult(Estimate(connection, request, resources));
+
     /// <summary>
     /// Counts the prompt this client would send, its inline attachments and binary tool parts, and caller-owned resources
     /// by their resolved descriptors. The local count is not corrected for Claude's tokenizer here; correction is learned
     /// per model from reported counts.
     /// </summary>
-    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request,
+    private ContextEstimate? Estimate(LlmConnection connection, LlmChatRequest request,
         IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources)
     {
         // Another provider's continuation state is never sent to the CLI: an agent opening and chat both drop it.
