@@ -1061,9 +1061,15 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         };
     }
 
-    /// <summary>A too-long refusal in an error object: every service the OpenAI API can point at, or Codex's code.</summary>
+    /// <summary>
+    /// A too-long refusal in an error object (every service the OpenAI API can point at, or Codex's code), or a response that
+    /// ended incomplete with reason context_length_exceeded, as xAI reports it.
+    /// </summary>
     private bool IsContextOverflow(JsonElement root)
     {
+        if (LlmJson.GetObject(root, "incomplete_details") is { } incomplete
+            && LlmJson.GetString(incomplete, "reason") == "context_length_exceeded")
+            return true;
         JsonElement error = LlmJson.GetObject(root, "error") ?? root;
         string? code = LlmJson.GetString(error, "code");
         return Transport == LlmTransport.OpenAiResponses
