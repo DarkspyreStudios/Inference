@@ -181,6 +181,23 @@ public sealed class AntigravityCliLlmClientTests
         Assert.DoesNotContain("--effort", invocation.Arguments);
     }
 
+    /// <summary>AGY reports a refused or failed tool call as an ERROR step; the turn continues to its result.</summary>
+    [Fact]
+    public async Task FailedToolStepIsAFinishedStepNotMalformedOutput()
+    {
+        const string output = """
+            {"event":"step_update","step_update":{"step_index":1,"state":"ERROR","step_type":"tool","tool_name":"view_file","tool_info":{"name":"view_file","parameters":{"AbsolutePath":"/missing.md"},"error":{"type":"TOOL_ERROR","message":"no such file or directory"}}}}
+            {"event":"result","result":{"status":"SUCCESS","response":"OK","usage":{"input_tokens":12,"output_tokens":2,"total_tokens":14}}}
+            """;
+        var request = new LlmChatRequest { ModelId = "auto", Messages = [new("user", "Reply with OK.")] };
+        var client = new AntigravityCliLlmClient(new RecordingRunner(new(0, output, string.Empty)));
+
+        IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(Connection(), request));
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("OK", result.Text);
+    }
+
     [Fact]
     public async Task TerminalResultFencesTrailingTextAndStillRequiresSuccessfulProcessExit()
     {

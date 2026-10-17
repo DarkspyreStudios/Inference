@@ -20,7 +20,8 @@ internal sealed record AntigravityStep(
     AntigravityToolStep? Tool,
     AntigravityUsage? Usage) : AntigravityEvent
 {
-    public bool IsDone => string.Equals(State, "DONE", StringComparison.Ordinal);
+    /// <summary>Whether the step finished: DONE, or ERROR for a step that failed, such as a tool call AGY refused.</summary>
+    public bool IsDone => State is "DONE" or "ERROR";
 }
 
 /// <summary>A native tool observation. Output and error are the provider's report, not host results.</summary>
@@ -127,7 +128,7 @@ internal static class AntigravityProtocol
         if (!step.TryGetProperty("step_index", out JsonElement indexElement)
             || !indexElement.TryGetInt32(out int stepIndex)
             || stepIndex < 0
-            || state is not ("ACTIVE" or "DONE")
+            || state is not ("ACTIVE" or "DONE" or "ERROR")
             || string.IsNullOrEmpty(stepType))
         {
             throw Malformed(null);

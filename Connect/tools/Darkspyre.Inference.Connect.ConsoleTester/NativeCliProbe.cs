@@ -10,7 +10,8 @@ namespace Darkspyre.Inference.Connect.ConsoleTester;
 
 /// <summary>
 /// Explicit qualification of retained CLI native sessions through the public agent contract. Each case runs in
-/// an isolated temporary workspace. No configuration is edited and no case is retried.
+/// an isolated temporary workspace and no case is retried. The Antigravity host-tools case, like any AGY session with
+/// host tools, adds AGY's global host-tools MCP entry and allow rule; no other case edits configuration.
 /// </summary>
 internal sealed class NativeCliProbe(LlmAgentProviderService agents, string connectionId, string model, string workspace,
     LlmProviderCapabilities capabilities, LlmTransport transport, ClaudeCliRecorder? recorder)
@@ -32,7 +33,8 @@ internal sealed class NativeCliProbe(LlmAgentProviderService agents, string conn
         :
     [
         new("text", TextAsync), new("structured", StructuredAsync), new("native-tools", NativeToolsAsync),
-        new("session", SessionAsync), new("resume", ResumeAsync), new("controls", ControlsAsync), new("cancel", CancelAsync)
+        new("session", SessionAsync), new("resume", ResumeAsync), new("controls", ControlsAsync), new("cancel", CancelAsync),
+        new("host-tools", HostToolsAsync)
     ];
 
     public static async Task<int> RunAsync(LlmProviderService llms, LlmAgentProviderService agents,
@@ -99,6 +101,31 @@ internal sealed class NativeCliProbe(LlmAgentProviderService agents, string conn
         Require(turn.ToolOutputs > 0, "No native tool observation reported output.");
         Require(turn.Text.Contains(_marker, StringComparison.Ordinal), "The reply does not contain the fixture marker.");
         return "native tool observation with reported output";
+    }
+
+    /// <summary>A host tool reaches AGY through the host-tools service, runs in this process and reports its output.</summary>
+    private async Task<string> HostToolsAsync(CancellationToken token)
+    {
+        int calls = 0;
+        await using ILlmAgentSession session = await agents.StartSessionAsync(connectionId, new LlmAgentSessionOptions
+        {
+            ModelId = model,
+            Runtime = Runtime(),
+            Tools = [Tool("probe_secret", "Returns the probe secret.")],
+            ToolHandler = (_, _) =>
+            {
+                Interlocked.Increment(ref calls);
+                return Task.FromResult(LlmToolOutput.FromText($"SECRET {_marker}"));
+            }
+        }, token);
+        TurnSummary turn = await RunAsync(session, Turn(
+            "Call the probe_secret tool of the darkspyre-host-tools MCP server once and reply with exactly what it returns."), token);
+        Require(turn.Status == LlmAgentTurnStatus.Completed, "The host tool turn did not complete.");
+        Require(calls == 1, $"The host handler ran {calls} times.");
+        Require(turn.Tools.Count(tool => tool.Tool == "probe_secret" && tool.Output is not null) == 1,
+            "No completed probe_secret tool event reported the host's output.");
+        Require(turn.Text.Contains(_marker, StringComparison.Ordinal), $"The reply does not contain the secret: '{turn.Text}'.");
+        return "a host tool ran through the host-tools service and its output reached the model";
     }
 
     private async Task<string> SessionAsync(CancellationToken token)

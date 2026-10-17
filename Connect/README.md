@@ -9,7 +9,8 @@ The conversation libraries are independently consumable:
 | `Darkspyre.Inference.Connect.Common` | Universal conversation and embedding contracts, facades, shared protocol code and discovery |
 | `Darkspyre.Inference.Connect.Codex` | Native Codex client and authentication |
 | `Darkspyre.Inference.Connect.Claude` | Official Claude CLI conversations and authentication |
-| `Darkspyre.Inference.Connect.Antigravity` | Official Antigravity CLI conversations, native resume and account usage |
+| `Darkspyre.Inference.Connect.Antigravity` | Official Antigravity CLI conversations, native resume, host tools and account usage |
+| `Darkspyre.Inference.Connect.HostTools` | The host-tools local service, bundled under `hosttools/service`, its client, and the `darkspyre-host-tools-mcp` program; source-only, built with Darkspyre.Common's local-service libraries |
 | `Darkspyre.Inference.Connect.OpenAiApi` | OpenAI Responses conversations and text embeddings |
 | `Darkspyre.Inference.Connect.SelfHost` | Conversations and text/image embeddings through caller-owned engines |
 
@@ -2784,7 +2785,7 @@ own authorization and side-effect policy.
 | AWS Bedrock AgentCore Harness | No | Yes | No | No |
 | Google Vertex AI (Gemini and Claude) | Yes | Yes | Yes | Yes |
 | Gemini API (Google AI Studio) | Yes | Yes | Yes | Yes |
-| Antigravity CLI | No | No | No | No |
+| Antigravity CLI | No | Yes | No | No |
 
 Tool-result content support is declared per route and lane; see [Tool output](#tool-output).
 
@@ -5235,8 +5236,18 @@ per open session, with an open standard input and one output reader.
 - `ResumeSessionAsync` passes that exact ID with `--conversation` and fails if the handshake reports
   another. Resume without `Runtime` fails, so the host must supply its stored working directory and
   provider policy. `--continue` is never used.
-- Host tools and a tool handler are rejected before any process starts. `ThreadId` and `SessionId` on a start are
-  not read: AGY assigns the conversation ID.
+- Host tools reach AGY through the host-tools local service (Darkspyre.Inference.Connect.HostTools). Each AGY
+  process registers its session's MCP tool list with the service under a fresh session ID and starts AGY with that ID
+  in `DARKSPYRE_HOST_TOOLS_SESSION`. AGY's global MCP entry `darkspyre-host-tools` starts the stdio MCP program
+  `darkspyre-host-tools-mcp`, which reads the ID, lists the session's tools and forwards each call to the service.
+  The service passes the call back to the registering host, which runs it through the session's tool handler as the
+  Claude CLI bridge does. The first session with host tools in a process runs `agy mcp add darkspyre-host-tools
+  <program>` and adds `mcp(darkspyre-host-tools/*)` to `permissions.allow` in `~/.gemini/antigravity-cli/settings.json`;
+  AGY reads both only from that global configuration. An AGY started without the variable gets no host tools.
+- A host tool call appears as AGY's `call_mcp_tool` step for the `darkspyre-host-tools` server. The turn reports it as
+  an `LlmAgentToolEvent` with the host tool's own name, namespace `darkspyre-host-tools` and the full output the
+  handler returned. Returned tool requests (`LlmAgentToolHandling.ReturnRequests`) are refused before any process
+  starts. `ThreadId` and `SessionId` on a start are not read: AGY assigns the conversation ID.
 - Session `Instructions` and a start's `Context` are sent once, ahead of the first turn's input: the instructions
   as `Instructions for this conversation:\n{text}`, then the history as the `CONVERSATION SO FAR` transcript. That
   turn emits the opening notice as one `LlmAgentWarningEvent`. A resume sends nonempty session instructions the
@@ -5248,6 +5259,7 @@ per open session, with an open standard input and one output reader.
   `LlmAgentToolEvent` for native tools with their reported output, running usage observations and
   `LlmAgentMessageCompletedEvent`. A schema turn streams no text and publishes one
   `LlmAgentStructuredOutputSnapshotEvent` holding the validated canonical result.
+- A step in state `ERROR`, such as a tool call AGY refused, is a finished step; its tool event reports the error.
 - `SUCCESS` completes the turn. `ERROR` and `INVALID` are provider failures. `CANCELED` and `INTERRUPTED`
   are interruptions. Every other status is Unknown. End of output without a result is a provider failure.
 - Usage covers the current turn only. It is the difference between cumulative result counters within
