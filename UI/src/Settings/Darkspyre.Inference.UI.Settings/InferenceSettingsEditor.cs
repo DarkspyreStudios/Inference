@@ -1,7 +1,6 @@
 using Darkspyre.Inference.Common.Setup;
 using Avalonia;
 using Avalonia.Controls;
-using Avalonia.Input.Platform;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Threading;
@@ -30,8 +29,8 @@ public sealed class InferenceSettingsEditor : UserControl
     private long editVersion;
     private int stepIndex;
     private SetupProgress? progress;
+    // The device code already copied to the clipboard when it was shown, so each code is copied once.
     private string? copiedCode;
-    private string? copyStatus;
     private SetupActionResult? actionResult;
     // The action whose result the tail shows, or null for a result no action produced.
     private SetupActionDescriptor? resultAction;
@@ -364,7 +363,8 @@ public sealed class InferenceSettingsEditor : UserControl
         }
     }
 
-    // The interaction is rebuilt only when it changes, the editor's busy state changes or the copy status changes.
+    // The interaction is rebuilt only when it changes or the editor's busy state changes. A device code is copied to
+    // the clipboard the first time it is shown.
     private void RenderInteraction()
     {
         SetupInteraction? interaction = this.settings.Interaction;
@@ -376,11 +376,17 @@ public sealed class InferenceSettingsEditor : UserControl
             this.interactionRegion.Content = null;
             return;
         }
-        string shape = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(interaction) + "\n" + this.Busy + "\n" + this.copyStatus;
+        string shape = System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(interaction) + "\n" + this.Busy;
         if (shape != this.interactionShape)
         {
             this.interactionShape = shape;
             this.interactionRegion.Content = this.Interaction(interaction);
+        }
+        if (interaction is SetupDeviceAuthorization device && device.UserCode != this.copiedCode)
+        {
+            this.copiedCode = device.UserCode;
+            string code = device.UserCode;
+            Dispatcher.UIThread.Post(async () => await this.CopyCodeAsync(code));
         }
         else if (interaction is SetupBrowserAuthorization browser) this.callback?.Update(browser.Callback, this.editVersion, this.AllIssues, this.Busy);
     }
@@ -501,7 +507,6 @@ public sealed class InferenceSettingsEditor : UserControl
                 actions.Children.Add(Enabled(Button("Continue", "primary", () => this.RunActionAsync(device.Continue)), !this.Busy));
                 actions.Children.Add(Enabled(Button("Cancel connection", "outline", () => this.RunActionAsync(device.Cancel)), !this.Busy));
                 view.Children.Add(actions);
-                if (this.copiedCode == device.UserCode && this.copyStatus is not null) view.Children.Add(SetupFieldInput.Text(this.copyStatus));
                 break;
             case SetupBrowserAuthorization browser:
                 Button open = Button("Open authorization page", "primary", () => this.OpenBrowserAsync(browser.AuthorizationUri));
@@ -741,21 +746,7 @@ public sealed class InferenceSettingsEditor : UserControl
     }
 
     // The clipboard write needs no provider effect or host consent; the code is shown on screen already.
-    private async Task CopyCodeAsync(string code)
-    {
-        this.copiedCode = code;
-        try
-        {
-            IClipboard clipboard = TopLevel.GetTopLevel(this)?.Clipboard ?? throw new InvalidOperationException("The editor is not in a window.");
-            await clipboard.SetTextAsync(code);
-            this.copyStatus = "Code copied.";
-        }
-        catch (Exception error) when (error is InvalidOperationException or NotSupportedException or System.Runtime.InteropServices.ExternalException)
-        {
-            this.copyStatus = "The code could not be copied. Select it and copy it instead.";
-        }
-        this.Changed();
-    }
+    private Task CopyCodeAsync(string code) => this.closed ? Task.CompletedTask : this.host.CopyToClipboardAsync(this, code, "Sign-in code copied to clipboard.");
 
     // Each applicable status fact as a chip: what is true, what is not, or that it is not checked.
     private IEnumerable<(string Text, bool? Value)> StatusChips()

@@ -235,5 +235,6 @@ public sealed class StepActionTests
             manager.RunAsync(settings, action.Id, progress, cancellationToken);
         public ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
         public Task RevealFolderAsync(string folder, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task CopyToClipboardAsync(Avalonia.Visual source, string text, string copied) => Task.CompletedTask;
     }
 }

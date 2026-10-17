@@ -1,3 +1,4 @@
+using Avalonia;
 using Darkspyre.Inference.Common.Setup;
 
 namespace Darkspyre.Inference.UI.Settings;
@@ -18,6 +19,11 @@ public interface IInferenceSettingsInteractionHost
 
     /// <summary>Shows a folder in the platform's file manager.</summary>
     Task RevealFolderAsync(string folder, CancellationToken cancellationToken);
+
+    /// <summary>Writes <paramref name="text"/> to the clipboard of the window that shows <paramref name="source"/> and
+    /// tells the person the result with the host's transient notice; <paramref name="copied"/> is the notice text on success.
+    /// A clipboard failure is reported to the person, not thrown.</summary>
+    Task CopyToClipboardAsync(Visual source, string text, string copied);
 }
 
 /// <summary>Optional host-native picker. Null means cancelled; the host owns permissions and returns an absolute path.

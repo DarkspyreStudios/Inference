@@ -179,13 +179,38 @@ public sealed class SetupEditorRegressionTests
     public Task DeviceCodeCanBeCopied() => EditorSession.RunAsync(async () =>
     {
         var (settings, manager) = New();
-        InferenceSettingsEditor editor = Editor(settings, manager);
+        var host = new Host();
+        InferenceSettingsEditor editor = Editor(settings, manager, host: host);
         settings.StartDevice("ABCD-1234");
         manager.RaiseStatusChanged();
-        await EditorSession.WaitForAsync(() => EditorSession.All<SelectableTextBlock>(editor, "inference-settings-user-code").Any());
+        await EditorSession.WaitForAsync(() => host.Copies.Count == 1);
         Assert.Equal("ABCD-1234", EditorSession.All<SelectableTextBlock>(editor, "inference-settings-user-code").Single().Text);
         EditorSession.Click(EditorSession.Button(editor, "Copy code"));
-        await EditorSession.WaitForAsync(() => EditorSession.TextOf(editor).Contains("Code copied.", StringComparison.Ordinal));
+        await EditorSession.WaitForAsync(() => host.Copies.Count == 2);
+        Assert.Equal(("ABCD-1234", "Sign-in code copied to clipboard."), host.Copies[1]);
+    });
+
+    /// <summary>A device code is copied through the host the first time it is shown, not again on a redraw, and a new
+    /// code is copied once more.</summary>
+    [Fact]
+    public Task DeviceCodeIsCopiedOnceWhenShown() => EditorSession.RunAsync(async () =>
+    {
+        var (settings, manager) = New();
+        var host = new Host();
+        InferenceSettingsEditor editor = Editor(settings, manager, host: host);
+        settings.StartDevice("ABCD-1234");
+        manager.RaiseStatusChanged();
+        await EditorSession.WaitForAsync(() => host.Copies.Count == 1);
+        manager.RaiseStatusChanged();
+        EditorSession.Settle();
+        Assert.Single(host.Copies);
+        settings.StartDevice("WXYZ-5678");
+        manager.RaiseStatusChanged();
+        await EditorSession.WaitForAsync(() => host.Copies.Count == 2);
+
+        Assert.Equal("WXYZ-5678", EditorSession.All<SelectableTextBlock>(editor, "inference-settings-user-code").Single().Text);
+        Assert.Equal(["ABCD-1234", "WXYZ-5678"], host.Copies.Select(copy => copy.Text));
+        Assert.All(host.Copies, copy => Assert.Equal("Sign-in code copied to clipboard.", copy.Copied));
     });
 
     [Fact]
@@ -263,9 +288,9 @@ public sealed class SetupEditorRegressionTests
     private static (TestSettings Settings, TestManager Manager) New(Target? target = null) =>
         (new TestSettings(), new TestManager(target ?? new Target()));
 
-    private static InferenceSettingsEditor Editor(TestSettings settings, TestManager manager, List<SetupEditorState>? states = null)
+    private static InferenceSettingsEditor Editor(TestSettings settings, TestManager manager, List<SetupEditorState>? states = null, Host? host = null)
     {
-        InferenceSettingsEditor editor = new(settings, manager, new Host());
+        InferenceSettingsEditor editor = new(settings, manager, host ?? new Host());
         editor.StateChanged += (_, state) => states?.Add(state);
         EditorSession.Show(editor);
         return editor;
@@ -380,5 +405,11 @@ public sealed class SetupEditorRegressionTests
             manager.RunAsync(settings, action.Id, progress, cancellationToken);
         public ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
         public Task RevealFolderAsync(string folder, CancellationToken cancellationToken) => Task.CompletedTask;
+        public List<(string Text, string Copied)> Copies { get; } = [];
+        public Task CopyToClipboardAsync(Avalonia.Visual source, string text, string copied)
+        {
+            Copies.Add((text, copied));
+            return Task.CompletedTask;
+        }
     }
 }

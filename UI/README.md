@@ -117,8 +117,11 @@ When the settings have several steps, the step list names and marks the current 
 and the step's own title is not repeated; single-step settings keep their title. A host that draws its
 own step strip sets `ShowStepList = false`: the list is hidden, each step shows its title, and Back and
 Next stay. `CurrentStepIndex` is the shown step, and `StepChanged` reports each move to another step. A device
-authorization shows a **Copy code** button that writes the user code to the clipboard and reports
-the outcome; the code itself selects in one click. A searchable choice list shows its separate
+authorization copies its user code to the clipboard the first time the code is shown, once per code, and shows a
+**Copy code** button that copies it again. Both go through
+`IInferenceSettingsInteractionHost.CopyToClipboardAsync(source, text, copied)`, which writes the clipboard and tells
+the person the result with the host's transient notice; the editor passes `Sign-in code copied to clipboard.`. The
+code itself selects in one click. A searchable choice list shows its separate
 provider-search box only while the loaded list is incomplete or a search is active; otherwise the
 auto-complete box filters the loaded choices. A choice whose value differs from its display name shows the
 value on a second line, and the filter matches either one.
