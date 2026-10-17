@@ -715,6 +715,23 @@ public sealed class DirectCodexTests
         Assert.Equal([true, false, false, true], sentTemperature);
     }
 
+    /// <summary>The ChatGPT device code opens the verification page with the code filled in when the provider returns
+    /// a complete verification URI, and the plain device page otherwise.</summary>
+    [Fact]
+    public async Task DeviceCodeUsesTheCompleteVerificationUriWhenReturned()
+    {
+        string body = """{"device_auth_id":"auth-1","user_code":"ABCD-EFGH","interval":5}""";
+        using var handler = new Handler(_ => Json(body));
+        var authenticator = new CodexAuthenticator(new HttpClient(handler));
+
+        LlmDeviceCode plain = await authenticator.StartAsync();
+        body = """{"device_auth_id":"auth-1","user_code":"ABCD-EFGH","interval":5,"verification_uri_complete":"https://auth.openai.com/codex/device?user_code=ABCD-EFGH"}""";
+        LlmDeviceCode complete = await authenticator.StartAsync();
+
+        Assert.Equal("https://auth.openai.com/codex/device", plain.VerificationUrl);
+        Assert.Equal("https://auth.openai.com/codex/device?user_code=ABCD-EFGH", complete.VerificationUrl);
+    }
+
     /// <summary>A reasoning value refused as unsupported is dropped from the resent request and the next turn (B4).</summary>
     [Fact]
     public async Task RefusedReasoningIsDroppedResentAndRemembered()

@@ -42,7 +42,7 @@ internal sealed class CodexAuthenticator(HttpClient http)
 
             int interval = LlmJson.GetInt(document.RootElement, "interval") ?? DefaultIntervalSeconds;
             result = new LlmDeviceCode(
-                $"{AuthBaseUrl}/codex/device",
+                PrefilledVerificationUrl(document.RootElement, $"{AuthBaseUrl}/codex/device"),
                 userCode,
                 deviceAuthId,
                 interval > 0 ? interval : DefaultIntervalSeconds);

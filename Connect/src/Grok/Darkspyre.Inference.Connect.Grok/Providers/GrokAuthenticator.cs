@@ -38,11 +38,7 @@ internal sealed class GrokAuthenticator(HttpClient http) : OAuthAuthenticatorBas
             string userCode = RequiredString(root, "user_code");
             string verificationUri = RequiredString(root, "verification_uri");
             ValidateVerificationUri(verificationUri);
-            if (OptionalString(root, "verification_uri_complete") is { } completeUri)
-            {
-                ValidateVerificationUri(completeUri);
-                verificationUri = completeUri;
-            }
+            verificationUri = PrefilledVerificationUrl(root, verificationUri);
 
             int expiresIn = PositiveSeconds(root, "expires_in") ?? throw ProtocolFailure();
             int interval = PositiveSeconds(root, "interval") ?? 5;

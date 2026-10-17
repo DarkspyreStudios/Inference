@@ -100,6 +100,16 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
             $"{operation} failed ({(int)response.StatusCode}): {safe}");
     }
 
+    /// <summary>Returns the device-code response's RFC 8628 <c>verification_uri_complete</c> when it is an absolute
+    /// https URL without user info, so the verification page opens with the user code already filled in. Otherwise
+    /// returns <paramref name="verificationUrl"/>, where the user types the code.</summary>
+    protected static string PrefilledVerificationUrl(JsonElement response, string verificationUrl) =>
+        LlmJson.GetString(response, "verification_uri_complete") is { } complete
+        && Uri.TryCreate(complete, UriKind.Absolute, out Uri? uri)
+        && uri.Scheme == Uri.UriSchemeHttps && string.IsNullOrEmpty(uri.UserInfo)
+            ? complete
+            : verificationUrl;
+
     private static bool ShouldRefresh(LlmOAuthTokens tokens)
     {
         DateTimeOffset? expiry = tokens.ExpiresAtUnixSeconds is { } seconds

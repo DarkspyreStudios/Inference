@@ -3446,6 +3446,11 @@ interval. Setup's `authorize` action and its continuation, and `SignInAsync`, us
 transport to find the device login. A transport with no registered device login is refused with
 `NotSupportedException`.
 
+`LlmDeviceCode.VerificationUrl` is the provider's RFC 8628 `verification_uri_complete` when the device-code
+response carries one as an absolute https URL; that page opens with the user code already filled in. Otherwise it is
+the plain verification page, where the user types the code. Codex and Grok apply this one rule. ChatGPT's (Codex)
+device endpoint returns no complete URI today, so a Codex sign-in shows `https://auth.openai.com/codex/device`.
+
 Interactive completion methods accept the connection version captured before authentication began.
 The `SignInAsync` convenience method captures that version internally. In both cases, the final save is
 still conditional, so a connection change during the external authentication round trip is rejected.
