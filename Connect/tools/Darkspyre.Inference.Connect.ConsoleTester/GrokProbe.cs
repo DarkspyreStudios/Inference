@@ -88,17 +88,19 @@ internal static class GrokProbe
     internal static async Task<string> CompactionAsync(LlmAgentProviderService agents, string connectionId, string model,
         TextWriter output, CancellationToken token)
     {
-        string fact = $"ORCHID-{Guid.NewGuid():N}"[..14];
+        // Grok refuses demands to repeat a token as prompt injection, so the fact is an ordinary one from a conversation.
+        string[] cities = ["Lisbon", "Kyoto", "Tallinn", "Hobart", "Bergen", "Oslo", "Dublin", "Perth"];
+        string fact = cities[Random.Shared.Next(cities.Length)];
         await using ILlmAgentSession session = await agents.StartSessionAsync(connectionId, new() { ModelId = model }, token);
         if ((await session.GetCapabilitiesAsync(token)).CompactionSide != LlmCompactionSide.Provider)
             throw new ProbeFailure("Grok must report provider-side compaction.");
-        await RunAsync(session, $"Remember the code {fact}. Reply only with OK.", output, token);
+        await RunAsync(session, $"I am planning a trip to {fact} next spring. Just acknowledge that briefly.", output, token);
         LlmAgentCompactedEvent compacted = await session.CompactNowAsync(token)
             ?? throw new ProbeFailure("Compact now must compact the conversation.");
-        string answer = await RunAsync(session, "What was the code I asked you to remember? Reply only with the code.", output, token);
+        string answer = await RunAsync(session, "Which city did I say I am planning to visit?", output, token);
         if (!answer.Contains(fact, StringComparison.Ordinal))
-            throw new ProbeFailure("The turn after compaction must recall the remembered code.");
-        return $"compacted to revision {compacted.ContextRevision}; the next turn recalled the code";
+            throw new ProbeFailure("The turn after compaction must recall the city.");
+        return $"compacted to revision {compacted.ContextRevision}; the next turn recalled the city";
     }
 
     private static async Task<string> RunAsync(ILlmAgentSession session, string prompt, TextWriter output, CancellationToken token)
