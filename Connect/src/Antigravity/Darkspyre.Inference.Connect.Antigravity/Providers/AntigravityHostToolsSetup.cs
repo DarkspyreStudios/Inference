@@ -16,11 +16,11 @@ internal static class AntigravityHostToolsSetup
     private static readonly SemaphoreSlim Gate = new(1, 1);
     private static readonly HashSet<string> Configured = new(StringComparer.Ordinal);
 
-    /// <summary>The MCP program beside the host-tools client library.</summary>
+    /// <summary>The MCP program in hosttools/mcp/ beside this library.</summary>
     internal static string McpProgram { get; } = Path.Combine(
-        Path.GetDirectoryName(typeof(HostToolsRuntime).Assembly.Location)
-            ?? throw new InvalidDataException("The host-tools client has no physical location."),
-        HostToolsProtocol.McpExecutableName + (OperatingSystem.IsWindows() ? ".exe" : ""));
+        Path.GetDirectoryName(typeof(AntigravityHostToolsSetup).Assembly.Location)
+            ?? throw new InvalidDataException("The Antigravity provider has no physical location."),
+        "hosttools", "mcp", HostToolsProtocol.McpExecutableName + (OperatingSystem.IsWindows() ? ".exe" : ""));
 
     /// <summary>
     /// The AGY CLI settings file that holds permission rules (https://antigravity.google/docs/permissions?tab=cli).

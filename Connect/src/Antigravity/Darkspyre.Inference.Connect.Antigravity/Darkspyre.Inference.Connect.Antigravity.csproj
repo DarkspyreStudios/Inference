@@ -5,11 +5,31 @@
   <ItemGroup>
     <ProjectReference Include="../../Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
     <ProjectReference Include="../../HostTools/Darkspyre.Inference.Connect.HostTools/Darkspyre.Inference.Connect.HostTools.csproj" />
-    <!-- AGY starts the host-tools MCP program from beside this library. -->
-    <ProjectReference Include="../../HostTools/Darkspyre.Inference.Connect.HostTools.Mcp/Darkspyre.Inference.Connect.HostTools.Mcp.csproj" />
+    <ProjectReference Include="../../HostTools/Darkspyre.Inference.Connect.HostTools.Mcp/Darkspyre.Inference.Connect.HostTools.Mcp.csproj"
+                      ReferenceOutputAssembly="false" Private="false" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.ConsoleTester" />
     <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
     <None Include="buildTransitive/Darkspyre.Inference.Connect.Antigravity.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
+
+  <!--
+    AGY starts the host-tools MCP program from hosttools/mcp/ beside this library: the program's whole output folder,
+    apphost and dependencies included. It runs after AssignTargetPaths, so a build and a no-build publish both carry it.
+  -->
+  <Target Name="AddHostToolsMcpProgram" AfterTargets="AssignTargetPaths">
+    <MSBuild Projects="../../HostTools/Darkspyre.Inference.Connect.HostTools.Mcp/Darkspyre.Inference.Connect.HostTools.Mcp.csproj"
+             Targets="GetTargetPath" Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="_HostToolsMcpAssembly" />
+    </MSBuild>
+    <PropertyGroup>
+      <_HostToolsMcpOutput>@(_HostToolsMcpAssembly->'%(RootDir)%(Directory)')</_HostToolsMcpOutput>
+    </PropertyGroup>
+    <ItemGroup>
+      <_HostToolsMcpFile Include="$(_HostToolsMcpOutput)**/*" />
+      <ContentWithTargetPath Include="@(_HostToolsMcpFile)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest">
+        <TargetPath>hosttools/mcp/%(_HostToolsMcpFile.RecursiveDir)%(_HostToolsMcpFile.Filename)%(_HostToolsMcpFile.Extension)</TargetPath>
+      </ContentWithTargetPath>
+    </ItemGroup>
+  </Target>
 </Project>

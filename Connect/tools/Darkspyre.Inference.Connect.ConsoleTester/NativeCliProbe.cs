@@ -34,7 +34,7 @@ internal sealed class NativeCliProbe(LlmAgentProviderService agents, string conn
     [
         new("text", TextAsync), new("structured", StructuredAsync), new("native-tools", NativeToolsAsync),
         new("session", SessionAsync), new("resume", ResumeAsync), new("controls", ControlsAsync), new("cancel", CancelAsync),
-        new("host-tools", HostToolsAsync)
+        new("host-tools", HostToolsAsync), new("compaction", CompactionAsync)
     ];
 
     public static async Task<int> RunAsync(LlmProviderService llms, LlmAgentProviderService agents,
@@ -126,6 +126,32 @@ internal sealed class NativeCliProbe(LlmAgentProviderService agents, string conn
             "No completed probe_secret tool event reported the host's output.");
         Require(turn.Text.Contains(_marker, StringComparison.Ordinal), $"The reply does not contain the secret: '{turn.Text}'.");
         return "a host tool ran through the host-tools service and its output reached the model";
+    }
+
+    /// <summary>
+    /// A 20,000-token context cap puts the trigger near 16,000 tokens. AGY's own framing is about 13,000, so a 5,000-token
+    /// note crosses it: the next turn compacts into a fresh AGY conversation and still recalls the remembered code.
+    /// </summary>
+    private async Task<string> CompactionAsync(CancellationToken token)
+    {
+        await using ILlmAgentSession session = await agents.StartSessionAsync(connectionId, new LlmAgentSessionOptions
+        {
+            ModelId = model,
+            Runtime = Runtime(),
+            ExecutionOptions = new() { ContextPolicy = new() { MaxContextTokens = 20_000, ReservedOutputTokens = 1_000 } }
+        }, token);
+        string threadId = session.ThreadId;
+        (string filler, _) = LimitProbe.Filler(5_000);
+        TurnSummary first = await RunAsync(session, Turn($"Remember the code {_marker}. Reply with OK only. Use no tools."), token);
+        TurnSummary second = await RunAsync(session, Turn($"Here is a note to keep:\n{filler}\nReply with OK only. Use no tools."), token);
+        TurnSummary third = await RunAsync(session, Turn("Which code did I ask you to remember? Reply with it only. Use no tools."), token);
+        Require(first.Status == LlmAgentTurnStatus.Completed && second.Status == LlmAgentTurnStatus.Completed
+            && third.Status == LlmAgentTurnStatus.Completed, "A turn did not complete.");
+        int compactions = first.Compactions + second.Compactions + third.Compactions;
+        Require(compactions > 0, "No turn compacted the conversation.");
+        Require(session.ThreadId == threadId, "The thread ID changed across the compaction.");
+        Require(third.Text.Contains(_marker, StringComparison.Ordinal), $"The compacted conversation lost the code: '{third.Text}'.");
+        return $"{compactions} compaction(s) reopened AGY with the compacted history, which kept the code";
     }
 
     private async Task<string> SessionAsync(CancellationToken token)
@@ -336,6 +362,9 @@ internal sealed class NativeCliProbe(LlmAgentProviderService agents, string conn
                 case LlmAgentMessageCompletedEvent message:
                     summary.Text = message.Text;
                     break;
+                case LlmAgentCompactedEvent:
+                    summary.Compactions++;
+                    break;
                 case LlmAgentToolEvent tool:
                     summary.Tools.Add(tool);
                     if (tool.Output is not null) summary.ToolOutputs++;
@@ -423,6 +452,8 @@ internal sealed class NativeCliProbe(LlmAgentProviderService agents, string conn
         public int Snapshots { get; set; }
 
         public int ToolOutputs { get; set; }
+
+        public int Compactions { get; set; }
 
         public LlmUsage? Usage { get; set; }
 
