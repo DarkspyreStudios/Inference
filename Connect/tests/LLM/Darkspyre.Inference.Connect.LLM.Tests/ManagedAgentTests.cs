@@ -871,7 +871,7 @@ public sealed class ManagedAgentTests
             Assert.Contains("summary of turn one", resent);
             Assert.DoesNotContain(new string('a', 600), resent);
             // A limit the refusal reported is learned for this connection and model.
-            Assert.Equal(transport == LlmTransport.OpenAiResponses ? 900 : null, recovered.Learned.Limit(recovered.ConnectionId, "test"));
+            Assert.Equal(transport == LlmTransport.OpenAiResponses ? 900 : null, recovered.Learned.Limit(recovered.ConnectionId, Harness.Connection, "test"));
         }
 
         // A second refusal in the same turn ends it with the provider's message and is not sent again.
@@ -902,7 +902,8 @@ public sealed class ManagedAgentTests
                 : new Dictionary<string, LlmCapabilityOverrides>()
         };
         var harness = new Harness { SessionConnection = connection };
-        harness.Learned.ObserveRefusal(harness.ConnectionId, "test", estimated: 0, reportedTokens: null, reportedLimit: 300, knownLimit: 1000);
+        await harness.Learned.ObserveRefusalAsync(harness.ConnectionId, "test", estimated: 0, reportedTokens: null, reportedLimit: 300,
+            knownLimit: 1000, CancellationToken.None);
         harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "answer", Status = LlmCompletionStatus.Completed });
         await using var session = harness.Create();
 

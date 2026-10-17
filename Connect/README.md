@@ -407,12 +407,14 @@ with what the model's reported counts taught. A reported step under a quarter of
 model's framing: the reported input above the local estimate, which is text the service adds that the request does not
 show, such as a hidden system prompt. A local count above the report teaches no framing. A step at a quarter of the
 window or more teaches the rate, taken with the framing removed. The correction is the estimate times the rate, plus
-the framing. A model's first request after the process starts has nothing learned. Every measurement that is not entirely provider-reported then adds
+the framing. The rate and the framing last only for the process, so a model's first request after the process starts
+has neither. A context limit a refusal teaches is saved through the host's `ILlmLearnedLimitStore`, and
+`LlmConnection.LearnedContextLimits` brings it back to later sessions; a limit learned in the process takes its place. Every measurement that is not entirely provider-reported then adds
 300 tokens (`ManagedAgentPolicy.EstimateMargin`) to its estimated part, because a local tokenizer is not the model's
 own and an estimate must err high; a count the provider reported in full gets no margin. The status, the request
 accounting and the compaction measures all carry it. The estimate is asynchronous, so a chat client may ask its model
 service to count text, and a failed count uses the local estimate for that text. The rate and any learned limit are
-kept per connection id and model for the process and never stored, so a limit learned on one service never applies to another connection. At or above the trigger the session compacts toward the target: it cuts each
+kept per connection id and model, so a limit learned on one service never applies to another connection. At or above the trigger the session compacts toward the target: it cuts each
 unprotected tool-result text part and structured content to its first and last 1,000 characters, sending cut structured
 content as text, and replaces binary parts with a notice,
 then keeps the current turn and the newest whole turns that fit in the room under the target that a 3,000-word

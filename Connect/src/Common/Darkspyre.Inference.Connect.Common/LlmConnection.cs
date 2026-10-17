@@ -75,4 +75,11 @@ public sealed record LlmConnection
     /// <summary>Optional capability corrections for individual model ids.</summary>
     public IReadOnlyDictionary<string, LlmCapabilityOverrides> ModelCapabilityOverrides { get; init; } =
         new Dictionary<string, LlmCapabilityOverrides>(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The context limits, in tokens by model id, that too-long refusals taught on this connection and
+    /// <see cref="ILlmLearnedLimitStore"/> saved. A limit learned in this process takes their place.
+    /// </summary>
+    public IReadOnlyDictionary<string, long> LearnedContextLimits { get; init; } =
+        new Dictionary<string, long>(StringComparer.Ordinal);
 }

@@ -670,8 +670,8 @@ internal sealed partial class ClaudeAgentClient
             lock (_sync) { added = turn.PendingInput is { } input ? [input] : []; }
             long estimate = await _history.EstimateAsync(_history.Saved, turn.ModelId, added, turn.Token);
             (long? reportedTokens, long? reportedLimit) = ReadRefusalSizes(detail);
-            _owner.Learned.ObserveRefusal(_connectionId, turn.ModelId, estimate, reportedTokens, reportedLimit,
-                ClaudeModelLimits.Get(turn.ModelId).ContextTokens);
+            await _owner.Learned.ObserveRefusalAsync(_connectionId, turn.ModelId, estimate, reportedTokens, reportedLimit,
+                ClaudeModelLimits.Get(turn.ModelId).ContextTokens, turn.Token);
         }
 
         /// <summary>Sends one summary request in print mode on the conversation's connection and returns its result.</summary>

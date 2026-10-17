@@ -2,10 +2,11 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 /// <summary>
 /// What reported counts and too-long refusals taught about each model on each connection. A local server's limit is
-/// its own setting, so nothing learned on one connection applies to another. Nothing is stored, so a model's first
-/// request after the process starts has nothing learned.
+/// its own setting, so nothing learned on one connection applies to another. A learned context limit is saved through
+/// the host's <see cref="ILlmLearnedLimitStore"/> and comes back on the connection; the rate and the framing last only
+/// for the process, so a model's first request after the process starts has no rate or framing.
 /// </summary>
-internal sealed class LearnedModelContext
+internal sealed class LearnedModelContext(ILlmLearnedLimitStore? store = null)
 {
     // Below a quarter of the usable window, provider framing (CLI system prompt, tool schemas) distorts the rate; at 25%
     // of a 200K window a 5K framing moves it by about 11%, toward compacting early.
@@ -31,13 +32,18 @@ internal sealed class LearnedModelContext
         }
     }
 
-    /// <summary>A too-long refusal. Reported values come from the refusal text when present.</summary>
-    internal void ObserveRefusal(string connectionId, string modelId, long estimated, long? reportedTokens,
-        long? reportedLimit, long? knownLimit)
+    /// <summary>
+    /// A too-long refusal. Reported values come from the refusal text when present. A limit it teaches is saved through
+    /// the store before this returns.
+    /// </summary>
+    internal async Task ObserveRefusalAsync(string connectionId, string modelId, long estimated, long? reportedTokens,
+        long? reportedLimit, long? knownLimit, CancellationToken cancellationToken)
     {
+        long? learned;
         lock (_sync)
         {
             Facts facts = For(connectionId, modelId);
+            long? before = facts.Limit;
             if (estimated > 0)
             {
                 if (reportedTokens is > 0)
@@ -54,7 +60,10 @@ internal sealed class LearnedModelContext
             if (reportedLimit is > 0) facts.Limit = reportedLimit;
             // With no limit at all, the window is below the refused request.
             else if (knownLimit is null && estimated > 0) facts.Limit = Correct(facts, estimated);
+            learned = facts.Limit != before ? facts.Limit : null;
         }
+        if (learned is long saved && store is not null)
+            await store.SaveContextLimitAsync(connectionId, modelId, saved, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -67,10 +76,14 @@ internal sealed class LearnedModelContext
         lock (_sync) { return _facts.TryGetValue((connectionId, modelId), out Facts? facts) ? Correct(facts, estimated) : estimated; }
     }
 
-    /// <summary>The limit a refusal taught, or null.</summary>
-    internal long? Limit(string connectionId, string modelId)
+    /// <summary>The limit a refusal taught in this process, else the one the connection carries as saved, or null.</summary>
+    internal long? Limit(string connectionId, LlmConnection connection, string modelId)
     {
-        lock (_sync) { return _facts.TryGetValue((connectionId, modelId), out Facts? facts) ? facts.Limit : null; }
+        lock (_sync)
+        {
+            if (_facts.TryGetValue((connectionId, modelId), out Facts? facts) && facts.Limit is long learned) return learned;
+        }
+        return connection.LearnedContextLimits.TryGetValue(modelId, out long saved) && saved > 0 ? saved : null;
     }
 
     /// <summary>Adds the values an "unsupported" refusal named; later requests on the connection and model leave them out.</summary>

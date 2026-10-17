@@ -719,8 +719,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     // sends the same step again; a second refusal in the turn ends it.
                     run.OverflowResent = true;
                     if (estimate is { } refused)
-                        _learned.ObserveRefusal(_connectionId, request.ModelId, refused.Tokens, error.ReportedInputTokens,
-                            error.ReportedContextLimit, Model(request.ModelId)?.MaxContextTokens);
+                        await _learned.ObserveRefusalAsync(_connectionId, request.ModelId, refused.Tokens, error.ReportedInputTokens,
+                            error.ReportedContextLimit, Model(request.ModelId)?.MaxContextTokens, token).ConfigureAwait(false);
                     if (Limits(request.ModelId) is null)
                     {
                         await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, error.Message);
@@ -1224,7 +1224,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     /// <summary>The limit refusals taught, or null when the connection sets a context length for the model: the listed
     /// model already carries that length, and it is the limit (B6).</summary>
     private long? LearnedLimit(string modelId) =>
-        LlmCapabilityOverrideLookup.ContextLength(_connection, modelId) is null ? _learned.Limit(_connectionId, modelId) : null;
+        LlmCapabilityOverrideLookup.ContextLength(_connection, modelId) is null ? _learned.Limit(_connectionId, _connection, modelId) : null;
 
     /// <summary>
     /// Compacts the running turn's context, installs it as the next revision and reports it. Returns false when the turn
