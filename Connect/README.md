@@ -460,7 +460,9 @@ model step as one assistant message with its calls, and one user message with th
 `{turnId}-{n}`. The conversation measures before the turn's input is written, the first turn's opening included, and
 when a model step's last host tool call settles, before its result is written. A measure with a reported step is that
 step's input and output plus the corrected estimate of the entries recorded after it; otherwise it is the corrected
-estimate of the whole history and the input. The window and output limit come from the CLI's model list, else the
+estimate of the whole history and the input. After a native resume the CLI holds its own saved session, which the
+saved history does not measure, so the measure reports no used size until the first step reports. The window and
+output limit come from the CLI's model list, else the
 published table. At or above the trigger, or after the turn's first too-long refusal, the conversation closes the CLI
 session, compacts the saved history with this turn's entries as the current turn, and opens a new CLI session with the
 compacted history as its opening. It then sends the turn's input, or `Continue from where you stopped. The tool

@@ -28,6 +28,8 @@ internal sealed class SavedConversation
     private long _sequence;
     // The local estimate of the first step of the open provider session, observed against its reported input.
     private long? _firstStepEstimate;
+    // The open provider session resumed the provider's own saved session, whose size the saved history does not show.
+    private bool _resumedUnmeasured;
 
     /// <summary>
     /// A saved history of <paramref name="history"/>, measured with the provider chat client's estimator and the
@@ -81,13 +83,15 @@ internal sealed class SavedConversation
     /// <summary>
     /// A provider session opened with <paramref name="opening"/>. With <paramref name="replaceHistory"/>, the opening
     /// becomes the next revision of the saved history. Earlier reports describe another session, so they are dropped.
-    /// Returns the saved history's revision.
+    /// With <paramref name="resumedNatively"/>, the session resumed the provider's own saved session; its size is
+    /// unknown until its first step reports. Returns the saved history's revision.
     /// </summary>
-    internal long Install(LlmAgentContext opening, bool replaceHistory)
+    internal long Install(LlmAgentContext opening, bool replaceHistory, bool resumedNatively)
     {
         lock (_sync)
         {
             if (replaceHistory) _saved = opening with { Revision = checked(_saved.Revision + 1) };
+            _resumedUnmeasured = resumedNatively;
             _reportedTokens = null;
             _recordedAt.Clear();
             _firstStepEstimate = null;
@@ -105,6 +109,7 @@ internal sealed class SavedConversation
         {
             _reportedTokens = (long)inputTokens + (outputTokens ?? 0);
             _reportedMark = _sequence;
+            _resumedUnmeasured = false;
             if (_firstStepEstimate is long estimate && Limits(modelId) is { } limits)
                 _learned.ObserveReport(_connectionId, modelId, estimate, inputTokens, limits.UsableWindow);
             _firstStepEstimate = null;
@@ -122,17 +127,24 @@ internal sealed class SavedConversation
         LlmAgentContext saved;
         long? reported;
         LlmChatMessage[] after;
+        bool unmeasured;
         lock (_sync)
         {
             saved = _saved;
             reported = _reportedTokens;
+            unmeasured = _resumedUnmeasured;
             after = [.. saved.Entries.Where(entry => _recordedAt.TryGetValue(entry.Id, out long at) && at > _reportedMark)
                 .Select(entry => entry.Message)];
         }
         LlmChatMessage[] added = input is null ? [] : [input];
         var resources = await ResolveAsync(saved, added, cancellationToken).ConfigureAwait(false);
-        ContextEstimate estimate;
-        if (reported is long tokens)
+        ContextEstimate? estimate;
+        if (unmeasured && reported is null)
+        {
+            // The provider resumed its own saved session; the saved history is not what it holds, so the size is unknown.
+            estimate = null;
+        }
+        else if (reported is long tokens)
         {
             LlmChatMessage[] tail = [.. after, .. added];
             long local = await LocalAsync(modelId, null, tail, resources, cancellationToken).ConfigureAwait(false);

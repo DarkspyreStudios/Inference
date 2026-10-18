@@ -18,6 +18,8 @@ public sealed partial class ClaudeAgentResourcesTests
         Assert.DoesNotContain(arguments, argument => argument.StartsWith("--session-id", StringComparison.Ordinal));
         Assert.DoesNotContain("--no-session-persistence", arguments);
         Assert.Equal("saved-1", session.ThreadId);
+        // The CLI holds its own saved session, which the saved history does not measure, until a step reports.
+        Assert.Null((await session.GetContextStatusAsync()).UsedContextTokens);
         await CompleteTurnAsync(session, process);
         // The CLI holds the history, so nothing of it is sent again.
         Assert.DoesNotContain("first question", UserText(process), StringComparison.Ordinal);
@@ -36,6 +38,7 @@ public sealed partial class ClaudeAgentResourcesTests
         IReadOnlyList<string> arguments = factory.Invocation.Arguments;
         Assert.Contains("--session-id=saved-1", arguments);
         Assert.DoesNotContain(arguments, argument => argument.StartsWith("--resume", StringComparison.Ordinal));
+        Assert.NotNull((await session.GetContextStatusAsync()).UsedContextTokens);
         await CompleteTurnAsync(session, process);
         Assert.Contains("first question", UserText(process), StringComparison.Ordinal);
         // The CLI saved this session under the thread id, so a later resume opens it natively.

@@ -598,7 +598,7 @@ internal sealed partial class ClaudeAgentClient
                     _generation = generation;
                     _catalog = session.Connection.Catalog;
                 }
-                revision = retired ? _history.Saved.Revision : _history.Install(opening, replaceHistory);
+                revision = retired ? _history.Saved.Revision : _history.Install(opening, replaceHistory, resumedNatively: identity is { Resume: true });
             }
             if (retired)
             {

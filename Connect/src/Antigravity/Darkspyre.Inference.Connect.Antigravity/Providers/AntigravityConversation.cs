@@ -68,7 +68,8 @@ internal sealed class AntigravityConversation : ILlmAgentSession
     internal async Task OpenAsync(CancellationToken cancellationToken)
     {
         if (_resumeConversationId is { } id)
-            _ = await InstallAsync(await _open(new(), id, cancellationToken).ConfigureAwait(false), new(), replaceHistory: false)
+            _ = await InstallAsync(await _open(new(), id, cancellationToken).ConfigureAwait(false), new(), replaceHistory: false,
+                resumedNatively: true)
                 .ConfigureAwait(false);
         else
             await EnsureOpenAsync(cancellationToken).ConfigureAwait(false);
@@ -358,17 +359,19 @@ internal sealed class AntigravityConversation : ILlmAgentSession
     /// conversation opened. Returns the revision.
     /// </summary>
     private async Task<long> OpenNewAsync(LlmAgentContext opening, bool replaceHistory, CancellationToken cancellationToken) =>
-        await InstallAsync(await _open(opening, null, cancellationToken).ConfigureAwait(false), opening, replaceHistory)
+        await InstallAsync(await _open(opening, null, cancellationToken).ConfigureAwait(false), opening, replaceHistory,
+            resumedNatively: false)
             .ConfigureAwait(false);
 
-    private async Task<long> InstallAsync(AntigravityAgentSession session, LlmAgentContext opening, bool replaceHistory)
+    private async Task<long> InstallAsync(AntigravityAgentSession session, LlmAgentContext opening, bool replaceHistory,
+        bool resumedNatively)
     {
         lock (_sync)
         {
             if (_retirement is null)
             {
                 _inner = session;
-                return _history.Install(opening, replaceHistory);
+                return _history.Install(opening, replaceHistory, resumedNatively);
             }
         }
         await session.DisposeAsync().ConfigureAwait(false);
