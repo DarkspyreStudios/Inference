@@ -24,15 +24,15 @@ public sealed class MetadataReadStream : Stream
     /// <summary>The bytes still allowed to be read.</summary>
     public long Remaining { get; private set; }
 
-    /// <inheritdoc />
+    /// <summary>Always true: the stream reads from its source.</summary>
     public override bool CanRead => true;
-    /// <inheritdoc />
+    /// <summary>Always true: the source is seekable, and the read budget still applies after a seek.</summary>
     public override bool CanSeek => true;
-    /// <inheritdoc />
+    /// <summary>Always false: the stream is read-only.</summary>
     public override bool CanWrite => false;
-    /// <inheritdoc />
+    /// <summary>The source's length.</summary>
     public override long Length => _source.Length;
-    /// <inheritdoc />
+    /// <summary>The source's position; setting it seeks the source without changing <see cref="Remaining"/>.</summary>
     public override long Position { get => _source.Position; set => _source.Position = value; }
     /// <inheritdoc />
     public override long Seek(long offset, SeekOrigin origin) => _source.Seek(offset, origin);
