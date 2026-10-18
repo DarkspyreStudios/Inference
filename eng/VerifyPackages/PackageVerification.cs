@@ -149,6 +149,8 @@ internal static class PackageVerification
         foreach (string assembly in assemblies)
             Require(entries.Contains($"lib/net11.0/{assembly}.xml", StringComparer.Ordinal), $"{id}: missing XML documentation for {assembly}");
         Require(entries.Contains("README.md", StringComparer.Ordinal) && entries.Contains("LICENSE.md", StringComparer.Ordinal), $"{id}: missing README or license");
+        if (id == "Darkspyre.Inference.Tensor.Image.Supra")
+            Require(entries.Contains("THIRD-PARTY-NOTICES.md", StringComparer.Ordinal), $"{id}: missing third-party notice for ported TensorSharp code");
         ZipArchiveEntry manifest = archive.GetEntry(id + ".nuspec") ?? throw new InvalidDataException($"{id}: missing manifest");
         using Stream stream = manifest.Open();
         XElement root = XDocument.Load(stream).Root ?? throw new InvalidDataException($"{id}: empty manifest");

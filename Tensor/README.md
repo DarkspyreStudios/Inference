@@ -33,7 +33,8 @@ Library boundaries:
   Supra DiT, Flan-T5-Base encoder, and Stable Diffusion VAE decoder directly through TensorSharp on
   CPU or CUDA. It returns PNG bytes through the shared image result. The current model supports
   256x256 output, deterministic seeds, Euler step counts, and classifier-free guidance; it does not
-  support negative prompts.
+  support negative prompts. The package carries `THIRD-PARTY-NOTICES.md`, the BSD-3 notice for the
+  code ported from upstream TensorSharp.
 - `Darkspyre.Inference.Tensor.Decision.Laya` — Laya-family typed decision inference over a
   host-registered checkpoint exported to ONNX. The ModernBERT encoder and typed decision heads run
   through ONNX Runtime: the Core ML execution provider on macOS, the CPU provider elsewhere. The BPE
