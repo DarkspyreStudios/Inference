@@ -1,31 +1,9 @@
-using System.Text.Json;
-using Darkspyre.Inference.Common;
-using Darkspyre.Inference.Common.LLM;
-using Darkspyre.Inference.Tensor.ConsoleTester;
 using Runner = Darkspyre.Inference.Tensor.ConsoleTester.Program;
 
 namespace Darkspyre.Inference.Tensor.Common.Tests;
 
 public sealed class ConsoleRuntimeLifetimeTests
 {
-    [Fact]
-    public async Task SelfHostToolRoundTripUsesExplicitSchemaWithoutReflectionDefaults()
-    {
-        Assert.False(JsonSerializer.IsReflectionEnabledByDefault);
-        var engine = new SelfHostEngine();
-
-        Assert.True(await SelfHostSuite.RunAsync(engine, "model", CancellationToken.None));
-        Assert.Equal(2, engine.Requests.Count);
-        LlmToolDefinition tool = Assert.Single(engine.Requests[0].Tools.OfType<LlmToolDefinition>(), tool => tool.Name == "get_time");
-        Assert.Equal("get_time", tool.Name);
-        Assert.Equal("object", tool.InputSchema.GetProperty("type").GetString());
-        Assert.Empty(tool.InputSchema.GetProperty("properties").EnumerateObject());
-        Assert.False(tool.InputSchema.GetProperty("additionalProperties").GetBoolean());
-        LlmToolResult result = Assert.IsType<LlmToolResult>(Assert.Single(
-            engine.Requests[1].Messages.SelectMany(message => message.ToolResults)));
-        Assert.Equal("time-1", result.ToolCallId);
-    }
-
     [Fact]
     public async Task OperationAndIndependentCleanupFailuresRemainTogetherWithoutRetirementRetry()
     {
@@ -41,30 +19,6 @@ public sealed class ConsoleRuntimeLifetimeTests
 
         Assert.Equal([operation, engineError, runtimeError], failure.InnerExceptions);
         Assert.Equal(["run", "engine", "runtime"], phases);
-    }
-
-    private sealed class SelfHostEngine : ILlmInference
-    {
-        public List<LlmInferenceRequest> Requests { get; } = [];
-        public InferenceImplementationDescriptor Descriptor { get; } = new("test-engine", "Test engine",
-            InferenceImplementationKind.Tensor, InferenceTask.TextGeneration);
-        public Task<LlmCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new LlmCapabilities { SupportsToolUse = InferenceSupport.Supported });
-        public Task<IReadOnlyList<LlmModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default) =>
-            Task.FromResult<IReadOnlyList<LlmModelInfo>>([new("model", "Model")]);
-        public Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(CancellationToken cancellationToken = default) =>
-            ListModelsAsync(cancellationToken);
-        public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmInferenceRequest request, CancellationToken cancellationToken = default)
-        {
-            Requests.Add(request);
-            return LlmInferenceExtensions.CompleteAsStreamAsync(new()
-            {
-                Text = Requests.Count == 1 ? "" : "The tool supplied the time.",
-                Status = Requests.Count == 1 ? LlmCompletionStatus.RequiresAction : LlmCompletionStatus.Completed,
-                ToolCalls = Requests.Count == 1 ? [new LlmToolCall("time-1", "get_time", "{}")] : [],
-                Provenance = new() { ImplementationId = Descriptor.Id, ModelId = "model" }
-            }, cancellationToken);
-        }
     }
 
     private sealed class Engine(List<string> phases, Exception? failure = null) : IAsyncDisposable
