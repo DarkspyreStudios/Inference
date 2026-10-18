@@ -408,8 +408,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         if (terminal.IsError)
         {
             throw new LlmProviderException(
-                "Claude CLI reported a provider error. Run claude in a terminal to verify sign-in and model access."
-                    + terminal.ErrorDetail,
+                "Claude CLI reported a provider error." + terminal.ErrorDetail,
                 Transport,
                 providerCode: "claude_cli_error")
             {
@@ -546,8 +545,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 && error.ValueKind == JsonValueKind.True)
             {
                 throw new LlmProviderException(
-                    "Claude CLI reported an account-usage error. Run claude in a terminal to verify sign-in."
-                        + ClaudeCliConfiguration.ErrorDetail(root, credential),
+                    "Claude CLI reported an account-usage error." + ClaudeCliConfiguration.ErrorDetail(root, credential),
                     Transport,
                     providerCode: "claude_cli_usage_error");
             }
@@ -976,13 +974,10 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 detail = " CLI exit output could not be read as a result envelope.";
             }
         }
-        string combined = $"{result.StandardError}\n{result.StandardOutput}";
-        bool authenticationFailure = combined.Contains("auth", StringComparison.OrdinalIgnoreCase)
-            || combined.Contains("login", StringComparison.OrdinalIgnoreCase)
-            || combined.Contains("credential", StringComparison.OrdinalIgnoreCase);
-        string guidance = authenticationFailure
-            ? " Run claude in a terminal and complete Claude sign-in."
-            : string.Empty;
+        // The CLI's own error output is the failure's context: it is shown, never interpreted.
+        if (!string.IsNullOrWhiteSpace(result.StandardError))
+            detail += " " + SecretRedactor.Sanitize("CLI error output: " + result.StandardError, credential)
+                .ReplaceLineEndings(" ").Trim();
         string inputFailure = result.StandardInputError is null
             ? string.Empty
             : $" {SecretRedactor.Sanitize(result.StandardInputError, credential)}";
@@ -990,7 +985,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             ? $"claude_cli_exit_{result.ExitCode}"
             : "claude_cli_input_closed";
         return new LlmProviderException(
-            $"Claude CLI exited with code {result.ExitCode}.{inputFailure}{guidance}"
+            $"Claude CLI exited with code {result.ExitCode}.{inputFailure}"
                 + detail,
             LlmTransport.AnthropicClaudeCli,
             providerCode: providerCode)

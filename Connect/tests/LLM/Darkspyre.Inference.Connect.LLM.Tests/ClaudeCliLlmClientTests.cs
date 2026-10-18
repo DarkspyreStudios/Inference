@@ -207,6 +207,34 @@ public sealed class ClaudeCliLlmClientTests
         Assert.Single(runner.Invocations);
     }
 
+    [Fact]
+    public async Task FailedExitShowsTheCliErrorWithoutGuessedSignInGuidance()
+    {
+        string output = new JsonObject
+        {
+            ["type"] = "result",
+            ["subtype"] = "error_during_execution",
+            ["is_error"] = true,
+            ["apiKeySource"] = "oauth credential",
+            ["errors"] = new JsonArray(JsonValue.Create("You've hit your usage limit"))
+        }.ToJsonString();
+        var runner = new RecordingRunner(new(1, output, "Request rejected (429) for auth catalog-secret"));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        LlmConnection connection = CliConnection() with
+        {
+            Credential = new LlmCredential { OAuth = new() { AccessToken = "catalog-secret" } }.Serialize()
+        };
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => ReadAllAsync(
+            client.StreamAsync(connection, new() { ModelId = "claude-test", Messages = [new("user", "test")] })));
+
+        Assert.StartsWith("Claude CLI exited with code 1. CLI detail: You've hit your usage limit", failure.Message, StringComparison.Ordinal);
+        Assert.Contains("CLI error output: Request rejected (429)", failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("sign-in", failure.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("catalog-secret", failure.ToString(), StringComparison.Ordinal);
+    }
+
     [Theory]
     [InlineData(false, true)]
     [InlineData(true, true)]
