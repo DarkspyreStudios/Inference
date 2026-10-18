@@ -76,6 +76,19 @@ internal sealed class LearnedModelContext(ILlmLearnedLimitStore? store = null)
         lock (_sync) { return _facts.TryGetValue((connectionId, modelId), out Facts? facts) ? Correct(facts, estimated) : estimated; }
     }
 
+    /// <summary>
+    /// A text's estimate times the learned rate, without the framing: the size the text adds to a request. The framing
+    /// is the provider's own text a whole request carries once, so a text that is part of a request does not carry it.
+    /// </summary>
+    internal long CorrectText(string connectionId, string modelId, long estimated)
+    {
+        lock (_sync)
+        {
+            return _facts.TryGetValue((connectionId, modelId), out Facts? facts)
+                ? checked((long)Math.Ceiling(estimated * Rate(facts))) : estimated;
+        }
+    }
+
     /// <summary>The limit a refusal taught in this process, else the one the connection carries as saved, or null.</summary>
     internal long? Limit(string connectionId, LlmConnection connection, string modelId)
     {

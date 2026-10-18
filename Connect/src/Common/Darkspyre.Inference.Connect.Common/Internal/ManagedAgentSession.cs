@@ -1430,8 +1430,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     {
         string modelId;
         lock (_sync) { modelId = _run?.Turn.ModelId ?? _options.ModelId; }
-        return Corrected(await EstimateAsync(new LlmChatRequest { ModelId = modelId, Messages = [new("user", text)] },
-            ResourceSizes.None, token).ConfigureAwait(false), modelId)?.Tokens;
+        // A text is part of a request, so it carries the rate but not the framing the whole request carries once.
+        return await EstimateAsync(new LlmChatRequest { ModelId = modelId, Messages = [new("user", text)] },
+            ResourceSizes.None, token).ConfigureAwait(false) is { } estimate
+            ? estimate.IncludesProviderReport ? estimate.Tokens : _learned.CorrectText(_connectionId, modelId, estimate.Tokens)
+            : null;
     }
 
     private static void AddUsage(LiveRun run, LlmUsage? usage)

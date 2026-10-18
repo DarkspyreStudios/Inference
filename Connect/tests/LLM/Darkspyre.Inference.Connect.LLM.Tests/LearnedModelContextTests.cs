@@ -52,6 +52,18 @@ public sealed class LearnedModelContextTests
         Assert.Equal(5_000, learned.Correct("grok", "grok-4.5", 5_000));
     }
 
+    /// <summary>A text inside a request carries the rate but not the framing, which a whole request carries once.</summary>
+    [Fact]
+    public void TextEstimatesLeaveOutTheFraming()
+    {
+        var learned = new LearnedModelContext();
+        learned.ObserveReport("claude", "opus", estimated: 40, reported: 30_040, usableWindow: 872_000);
+        learned.ObserveReport("claude", "opus", estimated: 300_000, reported: 360_000, usableWindow: 872_000);
+
+        Assert.Equal(30_000, learned.Correct("claude", "opus", 1_000) - learned.CorrectText("claude", "opus", 1_000));
+        Assert.Equal(1_100, learned.CorrectText("claude", "opus", 1_000));
+    }
+
     [Fact]
     public async Task LimitBelongsToTheConnection()
     {

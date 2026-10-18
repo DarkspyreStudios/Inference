@@ -182,7 +182,7 @@ internal sealed class SavedConversation
 
     /// <summary>The corrected size of a text sent as one user message.</summary>
     internal async ValueTask<long?> EstimateTextAsync(string modelId, string text, CancellationToken cancellationToken) =>
-        Correct(modelId, await LocalAsync(modelId, null, [new("user", text)], ResourceSizes.None, cancellationToken)
+        _learned.CorrectText(_connectionId, modelId, await LocalAsync(modelId, null, [new("user", text)], ResourceSizes.None, cancellationToken)
             .ConfigureAwait(false));
 
     /// <summary>The compaction limits of a model under the one limit rule; null when no window is known.</summary>
