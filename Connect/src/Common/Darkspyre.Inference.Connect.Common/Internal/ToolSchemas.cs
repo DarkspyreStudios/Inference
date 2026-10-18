@@ -6,11 +6,43 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// <summary>
 /// The tool schema a provider receives and the arguments the evaluator and handler see. Provider tool arguments are an
 /// object, so a schema whose root is not an object is sent wrapped in an object with one required member, <c>value</c>,
-/// and that member is unwrapped from the model's arguments.
+/// and that member is unwrapped from the model's arguments. A host tool's schema is sent without
+/// <c>additionalProperties</c>; arguments are still evaluated against the schema the host gave.
 /// </summary>
 internal static class ToolSchemas
 {
-    /// <summary>The schema sent to the provider: the tool's own schema when its root is an object, otherwise the wrapper.</summary>
+    // The keywords whose value is one schema, or an array of schemas, besides the name-keyed ones.
+    private static readonly string[] SubschemaKeywords = ["items", "prefixItems", "oneOf", "anyOf", "allOf", "not", "if", "then",
+        "else", "contains", "propertyNames", "unevaluatedItems", "unevaluatedProperties"];
+
+    // The keywords whose value is an object of schemas keyed by a name, which is never itself a keyword.
+    private static readonly string[] NamedSubschemaKeywords = ["properties", "patternProperties", "dependentSchemas", "$defs", "definitions"];
+
+    /// <summary>
+    /// The schema a host tool definition is sent to a model with: <see cref="Wire"/>, without any
+    /// <c>additionalProperties</c> keyword at any depth. A property named <c>additionalProperties</c> stays.
+    /// </summary>
+    internal static JsonElement Sent(JsonElement schema)
+    {
+        JsonNode? copy = JsonNode.Parse(Wire(schema).GetRawText());
+        WithoutAdditionalProperties(copy);
+        return JsonSerializer.SerializeToElement(copy);
+    }
+
+    private static void WithoutAdditionalProperties(JsonNode? node)
+    {
+        if (node is not JsonObject schema) return;
+        schema.Remove("additionalProperties");
+        foreach (string keyword in SubschemaKeywords)
+        {
+            if (schema[keyword] is JsonArray branches) foreach (JsonNode? branch in branches) WithoutAdditionalProperties(branch);
+            else WithoutAdditionalProperties(schema[keyword]);
+        }
+        foreach (string keyword in NamedSubschemaKeywords)
+            if (schema[keyword] is JsonObject named) foreach ((string _, JsonNode? value) in named) WithoutAdditionalProperties(value);
+    }
+
+    /// <summary>The tool's own schema when its root is an object, otherwise the wrapper; arguments are evaluated against it.</summary>
     internal static JsonElement Wire(JsonElement schema) => IsObject(schema) ? schema
         : JsonElement.Parse(new JsonObject
         {

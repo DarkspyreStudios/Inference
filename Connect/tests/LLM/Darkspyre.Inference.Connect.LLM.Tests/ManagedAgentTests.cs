@@ -702,6 +702,37 @@ public sealed class ManagedAgentTests
     }
 
     [Fact]
+    public async Task ASentDefinitionHasNoAdditionalPropertiesAndArgumentsAreCheckedAgainstTheDeclaredSchema()
+    {
+        var harness = new Harness();
+        harness.Results.Enqueue(Calls(new LlmToolCall("bad", "nested", """{"filter":{"city":3}}""")));
+        harness.Results.Enqueue(Done());
+        int toolsRun = 0;
+        await using var session = harness.Create(Options() with
+        {
+            Tools = [new LlmAgentToolDefinition
+            {
+                Name = "nested",
+                InputSchema = JsonElement.Parse("""
+                    {"type":"object","additionalProperties":false,"properties":{"filter":{"type":"object",
+                     "additionalProperties":false,"properties":{"city":{"type":"string"}}}}}
+                    """)
+            }],
+            ToolHandler = (_, _) => { toolsRun++; return Task.FromResult(LlmToolOutput.FromText("unexpected")); }
+        });
+
+        await Read(session.RunTurnAsync(Turn("hello")));
+
+        string sent = Assert.IsType<LlmToolDefinition>(Assert.Single(harness.Requests[0].Tools)).InputSchema.GetRawText();
+        Assert.DoesNotContain("additionalProperties", sent, StringComparison.Ordinal);
+        Assert.Contains("\"city\"", sent, StringComparison.Ordinal);
+        LlmToolResult rejected = Assert.IsType<LlmToolResult>(Assert.Single(harness.Requests[1].Messages.SelectMany(message => message.ToolResults)));
+        Assert.StartsWith("Tool 'nested' arguments were rejected:\n",
+            Assert.IsType<LlmToolOutputText>(Assert.Single(rejected.Output.Parts)).Text, StringComparison.Ordinal);
+        Assert.Equal(0, toolsRun);
+    }
+
+    [Fact]
     public async Task ReturnRequestsEndsTurnAtSettledBoundary()
     {
         var harness = new Harness();

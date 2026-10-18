@@ -142,8 +142,12 @@ name that matches
 `^[a-zA-Z0-9_-]{1,64}$` unchanged and any other name as its alias: `t_` followed by the first 40 lowercase hex
 characters of SHA-256 over the UTF-8 name. The alias applies to the tool list, a Specific tool choice and the calls in
 history, and returned calls carry the logical name again. Continuation state that stored a call under its alias still
-matches the logical call. A tool goes out as `{"type":"function","name","description","parameters","strict":false}`
-with its schema unchanged.
+matches the logical call. A tool goes out as `{"type":"function","name","description","parameters","strict":false}`.
+
+An agent session's tool schema goes to the model without any `additionalProperties` keyword, at any depth
+(`ToolSchemas.Sent`): in managed-session requests, in the MCP tool list of the Claude CLI and of Antigravity's host
+tools, and through the MCP tool bridge. Nothing else in the schema changes. The arguments are still checked against
+the schema the caller gave, so the change alters no check.
 
 Before a handler runs, the arguments are checked against the tool's schema without downloading anything. Members the
 schema does not declare are ignored, and the handler receives the arguments as the model sent them. Arguments that

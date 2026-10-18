@@ -1156,7 +1156,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 {
                     Name = function.Name,
                     Description = function.Description,
-                    InputSchema = ToolSchemas.Wire(function.InputSchema)
+                    InputSchema = ToolSchemas.Sent(function.InputSchema)
                 },
                 LlmAgentShellTool shell => shell.Tool,
                 _ => throw new NotSupportedException("Unknown agent tool definition.")

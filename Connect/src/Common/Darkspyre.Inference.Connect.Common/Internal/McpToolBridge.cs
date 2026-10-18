@@ -58,12 +58,12 @@ internal sealed class McpToolBridge(
     /// <summary>The session's definition of <paramref name="name"/>, or null for a tool it does not offer.</summary>
     public LlmAgentToolDefinition? Find(string name) => _byName.GetValueOrDefault(name);
 
-    /// <summary>The tool's MCP tools/list entry: native name, description and wire input schema.</summary>
+    /// <summary>The tool's MCP tools/list entry: native name, description and the input schema as sent.</summary>
     public static JsonObject ToolEntry(LlmAgentToolDefinition tool, LlmToolNames names) => new()
     {
         ["name"] = names.Native(tool.Name),
         ["description"] = tool.Description ?? string.Empty,
-        ["inputSchema"] = JsonNode.Parse(ToolSchemas.Wire(tool.InputSchema).GetRawText())
+        ["inputSchema"] = JsonNode.Parse(ToolSchemas.Sent(tool.InputSchema).GetRawText())
     };
 
     /// <summary>The MCP tools/list result for the session's tools.</summary>

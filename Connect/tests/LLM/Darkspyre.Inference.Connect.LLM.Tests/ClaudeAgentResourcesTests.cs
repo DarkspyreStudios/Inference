@@ -533,6 +533,12 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
             }],
             ToolHandler = (call, _) => { lock (received) received.Add(call.Arguments); return Task.FromResult(LlmToolOutput.FromText("counted")); }
         });
+        // The MCP tool list carries the schema without additionalProperties; the bridge checks the declared one.
+        JsonElement listed = process.Requests().Single(request => request.GetProperty("subtype").GetString() == "initialize")
+            .GetProperty("sdkMcpServerManifests").GetProperty("darkspyre-inference-connect").GetProperty("toolsListResult").GetProperty("tools");
+        JsonElement schema = listed.EnumerateArray().Single(tool => tool.GetProperty("name").GetString() == "count").GetProperty("inputSchema");
+        Assert.False(schema.TryGetProperty("additionalProperties", out _));
+        Assert.True(schema.GetProperty("properties").TryGetProperty("n", out _));
 
         process.Push(ToolUse("tu1", "count"));
         process.Push(ToolCall("c1", 1, "count", new { n = "many" }));
