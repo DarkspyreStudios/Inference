@@ -138,6 +138,9 @@ public sealed class TensorModelPackManager : ITensorModelPackManager, IDisposabl
         _sourceHttp = new(_httpClient, sourceAccess);
     }
 
+    /// <summary>The local directory that holds this manager's installed packs.</summary>
+    internal TensorPackDirectory Directory => _directory;
+
     /// <inheritdoc />
     public Task<IReadOnlyList<TensorModelPackDefinition>> GetDefinitionsAsync(CancellationToken cancellationToken = default)
     {

@@ -8,8 +8,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Darkspyre.TensorSharp.Backends.Cuda" GeneratePathProperty="true" />
-    <PackageReference Include="Darkspyre.TensorSharp.Models" />
+    <PackageReference Include="TensorSharp.Backends.Cuda" GeneratePathProperty="true" />
+    <PackageReference Include="TensorSharp.Models" />
     <PackageReference Include="Darkspyre.ML.Tokenizers" />
   </ItemGroup>
 
@@ -18,7 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="$(PkgDarkspyre_TensorSharp_Backends_Cuda)/contentFiles/any/net10.0/native/ptx/*.ptx">
+    <Content Include="$(PkgTensorSharp_Backends_Cuda)/contentFiles/any/net10.0/native/ptx/*.ptx">
       <Link>cuda_kernels/%(Filename)%(Extension)</Link>
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>

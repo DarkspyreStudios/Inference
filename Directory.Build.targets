@@ -5,9 +5,8 @@
   <PropertyGroup>
     <UsedAvaloniaProducts />
   </PropertyGroup>
-  <!-- Source roots come from sibling worktrees in Directory.Build.props.
+  <!-- Source mode builds SecureStore from its sibling worktree.
        Published dependencies require -p:DarkspyreDependencyMode=Packages. -->
-  <Import Project="$(TensorSharpSourceRoot)/eng/SourceReferences.targets" Condition="'$(TensorSharpSourceRoot)' != ''" />
   <!-- Source builds use project references; package consumers use the exact synchronized Common NuGet. -->
   <Target Name="PinInferencePackageDependencies" AfterTargets="_GetProjectReferenceVersions"
           Condition="'$(IsPackable)' == 'true'">
@@ -18,15 +17,10 @@
       </_ProjectReferencesWithVersions>
     </ItemGroup>
   </Target>
-  <Import Project="$(MSBuildThisFileDirectory)../SecureStore/eng/SourceReferences.targets" Condition="'$(TensorSharpSourceRoot)' != ''" />
-  <Import Project="$(MSBuildThisFileDirectory)../Persist/eng/SourceReferences.targets" Condition="'$(TensorSharpSourceRoot)' != ''" />
+  <Import Project="$(MSBuildThisFileDirectory)../SecureStore/eng/SourceReferences.targets" Condition="'$(DarkspyreDependencyMode)' == 'Source'" />
   <Target Name="ValidateDependencyMode" BeforeTargets="CollectPackageReferences;PrepareForBuild">
-    <Error Condition="'$(DarkspyreDependencyMode)' == 'Source' and '$(TensorSharpSourceRoot)' == ''"
-           Text="Source mode requires the sibling TensorSharp worktree. Do not clear TensorSharpSourceRoot." />
     <Error Condition="'$(DarkspyreDependencyMode)' != 'Source' and '$(DarkspyreDependencyMode)' != 'Packages'"
            Text="DarkspyreDependencyMode must be Source (workspace development) or Packages (release publishing/deployment)." />
-    <Error Condition="'$(DarkspyreDependencyMode)' == 'Packages' and '$(TensorSharpSourceRoot)' != ''"
-           Text="Package mode cannot use source-root overrides. Remove source-root properties from the release command." />
   </Target>
   <!-- Whisper's imported targets mark native output files Pack=true. They belong to its public
        runtime NuGet, not this product archive. Preserve build output copying and the dependency. -->

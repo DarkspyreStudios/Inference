@@ -211,7 +211,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
     // The selected model's install status card: the state of its listed entry and the actions that change it.
     private SetupInstallStatus InstallStatus(TensorModelPackDefinition selection)
     {
-        TensorListedModel listed = SelectedListing() ?? new(selection, SetupInstallState.NotDownloaded, null);
+        TensorListedModel listed = SelectedListing() ?? new(selection, SetupInstallState.NotDownloaded, null, null);
         long size = selection.Artifacts.Sum(artifact => artifact.Length);
         bool valid = ValidateDraft().IsValid;
         SetupActionDescriptor[] actions = listed.State switch
@@ -227,6 +227,10 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
                     SetupSideEffect.Network | SetupSideEffect.Download, IsEnabled: valid),
                 new("remove", "Delete download", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles, IsEnabled: true)
             ],
+            SetupInstallState.NotSupported =>
+            [
+                new("remove", "Delete download", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles, IsEnabled: true)
+            ],
             _ =>
             [
                 new("remove", "Delete download", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles,
@@ -235,7 +239,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
             ]
         };
         return new(listed.State, selection.Key.ModelId, Listing.Store, selection.Artifacts.Count, size, selection.License,
-            listed.MissingFile, null, actions);
+            listed.MissingFile, listed.UnsupportedReason, actions);
     }
 
     // The selected model's listed entry, offered or saved; null when the selection is not in the listing.

@@ -1,7 +1,6 @@
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Ggml;
-using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
@@ -16,9 +15,9 @@ public sealed class QwenEngineProvider(GgmlRuntimeOwner? runtimeOwner = null) : 
     public IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; } = [];
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<TensorModelPackDefinition>> GetInstalledModelsAsync(IPersist modelStore,
+    public Task<TensorInstalledReport> GetInstalledModelsAsync(TensorModelPackManager packs,
         CancellationToken cancellationToken = default) =>
-        TensorInstalledPacks.ReportAsync(modelStore, Definition.ModelStoreKey, BuiltInModels, Accepts,
+        TensorInstalledPacks.ReportAsync(packs, BuiltInModels, Accepts,
             new QwenModelResolver(runtimeOwner: _runtimeOwner), cancellationToken);
 
     private static bool Accepts(TensorModelPackDefinition model)

@@ -1,7 +1,6 @@
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
-using Darkspyre.Persist;
 using Microsoft.ML.OnnxRuntime;
 
 namespace Darkspyre.Inference.Tensor.Embedding.Gemma;
@@ -37,9 +36,9 @@ public sealed class GemmaEmbeddingEngineProvider : ITensorEngineProvider
     public IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; } = [GemmaEmbeddingModels.EmbeddingGemma2];
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<TensorModelPackDefinition>> GetInstalledModelsAsync(IPersist modelStore,
+    public Task<TensorInstalledReport> GetInstalledModelsAsync(TensorModelPackManager packs,
         CancellationToken cancellationToken = default) =>
-        TensorInstalledPacks.ReportAsync(modelStore, Definition.ModelStoreKey, BuiltInModels, Accepts, null, cancellationToken);
+        TensorInstalledPacks.ReportAsync(packs, BuiltInModels, Accepts, null, cancellationToken);
 
     private static bool Accepts(TensorModelPackDefinition model)
     {

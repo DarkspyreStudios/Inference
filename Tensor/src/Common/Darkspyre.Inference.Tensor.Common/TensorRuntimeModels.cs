@@ -17,12 +17,13 @@ public sealed record TensorRuntimeNativeFile(string RelativePath, long Size, str
     public string Sha256 { get; init => field = TensorRuntimeValidation.Hash(value); } = TensorRuntimeValidation.Hash(Sha256);
 }
 
-/// <summary>An immutable GGML candidate declaration, not evidence of installation or successful initialization.</summary>
+/// <summary>An immutable GGML or MLX candidate declaration, not evidence of installation or successful initialization.</summary>
 public sealed class TensorRuntimeCandidate
 {
-    /// <summary>Creates a validated candidate; throws when the identity is incomplete, the backend is not GGML, or the file list is empty or repeats a path.</summary>
+    /// <summary>Creates a validated candidate. Throws when the identity is incomplete, the backend is not GGML or MLX, the
+    /// file list is empty or repeats a path, or a preload path is not a listed file other than the entry library.</summary>
     public TensorRuntimeCandidate(TensorNativeCandidate identity, TensorBackendKind backend,
-        IReadOnlyList<TensorRuntimeNativeFile> files)
+        IReadOnlyList<TensorRuntimeNativeFile> files, IReadOnlyList<string> preload)
     {
         ArgumentNullException.ThrowIfNull(identity);
         TensorRuntimeValidation.Backend(backend);
@@ -32,6 +33,7 @@ public sealed class TensorRuntimeCandidate
         ArgumentException.ThrowIfNullOrWhiteSpace(identity.TargetRid);
         TensorSharpBuildIdentity build = TensorRuntimeValidation.Build(identity.Build);
         ArgumentNullException.ThrowIfNull(files);
+        ArgumentNullException.ThrowIfNull(preload);
         if (files.Count == 0)
             throw new ArgumentException("A native candidate requires its complete file closure.", nameof(files));
         var paths = new HashSet<string>(StringComparer.Ordinal);
@@ -44,21 +46,28 @@ public sealed class TensorRuntimeCandidate
             if (!paths.Add(file.RelativePath))
                 throw new ArgumentException("A native file list cannot contain duplicate paths.", nameof(files));
         }
+        string entry = Path.GetFileName(identity.AbsoluteBridgePath);
+        if (preload.Any(path => path is null || !paths.Contains(path) || path == entry))
+            throw new ArgumentException("Every preload path must be a listed file other than the entry library.", nameof(preload));
         Identity = new(identity.Id, identity.AbsoluteBridgePath, identity.Variant, build, identity.TargetRid);
         Backend = backend;
         Files = Array.AsReadOnly(snapshot);
+        Preload = Array.AsReadOnly(preload.ToArray());
     }
 
     // Required generated metadata needs a setter; constructor binding preserves the validated snapshots.
     /// <summary>The candidate's id, bridge library path, variant, build and target RID.</summary>
     [JsonInclude, JsonRequired]
     public TensorNativeCandidate Identity { get; internal init; }
-    /// <summary>The concrete GGML backend the candidate provides.</summary>
+    /// <summary>The concrete GGML or MLX backend the candidate provides.</summary>
     [JsonInclude, JsonRequired]
     public TensorBackendKind Backend { get; internal init; }
     /// <summary>The complete set of native files the candidate needs, with their sizes and hashes.</summary>
     [JsonInclude, JsonRequired]
     public IReadOnlyList<TensorRuntimeNativeFile> Files { get; internal init; }
+    /// <summary>Files loaded by absolute path, in this order, before the entry library.</summary>
+    [JsonInclude, JsonRequired]
+    public IReadOnlyList<string> Preload { get; internal init; }
 }
 
 /// <summary>Null candidates select the standard package policy; an empty list admits no candidates.</summary>
@@ -82,7 +91,7 @@ public sealed class TensorRuntimePlan
                 throw new ArgumentException("Every candidate must match the plan's exact build and RID.", nameof(candidates));
             if (!ids.Add(candidate.Identity.Id))
                 throw new ArgumentException("A runtime plan cannot contain duplicate candidate identities.", nameof(candidates));
-            snapshot[index] = new(candidate.Identity, candidate.Backend, candidate.Files);
+            snapshot[index] = new(candidate.Identity, candidate.Backend, candidate.Files, candidate.Preload);
         }
         Candidates = Array.AsReadOnly(snapshot);
     }
@@ -98,15 +107,15 @@ public sealed class TensorRuntimePlan
     public IReadOnlyList<TensorRuntimeCandidate>? Candidates { get; }
 }
 
-/// <summary>The identity of an actually initialized GGML backend, supplied by the executing runtime.</summary>
+/// <summary>The identity of an actually initialized GGML or MLX backend, supplied by the executing runtime.</summary>
 public sealed record TensorRuntimeBackendIdentity(TensorBackendKind Backend, TensorSharpBuildIdentity Build,
-    string TargetRid, string Variant, string? CandidateId, string NativeSourceCommit)
+    string TargetRid, string Variant, string? CandidateId)
 {
-    /// <summary>The concrete GGML backend that initialized.</summary>
+    /// <summary>The concrete GGML or MLX backend that initialized.</summary>
     [JsonRequired]
     public TensorBackendKind Backend { get; init => field = TensorRuntimeValidation.Backend(value); }
         = TensorRuntimeValidation.Backend(Backend);
-    /// <summary>The TensorSharp build identity the loaded native library reports.</summary>
+    /// <summary>The TensorSharp release the runtime is bound to.</summary>
     [JsonRequired]
     public TensorSharpBuildIdentity Build { get; init => field = TensorRuntimeValidation.Build(value); }
         = TensorRuntimeValidation.Build(Build);
@@ -122,13 +131,9 @@ public sealed record TensorRuntimeBackendIdentity(TensorBackendKind Backend, Ten
     [JsonRequired]
     public string? CandidateId { get; init => field = TensorRuntimeValidation.CandidateId(value); }
         = TensorRuntimeValidation.CandidateId(CandidateId);
-    /// <summary>The source commit the loaded native library was built from.</summary>
-    [JsonRequired]
-    public string NativeSourceCommit { get; init => field = TensorRuntimeValidation.Text(value, nameof(NativeSourceCommit)); }
-        = TensorRuntimeValidation.Text(NativeSourceCommit, nameof(NativeSourceCommit));
 }
 
-/// <summary>The lifecycle state of a generation-owned GGML runtime.</summary>
+/// <summary>The lifecycle state of a process's native runtime.</summary>
 public enum TensorRuntimeState
 {
     /// <summary>No backend initialization has started.</summary>
@@ -137,72 +142,11 @@ public enum TensorRuntimeState
     Initializing = 1,
     /// <summary>A backend is initialized and admits work.</summary>
     Ready = 2,
-    /// <summary>The last initialization found no usable backend and left no native state.</summary>
-    Unavailable = 3,
-    /// <summary>Native state may remain after a failure, so only a fresh process can use the runtime.</summary>
-    RequiresProcessRestart = 4,
-    /// <summary>The runtime is fenced and terminal cleanup is in progress or was refused.</summary>
-    Stopping = 5,
-    /// <summary>Terminal cleanup released the runtime.</summary>
-    Stopped = 6
+    /// <summary>The selection found no usable backend; native state may remain until the process exits.</summary>
+    Unavailable = 3
 }
 
-/// <summary>How a runtime shutdown attempt ended.</summary>
-public enum TensorRuntimeShutdownState
-{
-    /// <summary>The runtime was released.</summary>
-    Completed = 0,
-    /// <summary>The runtime had already stopped.</summary>
-    AlreadyStopped = 1,
-    /// <summary>Admitted work or active native resources prevented shutdown.</summary>
-    Busy = 2,
-    /// <summary>Release could not be proven, so the process must exit to free native state.</summary>
-    FailedRequiresProcessExit = 3
-}
-
-/// <summary>A safe runtime observation. Producers sanitize messages before publishing diagnostics.</summary>
-public sealed record TensorRuntimeDiagnostic(string Code, string Message)
-{
-    /// <summary>A stable machine-readable code for the observation.</summary>
-    [JsonRequired]
-    public string Code { get; init => field = TensorRuntimeValidation.Text(value, nameof(Code)); }
-        = TensorRuntimeValidation.Text(Code, nameof(Code));
-    /// <summary>A sanitized human-readable description of the observation.</summary>
-    [JsonRequired]
-    public string Message { get; init => field = TensorRuntimeValidation.Text(value, nameof(Message)); }
-        = TensorRuntimeValidation.Text(Message, nameof(Message));
-}
-
-/// <summary>An immutable shutdown observation; completion does not assert OS library unloading.</summary>
-public sealed record TensorRuntimeShutdownResult(TensorRuntimeShutdownState State, Guid OperationId,
-    DateTimeOffset ObservedAt, int OutstandingLeases, bool NativeStateMayRemain,
-    IReadOnlyList<TensorRuntimeDiagnostic> Diagnostics)
-{
-    /// <summary>How the shutdown attempt ended.</summary>
-    [JsonRequired]
-    public TensorRuntimeShutdownState State { get; init => field = TensorRuntimeValidation.ShutdownState(value); }
-        = TensorRuntimeValidation.ShutdownState(State);
-    /// <summary>A nonempty identity for this shutdown observation.</summary>
-    [JsonRequired]
-    public Guid OperationId { get; init => field = TensorRuntimeValidation.OperationId(value); }
-        = TensorRuntimeValidation.OperationId(OperationId);
-    /// <summary>When the outcome was observed.</summary>
-    [JsonRequired]
-    public DateTimeOffset ObservedAt { get; init; } = ObservedAt;
-    /// <summary>The number of admitted operations and model leases still held when the outcome was observed.</summary>
-    [JsonRequired]
-    public int OutstandingLeases { get; init => field = TensorRuntimeValidation.OutstandingLeases(value); }
-        = TensorRuntimeValidation.OutstandingLeases(OutstandingLeases);
-    /// <summary>True when native libraries or state may still be held by the process.</summary>
-    [JsonRequired]
-    public bool NativeStateMayRemain { get; init; } = NativeStateMayRemain;
-    /// <summary>Sanitized observations that explain the outcome.</summary>
-    [JsonRequired]
-    public IReadOnlyList<TensorRuntimeDiagnostic> Diagnostics { get; init => field = TensorRuntimeValidation.Diagnostics(value); }
-        = TensorRuntimeValidation.Diagnostics(Diagnostics);
-}
-
-/// <summary>Neutral control and observations for one generation-owned GGML runtime.</summary>
+/// <summary>Neutral control and observations for a process's native runtime.</summary>
 public interface ITensorRuntimeOwner : ITensorBackendProbe, IAsyncDisposable
 {
     /// <summary>The build, target RID and native candidates this runtime is bound to.</summary>
@@ -211,9 +155,6 @@ public interface ITensorRuntimeOwner : ITensorBackendProbe, IAsyncDisposable
     TensorRuntimeState State { get; }
     /// <summary>The identity of the initialized backend, or null when no backend is initialized.</summary>
     TensorRuntimeBackendIdentity? Current { get; }
-
-    /// <summary>Cancels the caller's wait, not shared terminal cleanup. Busy does not assert native release.</summary>
-    Task<TensorRuntimeShutdownResult> ShutdownAsync(CancellationToken cancellationToken = default);
 }
 
 internal static class TensorRuntimeValidation
@@ -222,16 +163,14 @@ internal static class TensorRuntimeValidation
     {
         ArgumentNullException.ThrowIfNull(build);
         ArgumentException.ThrowIfNullOrWhiteSpace(build.Version);
-        ArgumentException.ThrowIfNullOrWhiteSpace(build.NativeAbi);
-        ArgumentException.ThrowIfNullOrWhiteSpace(build.GgmlCommit);
-        return new(build.Version, build.NativeAbi, build.GgmlCommit);
+        return new(build.Version);
     }
 
     internal static TensorBackendKind Backend(TensorBackendKind backend)
     {
         if (backend is not (TensorBackendKind.GgmlCpu or TensorBackendKind.GgmlMetal
-            or TensorBackendKind.GgmlCuda or TensorBackendKind.GgmlVulkan))
-            throw new ArgumentOutOfRangeException(nameof(backend), "A runtime candidate requires a concrete GGML backend.");
+            or TensorBackendKind.GgmlCuda or TensorBackendKind.GgmlVulkan or TensorBackendKind.Mlx))
+            throw new ArgumentOutOfRangeException(nameof(backend), "A runtime candidate requires a concrete GGML or MLX backend.");
         return backend;
     }
 
@@ -265,29 +204,4 @@ internal static class TensorRuntimeValidation
     }
 
     internal static string? CandidateId(string? value) => value is null ? null : Text(value, nameof(CandidateId));
-
-    internal static TensorRuntimeShutdownState ShutdownState(TensorRuntimeShutdownState state) => Enum.IsDefined(state)
-        ? state : throw new ArgumentOutOfRangeException(nameof(state));
-
-    internal static Guid OperationId(Guid operationId) => operationId != Guid.Empty ? operationId
-        : throw new ArgumentException("A shutdown observation requires a nonempty operation identity.", nameof(operationId));
-
-    internal static int OutstandingLeases(int count)
-    {
-        ArgumentOutOfRangeException.ThrowIfNegative(count);
-        return count;
-    }
-
-    internal static IReadOnlyList<TensorRuntimeDiagnostic> Diagnostics(IReadOnlyList<TensorRuntimeDiagnostic> diagnostics)
-    {
-        ArgumentNullException.ThrowIfNull(diagnostics);
-        var snapshot = new TensorRuntimeDiagnostic[diagnostics.Count];
-        for (int index = 0; index < diagnostics.Count; index++)
-        {
-            TensorRuntimeDiagnostic diagnostic = diagnostics[index]
-                ?? throw new ArgumentException("A diagnostic list cannot contain null entries.", nameof(diagnostics));
-            snapshot[index] = new(diagnostic.Code, diagnostic.Message);
-        }
-        return Array.AsReadOnly(snapshot);
-    }
 }

@@ -1,6 +1,5 @@
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
-using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.Common;
 
@@ -71,12 +70,13 @@ public interface ITensorEngineProvider
     IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; }
 
     /// <summary>
-    /// The models this family can load from <paramref name="modelStore"/>, read under its own
-    /// <see cref="TensorEngineDefinition.ModelStoreKey"/>: its built-ins matched by key and artifact hashes, and other packs
-    /// through its own format check, with every file present at its recorded length. Loads no native code.
+    /// The models this family can load from <paramref name="packs"/>, and the installed packs it recognises but no longer
+    /// loads: its built-ins matched by key and artifact hashes, and other packs through its own format check, with every
+    /// file present at its recorded length. Loads no native code.
     /// </summary>
-    Task<IReadOnlyList<TensorModelPackDefinition>> GetInstalledModelsAsync(IPersist modelStore,
-        CancellationToken cancellationToken = default);
+    /// <param name="packs">The family's pack manager, over the folder its <see cref="TensorEngineDefinition.ModelStoreKey"/> names.</param>
+    /// <param name="cancellationToken">Cancels the report.</param>
+    Task<TensorInstalledReport> GetInstalledModelsAsync(TensorModelPackManager packs, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Creates an instance over the host's pack manager. The instance implements the engine's typed

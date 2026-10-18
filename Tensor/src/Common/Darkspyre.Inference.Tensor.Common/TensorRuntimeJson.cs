@@ -22,4 +22,3 @@ internal abstract class TensorRuntimeEnumJsonConverter<T> : JsonConverter<T> whe
 }
 
 internal sealed class TensorRuntimeStateJsonConverter : TensorRuntimeEnumJsonConverter<TensorRuntimeState>;
-internal sealed class TensorRuntimeShutdownStateJsonConverter : TensorRuntimeEnumJsonConverter<TensorRuntimeShutdownState>;

@@ -1,10 +1,8 @@
 namespace Darkspyre.Inference.Tensor.Common;
 
-/// <summary>The managed package version and exact native bridge/upstream identity are distinct.</summary>
-/// <param name="Version">The managed package version.</param>
-/// <param name="NativeAbi">The native bridge ABI identity.</param>
-/// <param name="GgmlCommit">The upstream GGML commit the native bridge was built from.</param>
-public sealed record TensorSharpBuildIdentity(string Version, string NativeAbi, string GgmlCommit);
+/// <summary>The TensorSharp release a runtime plan is bound to.</summary>
+/// <param name="Version">The TensorSharp package version.</param>
+public sealed record TensorSharpBuildIdentity(string Version);
 
 /// <summary>One ordered execution candidate. The executing runtime validates its absolute bridge path.</summary>
 /// <param name="Id">The candidate's identity.</param>

@@ -7,8 +7,11 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Darkspyre.Persist" />
-    <PackageReference Include="Darkspyre.TensorSharp.Runtime" />
+    <PackageReference Include="TensorSharp.Runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyMetadata Include="TensorSharpVersion" Value="$(TensorSharpVersion)" />
   </ItemGroup>
 
   <ItemGroup>

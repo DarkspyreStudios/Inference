@@ -31,12 +31,6 @@ public static class TensorJson
     public static JsonTypeInfo<TensorRuntimeBackendIdentity> TensorRuntimeBackendIdentity => Metadata<TensorRuntimeBackendIdentity>();
     /// <summary>Serialization metadata for <c>TensorRuntimeState</c>.</summary>
     public static JsonTypeInfo<TensorRuntimeState> TensorRuntimeState => Metadata<TensorRuntimeState>();
-    /// <summary>Serialization metadata for <c>TensorRuntimeShutdownState</c>.</summary>
-    public static JsonTypeInfo<TensorRuntimeShutdownState> TensorRuntimeShutdownState => Metadata<TensorRuntimeShutdownState>();
-    /// <summary>Serialization metadata for <c>TensorRuntimeDiagnostic</c>.</summary>
-    public static JsonTypeInfo<TensorRuntimeDiagnostic> TensorRuntimeDiagnostic => Metadata<TensorRuntimeDiagnostic>();
-    /// <summary>Serialization metadata for <c>TensorRuntimeShutdownResult</c>.</summary>
-    public static JsonTypeInfo<TensorRuntimeShutdownResult> TensorRuntimeShutdownResult => Metadata<TensorRuntimeShutdownResult>();
 
     private static JsonTypeInfo<T> Metadata<T>() => CreateOptions().GetTypeInfo<T>();
 
@@ -44,7 +38,6 @@ public static class TensorJson
     {
         var options = new JsonSerializerOptions(TensorJsonContext.Default.Options);
         options.Converters.Add(new TensorRuntimeStateJsonConverter());
-        options.Converters.Add(new TensorRuntimeShutdownStateJsonConverter());
         options.MakeReadOnly();
         return options;
     }
@@ -63,9 +56,6 @@ public static class TensorJson
 [JsonSerializable(typeof(TensorRuntimePlan))]
 [JsonSerializable(typeof(TensorRuntimeBackendIdentity))]
 [JsonSerializable(typeof(TensorRuntimeState))]
-[JsonSerializable(typeof(TensorRuntimeShutdownState))]
-[JsonSerializable(typeof(TensorRuntimeDiagnostic))]
-[JsonSerializable(typeof(TensorRuntimeShutdownResult))]
 [JsonSerializable(typeof(PersistedModelManifest))]
 [JsonSerializable(typeof(TensorManifestFingerprint))]
 internal sealed partial class TensorJsonContext : JsonSerializerContext;

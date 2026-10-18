@@ -1,6 +1,5 @@
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
-using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.STT.Whisper;
 
@@ -17,9 +16,9 @@ public sealed class WhisperEngineProvider : ITensorEngineProvider
     public IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; } = TensorSpeechModels.Whisper;
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<TensorModelPackDefinition>> GetInstalledModelsAsync(IPersist modelStore,
+    public Task<TensorInstalledReport> GetInstalledModelsAsync(TensorModelPackManager packs,
         CancellationToken cancellationToken = default) =>
-        TensorInstalledPacks.ReportAsync(modelStore, Definition.ModelStoreKey, BuiltInModels, Accepts, new WhisperModelResolver(), cancellationToken);
+        TensorInstalledPacks.ReportAsync(packs, BuiltInModels, Accepts, new WhisperModelResolver(), cancellationToken);
 
     private static bool Accepts(TensorModelPackDefinition model)
     {

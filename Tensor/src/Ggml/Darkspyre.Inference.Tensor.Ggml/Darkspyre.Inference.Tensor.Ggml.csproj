@@ -8,7 +8,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\Common\Darkspyre.Inference.Tensor.Common\Darkspyre.Inference.Tensor.Common.csproj" />
-    <PackageReference Include="Darkspyre.TensorSharp.Backends.GGML" />
+    <PackageReference Include="TensorSharp.Backends.GGML" />
+    <PackageReference Include="TensorSharp.Backends.MLX" />
   </ItemGroup>
 
   <ItemGroup>

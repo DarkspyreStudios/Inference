@@ -6,12 +6,15 @@ namespace Darkspyre.Inference.Tensor.Common;
 /// <param name="Definition">The model.</param>
 /// <param name="State">Whether its files are in the store.</param>
 /// <param name="MissingFile">For <see cref="SetupInstallState.FilesMissing"/>, the relative path of the first absent or wrong-length file; otherwise null.</param>
-public sealed record TensorListedModel(TensorModelPackDefinition Definition, SetupInstallState State, string? MissingFile);
+/// <param name="UnsupportedReason">For <see cref="SetupInstallState.NotSupported"/>, why the engine no longer loads the model; otherwise null.</param>
+public sealed record TensorListedModel(TensorModelPackDefinition Definition, SetupInstallState State, string? MissingFile,
+    string? UnsupportedReason);
 
 /// <summary>An engine family's offered models, the edited engine's own model when it is not among them, and the
 /// model store folder they were checked in.</summary>
 /// <param name="Store">The model store folder, as the host's setting names it.</param>
-/// <param name="Models">The offered models: built-ins first in their declared order, then every other reported model by key.</param>
+/// <param name="Models">The offered models: built-ins first in their declared order, then every other reported model by key,
+/// then the installed models the engine no longer supports.</param>
 /// <param name="Saved">The edited engine's saved model when it is not in <paramref name="Models"/>, with state FilesMissing
 /// or NotDownloaded; otherwise null. It is never offered as a choice; the editor shows it only in the status card.</param>
 public sealed record TensorModelListing(string Store, IReadOnlyList<TensorListedModel> Models, TensorListedModel? Saved);

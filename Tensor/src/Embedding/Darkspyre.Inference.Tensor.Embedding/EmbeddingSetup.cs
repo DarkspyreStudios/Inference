@@ -2,7 +2,6 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Ggml;
-using Darkspyre.Persist;
 using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.Embedding;
@@ -107,9 +106,9 @@ public sealed class EmbeddingEngineProvider(GgmlRuntimeOwner runtimeOwner) : ITe
     public IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; } = [];
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<TensorModelPackDefinition>> GetInstalledModelsAsync(IPersist modelStore,
+    public Task<TensorInstalledReport> GetInstalledModelsAsync(TensorModelPackManager packs,
         CancellationToken cancellationToken = default) =>
-        TensorInstalledPacks.ReportAsync(modelStore, Definition.ModelStoreKey, BuiltInModels, Accepts, new EmbeddingModelResolver(), cancellationToken);
+        TensorInstalledPacks.ReportAsync(packs, BuiltInModels, Accepts, new EmbeddingModelResolver(), cancellationToken);
 
     private static bool Accepts(TensorModelPackDefinition model)
     {

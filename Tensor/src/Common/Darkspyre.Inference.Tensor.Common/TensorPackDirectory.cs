@@ -50,6 +50,28 @@ internal sealed class TensorPackDirectory
         return filePath;
     }
 
+    /// <summary>The asset names of every <c>packs/&lt;id&gt;/&lt;revision&gt;/install.json</c> under the root, in ordinal
+    /// order; empty when the root does not exist.</summary>
+    internal IReadOnlyList<string> EnumerateManifestNames()
+    {
+        string packs = Path.Combine(_rootDirectory, "packs");
+        if (!Directory.Exists(packs)) { return []; }
+        var names = new List<string>();
+        foreach (string model in Directory.EnumerateDirectories(packs))
+        {
+            foreach (string revision in Directory.EnumerateDirectories(model))
+            {
+                if (File.Exists(Path.Combine(revision, "install.json")))
+                {
+                    names.Add($"packs/{Path.GetFileName(model)}/{Path.GetFileName(revision)}/install.json");
+                }
+            }
+        }
+
+        names.Sort(StringComparer.Ordinal);
+        return names;
+    }
+
     /// <summary>Opens an asset for asynchronous sequential reading, or returns null when it does not exist.</summary>
     public Task<Stream?> OpenReadAsync(string assetName, CancellationToken cancellationToken = default)
     {
