@@ -89,7 +89,7 @@ Connect keeps its platform handling for macOS, Linux and Windows inside its own 
 - An implementation that needs a provider SDK lives in its own provider assembly.
 - Shipping Connect libraries stay independent of application persistence and credential storage. Host tools use `Darkspyre.SecureStore` for secrets and `Darkspyre.Persistence` for durable non-secret state, and never copy either into this repository.
 - Provider protocol versions are independent of the package version. The direct Codex adapter uses one explicit Codex compatibility version for its `User-Agent`, `version` header and model-catalog `client_version`.
-- Tokenizers come from the `Darkspyre.ML.Tokenizers` fork. Connect keeps Microsoft's `Microsoft.ML.Tokenizers.Data.O200kBase` data package. Do not fork an adjacent Microsoft package unless Darkspyre changes its implementation.
+- Tokenizers come from the `Darkspyre.ML.Tokenizers` fork, published on nuget.org from `DarkspyreStudios/machinelearning` (`darkspyre` branch). Its version is the upstream `Microsoft.ML.Tokenizers` version it is based on plus a fourth Darkspyre revision number, and `Microsoft.ML.Tokenizers` and its data packages stay at that upstream version. Connect keeps Microsoft's `Microsoft.ML.Tokenizers.Data.O200kBase` data package. Do not fork an adjacent Microsoft package unless Darkspyre changes its implementation.
 
 ## Repository layout
 
