@@ -21,7 +21,10 @@ public sealed record LlmAgentCallerServices
     public ILlmAgentShellExecutor? ShellExecutor { get; init; }
     /// <summary>Gives the agent access to the caller's workspace resources.</summary>
     public IInferenceResourceAccess? Resources { get; init; }
-    /// <summary>The Host's full transcript of this conversation; compaction summarizes from it when set.</summary>
+    /// <summary>
+    /// The Host's full transcript of this conversation. Compaction reads it only to summarize the turns that an omitted
+    /// provider compaction state left out of the context.
+    /// </summary>
     public ILlmConversationTranscript? Transcript { get; init; }
     /// <inheritdoc />
     public override string ToString() => "LlmAgentCallerServices { <borrowed> }";

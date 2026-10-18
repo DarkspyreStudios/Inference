@@ -11,7 +11,7 @@ public sealed class ConversationCompactorTests
         TriggerTokens: 7_650, TargetTokens: 3_150);
 
     [Fact]
-    public async Task SummaryReadsTheTranscriptNotTheLastSummary()
+    public async Task SummaryFoldsTheEarlierSummaryAndNewTurnsNotTheTranscript()
     {
         var earlierSummary = new LlmAgentContextEntry("s", ConversationCompactor.SummaryTurnId,
             new("user", "Summary of the earlier conversation:\nEARLIER-SUMMARY"));
@@ -25,20 +25,86 @@ public sealed class ConversationCompactorTests
             NoStage, CancellationToken.None);
 
         string material = string.Join("\n", harness.Requests.Select(request => request.Messages.Single().Content));
-        Assert.Contains("turn one", material, StringComparison.Ordinal);
-        Assert.Contains("turn two", material, StringComparison.Ordinal);
-        Assert.DoesNotContain("EARLIER-SUMMARY", material, StringComparison.Ordinal);
+        Assert.Contains("EARLIER-SUMMARY", material, StringComparison.Ordinal);
+        Assert.Contains("turn three", material, StringComparison.Ordinal);
+        Assert.DoesNotContain("turn one", material, StringComparison.Ordinal);
         Assert.DoesNotContain(result.Context.Entries, entry => entry.Message.Content.Contains("EARLIER-SUMMARY", StringComparison.Ordinal));
         Assert.Equal([ConversationCompactor.SummaryTurnId, "t4", "t4"], result.Context.Entries.Select(entry => entry.TurnId));
+        Assert.Equal(3, result.DroppedMessageCount);
     }
 
     [Fact]
-    public async Task SummaryInputCutsTranscriptToolOutput()
+    public async Task CurrentTurnTooBigKeepsItsInputAndNewestSteps()
+    {
+        // Target 30,000 tokens; a 3,000-word summary takes 4,000, so 26,000 tokens of the 35,000-token turn stay.
+        var limits = new CompactionLimits(Window: 100_000, Reserve: 10_000, UsableWindow: 90_000, TriggerTokens: 76_500,
+            TargetTokens: 30_000);
+        LlmAgentContextEntry[] current = CurrentToolTurn(70);
+        var context = new LlmAgentContext { Entries = [.. Turn("old", "earlier"), .. current] };
+        var harness = new Harness(null);
+
+        CompactionResult result = await harness.Compactor.CompactAsync(context, "model", "now", new HashSet<string>(), limits,
+            NoStage, CancellationToken.None);
+
+        LlmAgentContextEntry[] kept = [.. result.Context.Entries.Where(entry => entry.TurnId == "now")];
+        Assert.Equal("now-user", kept[0].Id);
+        Assert.Equal("now-call19", kept[1].Id); // Steps 19 to 70: 52 results of 500 tokens.
+        Assert.Equal("now-result70", kept[^1].Id);
+        Assert.Equal(105, kept.Length);
+        Assert.Equal(ConversationCompactor.SummaryTurnId, result.Context.Entries[0].TurnId);
+        Assert.InRange(Harness.Measure(result.Context), 0, limits.TargetTokens);
+        string material = string.Join("\n", harness.Requests.Select(request => request.Messages.Single().Content));
+        Assert.Contains("earlier", material, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CurrentTurnCutNeverPassesAProtectedStep()
+    {
+        var limits = new CompactionLimits(Window: 100_000, Reserve: 10_000, UsableWindow: 90_000, TriggerTokens: 76_500,
+            TargetTokens: 30_000);
+        LlmAgentContextEntry[] current = CurrentToolTurn(70);
+        var protectedIds = new HashSet<string> { "now-call10", "now-result10" };
+        var harness = new Harness(null);
+
+        CompactionResult result = await harness.Compactor.CompactAsync(new LlmAgentContext { Entries = current }, "model", "now",
+            protectedIds, limits, NoStage, CancellationToken.None);
+
+        LlmAgentContextEntry[] kept = [.. result.Context.Entries.Where(entry => entry.TurnId == "now")];
+        Assert.Equal(["now-user", "now-call10", "now-result10"], kept.Take(3).Select(entry => entry.Id));
+        Assert.Equal("now-result70", kept[^1].Id);
+    }
+
+    [Fact]
+    public async Task SummaryPartsAreRequestedOneAtATime()
+    {
+        LlmAgentContextEntry[] older = [.. Enumerable.Range(1, 10).SelectMany(index => Turn("t" + index, new string('y', 8_000)))];
+        var context = new LlmAgentContext { Entries = [.. older, .. Turn("now", "continue")] };
+        int inFlight = 0, most = 0, requests = 0;
+        var compactor = new ConversationCompactor(
+            (measured, _) => ValueTask.FromResult(Harness.Measure(measured)),
+            async (request, _) =>
+            {
+                most = Math.Max(most, ++inFlight);
+                await Task.Yield();
+                inFlight--;
+                return new LlmChatResult { Diagnostics = new(200, null, null), Text = "summary " + ++requests, Status = LlmCompletionStatus.Completed, Usage = new(1, 1, 2) };
+            },
+            (text, _) => ValueTask.FromResult<long?>(Harness.Tokens(text)),
+            null);
+
+        await compactor.CompactAsync(context, "model", "now", new HashSet<string>(), Limits, NoStage, CancellationToken.None);
+
+        Assert.True(requests > 1);
+        Assert.Equal(1, most);
+    }
+
+    [Fact]
+    public async Task SummaryInputCutsToolOutput()
     {
         LlmAgentContextEntry[] older = [.. ToolTurn("t1", new string('q', 20_000)), .. Turn("t2", "older " + new string('z', 16_000))];
         LlmAgentContextEntry[] current = Turn("t3", "now");
         var context = new LlmAgentContext { Entries = [.. older, .. current] };
-        var harness = new Harness(new Transcript([.. older, .. current]));
+        var harness = new Harness(null);
 
         await harness.Compactor.CompactAsync(context, "model", "t3", new HashSet<string>(), Limits, NoStage, CancellationToken.None);
 
@@ -115,12 +181,12 @@ public sealed class ConversationCompactorTests
     }
 
     [Fact]
-    public async Task LongTranscriptIsSummarizedInParts()
+    public async Task LongHistoryIsSummarizedInParts()
     {
         LlmAgentContextEntry[] older = [.. Enumerable.Range(1, 10).SelectMany(index => Turn("t" + index, $"turn {index} " + new string('y', 8_000)))];
         LlmAgentContextEntry[] current = Turn("now", "continue");
         var context = new LlmAgentContext { Entries = [.. older, .. current] };
-        var harness = new Harness(new Transcript([.. older, .. current]));
+        var harness = new Harness(null);
 
         CompactionResult result = await harness.Compactor.CompactAsync(context, "model", "now", new HashSet<string>(), Limits,
             NoStage, CancellationToken.None);
@@ -204,6 +270,14 @@ public sealed class ConversationCompactorTests
     [
         new(turnId + "-call", turnId, new("assistant", "") { ToolCalls = [new LlmToolCall(turnId + "-c", "fetch", "{}")] }),
         new(turnId + "-result", turnId, new("user", "") { ToolResults = [new LlmToolResult(turnId + "-c", LlmToolOutput.FromText(output))] })
+    ];
+
+    /// <summary>The current turn "now": its input, then steps 1 to <paramref name="steps"/> of 500 result tokens each.</summary>
+    private static LlmAgentContextEntry[] CurrentToolTurn(int steps) =>
+    [
+        new("now-user", "now", new("user", "go")),
+        .. Enumerable.Range(1, steps).SelectMany(index => ToolTurn("now", new string('v', 2_000))
+            .Select(entry => entry with { Id = entry.Id + index }))
     ];
 
     private static string ResultText(LlmAgentContextEntry entry) =>

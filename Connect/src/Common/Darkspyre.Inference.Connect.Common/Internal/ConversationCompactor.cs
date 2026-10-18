@@ -68,13 +68,14 @@ internal sealed class CompactionFailedException(string message, LlmUsage? usage)
 
 /// <summary>
 /// Compacts one conversation's context for every provider: it shortens unprotected tool output, keeps the current turn
-/// and the newest whole turns that fit, and replaces the rest with a summary built from the transcript, never from an
-/// earlier summary.
+/// and the newest whole turns that fit, or only the current turn's input and newest steps when the turn alone does not
+/// fit, and replaces the earlier summary and everything else with one new summary of them.
 /// </summary>
 /// <param name="measure">The corrected size of the whole request the provider would send with a context.</param>
 /// <param name="sideRequest">Sends one <see cref="SummaryRequest"/> on the conversation's own connection and model.</param>
 /// <param name="estimateText">The corrected size of a text, for splitting parts.</param>
-/// <param name="transcript">The Host's full transcript; null summarizes the live context's real entries.</param>
+/// <param name="transcript">The Host's full transcript, read only to summarize the turns that an omitted provider
+/// compaction state left out; null drops those turns unsummarized.</param>
 internal sealed class ConversationCompactor(
     Func<LlmAgentContext, CancellationToken, ValueTask<long>> measure,
     Func<LlmChatRequest, CancellationToken, Task<LlmChatResult>> sideRequest,
@@ -96,6 +97,9 @@ internal sealed class ConversationCompactor(
     // About 4,000 tokens: long enough for decisions and open work, short enough to write in about a minute
     // (Brandon, 2026-10-10: compaction takes 1 to 3 minutes).
     private const int MaximumSummaryWords = 3000;
+
+    // The longest summary's size in tokens.
+    private const long MaximumSummaryTokens = (long)(MaximumSummaryWords / WordsPerToken);
 
     // About 1,000 tokens for each part's summary.
     private const int MinimumPartWords = 750;
@@ -123,12 +127,45 @@ internal sealed class ConversationCompactor(
         IReadOnlyList<LlmAgentContextEntry> entries = shortened.Entries;
         var current = entries.Where(entry => entry.TurnId == currentTurnId).ToArray();
         long currentMeasure = await Measure(shortened, current, cancellationToken).ConfigureAwait(false);
+        // A current turn that leaves no room under the target for the longest summary keeps only its input and newest
+        // steps, and its older steps join the summary. Otherwise the result would stay above the target, and a turn
+        // above the trigger would compact again at its next step. Under a target too small for that summary, the
+        // summary keeps half the target.
+        long currentRoom = limits.TargetTokens - Math.Min(MaximumSummaryTokens, limits.TargetTokens / 2);
+        (HashSet<string> keptIds, long keptMeasure) = currentMeasure > currentRoom
+            ? await KeepNewestStepsAsync(shortened, current, protectedEntryIds, currentRoom, cancellationToken).ConfigureAwait(false)
+            : await KeepNewestTurnsAsync(shortened, currentTurnId, currentMeasure, limits, cancellationToken).ConfigureAwait(false);
+        LlmAgentContextEntry[] kept = [.. entries.Where(entry => keptIds.Contains(entry.Id))];
+        // The new summary replaces the earlier summary and every entry not kept, so it is built from both.
+        LlmAgentContextEntry[] source = [.. entries.Where(entry => !keptIds.Contains(entry.Id))];
+        if (source.All(entry => entry.TurnId == SummaryTurnId))
+            return await FinishAsync(shortened, current, null, null, shortenedCount, removedImages, limits, cancellationToken)
+                .ConfigureAwait(false);
+
+        await stage("Summarizing earlier messages", cancellationToken).ConfigureAwait(false);
+        int words = (int)Math.Clamp(WordsPerToken * (limits.TargetTokens - keptMeasure), MinimumSummaryWords, MaximumSummaryWords);
+        (string summary, LlmUsage? usage) = await SummarizeAsync(source, modelId, words, limits, cancellationToken)
+            .ConfigureAwait(false);
+        var summaryEntry = new LlmAgentContextEntry(Guid.NewGuid().ToString("N"), SummaryTurnId,
+            new LlmChatMessage("user", SummaryPrefix + summary));
+        LlmAgentContext compacted = shortened with { Entries = [summaryEntry, .. kept] };
+        return await FinishAsync(compacted, current, entries.Count - kept.Length, usage,
+            shortenedCount, removedImages, limits, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The current turn and the newest older whole turns that fit in the room under the target that the longest summary
+    /// leaves, plus the newest part of the next turn from the earliest tool call that still fits, with their measure.
+    /// </summary>
+    private async Task<(HashSet<string> Ids, long Measure)> KeepNewestTurnsAsync(LlmAgentContext shortened,
+        string currentTurnId, long currentMeasure, CompactionLimits limits, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<LlmAgentContextEntry> entries = shortened.Entries;
         var keptTurns = new HashSet<string>(StringComparer.Ordinal) { currentTurnId };
         long keptMeasure = currentMeasure;
-        // Older whole turns, newest first, fill the room under the target that the longest summary leaves. Under a
-        // target too small for that summary, the summary keeps half the room.
+        // Under a target too small for the longest summary, the summary keeps half the room.
         long room = Math.Max(0, limits.TargetTokens - currentMeasure);
-        long olderRoom = room - Math.Min((long)(MaximumSummaryWords / WordsPerToken), room / 2);
+        long olderRoom = room - Math.Min(MaximumSummaryTokens, room / 2);
         string? partialTurn = null;
         foreach (string turnId in entries.Select(entry => entry.TurnId)
             .Where(turnId => turnId != currentTurnId && turnId != SummaryTurnId).Distinct(StringComparer.Ordinal).Reverse())
@@ -150,47 +187,63 @@ internal sealed class ConversationCompactor(
         if (partialTurn is not null)
         {
             LlmAgentContextEntry[] turn = [.. entries.Where(entry => entry.TurnId == partialTurn)];
-            int[] starts = [.. Enumerable.Range(1, Math.Max(0, turn.Length - 1)).Where(index => turn[index].Message.ToolCalls.Count > 0)];
-            // A later start keeps less, so the earliest start that fits is found by bisection.
-            int low = 0, high = starts.Length;
-            long found = keptMeasure;
-            while (low < high)
+            if (await EarliestStartAsync(shortened, whole, turn, Starts(turn),
+                    measured => measured - currentMeasure <= olderRoom, cancellationToken).ConfigureAwait(false) is { } fit)
             {
-                int middle = (low + high) / 2;
-                long candidateMeasure = await Measure(shortened, [.. whole, .. turn[starts[middle]..]], cancellationToken)
-                    .ConfigureAwait(false);
-                if (candidateMeasure - currentMeasure <= olderRoom)
-                {
-                    high = middle;
-                    found = candidateMeasure;
-                }
-                else low = middle + 1;
-            }
-            if (low < starts.Length)
-            {
-                keptIds.UnionWith(turn[starts[low]..].Select(entry => entry.Id));
-                keptMeasure = found;
+                keptIds.UnionWith(turn[fit.Start..].Select(entry => entry.Id));
+                keptMeasure = fit.Measure;
             }
         }
-        LlmAgentContextEntry[] kept = [.. entries.Where(entry => keptIds.Contains(entry.Id))];
-        LlmAgentContextEntry[] carried = transcript is null ? [.. entries.Where(entry => entry.TurnId == SummaryTurnId)] : [];
-        bool nothingNew = !entries.Any(entry => !keptIds.Contains(entry.Id) && entry.TurnId != SummaryTurnId);
+        return (keptIds, keptMeasure);
+    }
 
-        IReadOnlyList<LlmAgentContextEntry> source = nothingNew ? []
-            : await SourceAsync(entries, keptTurns, keptIds, cancellationToken).ConfigureAwait(false);
-        if (source.Count == 0)
-            return await FinishAsync(shortened, current, null, null, shortenedCount, removedImages, limits, cancellationToken)
+    /// <summary>
+    /// The current turn's first entry, its input, and its newest steps from the earliest tool call whose kept part
+    /// measures within <paramref name="room"/>, with their measure. A start never passes the turn's first protected
+    /// entry, so a protected call and its results stay. When no start fits, the latest allowed start keeps the least.
+    /// </summary>
+    private async Task<(HashSet<string> Ids, long Measure)> KeepNewestStepsAsync(LlmAgentContext shortened,
+        LlmAgentContextEntry[] turn, IReadOnlySet<string> protectedEntryIds, long room, CancellationToken cancellationToken)
+    {
+        int firstProtected = Array.FindIndex(turn, entry => protectedEntryIds.Contains(entry.Id));
+        int[] starts = [.. Starts(turn).Where(index => firstProtected < 0 || index <= firstProtected)];
+        if (starts.Length == 0)
+            return (turn.Select(entry => entry.Id).ToHashSet(StringComparer.Ordinal),
+                await Measure(shortened, turn, cancellationToken).ConfigureAwait(false));
+        LlmAgentContextEntry[] input = [turn[0]];
+        (int start, long kept) = await EarliestStartAsync(shortened, input, turn, starts, measured => measured <= room,
+                cancellationToken).ConfigureAwait(false)
+            ?? (starts[^1], await Measure(shortened, [.. input, .. turn[starts[^1]..]], cancellationToken).ConfigureAwait(false));
+        return ([turn[0].Id, .. turn[start..].Select(entry => entry.Id)], kept);
+    }
+
+    /// <summary>The indexes after the first of a turn's entries that hold a tool call: where a kept newest part can start.</summary>
+    private static int[] Starts(LlmAgentContextEntry[] turn) =>
+        [.. Enumerable.Range(1, Math.Max(0, turn.Length - 1)).Where(index => turn[index].Message.ToolCalls.Count > 0)];
+
+    /// <summary>
+    /// The earliest start whose kept part, after <paramref name="before"/>, measures as <paramref name="fits"/> accepts,
+    /// with that measure; null when none fits. A later start keeps less, so the start is found by bisection.
+    /// </summary>
+    private async Task<(int Start, long Measure)?> EarliestStartAsync(LlmAgentContext shortened,
+        LlmAgentContextEntry[] before, LlmAgentContextEntry[] turn, int[] starts, Func<long, bool> fits,
+        CancellationToken cancellationToken)
+    {
+        int low = 0, high = starts.Length;
+        long found = 0;
+        while (low < high)
+        {
+            int middle = (low + high) / 2;
+            long candidateMeasure = await Measure(shortened, [.. before, .. turn[starts[middle]..]], cancellationToken)
                 .ConfigureAwait(false);
-
-        await stage("Summarizing earlier messages", cancellationToken).ConfigureAwait(false);
-        int words = (int)Math.Clamp(WordsPerToken * (limits.TargetTokens - keptMeasure), MinimumSummaryWords, MaximumSummaryWords);
-        (string summary, LlmUsage? usage) = await SummarizeAsync(source, modelId, words, limits, cancellationToken)
-            .ConfigureAwait(false);
-        var summaryEntry = new LlmAgentContextEntry(Guid.NewGuid().ToString("N"), SummaryTurnId,
-            new LlmChatMessage("user", SummaryPrefix + summary));
-        LlmAgentContext compacted = shortened with { Entries = [.. carried, summaryEntry, .. kept] };
-        return await FinishAsync(compacted, current, entries.Count - kept.Length - carried.Length, usage,
-            shortenedCount, removedImages, limits, cancellationToken).ConfigureAwait(false);
+            if (fits(candidateMeasure))
+            {
+                high = middle;
+                found = candidateMeasure;
+            }
+            else low = middle + 1;
+        }
+        return low < starts.Length ? (starts[low], found) : null;
     }
 
     /// <summary>
@@ -207,7 +260,7 @@ internal sealed class ConversationCompactor(
         if (transcript is null) return new(remaining, null, null, 0, 0);
         var keptTurns = remaining.Entries.Select(entry => entry.TurnId).Where(turnId => turnId != SummaryTurnId)
             .ToHashSet(StringComparer.Ordinal);
-        IReadOnlyList<LlmAgentContextEntry> source = await SourceAsync(remaining.Entries, keptTurns, new HashSet<string>(), cancellationToken)
+        IReadOnlyList<LlmAgentContextEntry> source = await SourceAsync(transcript, keptTurns, cancellationToken)
             .ConfigureAwait(false);
         if (source.Count == 0) return new(remaining, null, null, 0, 0);
         LlmAgentContextEntry[] kept = Kept(remaining.Entries, keptTurns);
@@ -257,14 +310,11 @@ internal sealed class ConversationCompactor(
     private static LlmAgentContextEntry[] Kept(IReadOnlyList<LlmAgentContextEntry> entries, HashSet<string> turns) =>
         [.. entries.Where(entry => turns.Contains(entry.TurnId))];
 
-    /// <summary>The entries to summarize: the transcript's turns that are not kept, or the live context's real entries.</summary>
-    private async Task<IReadOnlyList<LlmAgentContextEntry>> SourceAsync(IReadOnlyList<LlmAgentContextEntry> entries,
-        HashSet<string> keptTurns, HashSet<string> keptIds, CancellationToken cancellationToken)
+    /// <summary>The entries to summarize: the transcript's real entries in turns that are not kept.</summary>
+    private static async Task<IReadOnlyList<LlmAgentContextEntry>> SourceAsync(ILlmConversationTranscript transcript,
+        HashSet<string> keptTurns, CancellationToken cancellationToken)
     {
-        bool Summarized(LlmAgentContextEntry entry) =>
-            !keptTurns.Contains(entry.TurnId) && !keptIds.Contains(entry.Id) && entry.TurnId != SummaryTurnId;
-        if (transcript is null)
-            return [.. entries.Where(Summarized)];
+        bool Summarized(LlmAgentContextEntry entry) => !keptTurns.Contains(entry.TurnId) && entry.TurnId != SummaryTurnId;
         var source = new List<LlmAgentContextEntry>();
         string? cursor = null;
         do
@@ -304,45 +354,22 @@ internal sealed class ConversationCompactor(
         return (string.Join("\n\n", summaries.Select(summary => summary.Text)), usage.Total);
     }
 
-    /// <summary>One side request per part, all at once; each part's words are in proportion to its size.</summary>
+    /// <summary>
+    /// One side request per part, one at a time, so a compaction never sends a burst of large requests on one account.
+    /// Each part's words are in proportion to its size. The first failure ends the compaction.
+    /// </summary>
     private async Task<List<(string Text, long Tokens)>> SummarizePartsAsync(List<(string Text, long Tokens)> parts,
         string modelId, int words, UsageSum usage, CancellationToken cancellationToken)
     {
         long total = Math.Max(1, parts.Sum(part => part.Tokens));
-        // The first failure cancels the other requests, so no paid request runs for a compaction that already failed.
-        using var failed = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        Task<LlmChatResult>[] requests = [.. parts.Select(async part =>
+        var summaries = new List<(string Text, long Tokens)>(parts.Count);
+        foreach ((string text, long tokens) in parts)
         {
-            try
-            {
-                return await sideRequest(SummaryRequest.Create(modelId, part.Text,
-                    (int)Math.Max(MinimumPartWords, (double)words * part.Tokens / total)), failed.Token).ConfigureAwait(false);
-            }
-            catch
-            {
-                await failed.CancelAsync().ConfigureAwait(false);
-                throw;
-            }
-        })];
-        LlmChatResult[] results;
-        try
-        {
-            results = await Task.WhenAll(requests).ConfigureAwait(false);
-        }
-        catch when (!cancellationToken.IsCancellationRequested)
-        {
-            // The request that failed is reported, not a sibling the failure cancelled.
-            Exception first = requests.Select(request => request.Exception?.InnerException)
-                .FirstOrDefault(error => error is not null and not OperationCanceledException)
-                ?? requests.First(request => request.IsFaulted || request.IsCanceled).Exception?.InnerException
-                ?? new OperationCanceledException(failed.Token);
-            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(first);
-            throw;
-        }
-        foreach (LlmChatResult result in results) usage.Add(result.Usage);
-        var summaries = new List<(string Text, long Tokens)>(results.Length);
-        foreach (LlmChatResult result in results)
+            LlmChatResult result = await sideRequest(SummaryRequest.Create(modelId, text,
+                (int)Math.Max(MinimumPartWords, (double)words * tokens / total)), cancellationToken).ConfigureAwait(false);
+            usage.Add(result.Usage);
             summaries.Add((result.Text, await EstimateAsync(result.Text, cancellationToken).ConfigureAwait(false)));
+        }
         return summaries;
     }
 
