@@ -1,5 +1,5 @@
+using Darkspyre.Inference.Tensor.Image.Supra.Direct;
 using TensorSharp;
-using TensorSharp.Models.Direct;
 using TensorSharp.Runtime;
 using TsTensor = TensorSharp.Tensor;
 

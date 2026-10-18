@@ -1,11 +1,9 @@
 using System.Diagnostics;
-using System.Reflection;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Image;
 using TensorSharp.Cuda;
-using TensorSharp.Models.Direct;
 using TensorSharp.Models.Media;
 
 namespace Darkspyre.Inference.Tensor.Image.Supra;
@@ -155,7 +153,7 @@ public sealed class SupraImageInference : ITensorImageInference
                 ModelId = definition.Key.ModelId,
                 ModelRevision = definition.Key.Revision,
                 Runtime = "TensorSharp",
-                RuntimeVersion = RuntimeVersion(),
+                RuntimeVersion = TensorSharpRelease.Version,
                 Backend = backend.ToString(),
                 Elapsed = Stopwatch.GetElapsedTime(started)
             }
@@ -410,8 +408,6 @@ public sealed class SupraImageInference : ITensorImageInference
         TensorBackendKind.Auto => TensorBackendKind.Cpu,
         _ => backend
     };
-
-    private static string RuntimeVersion() => TensorSharpRelease.Version;
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed || _lifetime.StopAccepted, this);
 }

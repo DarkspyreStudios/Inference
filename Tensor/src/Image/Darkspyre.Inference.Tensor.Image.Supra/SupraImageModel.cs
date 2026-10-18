@@ -1,7 +1,7 @@
+using Darkspyre.Inference.Tensor.Image.Supra.Direct;
 using TensorSharp;
 using TensorSharp.Cpu;
 using TensorSharp.Cuda;
-using TensorSharp.Models.Direct;
 using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.Image.Supra;
