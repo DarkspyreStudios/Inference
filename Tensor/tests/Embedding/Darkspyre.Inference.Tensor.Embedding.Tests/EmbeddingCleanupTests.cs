@@ -148,9 +148,9 @@ public sealed class EmbeddingCleanupTests : IDisposable
         {
             Key = Key,
             Capability = TensorCapability.Embedding,
-            RuntimeArchitecture = TensorEmbeddingModels.Qwen3Gguf.Name,
+            RuntimeArchitecture = TensorEmbeddingModels.BertGguf.Name,
             License = "Apache-2.0",
-            SupportedBackends = TensorEmbeddingModels.Backends,
+            SupportedBackends = TensorEmbeddingModels.BertGguf.Backends,
             Artifacts = [new() { Role = "model", RelativePath = "model.gguf", Length = bytes.Length,
                 Sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)), Sources = [new(source)] }]
         };
@@ -175,7 +175,7 @@ public sealed class EmbeddingCleanupTests : IDisposable
     private sealed class Model : IEmbeddingModel
     {
         public string ModelName => Key.ModelId;
-        public string Architecture => "qwen3";
+        public string Architecture => "bert";
         public int Dimensions { get; init; } = 1024;
         public int MaxTokens => 8192;
         public int VocabularySize => 10;

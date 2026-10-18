@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Ggml;
-using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.Embedding.Tests;
 
@@ -16,32 +15,37 @@ public sealed class EmbeddingInstalledModelsTests : IDisposable
     }
 
     [Fact]
-    public async Task EmbeddingReportsAQwen3EmbeddingHeaderAndSkipsChatShapedHeaders()
+    public async Task EmbeddingRetiresAQwen3EmbeddingHeaderAndStillReportsABertHeader()
     {
         var provider = new EmbeddingEngineProvider(GgmlRuntimeOwner.GetOrCreate());
+        TensorModelPackDefinition bert = await InstallAsync(provider, "bert.gguf", TensorEmbeddingModels.BertGguf.Name,
+            Header("bert", pooling: 2, "bert"));
         // Qwen3-Embedding-0.6B's header keys, as measured on its published GGUF.
-        TensorModelPackDefinition embedding = await InstallAsync(provider, "embedding.gguf", pooling: 3, dimensions: 1024);
-        await InstallAsync(provider, "chat.gguf", pooling: null, dimensions: 1024);
-        await InstallAsync(provider, "wide.gguf", pooling: 3, dimensions: 2560);
+        TensorModelPackDefinition qwen3 = await InstallAsync(provider, "qwen3-embedding.gguf", "qwen3-embedding-gguf",
+            Header("qwen3", pooling: 3, "gpt2"));
+        // A Qwen3 chat model of the same GGUF architecture names no pooling; it is neither reported nor retired.
+        await InstallAsync(provider, "qwen3-chat.gguf", "qwen3-embedding-gguf", Header("qwen3", pooling: null, "gpt2"));
 
-        IReadOnlyList<TensorModelPackDefinition> reported = await provider.GetInstalledModelsAsync(new OsUserPersist(_root));
+        using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, provider.Definition.ModelStoreKey));
+        TensorInstalledReport report = await provider.GetInstalledModelsAsync(packs);
 
-        Assert.Equal(embedding.Key, Assert.Single(reported).Key);
+        Assert.Equal(bert.Key, Assert.Single(report.Installed).Key);
+        TensorUnsupportedPack retired = Assert.Single(report.Unsupported);
+        Assert.Equal((qwen3.Key, TensorEmbeddingModels.Qwen3EmbeddingRetiredReason), (retired.Definition.Key, retired.Reason));
     }
 
-    private async Task<TensorModelPackDefinition> InstallAsync(EmbeddingEngineProvider provider, string name, uint? pooling, uint dimensions)
+    private async Task<TensorModelPackDefinition> InstallAsync(EmbeddingEngineProvider provider, string name, string architecture, byte[] bytes)
     {
         Directory.CreateDirectory(_root);
-        byte[] bytes = Header(pooling, dimensions);
         string source = Path.Combine(_root, name);
         await File.WriteAllBytesAsync(source, bytes);
         var definition = new TensorModelPackDefinition
         {
             Key = new("imported/" + name, "test"),
             Capability = TensorCapability.Embedding,
-            RuntimeArchitecture = TensorEmbeddingModels.Qwen3Gguf.Name,
+            RuntimeArchitecture = architecture,
             License = "Apache-2.0",
-            SupportedBackends = TensorEmbeddingModels.Backends,
+            SupportedBackends = TensorEmbeddingModels.BertGguf.Backends,
             Artifacts = [new() { Role = "model", RelativePath = name, Length = bytes.Length,
                 Sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)), Sources = [new(new Uri(source).AbsoluteUri)] }]
         };
@@ -50,28 +54,21 @@ public sealed class EmbeddingInstalledModelsTests : IDisposable
         return definition;
     }
 
-    // A GGUF v3 file with the given Qwen3 keys and no tensors, padded past the header.
-    private static byte[] Header(uint? pooling, uint dimensions)
+    // A GGUF v3 file with an embedding header of 1,024 dimensions and an 8,192-token context, no tensors, padded past
+    // the header.
+    private static byte[] Header(string architecture, uint? pooling, string tokenizer)
     {
         using var stream = new MemoryStream();
         using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
         {
             var values = new List<(string Key, Action Write)>
             {
-                ("general.architecture", () => String(writer, "qwen3")),
-                ("qwen3.embedding_length", () => UInt32(writer, dimensions)),
-                ("qwen3.context_length", () => UInt32(writer, 32768)),
-                ("tokenizer.ggml.model", () => String(writer, "gpt2")),
-                ("tokenizer.ggml.tokens", () =>
-                {
-                    string[] tokens = ["hello", "<|endoftext|>"];
-                    writer.Write(9u);
-                    writer.Write(8u);
-                    writer.Write((ulong)tokens.Length);
-                    foreach (string token in tokens) { Text(writer, token); }
-                })
+                ("general.architecture", () => String(writer, architecture)),
+                ($"{architecture}.embedding_length", () => UInt32(writer, 1024)),
+                ($"{architecture}.context_length", () => UInt32(writer, 32768)),
+                ("tokenizer.ggml.model", () => String(writer, tokenizer))
             };
-            if (pooling is uint value) { values.Add(("qwen3.pooling_type", () => UInt32(writer, value))); }
+            if (pooling is uint value) { values.Add(($"{architecture}.pooling_type", () => UInt32(writer, value))); }
             writer.Write("GGUF"u8);
             writer.Write(3u);
             writer.Write(0UL);

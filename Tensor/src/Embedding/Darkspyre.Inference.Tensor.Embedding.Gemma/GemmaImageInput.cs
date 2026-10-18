@@ -1,5 +1,3 @@
-using TensorSharp.Models;
-
 namespace Darkspyre.Inference.Tensor.Embedding.Gemma;
 
 /// <summary>Packs shared Gemma preprocessing output into the pinned ONNX vision input layout.</summary>
@@ -10,8 +8,7 @@ internal sealed record GemmaImageInput(float[] Patches, long[] Positions, int Wi
 
     internal static GemmaImageInput Prepare(byte[] bytes)
     {
-        var processor = new Gemma4ImageProcessor(imageMean: [0, 0, 0], imageStd: [1, 1, 1], referenceSizing: true);
-        var (pixels, width, height) = processor.ProcessImage(bytes);
+        var (pixels, width, height) = GemmaImagePreprocessor.Process(bytes);
         int ph = height / 16, pw = width / 16, plane = width * height;
         float[] patches = new float[MaxPatches * PatchPixels];
         long[] positions = Enumerable.Repeat(-1L, MaxPatches * 2).ToArray();

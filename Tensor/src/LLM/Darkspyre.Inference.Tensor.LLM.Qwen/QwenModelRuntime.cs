@@ -81,8 +81,8 @@ internal sealed class QwenModelRuntime : IQwenModelRuntime
 
 internal static class QwenModelCompatibility
 {
-    /// <summary>GGUF architectures this adapter loads: Qwen 3, and the Qwen 3.5 family that TensorSharp runs as one model class.</summary>
-    internal static readonly IReadOnlySet<string> Architectures = new HashSet<string>(["qwen3", "qwen35", "qwen35moe", "qwen3next"], StringComparer.Ordinal);
+    /// <summary>GGUF architectures this adapter loads: the Qwen 3.5 family that TensorSharp runs as one model class.</summary>
+    internal static readonly IReadOnlySet<string> Architectures = new HashSet<string>(["qwen35", "qwen35moe", "qwen3next"], StringComparer.Ordinal);
 
     public static void Validate(TensorModelPackDefinition definition)
     {
@@ -100,13 +100,13 @@ internal static class QwenModelCompatibility
     public static void ValidateCheckpoint(GgufFile file, TensorModelPackDefinition definition)
         => ValidateCheckpoint(new CheckpointMetadata(file.Version, file.Metadata, file.Tensors, file.FilePaths), definition);
 
-    internal static void ValidateHeaders(IReadOnlyList<(TensorSourceArtifact Artifact, GgufMetadata Header)> files,
+    internal static void ValidateHeaders(IReadOnlyList<(TensorSourceArtifact Artifact, GgufHeader Header)> files,
         TensorModelPackDefinition definition)
     {
         var tensors = new Dictionary<string, GgufTensorInfo>(StringComparer.Ordinal);
         for (int index = 0; index < files.Count; index++)
         {
-            GgufMetadata header = files[index].Header;
+            GgufHeader header = files[index].Header;
             var view = new CheckpointMetadata(header.Version, header.Values, header.Tensors, [files[index].Artifact.Path]);
             if (header.Version != files[0].Header.Version || view.GetUint32("split.count", 1) != files.Count
                 || view.GetUint32("split.no", (uint)index) != index
@@ -120,14 +120,14 @@ internal static class QwenModelCompatibility
                 { throw new InvalidDataException("GGUF tensor storage exceeds the artifact length."); }
             }
         }
-        GgufMetadata primary = files[0].Header;
+        GgufHeader primary = files[0].Header;
         ValidateCheckpoint(new CheckpointMetadata(primary.Version, primary.Values, tensors, files.Select(file => file.Artifact.Path).ToArray()), definition);
     }
 
     /// <summary>The architecture named by the checkpoint header, when this adapter loads it.</summary>
     internal static string ArchitectureOf(IReadOnlyDictionary<string, object> header) =>
         header.GetValueOrDefault("general.architecture") is string architecture && Architectures.Contains(architecture)
-            ? architecture : throw new InvalidDataException("This adapter requires a Qwen 3 or Qwen 3.5 family GGUF.");
+            ? architecture : throw new InvalidDataException("This adapter requires a Qwen 3.5 family GGUF.");
 
     private static void ValidateCheckpoint(CheckpointMetadata file, TensorModelPackDefinition definition)
     {
@@ -157,31 +157,7 @@ internal static class QwenModelCompatibility
         Shape(file, "token_embd.weight", hidden, vocabulary.Length);
         Shape(file, "output_norm.weight", hidden);
         if (file.Tensors.ContainsKey("output.weight")) { Shape(file, "output.weight", hidden, vocabulary.Length); }
-        if (arch == "qwen3") { ValidateQwen3Layers(file, layers, hidden, heads, kvHeads, headDimension); }
-        else { ValidateHybridLayers(file, arch, layers); }
-    }
-
-    private static void ValidateQwen3Layers(CheckpointMetadata file, int layers, int hidden, int heads, int kvHeads, int headDimension)
-    {
-        int feedForward = Positive(file, "qwen3.feed_forward_length");
-        if (layers > file.Tensors.Count / 11) { throw new InvalidDataException("The Qwen layer tensor set is incomplete."); }
-        if (file.GetUint32("qwen3.attention.value_length", (uint)headDimension) != headDimension)
-        { throw new InvalidDataException("Incompatible Qwen attention dimensions."); }
-        for (int layer = 0; layer < layers; layer++)
-        {
-            string prefix = $"blk.{layer}.";
-            Shape(file, prefix + "attn_norm.weight", hidden);
-            Shape(file, prefix + "attn_q.weight", hidden, checked(heads * headDimension));
-            Shape(file, prefix + "attn_k.weight", hidden, checked(kvHeads * headDimension));
-            Shape(file, prefix + "attn_v.weight", hidden, checked(kvHeads * headDimension));
-            Shape(file, prefix + "attn_q_norm.weight", headDimension);
-            Shape(file, prefix + "attn_k_norm.weight", headDimension);
-            Shape(file, prefix + "attn_output.weight", checked(heads * headDimension), hidden);
-            Shape(file, prefix + "ffn_norm.weight", hidden);
-            Shape(file, prefix + "ffn_gate.weight", hidden, feedForward);
-            Shape(file, prefix + "ffn_up.weight", hidden, feedForward);
-            Shape(file, prefix + "ffn_down.weight", feedForward, hidden);
-        }
+        ValidateHybridLayers(file, arch, layers);
     }
 
     // The Qwen 3.5 family mixes full-attention layers with GatedDeltaNet recurrent layers. TensorSharp's
@@ -198,12 +174,10 @@ internal static class QwenModelCompatibility
     /// <summary>
     /// Counts the layers that keep full attention history. The Qwen 3.5 family names them in
     /// <c>layer_types</c> when its length matches the block count, or places one every
-    /// <c>full_attention_interval</c> layers (default 4), as TensorSharp's loader does. Every Qwen 3
-    /// layer is full attention.
+    /// <c>full_attention_interval</c> layers (default 4), as TensorSharp's loader does.
     /// </summary>
     internal static int FullAttentionLayers(IReadOnlyDictionary<string, object> header, string arch, int layers)
     {
-        if (arch == "qwen3") { return layers; }
         if (header.GetValueOrDefault($"{arch}.layer_types") is string[] types && types.Length == layers)
         { return types.Count(type => !string.Equals(type, "linear_attention", StringComparison.OrdinalIgnoreCase)); }
         uint interval = header.GetValueOrDefault($"{arch}.full_attention_interval") is { } value

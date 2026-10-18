@@ -1,7 +1,5 @@
 using Darkspyre.Inference.Tensor.Common;
-using TensorSharp;
 using TensorSharp.Cuda;
-using TensorSharp.MLX;
 using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
@@ -15,25 +13,19 @@ internal sealed class QwenBackendProbe(GgmlRuntimeOwner? runtimeOwner = null) : 
         cancellationToken.ThrowIfCancellationRequested();
         if (TensorBackendProbes.ValidateLocalRequest(request, QwenSetup.Definition.Implementation.Id) is { } invalid)
             return Task.FromResult(invalid);
-        if (GgmlRuntimeOwner.IsGgml(request.RequestedBackend))
+        if (GgmlRuntimeOwner.IsNative(request.RequestedBackend))
             return (runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate()).CheckAsync(request, cancellationToken);
-        return Task.Run(() =>
-        {
-            using IDisposable? admission = request.RequestedBackend == TensorBackendKind.Mlx
-                ? (runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate()).EnterMlx(MlxBackend.Shutdown) : null;
-            return Check(request, IsBackendAvailable,
-                static error => NativeRuntimeQuarantine.TryGetFailure(error, out _), cancellationToken);
-        }, cancellationToken);
+        return Task.Run(() => Check(request, IsBackendAvailable, cancellationToken), cancellationToken);
     }
 
     internal static TensorBackendAvailability Check(TensorBackendProbeRequest request,
-        Func<TensorBackendKind, bool> isBackendAvailable, Func<Exception, bool> isRecordedFailure, CancellationToken cancellationToken)
+        Func<TensorBackendKind, bool> isBackendAvailable, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         if (TensorBackendProbes.ValidateLocalRequest(request, QwenSetup.Definition.Implementation.Id) is { } invalid) return invalid;
         TensorBackendKind actual = request.RequestedBackend;
         if (actual == TensorBackendKind.CoreMl
-            || !OperatingSystem.IsMacOS() && actual is TensorBackendKind.Mlx or TensorBackendKind.GgmlMetal
+            || !OperatingSystem.IsMacOS() && actual is TensorBackendKind.GgmlMetal
             || OperatingSystem.IsMacOS() && actual is TensorBackendKind.Cuda or TensorBackendKind.GgmlCuda or TensorBackendKind.GgmlVulkan)
             return TensorBackendAvailability.Observe(request, TensorBackendAvailabilityState.Unsupported, "This backend is unsupported by Qwen on the target platform.");
         if (actual != TensorBackendKind.Cpu && TensorBackendProbes.RejectUnboundNativePlan(request) is { } unbound) return unbound;
@@ -41,14 +33,6 @@ internal sealed class QwenBackendProbe(GgmlRuntimeOwner? runtimeOwner = null) : 
         try
         {
             available = isBackendAvailable(actual);
-        }
-        catch (Exception exception) when (exception is not OutOfMemoryException && isRecordedFailure(exception))
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            const string reason = "Native resource cleanup failed. Restart the application process before using this runtime.";
-            return TensorBackendAvailability.Observe(request, TensorBackendAvailabilityState.RequiresProcessRestart, reason,
-                candidateDiagnostics: [new(null, TensorBackendProbePhase.Initialization, "runtime-requires-process-exit", reason,
-                    NativeStateMayRemain: true)]);
         }
         catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or PlatformNotSupportedException)
         { available = false; }
@@ -70,7 +54,6 @@ internal sealed class QwenBackendProbe(GgmlRuntimeOwner? runtimeOwner = null) : 
     {
         TensorBackendKind.Cpu => true,
         TensorBackendKind.Cuda => CudaBackend.IsAvailable(),
-        TensorBackendKind.Mlx => MlxBackend.IsAvailable(),
         _ => false
     };
 }

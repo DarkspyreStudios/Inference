@@ -6,13 +6,12 @@ namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
 public sealed class QwenBackendProbeTests
 {
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void FailedNativeQueriesDoNotReportAMissingRuntime(bool recordedFailure)
+    [Fact]
+    public void FailedNativeQueriesDoNotReportAMissingRuntime()
     {
         var original = new InvalidOperationException("private native query cause");
-        TensorBackendKind backend = OperatingSystem.IsMacOS() ? TensorBackendKind.Mlx : TensorBackendKind.Cuda;
+        // The managed CUDA backend is the local check's native query; macOS refuses it first, so the CPU query stands in.
+        TensorBackendKind backend = OperatingSystem.IsMacOS() ? TensorBackendKind.Cpu : TensorBackendKind.Cuda;
         var request = new TensorBackendProbeRequest(Guid.NewGuid(), QwenSetup.Definition.Implementation.Id,
             backend, RuntimeInformation.RuntimeIdentifier);
 
@@ -21,24 +20,12 @@ public sealed class QwenBackendProbeTests
             {
                 Assert.Equal(backend, requested);
                 throw original;
-            }, error =>
-            {
-                Assert.Same(original, error);
-                return recordedFailure;
             }, CancellationToken.None);
 
-        Assert.Equal(recordedFailure ? TensorBackendAvailabilityState.RequiresProcessRestart : TensorBackendAvailabilityState.Unknown,
-            observation.State);
+        Assert.Equal(TensorBackendAvailabilityState.Unknown, observation.State);
         Assert.False(observation.IsAvailable);
         Assert.Null(observation.ActualBackend);
         Assert.Null(observation.IsInitialized);
-        if (recordedFailure)
-        {
-            TensorBackendCandidateDiagnostic diagnostic = Assert.Single(observation.CandidateDiagnostics);
-            Assert.True(diagnostic.NativeStateMayRemain);
-            Assert.Equal(TensorBackendProbePhase.Initialization, diagnostic.Phase);
-            Assert.Equal("runtime-requires-process-exit", diagnostic.Code);
-        }
         string json = JsonSerializer.Serialize(observation, TensorJson.BackendAvailability);
         Assert.DoesNotContain(original.Message, json, StringComparison.Ordinal);
     }

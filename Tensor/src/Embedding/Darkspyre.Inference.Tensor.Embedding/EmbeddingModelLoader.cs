@@ -20,7 +20,7 @@ internal sealed class EmbeddingModelLoader : IEmbeddingModelLoader
         if (!File.Exists(path) || new FileInfo(path).Length != definition.Artifacts[0].Length)
             throw new InvalidDataException("The installed embedding artifact is missing or changed.");
         // The engine receives the actual owner before checking cancellation or model metadata.
-        return await Task.Run(() => EmbeddingModelFactory.Load(path, new EmbeddingModelOptions
+        return await Task.Run<IEmbeddingModel>(() => EmbeddingModel.Load(path, new EmbeddingModelOptions
         {
             Backend = BackendName(backend),
             MaxTokens = architecture.MaximumInputTokens,

@@ -2,7 +2,6 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Ggml;
-using TensorSharp.Runtime;
 
 namespace Darkspyre.Inference.Tensor.Embedding;
 
@@ -54,9 +53,14 @@ public sealed class EmbeddingModelResolver : TensorModelResolver
             return Failure(TensorCompatibilityState.Unverified, "pack-metadata-incomplete", "Every artifact needs a pinned source, length, SHA-256 and license before resolution.");
         try
         {
-            GgufMetadata header = await new TensorMetadataReader(reader).ReadAsync(artifact, stream => GgufFile.InspectMetadata(stream), cancellationToken)
+            GgufHeader header = await new TensorMetadataReader(reader).ReadAsync(artifact, stream => GgufHeader.Read(stream), cancellationToken)
                 .ConfigureAwait(false);
             evidence.Add(new(artifact.Path, "gguf-header", $"GGUF {header.Version}; {header.Tensors.Count} tensors."));
+            // Qwen3-Embedding pools the last token; a Qwen3 chat model of the same GGUF architecture names no pooling.
+            if (header.Values.GetValueOrDefault("general.architecture") is "qwen3"
+                && header.Values.GetValueOrDefault("qwen3.pooling_type") is 3u)
+                return Failure(TensorCompatibilityState.Unsupported, TensorInstalledPacks.RetiredArchitectureCode,
+                    TensorEmbeddingModels.Qwen3EmbeddingRetiredReason);
             TensorEmbeddingArchitecture architecture = EmbeddingCompatibility.MatchHeader(header.Values);
             TensorModelPackDefinition definition = TensorResolvedPack.Create(candidate, TensorCapability.Embedding, architecture.Name,
                 architecture.Backends, [TensorResolvedPack.Artifact(artifact, "model", artifact.Path)]);

@@ -10,7 +10,6 @@ using Darkspyre.Inference.Tensor.LLM;
 using TensorSharp.Runtime;
 using TensorSharp.Runtime.Grammar;
 using TensorSharp.Server;
-using TensorSharp.MLX;
 using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
@@ -30,7 +29,6 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
     private readonly TensorModelLifetime _lifetime;
     private readonly IQwenModelRuntime _runtime;
     private readonly GgmlRuntimeOwner _runtimeOwner;
-    private GgmlRuntimeOwner.ModelLease? _runtimeModelLease;
     private TensorModelPackLease? _modelLease;
     private TensorBackendKind? _loadedBackend;
     private readonly object _stopGate = new();
@@ -147,9 +145,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         ValidateRequest(request);
         await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(cancellationToken)
             .ConfigureAwait(false);
-        using IDisposable? runtimeUse = _runtimeModelLease is not null ? _runtimeOwner.EnterExecution() : null;
         await ValidateModelIdAsync(request.ModelId, cancellationToken).ConfigureAwait(false);
-        if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(cancellationToken);
         TensorModelPackDefinition definition = _definition!;
         CancellationToken executionToken = modelUse.CancellationToken;
         TensorBackendKind backend = _loadedBackend
@@ -158,7 +154,6 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             definition.Key,
             backend,
             executionToken).ConfigureAwait(false);
-        if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
         using var session = new ChatSession();
         List<ChatMessage> messages = BuildMessages(request);
         List<ToolFunction>? tools = BuildTools(request.Tools);
@@ -179,12 +174,12 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
 
         int maxOutputTokens = request.MaxOutputTokens ?? 1_024;
         await EnsureFitsAsync(messages, tools, thinking, maxOutputTokens, executionToken).ConfigureAwait(false);
-        if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
         SamplingConfig sampling = await CreateSamplingAsync(request, format, thinking, executionToken).ConfigureAwait(false);
-        if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
         // The architecture's protocol parser separates the answer from thinking and tool calls.
         IOutputParser parser = OutputParserFactory.Create(_runtime.Architecture);
         parser.Init(thinking, tools);
+        // Upstream streams the piece that completes a stop sequence before it stops, so the filter withholds it.
+        StopSequenceFilter? stops = request.StopSequences.Count == 0 ? null : new(request.StopSequences);
         var output = new StringBuilder();
         var toolCalls = new List<LlmToolCall>();
         int? promptTokens = null;
@@ -209,14 +204,13 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             {
                 bool more;
                 ParsedOutput? part = null;
+                ParsedOutput? withheld = null;
                 try
                 {
-                    if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
                     executionToken.ThrowIfCancellationRequested();
                     more = await updates.MoveNextAsync().ConfigureAwait(false);
                     if (more)
                     {
-                        if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
                         ChatStreamUpdate update = updates.Current;
                         if (update.Done)
                         {
@@ -228,30 +222,32 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
                         {
                             if (update.RawGenerationSuffix is not null)
                                 parser.SetGenerationPromptSuffix(update.RawGenerationSuffix);
+                            string piece = stops is null ? update.Piece ?? "" : stops.Append(update.Piece ?? "");
                             part = update.IsParsed
-                                ? new ParsedOutput { Content = update.Piece ?? "", Thinking = update.ThinkingPiece ?? "", ToolCalls = update.ParsedToolCalls?.ToList() }
-                                : string.IsNullOrEmpty(update.Piece) ? null : parser.Add(update.Piece, false);
+                                ? new ParsedOutput { Content = piece, Thinking = update.ThinkingPiece ?? "", ToolCalls = update.ParsedToolCalls?.ToList() }
+                                : string.IsNullOrEmpty(piece) ? null : parser.Add(piece, false);
                         }
                     }
                     else
                     {
                         executionToken.ThrowIfCancellationRequested();
-                        if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
                         if (promptTokens is null)
                             throw new InferenceException(InferenceFailureCode.ExecutionFailed, "The Qwen runtime ended without a terminal update.");
+                        if (stops is { Stopped: false } && stops.Complete() is { Length: > 0 } tail)
+                            withheld = parser.Add(tail, false);
                         part = parser.Add(string.Empty, true);
                     }
                 }
                 catch (Exception error) { operationFailure = error; throw; }
 
-                using IEnumerator<LlmStreamEvent> parsed = Events(part, output, toolCalls).GetEnumerator();
+                using IEnumerator<LlmStreamEvent> parsed = Events(withheld, output, toolCalls)
+                    .Concat(Events(part, output, toolCalls)).GetEnumerator();
                 while (true)
                 {
                     bool hasEvent;
                     try
                     {
                         hasEvent = parsed.MoveNext();
-                        if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
                     }
                     catch (Exception error) { operationFailure = error; throw; }
                     if (!hasEvent) break;
@@ -310,7 +306,6 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         }
 
         executionToken.ThrowIfCancellationRequested();
-        if (runtimeUse is not null) _runtimeOwner.ThrowIfOperationCanceled(executionToken);
         LlmCompletionStatus status = finishReason switch
         {
             "eos" or "stop" or "stop_sequence" => LlmCompletionStatus.Completed,
@@ -370,25 +365,16 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         }
         ThrowIfReleaseRequired();
 
-        IDisposable? admission = EnterRuntimeAdmission();
-        try
+        lock (_stopGate)
         {
-            lock (_stopGate)
-            {
-                if (_stopRequested) { admission?.Dispose(); return Task.CompletedTask; }
-                return _lifetime.AcceptAsync(TensorEngineState.Starting, null, null,
-                    token =>
-                    {
-                        using (admission)
-                        {
-                            if (admission is not null) _runtimeOwner.ThrowIfOperationCanceled(token);
-                            ThrowIfReleaseRequired();
-                            return Task.FromResult(new TensorEngineStatus(null, null, TensorEngineState.Started, DateTimeOffset.UtcNow));
-                        }
-                    }, cancellationToken);
-            }
+            if (_stopRequested) return Task.CompletedTask;
+            return _lifetime.AcceptAsync(TensorEngineState.Starting, null, null,
+                token =>
+                {
+                    ThrowIfReleaseRequired();
+                    return Task.FromResult(new TensorEngineStatus(null, null, TensorEngineState.Started, DateTimeOffset.UtcNow));
+                }, cancellationToken);
         }
-        catch { admission?.Dispose(); throw; }
     }
 
     /// <inheritdoc />
@@ -398,22 +384,10 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         ThrowIfReleaseRequired();
         ArgumentNullException.ThrowIfNull(model);
         cancellationToken.ThrowIfCancellationRequested();
-        IDisposable? admission = EnterRuntimeAdmission();
-        try
-        {
-            await AdmitLoadAsync(model, admission, cancellationToken).ConfigureAwait(false);
-            admission = null;
-        }
-        finally { admission?.Dispose(); }
-    }
-
-    private async Task AdmitLoadAsync(TensorModelKey model, IDisposable? admission, CancellationToken cancellationToken)
-    {
         TensorModelPackDefinition definition;
         try
         {
             definition = await _packs.GetRequiredDefinitionAsync(model, cancellationToken).ConfigureAwait(false);
-            if (admission is not null) _runtimeOwner.ThrowIfOperationCanceled(cancellationToken);
         }
         catch (KeyNotFoundException exception)
         {
@@ -432,7 +406,6 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         }
 
         TensorModelPackStatus installed = await _packs.GetStatusAsync(model, cancellationToken).ConfigureAwait(false);
-        if (admission is not null) _runtimeOwner.ThrowIfOperationCanceled(cancellationToken);
         if (installed.State != TensorModelPackState.Installed)
         {
             throw new InferenceException(InferenceFailureCode.ModelUnavailable,
@@ -445,27 +418,18 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             ThrowIfDisposed();
             ThrowIfReleaseRequired();
             accepted = _lifetime.AcceptAsync(TensorEngineState.Loading, model, _requestedBackend == TensorBackendKind.Auto ? null : _requestedBackend,
-                async token =>
-                {
-                    using (admission)
-                        return await LoadCoreAsync(definition, _requestedBackend, token).ConfigureAwait(false);
-                }, cancellationToken);
+                token => LoadCoreAsync(definition, _requestedBackend, token), cancellationToken);
         }
         await accepted.ConfigureAwait(false);
     }
-
-    private IDisposable? EnterRuntimeAdmission() => _requestedBackend == TensorBackendKind.Mlx
-        ? _runtimeOwner.EnterMlx(MlxBackend.Shutdown)
-        : GgmlRuntimeOwner.IsGgml(_requestedBackend) ? _runtimeOwner.EnterExecution() : null;
 
     private async Task<TensorEngineStatus> LoadCoreAsync(
         TensorModelPackDefinition definition, TensorBackendKind backend, CancellationToken cancellationToken)
     {
         using IDisposable loading = await _lifetime.EnterLoadAsync(cancellationToken).ConfigureAwait(false);
         ThrowIfReleaseRequired();
-        if (_modelLease is not null || _runtimeModelLease is not null)
+        if (_modelLease is not null)
             throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The previous model ownership must be released before loading another model.");
-        if (GgmlRuntimeOwner.IsGgml(backend) || backend == TensorBackendKind.Mlx) _runtimeOwner.ThrowIfOperationCanceled(cancellationToken);
         TensorModelPackLease lease;
         try
         {
@@ -476,41 +440,32 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, exception.Message, exception);
         }
 
-        GgmlRuntimeOwner.ModelLease? runtimeLease = null;
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (GgmlRuntimeOwner.IsGgml(backend))
+            if (GgmlRuntimeOwner.IsNative(backend))
             {
-                runtimeLease = await _runtimeOwner.AcquireModelAsync(backend, cancellationToken).ConfigureAwait(false);
-                backend = runtimeLease.Backend;
+                backend = await _runtimeOwner.AcquireBackendAsync(backend, cancellationToken).ConfigureAwait(false);
                 if (!definition.SupportedBackends.Contains(backend))
                     throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The initialized backend is incompatible with this model pack.");
             }
-            else if (backend == TensorBackendKind.Mlx)
-            {
-                runtimeLease = _runtimeOwner.AcquireMlxModel(MlxBackend.Shutdown);
-            }
             _modelLease = lease;
-            _runtimeModelLease = runtimeLease;
             await _runtime.LoadAsync(definition, lease, BackendName(backend), cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            if (runtimeLease is not null) _runtimeOwner.ThrowIfOperationCanceled(cancellationToken);
             _lifetime.MarkLoaded(definition.Key, backend);
             _modelLease = lease;
-            _runtimeModelLease = runtimeLease;
             _loadedBackend = backend;
             _definition = definition;
             return new TensorEngineStatus(definition.Key, backend, TensorEngineState.Loaded, DateTimeOffset.UtcNow);
         }
         catch (OperationCanceledException error)
         {
-            await CleanupFailedLoadAsync(lease, runtimeLease, error).ConfigureAwait(false);
+            await CleanupFailedLoadAsync(lease, error).ConfigureAwait(false);
             throw;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            await CleanupFailedLoadAsync(lease, runtimeLease, exception).ConfigureAwait(false);
+            await CleanupFailedLoadAsync(lease, exception).ConfigureAwait(false);
             throw new InferenceException(
                 exception switch
                 {
@@ -523,18 +478,15 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         }
     }
 
-    private async Task CleanupFailedLoadAsync(TensorModelPackLease lease, GgmlRuntimeOwner.ModelLease? runtimeLease, Exception original)
+    private async Task CleanupFailedLoadAsync(TensorModelPackLease lease, Exception original)
     {
         // Retain actual ownership when cleanup fails; Stop/Unload can retry release-only work.
         _modelLease = lease;
-        _runtimeModelLease = runtimeLease;
         try
         {
             _runtime.Unload();
             await lease.DisposeAsync().ConfigureAwait(false);
-            runtimeLease?.Dispose();
             _modelLease = null;
-            _runtimeModelLease = null;
             _releaseRequired = false;
         }
         catch (Exception cleanup)
@@ -640,8 +592,6 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         {
             _runtime.Unload();
             await _modelLease.DisposeAsync().ConfigureAwait(false);
-            _runtimeModelLease?.Dispose();
-            _runtimeModelLease = null;
             _modelLease = null;
             _loadedBackend = null;
             _definition = null;

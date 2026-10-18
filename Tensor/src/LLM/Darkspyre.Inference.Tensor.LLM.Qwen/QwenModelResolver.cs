@@ -1,12 +1,12 @@
 using System.Globalization;
 using System.Text.RegularExpressions;
 using Darkspyre.Inference.Tensor.Common;
-using TensorSharp.Runtime;
 using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
-/// <summary>Resolves complete Qwen 3 and Qwen 3.5 family GGUF packs through bounded metadata inspection, never weight loading.</summary>
+/// <summary>Resolves complete Qwen 3.5 family GGUF packs through bounded metadata inspection, never weight loading. A Qwen3
+/// GGUF is reported Unsupported with the issue code <see cref="TensorInstalledPacks.RetiredArchitectureCode"/>.</summary>
 public sealed partial class QwenModelResolver : TensorModelResolver
 {
     private readonly GgmlRuntimeOwner _runtimeOwner;
@@ -48,12 +48,14 @@ public sealed partial class QwenModelResolver : TensorModelResolver
                 || string.IsNullOrWhiteSpace(artifact.Provenance.License) || artifact.Sha256 is not { Length: 64 } hash || !hash.All(Uri.IsHexDigit)))
             { return Failure(TensorCompatibilityState.Unverified, "pack-metadata-incomplete", "Every artifact needs a pinned source, length, SHA-256 and license before resolution."); }
             var metadataReader = new TensorMetadataReader(reader);
-            var headers = new List<(TensorSourceArtifact Artifact, GgufMetadata Header)>();
+            var headers = new List<(TensorSourceArtifact Artifact, GgufHeader Header)>();
             foreach (TensorSourceArtifact artifact in artifacts)
             {
-                GgufMetadata header = await metadataReader.ReadAsync(artifact, stream => GgufFile.InspectMetadata(stream), cancellationToken).ConfigureAwait(false);
+                GgufHeader header = await metadataReader.ReadAsync(artifact, stream => GgufHeader.Read(stream), cancellationToken).ConfigureAwait(false);
                 headers.Add((artifact, header));
                 evidence.Add(new(artifact.Path, "gguf-header", $"GGUF {header.Version}; {header.Tensors.Count} tensors; {header.DataOffset} header/alignment bytes."));
+                if (headers.Count == 1 && header.Values.GetValueOrDefault("general.architecture") is "qwen3")
+                { return Failure(TensorCompatibilityState.Unsupported, TensorInstalledPacks.RetiredArchitectureCode, TensorLlmModels.Qwen3RetiredReason); }
             }
             TensorModelArtifactDefinition[] manifest = artifacts.Select((artifact, index) => TensorResolvedPack.Artifact(artifact,
                 index == 0 ? "model" : $"model-shard-{index + 1}", artifact.Path)).ToArray();

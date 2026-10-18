@@ -63,22 +63,17 @@ public static class TensorEmbeddingModels
     }.ToFrozenSet();
 
     /// <summary>
-    /// Qwen3-Embedding decoders: the final-normalised hidden state of the last token. A query states its task; the
-    /// default instruction is the codebase retrieval task the model was evaluated with.
-    /// </summary>
-    public static TensorEmbeddingArchitecture Qwen3Gguf { get; } = new("qwen3-embedding-gguf", "qwen3", 1024,
-        Array.AsReadOnly([32, 64, 128, 256, 512, 768, 1024]), 8192, "Instruct: {instruction}\nQuery:{text}",
-        "Given a question about a codebase, retrieve the code or documentation that answers it", Backends);
-
-    /// <summary>
     /// GGUF BERT and XLM-RoBERTa sentence encoders with CLS pooling. They run on managed CPU and GGML CPU only, because
     /// TensorSharp's Metal encoder cannot run them.
     /// </summary>
     public static TensorEmbeddingArchitecture BertGguf { get; } = new("bert-embedding-gguf", "bert", 1024, Array.AsReadOnly([256, 1024]), 8192,
         "query: {text}", null, new[] { TensorBackendKind.Cpu, TensorBackendKind.GgmlCpu }.ToFrozenSet());
 
-    /// <summary>The architectures this package can run: <see cref="Qwen3Gguf"/> and <see cref="BertGguf"/>.</summary>
-    public static IReadOnlyList<TensorEmbeddingArchitecture> Architectures { get; } = Array.AsReadOnly([Qwen3Gguf, BertGguf]);
+    /// <summary>The architectures this package runs: <see cref="BertGguf"/>.</summary>
+    public static IReadOnlyList<TensorEmbeddingArchitecture> Architectures { get; } = Array.AsReadOnly([BertGguf]);
+
+    /// <summary>The reason an installed Qwen3-Embedding pack is not supported.</summary>
+    public const string Qwen3EmbeddingRetiredReason = "Qwen3-Embedding models are no longer supported.";
 
     /// <summary>The architecture that runs <paramref name="pack"/>, or null when no supported architecture does.</summary>
     public static TensorEmbeddingArchitecture? ArchitectureOf(TensorModelPackDefinition pack) =>
@@ -107,9 +102,7 @@ internal static class EmbeddingCompatibility
         string? name = values.GetValueOrDefault("general.architecture") as string;
         TensorEmbeddingArchitecture architecture = TensorEmbeddingModels.Architectures.FirstOrDefault(item => item.GgufArchitecture == name)
             ?? throw new InvalidDataException($"GGUF architecture '{name}' is not an embedding architecture this engine runs.");
-        bool isQwen3 = architecture.GgufArchitecture == "qwen3";
-        // Qwen3-Embedding pools the last token; a Qwen3 chat model of the same GGUF architecture names no pooling.
-        if (values.GetValueOrDefault($"{name}.pooling_type") is not uint pooling || (isQwen3 ? pooling != 3 : pooling is < 1 or > 3))
+        if (values.GetValueOrDefault($"{name}.pooling_type") is not uint pooling || pooling is < 1 or > 3)
             throw new InvalidDataException("The GGUF names no embedding pooling; it is not an embedding model.");
         object? dimensions = values.GetValueOrDefault($"{name}.embedding_length");
         if (dimensions is not uint length || length != architecture.NativeDimensions)
@@ -118,10 +111,8 @@ internal static class EmbeddingCompatibility
         if (context is not uint tokens || tokens < architecture.MaximumInputTokens)
             throw new InvalidDataException($"The GGUF's context of {context ?? "no"} tokens is below this engine's {architecture.MaximumInputTokens}-token limit.");
         string? tokenizer = values.GetValueOrDefault("tokenizer.ggml.model") as string;
-        if (isQwen3 ? tokenizer != "gpt2" : tokenizer is not ("bert" or "t5"))
+        if (tokenizer is not ("bert" or "t5"))
             throw new InvalidDataException($"Tokenizer '{tokenizer}' is not one this engine reads for {name}.");
-        if (isQwen3 && (values.GetValueOrDefault("tokenizer.ggml.tokens") is not string[] vocabulary || !vocabulary.Contains("<|endoftext|>", StringComparer.Ordinal)))
-            throw new InvalidDataException("The tokenizer has no <|endoftext|> token.");
         return architecture;
     }
 }

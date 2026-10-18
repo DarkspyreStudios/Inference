@@ -16,7 +16,6 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
     private readonly TensorModelLifetime _lifetime;
     private readonly GgmlRuntimeOwner? _runtimeOwner;
     private IEmbeddingModel? _model;
-    private GgmlRuntimeOwner.ModelLease? _runtimeLease;
     private TensorBackendKind _backend;
     private TensorModelPackLease? _lease;
     private TensorModelPackDefinition? _definition;
@@ -41,7 +40,7 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
     {
         ArgumentNullException.ThrowIfNull(packs);
         ArgumentNullException.ThrowIfNull(loader);
-        if (backend != TensorBackendKind.Cpu && !GgmlRuntimeOwner.IsGgml(backend))
+        if (backend != TensorBackendKind.Cpu && (backend == TensorBackendKind.Mlx || !GgmlRuntimeOwner.IsNative(backend)))
             throw new ArgumentOutOfRangeException(nameof(backend), "Embeddings run on managed CPU or a GGML backend.");
         _packs = packs; _loader = loader; RequestedBackend = backend;
         _runtimeOwner = backend == TensorBackendKind.Cpu ? null : runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate();
@@ -135,7 +134,7 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
     {
         using IDisposable loading = await _lifetime.EnterLoadAsync(cancellationToken).ConfigureAwait(false);
         ThrowIfReleaseRequired();
-        if (_model is not null || _lease is not null || _runtimeLease is not null)
+        if (_model is not null || _lease is not null)
             throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The previous embedding model ownership must be released before loading another model.");
         TensorModelPackLease lease;
         try { lease = await _packs.AcquireAsync(definition.Key, cancellationToken).ConfigureAwait(false); }
@@ -147,9 +146,8 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
             TensorBackendKind backend = RequestedBackend;
             if (_runtimeOwner is not null)
             {
-                // The owner chooses the actual GGML backend for Auto; the pack must support what it chose.
-                _runtimeLease = await _runtimeOwner.AcquireModelAsync(RequestedBackend, cancellationToken).ConfigureAwait(false);
-                backend = _runtimeLease.Backend;
+                // The owner chooses the actual backend for Auto; the pack must support what it chose.
+                backend = await _runtimeOwner.AcquireBackendAsync(RequestedBackend, cancellationToken).ConfigureAwait(false);
                 if (!definition.SupportedBackends.Contains(backend))
                     throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The initialized backend is incompatible with this embedding pack.");
             }
@@ -189,7 +187,6 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
         if (request.ModelId != definition.Key.ModelId)
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The request does not identify the resident embedding model.");
         long started = Stopwatch.GetTimestamp();
-        using IDisposable? runtimeUse = _runtimeLease is not null ? _runtimeOwner!.EnterExecution() : null;
         EmbeddingRun run;
         try { run = await EmbeddingModelRuntime.EmbedAsync(_model!, _architecture!, request, execution.CancellationToken).ConfigureAwait(false); }
         catch (Exception exception) when (exception is not OperationCanceledException and not InferenceException and not EmbeddingInputTooLongException)
@@ -244,7 +241,7 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
     {
         try
         {
-            // A live model keeps its dependent runtime and artifact leases when release fails.
+            // A live model keeps its artifact lease when release fails.
             _model?.Dispose();
             _model = null;
         }
@@ -254,22 +251,17 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
             throw;
         }
 
-        List<Exception> failures = [];
         try
         {
             if (_lease is not null) await _lease.DisposeAsync().ConfigureAwait(false);
             _lease = null;
         }
-        catch (Exception error) { failures.Add(error); }
-        try
+        catch
         {
-            _runtimeLease?.Dispose();
-            _runtimeLease = null;
+            _releaseRequired = true;
+            throw;
         }
-        catch (Exception error) { failures.Add(error); }
-        _releaseRequired = failures.Count != 0;
-        if (failures.Count == 1) System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(failures[0]).Throw();
-        if (failures.Count > 1) throw new AggregateException(failures);
+        _releaseRequired = false;
         _definition = null; _architecture = null;
     }
 
