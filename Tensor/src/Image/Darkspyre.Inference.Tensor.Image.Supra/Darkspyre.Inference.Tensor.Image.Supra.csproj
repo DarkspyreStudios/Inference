@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../../Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.Image.Supra.Tests" />
   </ItemGroup>
 
   <ItemGroup>

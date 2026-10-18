@@ -411,12 +411,7 @@ public sealed class SupraImageInference : ITensorImageInference
         _ => backend
     };
 
-    private static string RuntimeVersion() =>
-        typeof(DirectContext).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
-            .InformationalVersion
-        ?? typeof(DirectContext).Assembly.GetName().Version?.ToString()
-        ?? "unknown";
+    private static string RuntimeVersion() => TensorSharpRelease.Version;
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed || _lifetime.StopAccepted, this);
 }

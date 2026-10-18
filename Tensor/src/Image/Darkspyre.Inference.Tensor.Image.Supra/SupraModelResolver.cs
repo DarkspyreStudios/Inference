@@ -52,9 +52,15 @@ public sealed class SupraModelResolver : TensorModelResolver
                 { return Failure(TensorCompatibilityState.Unverified, "companion-integrity", "The source metadata does not match the pipeline's pinned companion."); }
                 if (companion.Role is "text-model" or "vae-model")
                 {
-                    SafetensorsMetadata metadata = await metadataReader.ReadAsync(artifact, stream => SafetensorsFile.InspectMetadata(stream), cancellationToken).ConfigureAwait(false);
-                    if (companion.Role == "text-model") { SupraCheckpointSchema.ValidateText(metadata.Tensors); }
-                    else { SupraCheckpointSchema.ValidateVae(metadata.Tensors); }
+                    SafetensorsHeader header = await metadataReader.ReadAsync(artifact, stream => SafetensorsHeader.Read(stream), cancellationToken).ConfigureAwait(false);
+                    // The schema reads the tensor table in TensorSharp's shape, the one an installed load opens.
+                    Dictionary<string, SafetensorTensorInfo> tensors = header.Tensors.ToDictionary(entry => entry.Key, entry => new SafetensorTensorInfo
+                    {
+                        Name = entry.Key, Shape = entry.Value.Shape, Dtype = Enum.Parse<SafetensorDtype>(entry.Value.Dtype, ignoreCase: true),
+                        Begin = entry.Value.Begin, End = entry.Value.End
+                    }, StringComparer.Ordinal);
+                    if (companion.Role == "text-model") { SupraCheckpointSchema.ValidateText(tensors); }
+                    else { SupraCheckpointSchema.ValidateVae(tensors); }
                     evidence.Add(new(artifact.Path, companion.Role, "Safetensors header and required pipeline tensor schema verified."));
                 }
                 else

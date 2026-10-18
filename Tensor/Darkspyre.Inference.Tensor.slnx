@@ -45,6 +45,9 @@
   <Folder Name="/tests/Embedding/">
     <Project Path="tests/Embedding/Darkspyre.Inference.Tensor.Embedding.Tests/Darkspyre.Inference.Tensor.Embedding.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/Image/">
+    <Project Path="tests/Image/Darkspyre.Inference.Tensor.Image.Supra.Tests/Darkspyre.Inference.Tensor.Image.Supra.Tests.csproj" />
+  </Folder>
   <Folder Name="/tests/LLM/">
     <Project Path="tests/LLM/Darkspyre.Inference.Tensor.LLM.Qwen.Tests/Darkspyre.Inference.Tensor.LLM.Qwen.Tests.csproj" />
   </Folder>
