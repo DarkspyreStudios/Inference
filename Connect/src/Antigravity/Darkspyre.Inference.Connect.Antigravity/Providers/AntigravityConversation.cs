@@ -280,7 +280,7 @@ internal sealed class AntigravityConversation : ILlmAgentSession
             await CloseInnerAsync().ConfigureAwait(false);
             long revision = await OpenNewAsync(result.Context, replaceHistory: true, token).ConfigureAwait(false);
             string requestId = Guid.NewGuid().ToString("N");
-            turn.Write(result.ToEvent(ThreadId, turn.Id, requestId, revision));
+            turn.Write(result.ToEvent(ThreadId, turn.Id, requestId, revision, carriesContext: true));
             if (result.Usage is not null)
             {
                 turn.Usage.Add(result.Usage);
@@ -314,7 +314,7 @@ internal sealed class AntigravityConversation : ILlmAgentSession
             if (!result.Changed) return null;
             await CloseInnerAsync().ConfigureAwait(false);
             long revision = await OpenNewAsync(result.Context, replaceHistory: true, cancellationToken).ConfigureAwait(false);
-            return result.ToEvent(ThreadId, lastTurnId, Guid.NewGuid().ToString("N"), revision);
+            return result.ToEvent(ThreadId, lastTurnId, Guid.NewGuid().ToString("N"), revision, carriesContext: true);
         }
         finally
         {

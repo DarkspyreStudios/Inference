@@ -140,6 +140,17 @@ public sealed record LlmAgentCompactedEvent(string ThreadId, string TurnId, stri
 
     /// <summary>Tool results whose images compaction removed.</summary>
     public int RemovedImageCount { get; init; }
+
+    /// <summary>
+    /// The whole compacted context at <see cref="ContextRevision"/>, from a conversation that compacts the history it
+    /// holds and exports no context for capture, such as the Claude and Antigravity CLI conversations; null otherwise.
+    /// A host that keeps its own copy of such a conversation replaces that copy with it.
+    /// </summary>
+    /// <remarks>
+    /// During a turn, the turn's entries so far carry <see cref="TurnId"/>, and what the turn adds afterwards is not
+    /// in it.
+    /// </remarks>
+    public LlmAgentContext? Context { get; init; }
 }
 
 /// <summary>An image the model produced, saved as a session resource.</summary>

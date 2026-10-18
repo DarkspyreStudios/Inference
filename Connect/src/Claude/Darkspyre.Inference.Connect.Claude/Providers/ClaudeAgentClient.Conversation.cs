@@ -539,7 +539,7 @@ internal sealed partial class ClaudeAgentClient
         }
 
         private LlmAgentCompactedEvent Compacted(string turnId, string requestId, long revision, CompactionResult result) =>
-            result.ToEvent(ThreadId, turnId, requestId, revision);
+            result.ToEvent(ThreadId, turnId, requestId, revision, carriesContext: true);
 
         public ValueTask DisposeAsync()
         {

@@ -467,7 +467,9 @@ compacted history as its opening. It then sends the turn's input, or `Continue f
 results above are complete; do not repeat finished tool calls.` when the turn already ran a step. The conversation
 keeps its thread id and the turn keeps its id across CLI sessions; usage totals add up across them. A second refusal
 ends the turn with the provider's reason. `GetContextStatusAsync` answers from the same measure, and `CompactNowAsync`
-compacts an idle conversation and reopens from the result. Stages, events and failures are those of Codex.
+compacts an idle conversation and reopens from the result. The CLI exports no context, so each compaction's
+`LlmAgentCompactedEvent` carries the compacted history as `Context`, at its `ContextRevision`; during a turn it holds the
+turn's entries so far under the event's `TurnId`. Stages, events and failures are those of Codex.
 
 **Compaction on Antigravity.** An Antigravity start or resume returns a conversation that owns the saved history and
 one AGY conversation at a time. The saved history is the opening history, or a resume's `Context`, then each turn's
@@ -483,7 +485,8 @@ with the turn's input as the current turn, summarizing in print mode on the same
 conversation and opens a new one with the compacted history as its opening transcript, followed by the turn's input.
 A failed compaction ends the turn and keeps the open AGY conversation. The conversation keeps its thread id and the
 turn keeps its id; usage totals add up across the summary requests and the turn. `GetContextStatusAsync` answers from
-the same measure, and `CompactNowAsync` compacts an idle conversation and reopens from the result. AGY also compacts on
+the same measure, and `CompactNowAsync` compacts an idle conversation and reopens from the result. Each of these
+compactions carries the compacted history as `LlmAgentCompactedEvent.Context`, as on Claude. AGY also compacts on
 its own with a `checkpoint` step, a model-written summary that replaces earlier steps in its context; the conversation
 reports it as `LlmAgentCompactedEvent` with no counts and the step's usage. The conversation reports
 `SupportsNativeResume` Unsupported once a compaction opened a new AGY conversation, because a resume by the thread id

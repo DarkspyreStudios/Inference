@@ -1358,7 +1358,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         (text, token) => writer.WriteAsync(new LlmAgentActivityEvent(ThreadId, run.Id, itemId, text), token);
 
     private LlmAgentCompactedEvent Compacted(string turnId, string requestId, long revision, CompactionResult result) =>
-        result.ToEvent(ThreadId, turnId, requestId, revision);
+        result.ToEvent(ThreadId, turnId, requestId, revision, carriesContext: false);
 
     /// <summary>
     /// The entries whose only content was continuation state the import omitted, such as a native compaction from

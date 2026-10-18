@@ -1004,6 +1004,10 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         Assert.NotNull(compacted);
         Assert.Equal(2, compacted.DroppedMessageCount);
         Assert.Equal("t2", compacted.TurnId);
+        // The host keeps its own copy of a Claude conversation and replaces it with this context.
+        LlmAgentContext carried = Assert.IsType<LlmAgentContext>(compacted.Context);
+        Assert.Equal(compacted.ContextRevision, carried.Revision);
+        Assert.Equal([ConversationCompactor.SummaryTurnId, "t2", "t2"], carried.Entries.Select(entry => entry.TurnId));
         Assert.Equal(1, first.Disposals);
         Assert.Equal(2, factory.Invocations.Count);
         await CompleteTurnAsync(session, second);
