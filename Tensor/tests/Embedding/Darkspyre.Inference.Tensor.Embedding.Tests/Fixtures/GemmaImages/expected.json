@@ -1,0 +1,9 @@
+{
+  "source": "Captured once from the TensorSharp fork at b3e06878: Gemma4ImageProcessor(imageMean: [0, 0, 0], imageStd: [1, 1, 1], referenceSizing: true).ProcessImage(bytes). sha256 is over the float32 little-endian bytes of the channel-first pixels.",
+  "images": {
+    "grey.png": { "width": 912, "height": 672, "length": 1838592, "sha256": "01f08120286edec4b059d3d66a1c9c20f89e36a80b5e095b39657f7f19575602" },
+    "photo.jpg": { "width": 912, "height": 672, "length": 1838592, "sha256": "88cd4dbb9f5f3577aa9f98c8f633a5a5a0f906fa272effe5d12a7b381fc15d0c" },
+    "rgb.png": { "width": 1056, "height": 576, "length": 1824768, "sha256": "d40552677c614f4e327426cb242daf39be7987ee14fba98e18556cf54bae4cd6" },
+    "rgba.png": { "width": 960, "height": 624, "length": 1797120, "sha256": "571136427f6fdc3a2d742e7081357fe607124eef495f113daf68b6c68c8f9afb" }
+  }
+}
