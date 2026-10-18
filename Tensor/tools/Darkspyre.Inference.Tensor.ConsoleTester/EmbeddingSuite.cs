@@ -52,14 +52,14 @@ internal static class EmbeddingSuite
                 ModelId = definition.Key.ModelId,
                 Inputs = [new TextEmbeddingInput("Dispose the loaded model before shutting down the native runtime."),
                     new TextEmbeddingInput("The invoice lists the purchased items and their prices.")],
-                Dimensions = 512
+                Dimensions = 256
             }, token);
             EmbeddingResult query = await engine.EmbedAsync(new()
             {
                 ModelId = definition.Key.ModelId,
                 Inputs = [new TextEmbeddingInput("How do I release the native model and runtime?")],
                 Kind = EmbeddingInputKind.Query,
-                Dimensions = 512
+                Dimensions = 256
             }, token);
             Verify(documents, definition, capabilities, 2, observation.Backend);
             Verify(query, definition, capabilities, 1, observation.Backend);
@@ -77,7 +77,7 @@ internal static class EmbeddingSuite
         EmbeddingResult restored = JsonSerializer.Deserialize(
             JsonSerializer.Serialize(result, InferenceJson.EmbeddingResult), InferenceJson.EmbeddingResult)
             ?? throw new InvalidOperationException("The embedding result JSON returned null.");
-        if (restored.Dimensions != 512 || restored.Vectors.Count != count || restored.TruncatedInputs.Count != 0
+        if (restored.Dimensions != 256 || restored.Vectors.Count != count || restored.TruncatedInputs.Count != 0
             || restored.ModelFingerprint != capabilities.ModelFingerprint || restored.Usage != result.Usage
             || restored.Usage.InputTokens <= 0 || restored.Provenance.ModelId != definition.Key.ModelId
             || restored.Provenance.ModelRevision != definition.Key.Revision || restored.Provenance.Backend != backend?.ToString())
@@ -85,7 +85,7 @@ internal static class EmbeddingSuite
         for (int index = 0; index < count; index++)
         {
             float[] vector = restored.Vectors[index];
-            if (vector.Length != 512 || !vector.SequenceEqual(result.Vectors[index]) || vector.Any(value => !float.IsFinite(value))
+            if (vector.Length != 256 || !vector.SequenceEqual(result.Vectors[index]) || vector.Any(value => !float.IsFinite(value))
                 || Math.Abs(Dot(vector, vector) - 1) > 0.001)
                 throw new InvalidOperationException("The result lost its ordered unit-length vector values.");
         }

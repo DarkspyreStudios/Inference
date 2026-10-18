@@ -1,6 +1,6 @@
 # Darkspyre.Inference.Tensor
 
-Source package version **11.15.1-rc.1** uses the shared typed reasoning-level contract; Qwen supports `None` and `High`.
+Source package version **11.16.0-rc.1** uses the shared typed reasoning-level contract; Qwen supports `None` and `High`.
 It includes Laya's CPU/GPU-only Core ML update and retains the ONNX and user-selected
 model-location/import contracts introduced in 11.4.0-rc.1.
 
@@ -18,7 +18,7 @@ leaves behind; a newer file may belong to another process's download. Each engin
 installed files as plain paths: Qwen and
 Supra pass them to TensorSharp, Laya creates its ONNX Runtime session from the model path,
 Whisper loads through `WhisperFactory.FromPath`, and the embedding engine loads through
-TensorSharp's `EmbeddingModelFactory.Load`. Gemma creates its ONNX text and vision sessions from verified pack paths.
+TensorSharp's `EmbeddingModel.Load`. Gemma creates its ONNX text and vision sessions from verified pack paths.
 
 Library boundaries:
 
@@ -26,8 +26,8 @@ Library boundaries:
   verification, the local pack directory, execution coordination and all Tensor capability interfaces.
   The capability namespaces remain `.Tensor.LLM`, `.Image`, `.Decision`, `.STT` and `.Embedding`;
   they resolve from the Common assembly without loading a model implementation.
-- `Darkspyre.Inference.Tensor.Ggml` — `GgmlRuntimeOwner`, the one owner of the GGML native runtime
-  that every engine running on GGML borrows.
+- `Darkspyre.Inference.Tensor.Ggml` — `GgmlRuntimeOwner`, the one owner of the process's GGML and MLX
+  native runtime that every engine running on GGML or MLX borrows.
 - `Darkspyre.Inference.Tensor.LLM.Qwen` — Qwen-compatible GGUF text inference.
 - `Darkspyre.Inference.Tensor.Image.Supra` — Supra2-IMG text-to-image inference. It runs the pinned
   Supra DiT, Flan-T5-Base encoder, and Stable Diffusion VAE decoder directly through TensorSharp on
@@ -43,24 +43,24 @@ Library boundaries:
   Whisper.net runtime. Whisper.net, Whisper.net.Runtime and NAudio.Core remain declared NuGet
   dependencies, not third-party DLLs embedded by the Darkspyre package.
 - `Darkspyre.Inference.Tensor.Embedding` — resident text embeddings through TensorSharp's GGUF
-  embedding models. Models arrive by import; the resolver accepts a GGUF whose header is a Qwen3
-  embedding model (last-token pooling; managed CPU, GGML CPU and Metal) or a BERT embedding model
-  (mean, CLS or last-token pooling; managed CPU and GGML CPU, because TensorSharp's Metal encoder
-  cannot run it), with 1,024 dimensions and at least an 8,192-token context.
+  embedding models. Models arrive by import; the resolver accepts a GGUF whose header is a BERT
+  embedding model (mean, CLS or last-token pooling; managed CPU and GGML CPU, because TensorSharp's
+  Metal encoder cannot run it), with 1,024 dimensions and at least an 8,192-token context. An
+  installed Qwen3-Embedding pack (GGUF architecture `qwen3` with last-token pooling) is reported
+  as not supported, with `TensorEmbeddingModels.Qwen3EmbeddingRetiredReason`.
   On Auto and the GGML backends the engine borrows the shared `GgmlRuntimeOwner`, so it runs on the
   backend the process's other GGML engines use; a pack that does not support that backend fails to
   load. The runtime formats queries itself: callers state whether inputs are queries or documents,
   using Common's `TextEmbeddingInput`. Capabilities declare text support; a batch containing
   `MediaEmbeddingInput` fails with `UnsupportedFeature` before the model runs.
-  Documents are embedded as given. Qwen3 queries carry an instruction, by default the codebase
-  retrieval task; BERT queries take the `query: ` prefix. The runtime counts every input before
+  Documents are embedded as given; BERT queries take the `query: ` prefix. The runtime counts every input before
   embedding any; an input over the limit fails the request with `EmbeddingInputTooLongException`,
   which names each over-limit input, unless the request permits truncation, in which case the
   result lists the inputs that were cut. A smaller requested size is taken from the vector's leading
-  values and scaled back to unit length (Qwen3: 32 to 1,024; BERT: 256 and 1,024). Each result
+  values and scaled back to unit length (BERT: 256 and 1,024). Each result
   carries the model fingerprint, a SHA-256 over the weights, architecture and query format; vectors
   with different fingerprints are not comparable.
-  A failed model release retains the model and its artifact/runtime leases. An explicit unload or
+  A failed model release retains the model and its artifact lease. An explicit unload or
   stop can retry release. Concurrent and repeated disposal calls share the original cleanup outcome.
   The owning Embedding tests use verified local packs and a stand-in model loader; they cover load
   cancellation, metadata failure, retained cleanup failure and teardown drain without native execution.
@@ -96,11 +96,11 @@ Setup Examples and Tensor ConsoleTester declare that reference alongside their
 engine and registry references. A transitive implementation reference does not
 supply the constructor's compile-time type in this source build.
 
-The existing Tensor ConsoleTester runs `tensor embedding --store <model-store> --backend GgmlMetal`
+The existing Tensor ConsoleTester runs `tensor embedding --store <model-store> --backend GgmlCpu`
 against the first model the Embedding family reports in that model store. It downloads nothing. The command checks ordered
-document/query vectors at 512 dimensions, unit length, matching-document ranking, actual fingerprint
-and provenance, and a result round-trip through `InferenceJson.EmbeddingResult`. A loaded GGML model
-must report Busy on runtime shutdown. The command disposes the model before terminal runtime cleanup.
+document/query vectors at 256 dimensions, unit length, matching-document ranking, actual fingerprint
+and provenance, and a result round-trip through `InferenceJson.EmbeddingResult`. The command disposes
+the model before the runtime owner.
 This qualification does not exercise over-limit inputs, truncation, native failures or other models.
 
 The console tester command `tensor gemma <cpu|webgpu> <model-directory> <fixture-directory> <output-directory>`
@@ -118,7 +118,7 @@ profile. Core ML uses CPU and GPU compute units; WebGPU is a separate ONNX optio
 The `webgpu-plugin` option loads Microsoft's packaged WebGPU provider for native cross-platform qualification.
 The image mode executes the pinned vision graph and then the main embedding graph using
 verified PIL-reference patches and positions. A separate preprocessing check compares the
-existing Gemma4 processor with those reference inputs, including patch padding and position order.
+production Gemma image preprocessing with those reference inputs, including patch padding and position order.
 The `images-shared` mode feeds the shared processor's pixels and the same patch packing
 directly into both ONNX graphs. It retains the frozen-input mode as an execution control.
 A separate-context control tests WebGPU cleanup with independent vision/text contexts.
@@ -128,21 +128,8 @@ embedding, and reports image preprocessing separately. External WebGPU 0.4.0 wit
 CPU/default input memory passes the measured text/image runs on Mac, Linux and Windows.
 The shared RGB bicubic resizer clips and rounds both passes before normalization to match
 the PIL reference. The qualification summary keeps preprocessing and encoder agreement separate.
-The profile identifies CPU partitions. The TensorSharp option loads the same export's FP32
-weights and runs its text forward pass through existing GGML tensor operations on Metal.
-Its resident-weight variant packs FP32 matrices once during loading and uses the existing
-GGML resident matrix operation. The Mac comparison script records every call's vector
-and checks execution parity against ONNX CPU and the preceding measured variant.
-The resident-row variant combines the fused path with `GetRowsQuant` using FP32
-weights. It avoids materializing the full embedding table before row selection.
-The fused variant also uses the existing Gemma norm/projection, feed-forward,
-post-norm/residual and PLE graphs while retaining the generic attention path.
-The grouped variant adds the existing FP32 grouped attention graph with an all-visible
-mask for the probe's bounded inputs and replaces repeated K/V copies with layout conversions.
-The `ggml-cpu` and `ggml-cpu-fused` options run the same TensorSharp forward on CPU.
-Optional diagnostic modes capture intermediate FP32 tensors or phase timings and managed
-allocation counts and inspect runtime ownership growth. An explicit diagnostic control
-disables GGML async compute. Host copies use the shared storage barrier. Trace reads synchronize execution and are excluded from performance claims.
+The profile identifies CPU partitions. The Mac comparison script records every call's vector
+and checks execution parity against ONNX CPU.
 Each option runs in its own process. The probe accepts 2–512 tokens, where the full and
 sliding attention masks coincide, and does not register an engine in the shipped Tensor catalog.
 The [probe instructions](tools/Darkspyre.Inference.Tensor.GemmaExperiment/README.md)
@@ -153,17 +140,17 @@ retrieval, cancellation, reuse and pack release. Its summary compares CPU and We
 across Mac, Linux and Windows with the frozen CPU image reference. The SelfHost tool fixture
 checks the supplied time tool alongside the universal conversation path's built-in tools.
 
-Supra's publisher supplies the DiT as a PyTorch ZIP state dictionary rather than safetensors. The
-Darkspyre TensorSharp fork reads that file as data through a whitelist-only checkpoint reader. It
+Supra's publisher supplies the DiT as a PyTorch ZIP state dictionary rather than safetensors.
+Supra's `TorchStateDictionaryFile` reads that file as data through a whitelist-only checkpoint reader. It
 accepts only the tensor rebuild, storage, and container forms required by the pinned checkpoint and
 rejects arbitrary pickle globals and reducers. Flan-T5 and the VAE use their pinned safetensors
 artifacts. No Python or PyTorch component is loaded or executed.
 
 Tensor uses `Darkspyre.ML.Tokenizers` for the focused SentencePiece correction needed by Flan-T5
-models whose BOS token is intentionally disabled. This release uses TensorSharp 2.8.6.4;
-this development checkout uses the local-only GGUF fix described below. Both include rank-four
-channels-last image group normalization. These fork packages retain the upstream
-assemblies and namespaces; consuming code remains first-class C# and does not load Python or PyTorch.
+models whose BOS token is intentionally disabled. Tensor runs on the upstream TensorSharp packages
+from nuget.org at the version `TensorSharpVersion` in `Directory.Packages.props` names; changing that
+property takes another release. `TensorSharpRelease.Version` reports it at run time from the
+assembly metadata the build writes. Consuming code remains first-class C# and does not load Python or PyTorch.
 
 Each implementation library publishes its pack definition separately from installation. A desktop
 application composes the packs it supports into a `TensorModelCatalog`, constructs one
@@ -209,12 +196,8 @@ Failed enumeration cleanup fences further inference and retains the refused iter
 ownership. Teardown reports the original operation and each independent cleanup error once.
 Repeated disposal preserves that outcome without replaying failed stream cleanup.
 
-Direct MLX Qwen models and default probes borrow the same runtime owner's admission fence.
-Concurrent models keep separate leases. Unload and Stop release the instance's lease and leave
-the shared worker reusable. Explicit runtime shutdown refuses live model/probe/execution leases.
-After drain, terminal cleanup clears checked MLX caches and retires the worker through
-`MlxBackend.Shutdown`. The owner's Plan and Current remain GGML-specific; they do not describe
-an MLX native ABI. Common and Connect contracts stay unchanged.
+Qwen models on MLX select their backend through the same runtime owner as GGML models. The owner
+loads at most one native candidate per process; native state stays until the process exits.
 
 Laya owns an acquired pack lease and each returned model before checking load cancellation.
 Failed load cleanup preserves the load error and the cleanup error. The engine retains resources
@@ -291,14 +274,20 @@ A provider exposes four operations:
 - `BuiltInModels` lists the engine's built-in packs. Whisper has its twelve published variants, Supra
   and EmbeddingGemma have one each, and Qwen, Embedding and Laya have none: their models arrive by
   import. Reading it touches no file.
-- `GetInstalledModelsAsync(IPersist modelStore)` returns the models the engine can load from its
-  `ModelStoreKey` store in the model store, through `TensorInstalledPacks.ReportAsync`. A pack is
+- `GetInstalledModelsAsync(packs)` returns a `TensorInstalledReport` for the folder of the given
+  `TensorModelPackManager`, which the host roots at `<model store>/<ModelStoreKey>`, through
+  `TensorInstalledPacks.ReportAsync`. A pack is
   reported when its `install.json` names artifacts that are all present at their recorded length, and
   the family recognises it: a built-in whose key and artifact hashes match `install.json`, or a pack
   whose `model.json` matches `install.json`, passes the engine's compatibility validator and, where the
   family has a resolver, resolves as Supported from its installed files. The report hashes nothing and
-  loads no native code; the lease before a load hashes every artifact. Built-ins come first, then the
-  others by key.
+  loads no native code; the lease before a load hashes every artifact. `Installed` lists built-ins
+  first, then the others by key. A pack whose format check returns Unsupported with the issue code
+  `architecture-retired` (`TensorInstalledPacks.RetiredArchitectureCode`) goes to `Unsupported`
+  with the issue's message as its reason: Qwen reports a `qwen3` GGUF this way and Embedding a
+  Qwen3-Embedding GGUF. `TensorInstalledPacks.ListAsync` lists those packs after the offered models
+  as `NotSupported` with `TensorListedModel.UnsupportedReason`; their status card offers only
+  Delete download.
 - `CreateInstance(packs, backend)` constructs the engine with its own execution coordinator. The
   returned `ITensorModelInstance` also implements the engine's capability interface:
   `ITensorLlmInference`, `ITensorImageInference`, `ITensorDecisionInference` or
@@ -348,12 +337,15 @@ foreach (TensorEngineDefinition definition in registry.Definitions)
 
 if (registry.TryGetProvider(savedConfiguration.ImplementationId, out ITensorEngineProvider? provider))
 {
-    var modelStore = new OsUserPersist(hostStorageRoot);
-    IReadOnlyList<TensorModelPackDefinition> installed = await provider.GetInstalledModelsAsync(modelStore);
-    TensorModelListing listing = await TensorInstalledPacks.ListAsync(modelStore, hostStorageRoot,
-        provider.Definition.ModelStoreKey, provider.BuiltInModels, installed, savedDefinition);
-    var packs = new TensorModelPackManager(new TensorModelCatalog(listing.Models.Select(model => model.Definition)),
-        Path.Combine(hostStorageRoot, provider.Definition.ModelStoreKey));
+    string folder = Path.Combine(hostStorageRoot, provider.Definition.ModelStoreKey);
+    TensorModelListing listing;
+    using (var reportPacks = new TensorModelPackManager(new TensorModelCatalog([]), folder))
+    {
+        TensorInstalledReport installed = await provider.GetInstalledModelsAsync(reportPacks);
+        listing = await TensorInstalledPacks.ListAsync(reportPacks, hostStorageRoot, provider.BuiltInModels,
+            installed, savedDefinition);
+    }
+    var packs = new TensorModelPackManager(new TensorModelCatalog(listing.Models.Select(model => model.Definition)), folder);
     ITensorModelInstance instance = provider.CreateInstance(packs, savedConfiguration.Backend);
     // A host with a live model store implements ITensorModelList and raises Changed after each new report.
     TensorSettingsManager manager = provider.CreateSettingsManager(commitTarget, packs, TensorModelList.Fixed(listing), instance);
@@ -363,15 +355,11 @@ if (registry.TryGetProvider(savedConfiguration.ImplementationId, out ITensorEngi
 
 `tensor registry --store <dir>` in the Tensor ConsoleTester lists every registered engine, its built-in
 count, each offered model with its install state in that model store (`installed`, `not-downloaded` or
-`files-missing (<file>)`), and opens its settings through the same provider calls. It installs, loads and saves nothing.
+`files-missing (<file>)` or `not-supported (<reason>)`), and opens its settings through the same provider calls. It installs, loads and saves nothing.
 
 The Qwen console runner retains the shared runtime owner that its engine borrows. It disposes the
-engine before retiring the runtime. Operation, engine cleanup and runtime cleanup failures remain
-independent causes. Runtime disposal preserves the supplier's original failure. A failed retirement
-is not retried to obtain a status. After successful retirement, the runner prints the owned JSON
-shutdown observation from `ShutdownAsync`; an already retired owner reports `AlreadyStopped`.
-An unsafe or busy observation and any cleanup failure produce a nonzero process exit. Successful
-generation alone does not establish runtime retirement.
+engine before the runtime owner. Operation, engine cleanup and runtime cleanup failures remain
+independent causes, and any cleanup failure produces a nonzero process exit.
 
 The console's direct Qwen and Connect SelfHost tool suites share one parsed JSON schema for
 `get_time`. Schema construction does not use reflection serialization. SelfHost borrows the loaded
@@ -443,7 +431,7 @@ the configuration and reconstruct registrations when composing the manager after
 does not perform that unload. Stop remains terminal, and an
 already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
-These setup contracts use the synchronized source package version 11.15.1-rc.1, including
+These setup contracts use the synchronized source package version 11.16.0-rc.1, including
 provider-owned dirty state and explicit choice capabilities for the shared Settings editor.
 
 `TensorJson` exports assembly-owned `JsonTypeInfo<T>` for `SetupConfiguration`, `SetupChanges`,
@@ -467,9 +455,8 @@ operation locals are released. These tests execute no native runtime and downloa
 
 `ITensorBackendProbe.CheckAsync` takes a `TensorBackendProbeRequest`. The request carries an operation
 ID, implementation ID, requested backend, target RID, optional exact TensorSharp build identity and
-an ordered native candidate list. `TensorSharpBuildIdentity` keeps the package version, native ABI
-hash and pinned GGML commit separate. Each candidate carries its own ID, absolute bridge path,
-variant, build and RID. A bound probe supplies its trusted runtime plan. Settings never supply
+an ordered native candidate list. `TensorSharpBuildIdentity` names the TensorSharp package version.
+Each candidate carries its own ID, absolute bridge path, variant, build and RID. A bound probe supplies its trusted runtime plan. Settings never supply
 executable paths; the manager sends its implementation/backend identity and a fresh operation ID.
 Null candidates select ordinary package probing; an empty candidate list never falls through to
 ambient native discovery. The local defaults return an explicit Unknown observation for a nonempty
@@ -481,9 +468,9 @@ presence and successful initialization are separate observations. `ActualBackend
 successfully initialized runtime, not a suggested selection. Prerequisite checks leave actual
 backend, initialization and loaded-candidate identity unknown. Diagnostics preserve candidate
 order and report phase, safe code/message and possible surviving native state.
-Qwen's direct-native probe reports Unknown when a runtime query fails. A TensorSharp-recorded
-unsafe cleanup failure reports RequiresProcessRestart with a possible-surviving-state diagnostic.
-Neither result becomes missing-driver evidence or triggers another backend attempt. The settings manager
+Qwen's local probe reports Unknown when a runtime query fails. The runtime owner reports
+RequiresProcessRestart, with a possible-surviving-state diagnostic, when a candidate's library
+loaded but did not start. Neither result becomes missing-driver evidence or triggers another backend attempt. The settings manager
 rejects a result for another operation, implementation, requested backend or target RID. RID matching
 is exact and ordinal. Each settings draft reserves its own backend checks. Only the latest check
 can publish evidence, and every accepted draft edit invalidates outstanding checks, including an
@@ -497,111 +484,64 @@ and Common identities in one foreign generation. It settles injected checks and 
 round-trips saved changes through owned metadata, then releases the graph and verifies collection.
 This test does not initialize a native runtime or qualify an active model/session generation.
 
-`ITensorRuntimeOwner` declares generation runtime control alongside `ITensorBackendProbe`. It exposes
-the immutable `TensorRuntimePlan`, the runtime state, the nullable actual backend identity and a
-structured shutdown observation. `GgmlRuntimeOwner.GetOrCreate(plan)`, in
-`Darkspyre.Inference.Tensor.Ggml`, binds one assembly-generation owner of the GGML native runtime.
-Equal plans join it; conflicting plans refuse, including after terminal shutdown. Every engine that runs
-on GGML borrows that same owner: Qwen engines, model resolvers and settings, and the embedding engine.
-A loaded model holds one lease and enters the owner for each call. Each engine's probe checks its own
-implementation before it asks the owner about a backend. Constructing or serializing a plan never resolves a
-package catalog, inspects files, initializes a backend or establishes availability.
+`ITensorRuntimeOwner` declares process runtime control alongside `ITensorBackendProbe`. It exposes
+the immutable `TensorRuntimePlan`, the runtime state (Uninitialized, Initializing, Ready or
+Unavailable) and the nullable actual backend identity. `GgmlRuntimeOwner.GetOrCreate(plan)`, in
+`Darkspyre.Inference.Tensor.Ggml`, binds the process's one owner of the GGML and MLX native runtime.
+Equal plans join it; conflicting plans refuse. Every engine that runs on GGML or MLX borrows that same
+owner: Qwen engines, model resolvers and settings, and the embedding engine. Each engine's probe checks
+its own implementation before it asks the owner about a backend. Constructing or serializing a plan never
+resolves a catalog, inspects files, initializes a backend or establishes availability.
+
+A plan's candidates are GGML or MLX drivers. Each lists every native file with its size and SHA-256 and
+the files to load before the entry library (`Preload`). The first selection walks the candidates of the
+requested backend, or of the RID's Auto order, and hashes each candidate's files against the plan; the
+first file that is missing or differs refuses that candidate with its relative path. TensorSharp ships
+no GGML native library, so nothing loads before a candidate passes. The owner then loads the preload
+files and the entry library by absolute path, answers TensorSharp's `GgmlOps` library name with the
+loaded entry, and lets TensorSharp initialize the backend; an MLX candidate is named to TensorSharp's
+MLX loader instead. Auto with no candidate runs on TensorSharp's managed CPU backend; an explicit native
+backend with no passing candidate fails with `BackendUnavailable`. After a library loaded, the other
+candidates are reported not-selected: native state stays until the process exits.
 
 `AddTensorEngines(services, ggmlRuntimePlan)` carries the optional immutable logical plan into its
 lazy GGML owner factory. A factory-created owner is container-owned; an explicitly registered owner
-instance remains borrowed. Model instances release their own leases and never shut down the shared
-runtime. Stop/dispose instances before terminal runtime shutdown.
+instance remains borrowed. Disposing the owner refuses new selections.
 Dispose a service provider that resolves these registrations asynchronously with `await using` or
 `DisposeAsync`. Its factory-created GGML runtime owner has an asynchronous terminal lifetime.
 
-Qwen consumes the TensorSharp 2.8.6.9 managed loader APIs through ordinary PackageReferences.
-GGML is a direct Qwen and Ggml library dependency. Source restore and compilation do not substitute
-supplier project references. The actual private-generation test composes Qwen with the package's
-Chat/Models/GGML/Core/Runtime assemblies, checks an explicit empty plan, and retires owned metadata
-and zero-handle runtime state. It does not initialize a backend, resolve a catalog or load a model.
+Qwen consumes the TensorSharp managed loader APIs through ordinary PackageReferences. GGML and MLX
+are direct Ggml library dependencies, and GGML is also a direct Qwen dependency. A selection's failure
+reason is public; its original exception stays the inner cause of the `InferenceException` a load
+receives and is never serialized into a probe observation.
 
-Null candidates resolve the supplier's finite deployed package catalog once at the first admitted
-GGML check/load. Empty candidates admit nothing and never resolve or load ambient libraries. Auto
-considers compatible concrete backend groups in priority order. It stops fallback after any possibly
-retained native state. Actual backend, variant, build, ABI and native source commit come from successful
-supplier initialization, not the requested backend or current managed source checkout.
-Initialization exceptions remain private to the owner. Model admission/load failures retain the
-original exception as an inner cause; public probe reasons and diagnostics remain sanitized.
-Managed owner tests verify that later restart-required refusals retain the same initialization
-cause without serializing it into the probe observation.
-An initialization `OutOfMemoryException` escapes unchanged. The owner retains that same cause
-for later restart-required admission and execution refusals without retrying initialization.
-
-Initialization, queued model loading, resident models and execution retain owner leases until their
-actual work/cleanup settles. Ordinary shutdown with active leases reports Busy without teardown.
-Disposal synchronously fences new work and reports Busy/failure visibly. Existing instances retain
-release-only cleanup access; explicit terminal shutdown can finish after they drain. Concurrent
-shutdown/disposal calls share cleanup and failure. A cancelled shutdown wait does not cancel cleanup
-or reopen admission. Supplier refusals without structured safe-Busy proof report FailedRequiresProcessExit;
-no diagnostic text is parsed to invent counts or recoverability.
-Managed owner tests hold supplier cleanup pending to verify cancelled-wait isolation and shared
-completion. They verify explicit safe-Busy retry through the injected supplier without native execution.
-Supplier shutdown exceptions remain private to the owner. Disposal preserves the actual exception
-as its inner cause, and repeated disposal shares that failure without repeating terminal cleanup.
-Structured shutdown observations retain their safe diagnostics and do not serialize that exception.
-Cleanup allocation failures use that same terminal outcome. They do not skip the other admitted
-terminal action or erase an earlier failure. Disposal preserves each actual cause without replay.
-An initialized supplier that remains Ready after its guard refuses teardown reports Busy with zero
-owner leases and possible external native resources. Its control is retained for explicit retry after
-those resources drain; the admission fence stays closed. Unknown or poisoned refusals remain terminal.
-
-If acquisition cancellation is followed by model-lease cleanup failure, the runtime owner retains
-that exact cleanup handle and both failures remain visible. It does not count failed cleanup as
-release or invoke native shutdown over it. Explicit shutdown may retry only that held release;
-failure reports FailedRequiresProcessExit with the outstanding ownership, while successful release
-permits guarded terminal shutdown. Disposal preserves a failed held release as its inner cause;
-independent held-release failures remain together in an aggregate. The structured shutdown result
-does not serialize those exceptions. Each private shutdown completion binds its result to its cause,
-so a later explicit release retry does not replace the cause awaited by disposal.
-An allocation failure from a held lease's release retains the lease and reports the same failed
-shutdown observation. It does not enter supplier teardown while the lease remains outstanding.
-Drained terminal owners drop supplier/catalog task references
-without disposing borrowed collaborators.
-
-A failed model load/unload that cannot complete cleanup keeps its pack/runtime ownership. New loading
-or execution refuses until release-only cleanup succeeds, rather than replacing those held leases.
+A failed model load/unload that cannot complete cleanup keeps its pack ownership. New loading
+or execution refuses until release-only cleanup succeeds, rather than replacing that held lease.
 Qwen stops new operational admissions synchronously and shares the pending cleanup attempt. Stop still
 returns admission and publishes Stopped/Failed through the existing lifecycle; a completed failed Stop
 can be explicitly retried for release only. Dispose waits for actual cleanup and preserves its shared
 failure for repeated callers, even if a later explicit Stop successfully releases the resources.
 
 The embedding engine receives a loaded model before checking cancellation or pack metadata. Failed
-model release retains that model and its dependent runtime/artifact leases. After model release,
-runtime and artifact lease cleanup proceeds independently and preserves each failure. Failed cleanup
-refuses another load or execution. Explicit Stop retries only release work; Dispose shares the actual
-terminal cleanup outcome, including failure. A pack lease invokes its release callback once and shares
-that outcome with later disposal calls; a failed callback does not become a successful no-op.
+model release retains that model and its artifact lease. Failed cleanup refuses another load or
+execution. Explicit Stop retries only release work; Dispose shares the actual terminal cleanup
+outcome, including failure. A pack lease invokes its release callback once and shares that outcome
+with later disposal calls; a failed callback does not become a successful no-op.
 
-Plans deep-snapshot ordered GGML candidates and their file declarations. Each candidate has a
-distinct ID, exact build/RID and concrete GGML backend. Null candidates retain the standard-package
-policy; an empty list admits no candidates. File declarations require nonempty portable relative
-paths, nonnegative sizes and exact lowercase SHA-256 hashes. Constructor checks are lexical/data
-checks only. These checks do not prove actual links, bytes, trusted package provenance or exact
-entry-library binding to the complete file closure. A nonempty declaration is not execution evidence.
-The four runtime records retain positional construction, named arguments, deconstruction and `with`
-copies. Validated init accessors reject invalid copies and snapshot nested builds and diagnostics.
-Owned JSON requires every mandatory runtime fact, including zero sizes, observation timestamps,
-shutdown counts/state/flags and an explicitly nullable actual candidate ID. Missing facts refuse;
-they do not become zero, false, Completed or a default timestamp. Plan candidates remain optional.
-The two runtime-state enums retain their numeric wire values. Their owned JSON readers and writers
-reject undefined values, strings, nulls and numbers outside the Int32 range.
-The finite converters belong to `TensorJson` options, not attributes on public enum declarations.
-Caller-owned generated DTO metadata can compose those actual converter instances from the owned
-enum metadata options. This composition leaves the established `TensorBackendKind` data policy unchanged.
-
-`TensorRuntimeShutdownResult` snapshots its ordered safe diagnostics and carries the actual
-observation time, operation ID, outstanding owner leases and possible surviving native state.
-Completed, AlreadyStopped, Busy and FailedRequiresProcessExit remain distinct observations.
-The control contract cancels the caller's shutdown wait, not shared terminal cleanup. No native
-lease, handle or runtime-owner object has a JSON root. `TensorJson` exports the eight exact
-`TensorRuntime*` data/enum getters through its assembly-owned generated metadata. Controlled tests
-round-trip all eight through the real collectible Tensor.Common generation and verify collection
-after the metadata and operation locals retire; these tests perform no native execution.
+Plans deep-snapshot ordered GGML and MLX candidates, their file declarations and their preload lists.
+Each candidate has a distinct ID, exact build/RID and concrete GGML or MLX backend, and every preload
+path is a listed file other than the entry library. Null and empty candidate lists admit no native
+candidate. File declarations require nonempty portable relative paths, nonnegative sizes and exact
+lowercase SHA-256 hashes. Constructor checks are lexical/data checks only; the owner hashes the files
+at its first selection. A nonempty declaration is not execution evidence.
+The runtime records retain positional construction, named arguments, deconstruction and `with`
+copies. Validated init accessors reject invalid copies and snapshot nested builds.
+Owned JSON requires every mandatory runtime fact, including zero sizes and an explicitly nullable
+actual candidate ID. Missing facts refuse; they do not become zero or false. Plan candidates remain
+optional. `TensorRuntimeState` retains its numeric wire values. Its owned JSON reader and writer
+reject undefined values, strings, nulls and numbers outside the Int32 range. The finite converter
+belongs to `TensorJson` options, not an attribute on the public enum declaration. No native handle
+or runtime-owner object has a JSON root.
 
 Qwen and Supra now load the definition selected by `LoadAsync(key)`, rather than requiring the
 built-in key. Register complete, immutable definitions in the same manager used by the engine.
@@ -609,12 +549,15 @@ Neither Save nor a prompt installs/loads weights. Requests, execution coordinati
 and provenance use the resident pack's actual key. The host can Unload and then Load another
 compatible pack on the same instance; Stop remains terminal.
 
-Qwen targets `TensorLlmModels.QwenRuntimeArchitecture`: GGUF architectures `qwen3`, and the Qwen 3.5
-family `qwen35`, `qwen35moe` and `qwen3next`, which mixes full-attention layers with GatedDeltaNet
-recurrent layers. Other TensorSharp architectures, including `qwen4exp`, are not loaded. Its loader
+Qwen targets `TensorLlmModels.QwenRuntimeArchitecture`: the Qwen 3.5 family GGUF architectures
+`qwen35`, `qwen35moe` and `qwen3next`, which mixes full-attention layers with GatedDeltaNet
+recurrent layers. Other TensorSharp architectures, including `qwen4exp`, are not loaded. A `qwen3`
+GGUF is reported Unsupported with `TensorLlmModels.Qwen3RetiredReason`. A request's stop sequences
+are withheld from the stream while a piece can still complete one, and neither the stream nor the
+result text contains the matched sequence. Its loader
 checks the installed GGUF architecture/version, tokenizer and chat metadata, dimensions, storage
-encoding and complete shard declarations before native allocation. Qwen 3 checks every layer's
-tensor shapes; for the Qwen 3.5 family it checks the recurrent-state keys and layer layout, and
+encoding and complete shard declarations before native allocation. It checks the recurrent-state
+keys and layer layout, and
 TensorSharp's own load validates each layer. Listed context/output limits remain unknown until validated loaded-runtime
 metadata is available. A split GGUF pack
 installs every declared shard beside the primary file under its numbered name, and Qwen passes
@@ -944,26 +887,22 @@ the Audio / SpeechTranscription task without provider-name renderer branches.
 
 ## Package dependency boundary
 
-Tensor depends on **Darkspyre.Inference.Common [11.15.1-rc.1]** and the **Darkspyre.TensorSharp.*
-2.8.6.9** dependency closure through NuGet. None of their DLLs is embedded in Tensor. TensorSharp
-loads model files from paths and provides bounded metadata inspection through its GGUF,
-safetensors and restricted PyTorch readers. `Darkspyre.TensorSharp.Backends.GGML` is managed-only.
-Its restore graph does not select a GGML native package. Consumers supply compatible native
-packages or an explicit runtime candidate plan before an admitted backend check or model load.
-An empty candidate plan never falls through to ambient probing. Package presence does not establish
-backend availability or successful model allocation.
-
-For the macOS ARM64 engine, explicitly reference
-`Darkspyre.TensorSharp.Backends.GGML.Native.osx-arm64` version **2.8.6.9** alongside Tensor.
-The native 2.8.6.8 package's catalog does not satisfy this managed wrapper's contract.
-The managed Tensor libraries do not select this native dependency. Local archives are not a claim
-of private-feed publication, native execution or full-model qualification.
+Tensor depends on **Darkspyre.Inference.Common [11.16.0-rc.1]** and the upstream **TensorSharp.***
+packages from nuget.org at `TensorSharpVersion` (**2026.10.11**), plus StbImageSharp for Gemma's
+image decoding. None of their DLLs is embedded in Tensor. TensorSharp loads model files from paths.
+Bounded metadata inspection is Tensor's own: `GgufHeader` in Tensor.Common and `SafetensorsHeader`
+and `TorchStateDictionaryFile` in Supra read through `MetadataReadStream`, which bounds every read.
+`TensorSharp.Backends.GGML` ships no native library. Consumers supply verified drivers through an
+explicit runtime candidate plan before an admitted backend check or model load. An empty candidate
+plan never falls through to ambient probing. Package presence does not establish backend
+availability or successful model allocation. Local archives are not a claim of private-feed
+publication, native execution or full-model qualification.
 
 Use the root `NuGet.Config` and process-scoped private-feed credentials for normal restores when the
 required package version is available on the feed. A local archive source for verification is an
 explicit separate restore configuration, not a permanent shipping-source redirect.
-Darkspyre dependencies come from the private feed; Microsoft.ML.OnnxRuntime, Whisper.net, its
-runtime and NAudio.Core come from public NuGet. Their own packages own their assemblies/native runtime assets. Tensor contains
+Darkspyre dependencies come from the private feed; TensorSharp, StbImageSharp, Microsoft.ML.OnnxRuntime,
+Whisper.net, its runtime and NAudio.Core come from public NuGet. Their own packages own their assemblies/native runtime assets. Tensor contains
 only its capability, engine and registry assemblies and their XML documentation, README and license.
 The registry's dependency-injection abstractions come from the .NET shared framework.
 
@@ -974,5 +913,5 @@ installation. Whisper's advertised CPU runtime and ONNX Runtime's native library
 Core ML execution provider, are supplied by their public package dependencies.
 The CUDA dependency retains its committed PTX payload; disabling native builds does not remove that
 payload. Tensor's archive boundary excludes those foreign shader files. The strict
-`VerifyRuntimeInventory --require-managed-ggml` gate checks actual restored GGML package identities
-and payloads while retaining the separate Whisper, ONNX, image-runtime and GPU asset inventory.
+`VerifyRuntimeInventory --require-managed-ggml` gate checks that no restored package carries a GGML
+native library while retaining the separate Whisper, ONNX, image-runtime and GPU asset inventory.

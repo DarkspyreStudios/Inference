@@ -163,8 +163,9 @@ public sealed class GgmlRuntimeOwner : ITensorRuntimeOwner
         try { result = await SelectCoreAsync(requested).ConfigureAwait(false); }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            result = Selection.Failed(TensorBackendAvailabilityState.Unavailable,
-                "The native runtime could not be selected.", [], []) with { Error = error };
+            Selection failed = Selection.Failed(TensorBackendAvailabilityState.Unavailable,
+                "The native runtime could not be selected.", [], []);
+            result = failed with { Error = error };
         }
         lock (_gate)
         {

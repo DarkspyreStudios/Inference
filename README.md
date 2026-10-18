@@ -4,8 +4,9 @@
 
 `Darkspyre.ML.Tokenizers` is the explicit NuGet exception. It remains a package in source mode, restored from nuget.org like any third-party package; changes to that fork are consumed through a NuGet version update.
 
-`DarkspyreDependencyMode` defaults to `Source`. Builds resolve TensorSharp and host-tool storage
-references from sibling TensorSharp, SecureStore and PersistenceStore worktrees automatically.
+`DarkspyreDependencyMode` defaults to `Source`. Builds resolve host-tool credential storage
+references from the sibling SecureStore worktree automatically. TensorSharp always comes from its
+upstream nuget.org packages.
 Release commands select `-p:DarkspyreDependencyMode=Packages` explicitly. `eng/deploy.sh` selects
 that mode for its nested processes. A missing source target fails without a package fallback.
 Shipping capability libraries remain independent of application credential storage and persistence.
@@ -19,18 +20,14 @@ directly without an HTTP bridge. A web service can host the same libraries and t
 into their typed contracts. In either case, the application owns startup, configuration, credentials,
 persistence, user consent, and shutdown.
 
-Current source and published package version: **11.15.1-rc.1**, targeting **.NET 11**.
+Current source package version: **11.16.0-rc.1**, targeting **.NET 11**.
 The library family is distributed through the private
 [DarkspyreStudios GitHub Packages feed](https://github.com/orgs/DarkspyreStudios/packages).
 The restore source is `https://nuget.pkg.github.com/DarkspyreStudios/index.json`.
 Unimplemented provider capabilities remain unavailable; publishing their contracts does not enable them.
-GGML engine activation additionally requires a compatible per-RID native package and catalog.
-Tensor uses the published TensorSharp **2.8.6.9** managed packages. A macOS ARM64 engine explicitly selects
-`Darkspyre.TensorSharp.Backends.GGML.Native.osx-arm64` **2.8.6.9**; the native 2.8.6.8 catalog is
-not compatible with its managed wrapper. The corrected Mac package is available on the same private
-feed. Fresh package-only consumer checks verify CPU, Metal and Auto initialization and clean shutdown
-in Debug and Release. These checks do not qualify model execution. The managed GGML wrapper is not
-a native driver and does not select the native package automatically.
+Tensor uses the upstream TensorSharp packages from nuget.org at the version `TensorSharpVersion` in
+`Directory.Packages.props` names (**2026.10.11**). They ship no GGML native library: GGML and MLX
+engine activation requires the application to supply verified drivers through a runtime plan.
 
 The repository also hosts the [GPU arbiter](App/README.md), an independent .NET 10 Windows
 x64 application under `App/` that shares a GPU between llama.cpp and ComfyUI. It owns its
@@ -144,17 +141,17 @@ Install only the products your application needs, keeping their versions synchro
 Workspace builds consume sibling source projects. Package installation uses the synchronized family version.
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect.OpenAiApi --version 11.15.1-rc.1
+dotnet add package Darkspyre.Inference.Connect.OpenAiApi --version 11.16.0-rc.1
 ```
 
 ```bash
-dotnet add package Darkspyre.Inference.Tensor.Image.Supra --version 11.15.1-rc.1
+dotnet add package Darkspyre.Inference.Tensor.Image.Supra --version 11.16.0-rc.1
 ```
 
 Optional, for an Avalonia host:
 
 ```bash
-dotnet add package Darkspyre.Inference.UI.Settings --version 11.15.1-rc.1
+dotnet add package Darkspyre.Inference.UI.Settings --version 11.16.0-rc.1
 ```
 
 Common is brought in transitively. An application that only consumes the shared contracts can
@@ -373,15 +370,10 @@ All library versions come from [Directory.Build.props](Directory.Build.props):
 `<net>.<release>.<minor>` means .NET generation, breaking-contract release, and compatible tweak/fix.
 The current `-rc.1` suffix reflects .NET 11 RC dependencies. Releases are coordinated and immutable.
 
-### Release-candidate mode and source mode
+### Source references for consumers
 
-Without source properties a build is in release-candidate mode: TensorSharp comes from the published packages
-pinned in `Directory.Packages.props`. No `NuGet.Config` names a local feed.
-
-Interim builds use source mode. `-p:TensorSharpSourceRoot=/absolute/TensorSharp` names a TensorSharp checkout,
-normally a detached worktree of its `origin/dev`. `Directory.Build.targets` then imports that checkout's
-`eng/SourceReferences.targets`, which turns each `Darkspyre.TensorSharp.*` PackageReference into a ProjectReference
-to the checkout.
+TensorSharp comes from the nuget.org packages pinned in `Directory.Packages.props` in every mode.
+No `NuGet.Config` names a local feed.
 
 Consumers of these packages use [eng/SourceReferences.targets](eng/SourceReferences.targets) the same way. A consumer
 that sets `InferenceSourceRoot` imports it, and each `Darkspyre.Inference.*` PackageReference becomes ProjectReferences

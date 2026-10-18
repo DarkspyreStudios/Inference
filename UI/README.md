@@ -1,7 +1,7 @@
 # Darkspyre.Inference.UI.Settings
 
-Source package version **11.15.1-rc.1**, synchronized with Common, Connect and Tensor. Its exact Common NuGet
-dependency is `[11.15.1-rc.1]`; the package does not embed Common, Connect, Tensor or Avalonia DLLs.
+Source package version **11.16.0-rc.1**, synchronized with Common, Connect and Tensor. Its exact Common NuGet
+dependency is `[11.16.0-rc.1]`; the package does not embed Common, Connect, Tensor or Avalonia DLLs.
 
 This package provides one host-placed Avalonia editor control for a provider's `InferenceSettings` object and
 its `IInferenceSettingsManager`. It renders the settings' fields, validation, status, and setup actions

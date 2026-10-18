@@ -56,8 +56,11 @@ public sealed class SupraModelResolver : TensorModelResolver
                     // The schema reads the tensor table in TensorSharp's shape, the one an installed load opens.
                     Dictionary<string, SafetensorTensorInfo> tensors = header.Tensors.ToDictionary(entry => entry.Key, entry => new SafetensorTensorInfo
                     {
-                        Name = entry.Key, Shape = entry.Value.Shape, Dtype = Enum.Parse<SafetensorDtype>(entry.Value.Dtype, ignoreCase: true),
-                        Begin = entry.Value.Begin, End = entry.Value.End
+                        Name = entry.Key,
+                        Shape = entry.Value.Shape,
+                        Dtype = Enum.Parse<SafetensorDtype>(entry.Value.Dtype, ignoreCase: true),
+                        Begin = entry.Value.Begin,
+                        End = entry.Value.End
                     }, StringComparer.Ordinal);
                     if (companion.Role == "text-model") { SupraCheckpointSchema.ValidateText(tensors); }
                     else { SupraCheckpointSchema.ValidateVae(tensors); }
