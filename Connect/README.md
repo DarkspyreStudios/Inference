@@ -425,7 +425,8 @@ steps are summarized, so the result lands near the target and the turn's next st
 never starts after the turn's first protected entry. The summary is built from the earlier summary and the entries it
 replaces, and the new summary replaces both. The summary input cuts tool output the same way. Summary requests run on
 the conversation's own connection and model, one part at a time, each within half the usable window, and the summary
-holds at most 3,000 words. On Codex a summary request that is refused as overloaded or whose stream is interrupted is sent
+holds at most 3,000 words. A summary request that runs past 10 minutes ends the compaction with `Compaction stopped: a
+summary request of about {tokens} tokens did not finish within 10 minutes. The context is unchanged.` On Codex a summary request that is refused as overloaded or whose stream is interrupted is sent
 again inside the session, up to three attempts. The working indicator shows `Pruning old context`, `Summarizing earlier messages` and
 `Applying the compacted context` as `LlmAgentActivityEvent` text, cleared by empty text. A compaction that changed the
 context emits `LlmAgentCompactedEvent` with the dropped-entry, shortened-output and removed-image counts, then an

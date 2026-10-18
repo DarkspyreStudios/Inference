@@ -115,6 +115,13 @@ internal sealed class ConversationCompactor(
     private const string SummaryPrefix = "Summary of the earlier conversation:\n";
 
     /// <summary>
+    /// How long one summary request may take before the compaction fails. Ten minutes is well above a half-window part
+    /// of a 1M-token window, which a sound request summarizes in a few minutes, and ends a stalled request
+    /// (Brandon, 2026-10-18).
+    /// </summary>
+    internal TimeSpan PartTimeout { get; init; } = TimeSpan.FromMinutes(10);
+
+    /// <summary>
     /// Compacts the context toward <see cref="CompactionLimits.TargetTokens"/>. Calls <paramref name="stage"/> with
     /// today's working-indicator text before shortening and before summarizing.
     /// </summary>
@@ -361,8 +368,10 @@ internal sealed class ConversationCompactor(
 
     /// <summary>
     /// One side request per part, one at a time, so a compaction never sends a burst of large requests on one account.
-    /// Each part's words are in proportion to its size. The first failure ends the compaction.
+    /// Each part's words are in proportion to its size. The first failure ends the compaction, and so does a request
+    /// that runs past <see cref="PartTimeout"/>.
     /// </summary>
+    /// <exception cref="CompactionFailedException">A summary request ran past <see cref="PartTimeout"/>.</exception>
     private async Task<List<(string Text, long Tokens)>> SummarizePartsAsync(List<(string Text, long Tokens)> parts,
         string modelId, int words, UsageSum usage, CancellationToken cancellationToken)
     {
@@ -370,8 +379,20 @@ internal sealed class ConversationCompactor(
         var summaries = new List<(string Text, long Tokens)>(parts.Count);
         foreach ((string text, long tokens) in parts)
         {
-            LlmChatResult result = await sideRequest(SummaryRequest.Create(modelId, text,
-                (int)Math.Max(MinimumPartWords, (double)words * tokens / total)), cancellationToken).ConfigureAwait(false);
+            using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            limit.CancelAfter(PartTimeout);
+            LlmChatResult result;
+            try
+            {
+                result = await sideRequest(SummaryRequest.Create(modelId, text,
+                    (int)Math.Max(MinimumPartWords, (double)words * tokens / total)), limit.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw new CompactionFailedException(
+                    $"Compaction stopped: a summary request of about {tokens} tokens did not finish within {PartTimeout.TotalMinutes:0} "
+                    + "minutes. The context is unchanged.", usage.Total);
+            }
             usage.Add(result.Usage);
             summaries.Add((result.Text, await EstimateAsync(result.Text, cancellationToken).ConfigureAwait(false)));
         }

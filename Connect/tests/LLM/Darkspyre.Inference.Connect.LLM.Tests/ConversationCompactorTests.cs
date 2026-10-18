@@ -99,6 +99,28 @@ public sealed class ConversationCompactorTests
     }
 
     [Fact]
+    public async Task ASummaryRequestPastTheTimeLimitFailsTheCompaction()
+    {
+        LlmAgentContextEntry[] older = Turn("t1", "older " + new string('z', 16_000));
+        var context = new LlmAgentContext { Entries = [.. older, .. Turn("t2", "now")] };
+        var compactor = new ConversationCompactor(
+            (measured, _) => ValueTask.FromResult(Harness.Measure(measured)),
+            async (_, token) =>
+            {
+                await Task.Delay(Timeout.Infinite, token);
+                throw new InvalidOperationException("unreachable");
+            },
+            (text, _) => ValueTask.FromResult<long?>(Harness.Tokens(text)),
+            null)
+        { PartTimeout = TimeSpan.FromMilliseconds(50) };
+
+        var failure = await Assert.ThrowsAsync<CompactionFailedException>(() => compactor.CompactAsync(context, "model", "t2",
+            new HashSet<string>(), Limits, NoStage, CancellationToken.None));
+
+        Assert.Contains("did not finish within", failure.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SummaryInputCutsToolOutput()
     {
         LlmAgentContextEntry[] older = [.. ToolTurn("t1", new string('q', 20_000)), .. Turn("t2", "older " + new string('z', 16_000))];

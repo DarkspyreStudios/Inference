@@ -25,6 +25,15 @@ internal sealed partial class ClaudeAgentClient
         long? usedTokens, long? windowTokens, bool? needsCompaction, long? listedTokens, long? learnedTokens, long? capTokens);
 
     [LoggerMessage(Level = LogLevel.Information,
+        Message = "Claude summary request on {ConnectionId} thread {ThreadId} started with {Characters} characters")]
+    private static partial void LogSummaryStarted(ILogger logger, string connectionId, string threadId, long characters);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Claude summary request on {ConnectionId} thread {ThreadId} of {Characters} characters {Outcome} after {Seconds:0} seconds")]
+    private static partial void LogSummaryEnded(ILogger logger, string connectionId, string threadId, long characters, double seconds,
+        string outcome);
+
+    [LoggerMessage(Level = LogLevel.Information,
         Message = "Claude compaction on {ConnectionId} thread {ThreadId} ({Reason}): model {ModelId}, {DroppedEntries} entries replaced by the summary, {ShortenedResults} tool results shortened; target {TargetTokens}, trigger {TriggerTokens}, window {WindowTokens} tokens")]
     private static partial void LogCompaction(ILogger logger, string connectionId, string threadId, string reason, string modelId,
         int? droppedEntries, int shortenedResults, long targetTokens, long triggerTokens, long windowTokens);
@@ -704,9 +713,34 @@ internal sealed partial class ClaudeAgentClient
                 ClaudeModelLimits.Get(turn.ModelId).ContextTokens, turn.Token);
         }
 
-        /// <summary>Sends one summary request in print mode on the conversation's connection and returns its result.</summary>
-        private Task<LlmChatResult> SideRequestAsync(LlmChatRequest request, CancellationToken cancellationToken) =>
-            SummaryRequest.ReadAsync(_owner.Chat.StreamAsync(_connection, request, cancellationToken), cancellationToken);
+        /// <summary>
+        /// Sends one summary request in print mode on the conversation's connection and returns its result. Logs its size,
+        /// duration and outcome.
+        /// </summary>
+        private async Task<LlmChatResult> SideRequestAsync(LlmChatRequest request, CancellationToken cancellationToken)
+        {
+            long characters = request.Messages.Sum(message => (long)message.Content.Length);
+            long started = System.Diagnostics.Stopwatch.GetTimestamp();
+            LogSummaryStarted(_owner.Logger, _connectionId, ThreadId, characters);
+            string outcome = "failed";
+            try
+            {
+                LlmChatResult result = await SummaryRequest.ReadAsync(_owner.Chat.StreamAsync(_connection, request, cancellationToken),
+                    cancellationToken);
+                outcome = $"completed with {result.Text.Length} characters";
+                return result;
+            }
+            catch (OperationCanceledException)
+            {
+                outcome = "cancelled";
+                throw;
+            }
+            finally
+            {
+                double seconds = System.Diagnostics.Stopwatch.GetElapsedTime(started).TotalSeconds;
+                LogSummaryEnded(_owner.Logger, _connectionId, ThreadId, characters, seconds, outcome);
+            }
+        }
 
         /// <summary>The corrected size of a text sent as one user message.</summary>
         private ValueTask<long?> EstimateTextAsync(string text, CancellationToken cancellationToken)
