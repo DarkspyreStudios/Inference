@@ -1,4 +1,4 @@
-"""Measure isolated Mac runtime variants against the same ONNX CPU outputs."""
+"""Measure isolated ONNX providers against the same ONNX CPU outputs."""
 
 import json
 import math
@@ -32,7 +32,6 @@ def main():
     model = Path(sys.argv[1]).resolve()
     output = Path(sys.argv[2]).resolve()
     executable = Path(__file__).resolve().parent / "bin/Release/net11.0/Darkspyre.Inference.Tensor.GemmaExperiment.dll"
-    previous = {"metal-resident": "metal", "metal-fused": "metal-resident", "metal-grouped": "metal-fused", "metal-rows": "metal-fused"}
     failures = []
     for provider in sys.argv[3:]:
         for length in (12, 128, 512):
@@ -50,8 +49,6 @@ def main():
                 raise ValueError("Reference and candidate inputs differ")
             vectors = result["vectors"]
             comparisons = [difference(vector, cpu["vector"]) for vector in vectors]
-            prior_path = output / f"{previous[provider]}-{length}/result.json" if provider in previous else None
-            prior = json.loads(prior_path.read_text()) if prior_path and prior_path.exists() else None
             log = (case / "run.log").read_text()
             rss = re.search(r"(\d+)\s+maximum resident set size", log)
             summary = {
@@ -63,16 +60,12 @@ def main():
                 "cpuMinCosine": min(item["cosine"] for item in comparisons),
                 "maxNormError": max(abs(item["norm"] - 1) for item in comparisons),
                 "repeatMaxAbs": max(difference(vector, vectors[0])["maxAbs"] for vector in vectors),
-                "previousVariant": previous.get(provider),
-                "previousMaxAbs": max(difference(vector, prior["vector"])["maxAbs"] for vector in vectors) if prior else None,
                 "command": command,
             }
-            # The original Metal probe differs from CPU by up to 7.32e-5 with cosine
-            # 0.999999826. These bounds admit that baseline, not retrieval-quality claims.
+            # These bounds measure execution parity, not retrieval quality.
             summary["parityPassed"] = (summary["cpuMaxAbs"] <= 1e-4
                                        and summary["cpuMinCosine"] >= 0.999999
-                                       and summary["maxNormError"] <= 1e-6
-                                       and (summary["previousMaxAbs"] is None or summary["previousMaxAbs"] <= 1e-4))
+                                       and summary["maxNormError"] <= 1e-6)
             (case / "measurement.json").write_text(json.dumps(summary, indent=2) + "\n")
             print(json.dumps({key: value for key, value in summary.items() if key != "command"}), flush=True)
             if not summary["parityPassed"]:
