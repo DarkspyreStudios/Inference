@@ -73,8 +73,7 @@ internal sealed record RuntimeInventory(
                 nuspec, managed.ToArray(), dependencies.ToArray()));
         }
         RuntimeCoverage[] coverage = BuildCoverage(native);
-        bool ggmlNatives = packages.Any(package => DependencyPolicy.IsNativeGgml(package.Id))
-            || native.Any(asset => IsGgml(asset.PackageId) && asset.Kind == "NativeLibrary");
+        bool ggmlNatives = native.Any(asset => IsGgml(asset.PackageId) && asset.Kind == "NativeLibrary");
         return new(1, sourceCommit, assetsHash, SupportedRids, packages, native, coverage, ggmlNatives, "NotRun");
     }
 
@@ -87,7 +86,7 @@ internal sealed record RuntimeInventory(
             Add("Whisper", rid, asset => asset.PackageId == "Whisper.net.Runtime", "whisper", "Whisper runtime uses build-target assets, not NuGet runtimeTargets.");
             Add("Magick", rid, asset => asset.PackageId.StartsWith("Magick.NET-Q8-", StringComparison.Ordinal), "Magick.Native", "AnyCPU includes native payloads; file presence does not prove image execution.");
             Add("OpenCv", rid, asset => asset.PackageId.Contains("OpenCvSharp", StringComparison.Ordinal), "OpenCvSharpExtern", "OpenCV-dependent paths require this vendor runtime; no other architecture substitutes.");
-            Add("Ggml", rid, asset => IsGgml(asset.PackageId), "GgmlOps", "Standalone consumers explicitly supply a compatible native package/plan after managed-only GGML adoption.");
+            Add("Ggml", rid, asset => IsGgml(asset.PackageId), "GgmlOps", "TensorSharp packs no GGML native library; consumers supply verified drivers through the runtime plan.");
         }
         return coverage.ToArray();
 
@@ -116,13 +115,6 @@ internal sealed record RuntimeInventory(
             return (parts[1], IsLibrary(path) ? "NativeLibrary" : "NativeAuxiliary");
         if (parts.Length >= 3 && parts[0] == "build" && IsLibrary(path))
             return (parts[1] switch { "macos-arm64" => "osx-arm64", "macos-x64" => "osx-x64", _ => parts[1] }, "NativeLibrary");
-        if (IsGgml(packageId) && parts.Length >= 3 && parts[0] == "ggml" && !parts.Skip(2).Contains("licenses", StringComparer.Ordinal))
-        {
-            string? rid = SupportedRids.FirstOrDefault(candidate => packageId.Equals(
-                DependencyPolicy.NativeGgml + "." + candidate + "." + parts[1], StringComparison.OrdinalIgnoreCase));
-            return (rid, IsLibrary(path) ? "NativeLibrary" : path.EndsWith(".ptx", StringComparison.OrdinalIgnoreCase)
-                || path.EndsWith(".cubin", StringComparison.OrdinalIgnoreCase) ? "GpuCode" : "NativeAuxiliary");
-        }
         if (path.EndsWith(".metal", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".metallib", StringComparison.OrdinalIgnoreCase)) return ("osx-arm64", "GpuCode");
         if (path.EndsWith(".ptx", StringComparison.OrdinalIgnoreCase)) return (null, "GpuCode");
         return (null, null);

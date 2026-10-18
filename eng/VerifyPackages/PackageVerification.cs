@@ -8,12 +8,12 @@ using NuGet.Versioning;
 
 internal sealed class DependencyPolicy
 {
-    internal const string Ggml = "Darkspyre.TensorSharp.Backends.GGML";
-    internal const string NativeGgml = Ggml + ".Native";
+    internal const string Ggml = "TensorSharp.Backends.GGML";
+    private const string TensorSharpChat = "TensorSharp.Chat";
     internal static readonly string[] TensorDependencies =
     [
-        "Darkspyre.ML.Tokenizers", "Darkspyre.TensorSharp.Backends.Cuda", Ggml, "Darkspyre.TensorSharp.Chat",
-        "Darkspyre.TensorSharp.Models", "Darkspyre.TensorSharp.Runtime", "Microsoft.ML.OnnxRuntime", "Microsoft.ML.OnnxRuntime.EP.WebGpu",
+        "Darkspyre.ML.Tokenizers", "TensorSharp.Backends.Cuda", Ggml, "TensorSharp.Backends.MLX", TensorSharpChat,
+        "TensorSharp.Models", "TensorSharp.Runtime", "StbImageSharp", "Microsoft.ML.OnnxRuntime", "Microsoft.ML.OnnxRuntime.EP.WebGpu",
         "Whisper.net", "Whisper.net.Runtime", "NAudio.Core"
     ];
     private readonly Dictionary<string, NuGetVersion> _versions;
@@ -37,11 +37,18 @@ internal sealed class DependencyPolicy
         PackageVerification.Require(document.Root?.Name.LocalName.Equals("Project", StringComparison.OrdinalIgnoreCase) == true, "Expected central package Project XML.");
         PackageVerification.Require(!document.Descendants().Any(element => element.Name.LocalName.ToUpperInvariant() is "IMPORT" or "CHOOSE" or "TARGET" or "USINGTASK"),
             "Imported, conditional or executable central package inputs are unsupported.");
+        // A version may name one unconditional property of the same file, as TensorSharpVersion does.
+        var properties = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (XElement property in document.Descendants().Where(element =>
+            element.Parent?.Name.LocalName.Equals("PropertyGroup", StringComparison.OrdinalIgnoreCase) == true
+            && !element.AncestorsAndSelf().Any(ancestor => PackageVerification.ReadAttribute(ancestor, "Condition") is not null)))
+            properties[property.Name.LocalName] = property.Value;
         var versions = new Dictionary<string, NuGetVersion>(StringComparer.OrdinalIgnoreCase);
         foreach (XElement item in document.Descendants().Where(element => element.Name.LocalName.Equals("PackageVersion", StringComparison.OrdinalIgnoreCase)))
         {
             string? id = PackageVerification.ReadAttribute(item, "Include");
             string? value = PackageVerification.ReadAttribute(item, "Version");
+            if (value is ['$', '(', .., ')'] && properties.TryGetValue(value[2..^1], out string? named)) value = named;
             PackageVerification.Require(!string.IsNullOrWhiteSpace(id)
                 && id.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '_') && !item.HasElements
                 && PackageVerification.ReadAttribute(item, "Update") is null && PackageVerification.ReadAttribute(item, "Remove") is null
@@ -52,16 +59,13 @@ internal sealed class DependencyPolicy
         }
         foreach (string id in TensorDependencies)
             PackageVerification.Require(versions.ContainsKey(id), $"Missing central package version: {id}.");
-        NuGetVersion tensorSharp = versions["Darkspyre.TensorSharp.Chat"];
+        NuGetVersion tensorSharp = versions[TensorSharpChat];
         PackageVerification.Require(versions.Where(item => IsTensorSharp(item.Key)).All(item => item.Value == tensorSharp),
             "Central TensorSharp package versions are not synchronized.");
         return new(versions);
     }
 
-    internal static bool IsNativeGgml(string id) => id.Equals(NativeGgml, StringComparison.OrdinalIgnoreCase)
-        || id.StartsWith(NativeGgml + ".", StringComparison.OrdinalIgnoreCase);
-
-    private static bool IsTensorSharp(string id) => id.StartsWith("Darkspyre.TensorSharp.", StringComparison.OrdinalIgnoreCase);
+    private static bool IsTensorSharp(string id) => id.StartsWith("TensorSharp.", StringComparison.OrdinalIgnoreCase);
 
     internal void ValidateDeclarations(IReadOnlyDictionary<string, XElement> dependencies, bool completeTensor = true)
     {
@@ -69,7 +73,7 @@ internal sealed class DependencyPolicy
             PackageVerification.Require(dependencies.ContainsKey(id), $"Tensor: missing declared dependency {id}.");
         foreach ((string id, XElement dependency) in dependencies)
         {
-            NuGetVersion? expected = IsTensorSharp(id) ? _versions["Darkspyre.TensorSharp.Chat"] : _versions.GetValueOrDefault(id);
+            NuGetVersion? expected = IsTensorSharp(id) ? _versions[TensorSharpChat] : _versions.GetValueOrDefault(id);
             if (expected is null) continue;
             string? declared = (string?)dependency.Attribute("version");
             PackageVerification.Require(declared is not null && VersionRange.TryParse(declared, out VersionRange? range)
@@ -81,14 +85,12 @@ internal sealed class DependencyPolicy
     internal void ValidateRestored(IEnumerable<(string Id, string Version)> packages)
     {
         (string Id, string Version)[] restored = packages.ToArray();
-        PackageVerification.Require(!restored.Any(package => IsNativeGgml(package.Id)),
-            "The restore graph contains a GGML native package, even if it has no native payload.");
         foreach (string id in TensorDependencies)
             PackageVerification.Require(restored.Any(package => package.Id.Equals(id, StringComparison.OrdinalIgnoreCase)),
                 $"The restore graph is missing {id}.");
         foreach ((string id, string version) in restored)
         {
-            NuGetVersion? expected = IsTensorSharp(id) ? _versions["Darkspyre.TensorSharp.Chat"] : _versions.GetValueOrDefault(id);
+            NuGetVersion? expected = IsTensorSharp(id) ? _versions[TensorSharpChat] : _versions.GetValueOrDefault(id);
             if (expected is null) continue;
             PackageVerification.Require(NuGetVersion.TryParse(version, out NuGetVersion? actual) && actual == expected,
                 $"The restored {id} version {version} differs from the central version {expected}.");
@@ -166,7 +168,6 @@ internal static class PackageVerification
         {
             string? dependencyId = (string?)dependency.Attribute("id");
             Require(!string.IsNullOrWhiteSpace(dependencyId) && dependencies.TryAdd(dependencyId!, dependency), $"{id}: missing or duplicate dependency identity");
-            Require(!DependencyPolicy.IsNativeGgml(dependencyId!), $"{id}: GGML native packages must be selected explicitly by the consumer");
             Require(!((string?)dependency.Attribute("version") ?? string.Empty).Contains("local", StringComparison.OrdinalIgnoreCase), $"{id}: local-only dependency leaked into release");
         }
         Require(metadata.Descendants(ns + "group").All(group => (string?)group.Attribute("targetFramework") == "net11.0"), $"{id}: unexpected target framework");
