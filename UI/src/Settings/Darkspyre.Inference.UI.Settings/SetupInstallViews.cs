@@ -6,7 +6,10 @@ using Avalonia.Media;
 
 namespace Darkspyre.Inference.UI.Settings;
 
-/// <summary>One install-state chip: Installed (success, check), Not downloaded (warning, download) or Files missing (destructive).</summary>
+/// <summary>
+/// One install-state chip: Installed (success, check), Not downloaded (warning, download), or Files missing and Not supported
+/// (destructive, no icon).
+/// </summary>
 public sealed class SetupInstallChip : ContentControl
 {
     // A check mark and a download arrow on a 24 unit grid.
@@ -17,7 +20,7 @@ public sealed class SetupInstallChip : ContentControl
     public SetupInstallChip(SetupInstallState state, string text)
     {
         StackPanel line = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
-        if (state != SetupInstallState.FilesMissing)
+        if (state is SetupInstallState.Installed or SetupInstallState.NotDownloaded)
         {
             Avalonia.Controls.Shapes.Path icon = new()
             {
@@ -40,6 +43,15 @@ public sealed class SetupInstallChip : ContentControl
             _ => "destructive",
         });
     }
+
+    /// <summary>Creates a choice's chip: "Installed", "Not supported", or <paramref name="notDownloaded"/> for a choice that is not
+    /// downloaded.</summary>
+    internal static SetupInstallChip ForChoice(SetupChoiceInstall install, string notDownloaded) => new(install.State, install.State switch
+    {
+        SetupInstallState.Installed => "Installed",
+        SetupInstallState.NotSupported => "Not supported",
+        _ => notDownloaded,
+    });
 
     /// <inheritdoc />
     protected override Type StyleKeyOverride => typeof(ContentControl);
@@ -75,6 +87,10 @@ public sealed class SetupInstallStatusCard : UserControl
             case SetupInstallState.NotDownloaded:
                 body.Children.Add(new SetupInstallChip(SetupInstallState.NotDownloaded, "Not downloaded"));
                 body.Children.Add(Text($"This model is not in {status.Location}. The engine cannot load it until it is downloaded."));
+                break;
+            case SetupInstallState.NotSupported:
+                body.Children.Add(new SetupInstallChip(SetupInstallState.NotSupported, "Not supported"));
+                body.Children.Add(Text(status.UnsupportedReason ?? string.Empty));
                 break;
             default:
                 body.Children.Add(new SetupInstallChip(SetupInstallState.FilesMissing, "Files missing"));

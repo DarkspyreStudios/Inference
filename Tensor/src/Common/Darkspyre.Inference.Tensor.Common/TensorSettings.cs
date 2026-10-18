@@ -235,7 +235,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
             ]
         };
         return new(listed.State, selection.Key.ModelId, Listing.Store, selection.Artifacts.Count, size, selection.License,
-            listed.MissingFile, actions);
+            listed.MissingFile, null, actions);
     }
 
     // The selected model's listed entry, offered or saved; null when the selection is not in the listing.
@@ -246,6 +246,15 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
     // The selected model's install state; a selection outside the listing is NotDownloaded.
     private SetupInstallState SelectedState() => SelectedListing()?.State ?? SetupInstallState.NotDownloaded;
 
+    // A model's choice chip state: Installed and NotSupported as listed; any other model is NotDownloaded.
+    private SetupInstallState ChoiceState(TensorModelPackDefinition model) =>
+        Listing.Models.FirstOrDefault(listed => listed.Definition.Key == model.Key)?.State switch
+        {
+            SetupInstallState.Installed => SetupInstallState.Installed,
+            SetupInstallState.NotSupported => SetupInstallState.NotSupported,
+            _ => SetupInstallState.NotDownloaded
+        };
+
     private static SetupTextField Observation(string id, string label, string value) =>
         new(new(id, label) { IsReadOnly = true }, value, string.Empty,
             _ => new(SetupEditState.Invalid, [new("read-only", "This field is an observation.", id)]));
@@ -254,8 +263,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
     protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query) => fieldId switch
     {
         "model" => Page(query, Choices().Select(model => new SetupChoice(model.Key.ToString(), model.Key.ModelId, model.Key.Revision,
-            new SetupChoiceInstall(Listing.Models.Any(listed => listed.Definition.Key == model.Key && listed.State == SetupInstallState.Installed),
-                model.Artifacts.Sum(artifact => artifact.Length))))),
+            new SetupChoiceInstall(ChoiceState(model), model.Artifacts.Sum(artifact => artifact.Length))))),
         "backend" => Page(query, Backends().Select(backend => new SetupChoice(backend.ToString(), BackendName(backend)))),
         "location-kind" => Page(query, new[] { new SetupChoice("file", "Local file"), new("folder", "Local folder"), new("url", "Artifact URL") }
             .Concat(_hasSource ? [new SetupChoice("repository", "Repository")] : [])),

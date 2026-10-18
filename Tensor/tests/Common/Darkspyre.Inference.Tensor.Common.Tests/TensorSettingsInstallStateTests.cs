@@ -35,11 +35,11 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
         SetupChoicePage choices = await manager.QueryChoicesAsync(settings, "model", new());
         Assert.Equal(
             [
-                (installed.Key.ToString(), true, installed.Artifacts[0].Length),
-                (large.Key.ToString(), false, 487_601_967L),
-                (missing.Key.ToString(), false, missing.Artifacts[0].Length)
+                (installed.Key.ToString(), SetupInstallState.Installed, installed.Artifacts[0].Length),
+                (large.Key.ToString(), SetupInstallState.NotDownloaded, 487_601_967L),
+                (missing.Key.ToString(), SetupInstallState.NotDownloaded, missing.Artifacts[0].Length)
             ],
-            choices.Choices.Select(choice => (choice.Value, choice.Install!.IsInstalled, choice.Install.Size)));
+            choices.Choices.Select(choice => (choice.Value, choice.Install!.State, choice.Install.Size)));
         SetupStatus status = settings.Status;
         Assert.All(new[] { status.Configured, status.Authenticated, status.Installed, status.Verified, status.Loaded, status.Ready },
             observation => Assert.False(observation.IsApplicable));

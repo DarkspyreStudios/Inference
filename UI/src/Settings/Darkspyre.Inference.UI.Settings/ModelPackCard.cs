@@ -22,8 +22,7 @@ internal sealed class ModelPackCard : UserControl
         TextBlock size = new() { Text = $"{SetupByteSize.Format(install.Size)} download" };
         size.Classes.Add("inference-settings-help");
         body.Children.Add(size);
-        body.Children.Add(new SetupInstallChip(install.IsInstalled ? SetupInstallState.Installed : SetupInstallState.NotDownloaded,
-            install.IsInstalled ? "Installed" : "Not downloaded"));
+        body.Children.Add(SetupInstallChip.ForChoice(install, "Not downloaded"));
         Button card = new() { Content = body, HorizontalContentAlignment = HorizontalAlignment.Left };
         card.Classes.Add("inference-model-pack-card");
         card.Classes.Set("selected", selected);

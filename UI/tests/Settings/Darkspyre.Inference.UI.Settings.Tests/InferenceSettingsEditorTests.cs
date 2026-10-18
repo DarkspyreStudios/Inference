@@ -85,6 +85,27 @@ public sealed class InferenceSettingsEditorTests
     });
 
     [Fact]
+    public Task NotSupportedShowsItsTextAndReasonOnTheCardAndOnTheChoiceChip() => EditorSession.RunAsync(async () =>
+    {
+        InferenceSettingsEditor editor = ShowInstallEditor(new InstallSettings("small", SetupInstallState.NotSupported).Unobserved(), new InstallManager());
+        await EditorSession.WaitForAsync(() => Cards(editor).Length == 2);
+
+        Border card = Assert.Single(EditorSession.All<Border>(Assert.Single(EditorSession.All<SetupInstallStatusCard>(editor)), "inference-install-card"));
+        Assert.Equal(["small", "Not supported", InstallSettings.UnsupportedReason, "Delete download"], EditorSession.TextOf(card).Split('\n'));
+        Assert.Equal(["Delete download"], EditorSession.All<Button>(card).Select(button => (string)button.Content!));
+        Assert.Contains("destructive", card.Classes);
+
+        Assert.Equal(["small 465 MB download Not supported", "tiny 465 MB download Not downloaded"], Cards(editor).Select(pack => Squash(EditorSession.TextOf(pack))));
+        foreach (Control root in new Control[] { card, Cards(editor)[0] })
+        {
+            ContentControl chip = Assert.Single(EditorSession.All<ContentControl>(root, "inference-install-chip"));
+            Assert.Contains("destructive", chip.Classes);
+            Assert.Empty(EditorSession.All<Avalonia.Controls.Shapes.Path>(chip));
+        }
+        Assert.Empty(EditorSession.All<Button>(editor, "inference-model-pack-card", "selected"));
+    });
+
+    [Fact]
     public Task ClickingDownloadRunsTheDownloadActionThroughTheHost() => EditorSession.RunAsync(async () =>
     {
         var manager = new InstallManager();
@@ -233,6 +254,7 @@ public sealed class InferenceSettingsEditorTests
         new(new("tensor", "Tensor engine", InferenceImplementationKind.Tensor, InferenceTask.SpeechTranscription), "Example engine"),
         new(SetupChangeIntent.Create, "entry", null))
     {
+        public const string UnsupportedReason = "This engine release no longer loads this model.";
         private const long Size = 487_601_967;
         private static readonly string[] Keys = ["small", "tiny"];
         private string _model = model;
@@ -251,9 +273,11 @@ public sealed class InferenceSettingsEditorTests
             new SetupChoiceField(new("model", "Model pack") { IsRequired = true }, _model, string.Empty, value => Edit(() => _model = value), false,
                 capabilities: new(InferenceSupport.Supported, InferenceSupport.Supported), showValue: StateOf(_model) == SetupInstallState.Installed),
             new SetupInstallStatusField(new("install-status", "Install state") { IsReadOnly = true }, new(StateOf(_model), _model, "/models", 1, Size, "MIT",
-                StateOf(_model) == SetupInstallState.FilesMissing ? "ggml-small.bin" : null, StateOf(_model) switch
+                StateOf(_model) == SetupInstallState.FilesMissing ? "ggml-small.bin" : null,
+                StateOf(_model) == SetupInstallState.NotSupported ? UnsupportedReason : null, StateOf(_model) switch
                 {
                     SetupInstallState.NotDownloaded => [new("download", $"Download ({SetupByteSize.Format(Size)})", SetupActionPurpose.Install, SetupSideEffect.Download)],
+                    SetupInstallState.NotSupported => [new("remove", "Delete download", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles)],
                     SetupInstallState.FilesMissing =>
                     [
                         new("download", "Download again", SetupActionPurpose.Install, SetupSideEffect.Download),
@@ -264,7 +288,7 @@ public sealed class InferenceSettingsEditorTests
         ])])];
         protected override IReadOnlyList<SetupActionDescriptor> CreateActions() => [];
         protected override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query) => fieldId == "model"
-            ? new(Keys.Select(key => new SetupChoice(key, key, Install: new(StateOf(key) == SetupInstallState.Installed, Size))).ToArray())
+            ? new(Keys.Select(key => new SetupChoice(key, key, Install: new(StateOf(key) == SetupInstallState.FilesMissing ? SetupInstallState.NotDownloaded : StateOf(key), Size))).ToArray())
             : null;
         protected override SetupValidation ValidateDraft() => SetupValidation.Valid;
         protected override string CreateChanges() => _model;

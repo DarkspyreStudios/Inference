@@ -193,13 +193,15 @@ public enum SetupInstallState
     /// <summary>The store holds no install record for the model.</summary>
     NotDownloaded,
     /// <summary>The store holds the model's install record, but a file it names is absent or shorter or longer than recorded.</summary>
-    FilesMissing
+    FilesMissing,
+    /// <summary>The store holds the model's files, but this release of the engine no longer loads it.</summary>
+    NotSupported
 }
 
 /// <summary>The install facts a choice shows as its chip.</summary>
-/// <param name="IsInstalled">True when the option's files are in the store and complete.</param>
+/// <param name="State">The option's install state: Installed, NotDownloaded or NotSupported.</param>
 /// <param name="Size">The option's total download size in bytes.</param>
-public sealed record SetupChoiceInstall(bool IsInstalled, long Size);
+public sealed record SetupChoiceInstall(SetupInstallState State, long Size);
 
 /// <summary>One option a choice field offers.</summary>
 /// <param name="Value">The value stored when the option is chosen.</param>
@@ -268,9 +270,11 @@ public sealed class SetupChoiceField(
 /// <param name="Size">The model's total size in bytes.</param>
 /// <param name="License">The model's licence.</param>
 /// <param name="MissingFile">For <see cref="SetupInstallState.FilesMissing"/>, the relative path of the first absent or wrong-length file; otherwise null.</param>
+/// <param name="UnsupportedReason">For <see cref="SetupInstallState.NotSupported"/>, why the engine no longer loads the
+/// model; otherwise null.</param>
 /// <param name="Actions">The card's buttons, in display order. They run through the settings manager like any other action.</param>
 public sealed record SetupInstallStatus(SetupInstallState State, string Name, string Location, int FileCount, long Size,
-    string License, string? MissingFile, IReadOnlyList<SetupActionDescriptor> Actions);
+    string License, string? MissingFile, string? UnsupportedReason, IReadOnlyList<SetupActionDescriptor> Actions);
 
 /// <summary>A read-only field that shows a model's install state and the actions that change it.</summary>
 /// <param name="description">Identity and presentation state of the field. The label names the card for assistive technology.</param>

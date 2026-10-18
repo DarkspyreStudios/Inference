@@ -44,14 +44,17 @@ configuration or a successful Save does not establish a fresh check. Action and 
 as sentences, never as enum names.
 A `SetupInstallStatusField` renders as a status card under the choice it follows: Installed in the
 store, with the file count, size and licence and a **Show** button that calls the host's
-`RevealFolderAsync` with the store folder; Not downloaded, with a Download button; or Files missing,
-naming the missing file, with Download again and Delete download. A disabled card action shows its
-reason beside it. The card's buttons run through the manager like any other action, with the
-editor's progress and Cancel. A choice whose `SetupChoice.Install` is set shows a chip: "Installed",
-or "Not downloaded" with its download size. Only an Installed chip carries a check mark. When every
-loaded choice of a field carries `Install`, the field shows the choices as model pack cards in place
-of the list: name, download size and install state, chosen on click. A `SetupChoiceField` with
-`ShowValue` false keeps its value but renders no selection, and no card shows as selected; the
+`RevealFolderAsync` with the store folder; Not downloaded, with a Download button; Files missing,
+naming the missing file, with Download again and Delete download; or Not supported, with the
+status's `UnsupportedReason` as a line under the chip and the actions the status gives. A disabled
+card action shows its reason beside it. The card's buttons run through the manager like any other
+action, with the editor's progress and Cancel. A choice whose `SetupChoice.Install` is set shows a
+chip for its `State`: "Installed", "Not downloaded" with its download size, or "Not supported".
+An Installed chip uses the success style with a check mark, a Not downloaded chip the warning style
+with a download arrow, and Files missing and Not supported chips the destructive style with no icon.
+When every loaded choice of a field carries `Install`, the field shows the choices as model pack
+cards in place of the list: name, download size and install chip ("Installed", "Not downloaded" or
+"Not supported"), chosen on click. A `SetupChoiceField` with `ShowValue` false keeps its value but renders no selection, and no card shows as selected; the
 status card shows the value instead. A choice's `Tags` show as chips beside its name, and its
 description as a line under it.
 `IntroContent` and `SupplementaryContent` accept optional host guidance without changing the

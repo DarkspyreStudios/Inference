@@ -399,9 +399,9 @@ for local files/folders and independent URLs. Supply an `ITensorModelSource` thr
 `source` argument to additionally enable repository browsing. The optional `reader` argument accepts
 host-configured artifact access, for example `new TensorArtifactReader(source, httpClient, access)`.
 
-The model choice offers each listed model with a `SetupChoiceInstall` chip: whether it is installed and
-its download size. The choice shows its value only while the selected model is Installed
-(`SetupChoiceField.ShowValue`). Under it, a `SetupInstallStatusField` ("Install state") carries the
+The model choice offers each listed model with a `SetupChoiceInstall` chip: its state (Installed or
+NotSupported as listed, NotDownloaded for any other model) and its download size. The choice shows
+its value only while the selected model is Installed (`SetupChoiceField.ShowValue`). Under it, a `SetupInstallStatusField` ("Install state") carries the
 selected model's `SetupInstallStatus` card. An Installed model offers **Delete download**, enabled only
 while the instance holds no model; otherwise its reason reads "Unload the model first." A NotDownloaded
 model offers **Download (<size>)**. A FilesMissing model names the missing file and offers **Download

@@ -518,7 +518,7 @@ public sealed class SetupFieldInput : UserControl
         this.choiceStatus.IsVisible = status is not null;
     }
 
-    // An option with local files shows whether they are installed and, when not, its download size. Its tags show as chips,
+    // An option with local files shows its install state and, when not downloaded, its download size. Its tags show as chips,
     // and its description as a line under the name.
     private static StackPanel ChoiceView(SetupChoice? option)
     {
@@ -527,8 +527,7 @@ public sealed class SetupFieldInput : UserControl
         WrapPanel head = new() { ItemSpacing = 8, LineSpacing = 4 };
         head.Children.Add(new TextBlock { Text = option.DisplayName, VerticalAlignment = VerticalAlignment.Center });
         if (option.Install is { } install)
-            head.Children.Add(new SetupInstallChip(install.IsInstalled ? SetupInstallState.Installed : SetupInstallState.NotDownloaded,
-                install.IsInstalled ? "Installed" : $"Not downloaded · {SetupByteSize.Format(install.Size)}"));
+            head.Children.Add(SetupInstallChip.ForChoice(install, $"Not downloaded · {SetupByteSize.Format(install.Size)}"));
         foreach (string tag in option.Tags) head.Children.Add(InferenceSettingsEditor.Chip(tag, null));
         line.Children.Add(head);
         if (option.DisplayName != option.Value) line.Children.Add(Text(option.Value, "inference-settings-choice-value"));
