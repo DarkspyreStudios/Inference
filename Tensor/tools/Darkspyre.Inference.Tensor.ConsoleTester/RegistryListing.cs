@@ -1,7 +1,6 @@
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Registry;
-using Darkspyre.Persist;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Tensor.ConsoleTester;
@@ -24,7 +23,6 @@ internal static class RegistryListing
         await using ServiceProvider services = new ServiceCollection().AddTensorEngines().BuildServiceProvider();
         TensorEngineRegistry registry = services.GetRequiredService<TensorEngineRegistry>();
         Console.WriteLine($"store   : {store}");
-        var modelStore = new OsUserPersist(store);
         foreach (TensorEngineDefinition definition in registry.Definitions)
         {
             if (!registry.TryGetProvider(definition.Setup.Implementation.Id, out ITensorEngineProvider? provider))
@@ -32,12 +30,16 @@ internal static class RegistryListing
                 throw new InvalidOperationException($"The registry did not resolve '{definition.Setup.Implementation.Id}'.");
             }
 
-            IReadOnlyList<TensorModelPackDefinition> installed = await provider.GetInstalledModelsAsync(modelStore, cancellationToken);
-            TensorModelListing listing = await TensorInstalledPacks.ListAsync(modelStore, store, definition.ModelStoreKey,
-                provider.BuiltInModels, installed, saved: null, cancellationToken);
             // One pack manager per engine kind, rooted at the engine's store key beneath the host's root.
-            using var packs = new TensorModelPackManager(new TensorModelCatalog(listing.Models.Select(model => model.Definition).ToArray()),
-                Path.Combine(store, definition.ModelStoreKey));
+            string folder = Path.Combine(store, definition.ModelStoreKey);
+            TensorInstalledReport installed;
+            TensorModelListing listing;
+            using (var reportPacks = new TensorModelPackManager(new TensorModelCatalog([]), folder))
+            {
+                installed = await provider.GetInstalledModelsAsync(reportPacks, cancellationToken);
+                listing = await TensorInstalledPacks.ListAsync(reportPacks, store, provider.BuiltInModels, installed, saved: null, cancellationToken);
+            }
+            using var packs = new TensorModelPackManager(new TensorModelCatalog(listing.Models.Select(model => model.Definition).ToArray()), folder);
             TensorSettingsManager manager = provider.CreateSettingsManager(new ListingTarget(), packs, TensorModelList.Fixed(listing));
             TensorSettings settings = await manager.OpenAsync(new(SetupChangeIntent.Create, "registry-listing", null), cancellationToken: cancellationToken);
 
@@ -45,13 +47,14 @@ internal static class RegistryListing
             Console.WriteLine($"engine  : {definition.Setup.Implementation.Id} ({definition.Setup.Implementation.DisplayName})");
             Console.WriteLine($"  tasks   : {string.Join(", ", definition.Setup.Implementation.Tasks)}");
             Console.WriteLine($"  store   : {definition.ModelStoreKey}");
-            Console.WriteLine($"  models  : {provider.BuiltInModels.Count} built in, {installed.Count} installed");
+            Console.WriteLine($"  models  : {provider.BuiltInModels.Count} built in, {installed.Installed.Count} installed, {installed.Unsupported.Count} not supported");
             foreach (TensorListedModel model in listing.Models)
             {
                 string state = model.State switch
                 {
                     SetupInstallState.Installed => "installed",
                     SetupInstallState.FilesMissing => $"files-missing ({model.MissingFile})",
+                    SetupInstallState.NotSupported => $"not-supported ({model.UnsupportedReason})",
                     _ => "not-downloaded"
                 };
                 Console.WriteLine($"    {state} {model.Definition.Key.ModelId} @ {model.Definition.Key.Revision}");

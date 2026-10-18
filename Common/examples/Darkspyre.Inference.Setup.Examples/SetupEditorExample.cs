@@ -55,7 +55,7 @@ public static class SetupCompositionExample
     /// <summary>A model list with no live model store: every definition is offered as not downloaded.</summary>
     internal static ITensorModelList ExampleList(IEnumerable<TensorModelPackDefinition> definitions) =>
         TensorModelList.Fixed(new("example store",
-            definitions.Select(definition => new TensorListedModel(definition, SetupInstallState.NotDownloaded, null)).ToArray(), null));
+            definitions.Select(definition => new TensorListedModel(definition, SetupInstallState.NotDownloaded, null, null)).ToArray(), null));
 
     private static SetupConfigurationIdentity NewEntry() => new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null);
 }

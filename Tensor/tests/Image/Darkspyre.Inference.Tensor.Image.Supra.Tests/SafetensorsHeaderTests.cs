@@ -12,7 +12,8 @@ public sealed class SafetensorsHeaderTests
         SafetensorsHeader header = SafetensorsHeader.Read(new MemoryStream(file));
 
         SafetensorsTensorEntry entry = Assert.Single(header.Tensors).Value;
-        Assert.Equal(("BF16", new long[] { 2, 3 }, 0L, 12L), (entry.Dtype, entry.Shape, entry.Begin, entry.End));
+        Assert.Equal(("BF16", 0L, 12L), (entry.Dtype, entry.Begin, entry.End));
+        Assert.Equal([2L, 3L], entry.Shape);
         Assert.Equal("pt", header.Metadata["format"]);
         Assert.Equal(file.Length - 12, header.DataOffset);
     }

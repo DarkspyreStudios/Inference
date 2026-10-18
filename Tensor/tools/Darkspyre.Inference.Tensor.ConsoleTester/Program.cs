@@ -131,11 +131,11 @@ internal static class Program
 
             var suite = new QwenSuite(engine, model.Id);
             return await suite.RunAsync(options, cancellationToken) ? 0 : 1;
-        }, engine, runtime, Console.Out);
+        }, engine, runtime);
     }
 
     internal static async Task<int> RunOwnedEngineAsync(Func<Task<int>> run, IAsyncDisposable engine,
-        ITensorRuntimeOwner runtime, TextWriter output)
+        ITensorRuntimeOwner runtime)
     {
         var failures = new List<Exception>();
         int exitCode = 1;
@@ -144,21 +144,8 @@ internal static class Program
         try { await engine.DisposeAsync(); }
         catch (Exception error) { failures.Add(error); }
 
-        // Disposal retains the supplier's actual cause. Do not retry a failed retirement to obtain a status.
-        bool retired = false;
-        try { await runtime.DisposeAsync(); retired = true; }
+        try { await runtime.DisposeAsync(); }
         catch (Exception error) { failures.Add(error); }
-        if (retired)
-        {
-            try
-            {
-                TensorRuntimeShutdownResult shutdown = await runtime.ShutdownAsync();
-                await output.WriteLineAsync("runtime : " + JsonSerializer.Serialize(shutdown, TensorJson.TensorRuntimeShutdownResult));
-                if (shutdown.State is not (TensorRuntimeShutdownState.Completed or TensorRuntimeShutdownState.AlreadyStopped))
-                    exitCode = 1;
-            }
-            catch (Exception error) { failures.Add(error); }
-        }
         if (failures.Count > 0)
             ExceptionDispatchInfo.Capture(failures.Count == 1 ? failures[0]
                 : new AggregateException("The model run or its cleanup failed.", failures)).Throw();

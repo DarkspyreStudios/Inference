@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
+using System.Text;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Ggml;
-using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
@@ -17,34 +17,140 @@ public sealed class QwenInstalledModelsTests : IDisposable
     [Fact]
     public async Task QwenReportsNoBuiltInAndSkipsAPackThatIsNotAGguf()
     {
-        var supplier = new GgmlRuntimeShutdownTests.Supplier(null);
-        await using var owner = new GgmlRuntimeOwner(new(supplier.Build, supplier.Rid, []), supplier);
+        await using var owner = new GgmlRuntimeOwner(new(new("2026.10.11"), "osx-arm64", []), new FakeNativeLibraries());
         var provider = new QwenEngineProvider(owner);
-        var modelStore = new OsUserPersist(_root);
         Assert.Empty(provider.BuiltInModels);
-        Assert.Empty(await provider.GetInstalledModelsAsync(modelStore));
+        TensorInstalledReport report = await ReportAsync(provider);
+        Assert.Empty(report.Installed);
+        Assert.Empty(report.Unsupported);
 
+        await InstallAsync(provider, "source.gguf", "not a GGUF checkpoint"u8.ToArray());
+
+        report = await ReportAsync(provider);
+        Assert.Empty(report.Installed);
+        Assert.Empty(report.Unsupported);
+    }
+
+    [Fact]
+    public async Task QwenRetiresAQwen3HeaderAndStillAcceptsAQwen35Header()
+    {
+        await using var owner = new GgmlRuntimeOwner(new(new("2026.10.11"), "osx-arm64", []), new FakeNativeLibraries());
+        var provider = new QwenEngineProvider(owner);
+        TensorModelPackDefinition qwen35 = await InstallAsync(provider, "qwen35.gguf", Checkpoint("qwen35"));
+        TensorModelPackDefinition qwen3 = await InstallAsync(provider, "qwen3.gguf", Checkpoint("qwen3"));
+
+        TensorInstalledReport report = await ReportAsync(provider);
+
+        Assert.Equal(qwen35.Key, Assert.Single(report.Installed).Key);
+        TensorUnsupportedPack retired = Assert.Single(report.Unsupported);
+        Assert.Equal((qwen3.Key, TensorLlmModels.Qwen3RetiredReason), (retired.Definition.Key, retired.Reason));
+    }
+
+    private async Task<TensorInstalledReport> ReportAsync(QwenEngineProvider provider)
+    {
+        using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, provider.Definition.ModelStoreKey));
+        return await provider.GetInstalledModelsAsync(packs);
+    }
+
+    private async Task<TensorModelPackDefinition> InstallAsync(QwenEngineProvider provider, string name, byte[] bytes)
+    {
         Directory.CreateDirectory(_root);
-        byte[] bytes = "not a GGUF checkpoint"u8.ToArray();
-        string source = Path.Combine(_root, "source.gguf");
+        string source = Path.Combine(_root, name);
         await File.WriteAllBytesAsync(source, bytes);
         var definition = new TensorModelPackDefinition
         {
-            Key = new("imported/source.gguf", "test"),
+            Key = new("imported/" + name, "test"),
             Capability = TensorCapability.Llm,
             RuntimeArchitecture = TensorLlmModels.QwenRuntimeArchitecture,
             License = "Apache-2.0",
             SupportedBackends = TensorLlmModels.Backends,
-            Artifacts = [new() { Role = "model", RelativePath = "source.gguf", Length = bytes.Length,
+            Artifacts = [new() { Role = "model", RelativePath = name, Length = bytes.Length,
                 Sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)), Sources = [new(new Uri(source).AbsoluteUri)] }]
         };
         QwenModelCompatibility.Validate(definition);
-        using (var packs = new TensorModelPackManager(new([definition]), Path.Combine(_root, provider.Definition.ModelStoreKey)))
-        {
-            await packs.InstallAsync(definition.Key);
-            Assert.Equal(TensorModelPackState.Installed, (await packs.GetStatusAsync(definition.Key)).State);
-        }
+        using var packs = new TensorModelPackManager(new([definition]), Path.Combine(_root, provider.Definition.ModelStoreKey));
+        await packs.InstallAsync(definition.Key);
+        return definition;
+    }
 
-        Assert.Empty(await provider.GetInstalledModelsAsync(modelStore));
+    // The smallest GGUF v3 checkpoint the Qwen 3.5 schema accepts: one full-attention layer of hidden size 8, a two-token
+    // BPE vocabulary, a chat template and four F32 tensors whose data follows the 32-byte aligned header.
+    private static byte[] Checkpoint(string architecture)
+    {
+        (string Name, ulong[] Shape)[] tensors =
+        [
+            ("token_embd.weight", [8, 2]), ("output_norm.weight", [8]),
+            ("blk.0.attn_norm.weight", [8]), ("blk.0.ffn_norm.weight", [8])
+        ];
+        using var stream = new MemoryStream();
+        using (var writer = new BinaryWriter(stream, Encoding.UTF8, leaveOpen: true))
+        {
+            var values = new List<(string Key, Action Write)>
+            {
+                ("general.architecture", () => String(writer, architecture)),
+                ($"{architecture}.block_count", () => UInt32(writer, 1)),
+                ($"{architecture}.embedding_length", () => UInt32(writer, 8)),
+                ($"{architecture}.attention.head_count", () => UInt32(writer, 2)),
+                ($"{architecture}.attention.head_count_kv", () => UInt32(writer, 2)),
+                ($"{architecture}.context_length", () => UInt32(writer, 4096)),
+                ($"{architecture}.full_attention_interval", () => UInt32(writer, 1)),
+                ("tokenizer.ggml.model", () => String(writer, "gpt2")),
+                ("tokenizer.ggml.tokens", () => Strings(writer, ["a", "b"])),
+                ("tokenizer.ggml.merges", () => Strings(writer, ["a b"])),
+                ("tokenizer.chat_template", () => String(writer, "{{ messages }}"))
+            };
+            foreach (string key in new[] { "ssm.inner_size", "ssm.state_size", "ssm.group_count", "ssm.time_step_rank", "ssm.conv_kernel" })
+                values.Add(($"{architecture}.{key}", () => UInt32(writer, 1)));
+            writer.Write("GGUF"u8);
+            writer.Write(3u);
+            writer.Write((ulong)tensors.Length);
+            writer.Write((ulong)values.Count);
+            foreach ((string key, Action write) in values)
+            {
+                Text(writer, key);
+                write();
+            }
+            ulong offset = 0;
+            foreach ((string name, ulong[] shape) in tensors)
+            {
+                Text(writer, name);
+                writer.Write((uint)shape.Length);
+                foreach (ulong dimension in shape) writer.Write(dimension);
+                writer.Write(0u); // F32
+                writer.Write(offset);
+                offset += shape.Aggregate(4UL, (bytes, dimension) => bytes * dimension);
+                offset = (offset + 31) / 32 * 32;
+            }
+            writer.Write(new byte[(32 - stream.Length % 32) % 32]);
+            writer.Write(new byte[offset]);
+        }
+        return stream.ToArray();
+    }
+
+    private static void Text(BinaryWriter writer, string value)
+    {
+        byte[] bytes = Encoding.UTF8.GetBytes(value);
+        writer.Write((ulong)bytes.Length);
+        writer.Write(bytes);
+    }
+
+    private static void String(BinaryWriter writer, string value)
+    {
+        writer.Write(8u);
+        Text(writer, value);
+    }
+
+    private static void Strings(BinaryWriter writer, string[] values)
+    {
+        writer.Write(9u);
+        writer.Write(8u);
+        writer.Write((ulong)values.Length);
+        foreach (string value in values) Text(writer, value);
+    }
+
+    private static void UInt32(BinaryWriter writer, uint value)
+    {
+        writer.Write(4u);
+        writer.Write(value);
     }
 }

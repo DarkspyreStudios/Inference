@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
-using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.Common.Tests;
 
@@ -25,9 +24,9 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
         TensorModelPackDefinition large = small with { Artifacts = [small.Artifacts[0] with { Length = 487_601_967 }] };
         TensorModelPackDefinition missing = Definition("test/missing", "missing weights");
         var list = new TestList(new TensorModelListing("/models", [
-            new(installed, SetupInstallState.Installed, null),
-            new(large, SetupInstallState.NotDownloaded, null),
-            new(missing, SetupInstallState.FilesMissing, "model.gguf")], null));
+            new(installed, SetupInstallState.Installed, null, null),
+            new(large, SetupInstallState.NotDownloaded, null, null),
+            new(missing, SetupInstallState.FilesMissing, "model.gguf", null)], null));
         using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, Store));
         var manager = new TensorSettingsManager(Setup, new NoSave(), list, packs);
         TensorSettings settings = await manager.OpenAsync(NewEntry());
@@ -72,7 +71,7 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
     public async Task AChangedListRefreshesTheCardAndKeepsTheSelection()
     {
         TensorModelPackDefinition model = Definition("test/model", "model weights");
-        var list = new TestList(new TensorModelListing("/models", [new(model, SetupInstallState.Installed, null)], null));
+        var list = new TestList(new TensorModelListing("/models", [new(model, SetupInstallState.Installed, null, null)], null));
         using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, Store));
         var manager = new TensorSettingsManager(Setup, new NoSave(), list, packs);
         TensorSettings settings = await manager.OpenAsync(NewEntry());
@@ -80,7 +79,7 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
         int raised = 0;
         manager.StatusChanged += (_, _) => raised++;
 
-        list.Listing = new("/other", [new(model, SetupInstallState.NotDownloaded, null)], null);
+        list.Listing = new("/other", [new(model, SetupInstallState.NotDownloaded, null, null)], null);
         list.Raise();
         await manager.RefreshStatusAsync(settings);
 
@@ -136,12 +135,32 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
         Assert.Equal(SetupInstallState.NotDownloaded, InstallField(settings)!.Status.State);
     }
 
+    /// <summary>A model the engine no longer loads shows its reason, a Not supported chip and only Delete download.</summary>
+    [Fact]
+    public async Task ANotSupportedModelOffersOnlyDeleteDownloadAndShowsItsReason()
+    {
+        TensorModelPackDefinition model = Definition("test/retired", "retired weights");
+        var list = new TestList(new TensorModelListing("/models",
+            [new(model, SetupInstallState.NotSupported, null, "This architecture is no longer supported.")], null));
+        using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, Store));
+        var manager = new TensorSettingsManager(Setup, new NoSave(), list, packs);
+        TensorSettings settings = await manager.OpenAsync(NewEntry());
+
+        SetupChoicePage choices = await manager.QueryChoicesAsync(settings, "model", new());
+        Assert.Equal(SetupInstallState.NotSupported, Assert.Single(choices.Choices).Install!.State);
+        Select(settings, model);
+        SetupInstallStatus card = InstallField(settings)!.Status;
+
+        Assert.Equal((SetupInstallState.NotSupported, "This architecture is no longer supported."), (card.State, card.UnsupportedReason));
+        Assert.Equal([("remove", "Delete download", true)], card.Actions.Select(action => (action.Id, action.DisplayName, action.IsEnabled)));
+    }
+
     /// <summary>An installed pack offers Delete download, which a loaded model blocks until it is unloaded.</summary>
     [Fact]
     public async Task InstalledPackOffersDeleteDownloadOnlyWhenUnloaded()
     {
         TensorModelPackDefinition model = Definition("test/model", "model weights");
-        var list = new TestList(new TensorModelListing("/models", [new(model, SetupInstallState.Installed, null)], null));
+        var list = new TestList(new TensorModelListing("/models", [new(model, SetupInstallState.Installed, null, null)], null));
         using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, Store));
         var manager = new TensorSettingsManager(Setup, new NoSave(), list, packs);
         TensorSettings settings = await manager.OpenAsync(NewEntry());
@@ -164,7 +183,7 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
     {
         TensorModelPackDefinition model = Definition("test/model", "model weights") with
         { SupportedBackends = new HashSet<TensorBackendKind> { TensorBackendKind.GgmlCpu, TensorBackendKind.GgmlMetal } };
-        var list = new TestList(new TensorModelListing("/models", [new(model, SetupInstallState.Installed, null)], null));
+        var list = new TestList(new TensorModelListing("/models", [new(model, SetupInstallState.Installed, null, null)], null));
         using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, Store));
         var manager = new TensorSettingsManager(Setup, new NoSave(), list, packs, resolver: new NoResolver());
         TensorSettings settings = await manager.OpenAsync(NewEntry());
@@ -201,10 +220,9 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
     // The listing the host builds: the family's report of the store, then the files check.
     private TestList StoreList(IReadOnlyList<TensorModelPackDefinition> builtIns, TensorModelPackDefinition? saved) => new(async () =>
     {
-        var modelStore = new OsUserPersist(_root);
-        IReadOnlyList<TensorModelPackDefinition> installed =
-            await TensorInstalledPacks.ReportAsync(modelStore, Store, builtIns, _ => true, formatCheck: null);
-        return await TensorInstalledPacks.ListAsync(modelStore, "/models", Store, builtIns, installed, saved);
+        using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, Store));
+        TensorInstalledReport installed = await TensorInstalledPacks.ReportAsync(packs, builtIns, _ => true, formatCheck: null);
+        return await TensorInstalledPacks.ListAsync(packs, "/models", builtIns, installed, saved);
     });
 
     private async Task<TensorModelPackDefinition> InstallAsync(string id, string content)

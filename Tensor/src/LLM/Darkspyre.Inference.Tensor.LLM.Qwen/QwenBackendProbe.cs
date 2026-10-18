@@ -24,9 +24,7 @@ internal sealed class QwenBackendProbe(GgmlRuntimeOwner? runtimeOwner = null) : 
         cancellationToken.ThrowIfCancellationRequested();
         if (TensorBackendProbes.ValidateLocalRequest(request, QwenSetup.Definition.Implementation.Id) is { } invalid) return invalid;
         TensorBackendKind actual = request.RequestedBackend;
-        if (actual == TensorBackendKind.CoreMl
-            || !OperatingSystem.IsMacOS() && actual is TensorBackendKind.GgmlMetal
-            || OperatingSystem.IsMacOS() && actual is TensorBackendKind.Cuda or TensorBackendKind.GgmlCuda or TensorBackendKind.GgmlVulkan)
+        if (actual == TensorBackendKind.CoreMl || OperatingSystem.IsMacOS() && actual == TensorBackendKind.Cuda)
             return TensorBackendAvailability.Observe(request, TensorBackendAvailabilityState.Unsupported, "This backend is unsupported by Qwen on the target platform.");
         if (actual != TensorBackendKind.Cpu && TensorBackendProbes.RejectUnboundNativePlan(request) is { } unbound) return unbound;
         bool? available;

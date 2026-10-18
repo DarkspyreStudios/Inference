@@ -18,31 +18,17 @@ public sealed class QwenPackSelectionTests : IDisposable
     private static readonly byte[] Weights = "controlled checkpoint bytes"u8.ToArray();
 
     [Fact]
-    public async Task MlxModelSwitchingAndConcurrentEnginesHoldGenerationLeasesUntilRelease()
+    public async Task AStopSequenceTheRuntimeStreamsIsNeverShownOrReturned()
     {
-        var supplier = new GgmlRuntimeShutdownTests.Supplier(null);
-        await using var owner = new GgmlRuntimeOwner(new(supplier.Build, supplier.Rid, []), supplier);
-        (QwenLlmInference first, TensorModelPackManager packs, string model) = await LoadedAsync(
-            new Runtime(), "host/mlx-generation", TensorBackendKind.Mlx, owner);
+        var runtime = new Runtime { Pieces = ["Hel", "lo ST", "OP never shown"] };
+        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/stop-sequence");
+        await using (engine)
         using (packs)
-        await using (first)
-        await using (var second = new QwenLlmInference(packs, new Runtime(), TensorBackendKind.Mlx, runtimeOwner: owner))
         {
-            TensorModelKey key = (await first.GetObservationAsync()).Model!;
-            await second.LoadAndWaitAsync(key);
-            TensorRuntimeShutdownResult busy = await owner.ShutdownAsync();
-            Assert.Equal(TensorRuntimeShutdownState.Busy, busy.State);
-            Assert.Equal(2, busy.OutstandingLeases);
-            await first.UnloadAndWaitAsync();
-            Assert.Equal(1, (await owner.ShutdownAsync()).OutstandingLeases);
-            await first.LoadAndWaitAsync(key);
-            Assert.Equal(2, (await owner.ShutdownAsync()).OutstandingLeases);
-            await first.StopAndWaitAsync();
-            Assert.Equal(1, (await owner.ShutdownAsync()).OutstandingLeases);
-            await second.DisposeAsync();
-            Assert.Equal(TensorRuntimeShutdownState.Completed, (await owner.ShutdownAsync()).State);
-            Assert.Null(owner.Current);
-            Assert.Equal(1, supplier.Shutdowns);
+            List<LlmStreamEvent> events = await Collect(engine, Request(model) with { StopSequences = ["STOP"] });
+
+            Assert.Equal("Hello ", string.Concat(events.OfType<LlmTextDeltaEvent>().Select(item => item.Delta)));
+            Assert.Equal("Hello ", Assert.IsType<LlmCompletionEvent>(events[^1]).Result.Text);
         }
     }
 
@@ -326,14 +312,13 @@ public sealed class QwenPackSelectionTests : IDisposable
         }
     }
 
-    private async Task<(QwenLlmInference Engine, TensorModelPackManager Packs, string Model)> LoadedAsync(Runtime runtime, string id,
-        TensorBackendKind backend = TensorBackendKind.Cpu, GgmlRuntimeOwner? runtimeOwner = null)
+    private async Task<(QwenLlmInference Engine, TensorModelPackManager Packs, string Model)> LoadedAsync(Runtime runtime, string id)
     {
         TensorModelPackDefinition pack = Pack(id);
         var http = new HttpClient(new Handler());
         TensorModelPackManager packs = Manager(http, pack);
         await packs.InstallAsync(pack.Key);
-        var engine = new QwenLlmInference(packs, runtime, backend, runtimeOwner: runtimeOwner);
+        var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu);
         await engine.LoadAndWaitAsync(pack.Key);
         return (engine, packs, pack.Key.ModelId);
     }
@@ -360,7 +345,7 @@ public sealed class QwenPackSelectionTests : IDisposable
     private sealed class Runtime : IQwenModelRuntime
     {
         public List<TensorModelKey> Keys { get; } = [];
-        public string? Architecture { get; init; } = "qwen3";
+        public string? Architecture { get; init; } = "qwen35";
         public IReadOnlyList<string> Pieces { get; init; } = ["hello"];
         public bool EmitCompletion { get; init; } = true;
         public Action? BeforeCompletion { get; init; }

@@ -4,7 +4,6 @@ using Darkspyre.Inference.Common.Embedding;
 using Darkspyre.Inference.Tensor.Common;
 using Darkspyre.Inference.Tensor.Embedding;
 using Darkspyre.Inference.Tensor.Ggml;
-using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.ConsoleTester;
 
@@ -32,11 +31,12 @@ internal static class EmbeddingSuite
     {
         GgmlRuntimeOwner runtime = GgmlRuntimeOwner.GetOrCreate();
         var provider = new EmbeddingEngineProvider(runtime);
-        IReadOnlyList<TensorModelPackDefinition> installed = await provider.GetInstalledModelsAsync(new OsUserPersist(options.Store!), token);
-        TensorModelPackDefinition definition = installed.Count > 0 ? installed[0]
-            : throw new InvalidOperationException("No Embedding model is installed in this store.");
-        using var packs = new TensorModelPackManager(new TensorModelCatalog([definition]),
+        using var packs = new TensorModelPackManager(new TensorModelCatalog([]),
             Path.Combine(options.Store!, provider.Definition.ModelStoreKey));
+        TensorInstalledReport installed = await provider.GetInstalledModelsAsync(packs, token);
+        TensorModelPackDefinition definition = installed.Installed.Count > 0 ? installed.Installed[0]
+            : throw new InvalidOperationException("No Embedding model is installed in this store.");
+        await packs.RegisterAsync(definition, token);
         var engine = new TensorEmbeddingInference(packs, options.Backend, runtime);
         return await Program.RunOwnedEngineAsync(async () =>
         {
@@ -67,15 +67,8 @@ internal static class EmbeddingSuite
             double unrelated = Dot(query.Vectors[0], documents.Vectors[1]);
             if (relevant <= unrelated) throw new InvalidOperationException("The query did not rank the matching document first.");
             Console.WriteLine($"PASS: document/query embeddings; cosine {relevant:F4} > {unrelated:F4}; input tokens {documents.Usage.InputTokens}/{query.Usage.InputTokens}.");
-            if (options.Backend != TensorBackendKind.Cpu)
-            {
-                TensorRuntimeShutdownResult busy = await runtime.ShutdownAsync(token);
-                Console.WriteLine("busy    : " + JsonSerializer.Serialize(busy, TensorJson.TensorRuntimeShutdownResult));
-                if (busy.State != TensorRuntimeShutdownState.Busy || busy.OutstandingLeases <= 0)
-                    throw new InvalidOperationException("Runtime shutdown did not refuse the loaded embedding model.");
-            }
             return 0;
-        }, engine, runtime, Console.Out);
+        }, engine, runtime);
     }
 
     private static void Verify(EmbeddingResult result, TensorModelPackDefinition definition,

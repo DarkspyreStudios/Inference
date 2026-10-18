@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.STT.Whisper;
-using Darkspyre.Persist;
 
 namespace Darkspyre.Inference.Tensor.Common.Tests;
 
@@ -32,9 +31,10 @@ public sealed class TensorInstalledPacksTests : IDisposable
         await File.WriteAllTextAsync(StorePath(TensorModelPackManager.DescriptionName(mismatched.Key)),
             JsonSerializer.Serialize(disagreeing, TensorJson.ModelPack));
 
-        IReadOnlyList<TensorModelPackDefinition> reported = await ReportAsync([]);
+        TensorInstalledReport reported = await ReportAsync([]);
 
-        Assert.Equal(complete.Key, Assert.Single(reported).Key);
+        Assert.Equal(complete.Key, Assert.Single(reported.Installed).Key);
+        Assert.Empty(reported.Unsupported);
     }
 
     [Fact]
@@ -45,9 +45,9 @@ public sealed class TensorInstalledPacksTests : IDisposable
         TensorModelPackDefinition installedOther = await InstallAsync("test/changed", "other weights");
         TensorModelPackDefinition declared = Definition("test/changed", "declared weights", "unused.gguf");
 
-        IReadOnlyList<TensorModelPackDefinition> reported = await ReportAsync([builtIn, declared]);
+        TensorInstalledReport reported = await ReportAsync([builtIn, declared]);
 
-        Assert.Same(builtIn, Assert.Single(reported));
+        Assert.Same(builtIn, Assert.Single(reported.Installed));
         Assert.NotEqual(declared.Artifacts[0].Sha256, installedOther.Artifacts[0].Sha256);
     }
 
@@ -57,14 +57,37 @@ public sealed class TensorInstalledPacksTests : IDisposable
         TensorModelPackDefinition tiny = TensorSpeechModels.Whisper.Single(model => model.Key.ModelId == "whisper/tiny");
         TensorModelPackDefinition imported = tiny with { Key = new("imported/ggml-tiny.bin", "test") };
         var provider = new WhisperEngineProvider();
-        var modelStore = new OsUserPersist(_root);
+        using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, provider.Definition.ModelStoreKey));
         await WriteWhisperPackAsync(provider.Definition.ModelStoreKey, imported, magic: 0x67676d6c);
 
-        TensorModelPackDefinition reported = Assert.Single(await provider.GetInstalledModelsAsync(modelStore));
+        TensorModelPackDefinition reported = Assert.Single((await provider.GetInstalledModelsAsync(packs)).Installed);
         Assert.Equal(imported.Key, reported.Key);
 
         await WriteWhisperPackAsync(provider.Definition.ModelStoreKey, imported, magic: 0x12345678);
-        Assert.Empty(await provider.GetInstalledModelsAsync(modelStore));
+        Assert.Empty((await provider.GetInstalledModelsAsync(packs)).Installed);
+    }
+
+    [Fact]
+    public async Task APackWhoseArchitectureIsRetiredIsReportedAndListedAsNotSupported()
+    {
+        TensorModelPackDefinition current = await InstallAsync("test/current", "current weights");
+        TensorModelPackDefinition retired = await InstallAsync("test/retired", "retired weights");
+        using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, Store));
+
+        TensorInstalledReport report = await TensorInstalledPacks.ReportAsync(packs, [], _ => true,
+            new RetiringResolver("retired weights"));
+        TensorModelListing listing = await TensorInstalledPacks.ListAsync(packs, "the store", [], report, saved: retired);
+
+        Assert.Equal(current.Key, Assert.Single(report.Installed).Key);
+        TensorUnsupportedPack unsupported = Assert.Single(report.Unsupported);
+        Assert.Equal((retired.Key, RetiringResolver.Reason), (unsupported.Definition.Key, unsupported.Reason));
+        Assert.Equal(
+            [
+                (current.Key, SetupInstallState.Installed, (string?)null),
+                (retired.Key, SetupInstallState.NotSupported, RetiringResolver.Reason)
+            ],
+            listing.Models.Select(model => (model.Definition.Key, model.State, model.UnsupportedReason)));
+        Assert.Null(listing.Saved);
     }
 
     [Fact]
@@ -116,7 +139,14 @@ public sealed class TensorInstalledPacksTests : IDisposable
 
     private Task<TensorModelListing> ListAsync(IReadOnlyList<TensorModelPackDefinition> builtIns,
         IReadOnlyList<TensorModelPackDefinition> installed, TensorModelPackDefinition? saved) =>
-        TensorInstalledPacks.ListAsync(new OsUserPersist(_root), "the store", Store, builtIns, installed, saved);
+        ListOverPacksAsync(builtIns, new(installed, []), saved);
+
+    private async Task<TensorModelListing> ListOverPacksAsync(IReadOnlyList<TensorModelPackDefinition> builtIns,
+        TensorInstalledReport installed, TensorModelPackDefinition? saved)
+    {
+        using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, Store));
+        return await TensorInstalledPacks.ListAsync(packs, "the store", builtIns, installed, saved);
+    }
 
     // A sparse file of the tiny variant's length with its GGML header, and the manifest and description of the pack.
     private async Task WriteWhisperPackAsync(string store, TensorModelPackDefinition pack, uint magic)
@@ -137,8 +167,11 @@ public sealed class TensorInstalledPacksTests : IDisposable
             JsonSerializer.Serialize(pack, TensorJson.ModelPack));
     }
 
-    private Task<IReadOnlyList<TensorModelPackDefinition>> ReportAsync(IReadOnlyList<TensorModelPackDefinition> builtIns) =>
-        TensorInstalledPacks.ReportAsync(new OsUserPersist(_root), Store, builtIns, _ => true, formatCheck: null);
+    private async Task<TensorInstalledReport> ReportAsync(IReadOnlyList<TensorModelPackDefinition> builtIns)
+    {
+        using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, Store));
+        return await TensorInstalledPacks.ReportAsync(packs, builtIns, _ => true, formatCheck: null);
+    }
 
     private async Task<TensorModelPackDefinition> InstallAsync(string id, string content)
     {
@@ -170,4 +203,22 @@ public sealed class TensorInstalledPacksTests : IDisposable
         StorePath(TensorModelPackManager.ArtifactName(pack.Key, pack.Artifacts[0].RelativePath));
 
     private string StorePath(string assetName) => Path.Combine(_root, Store, assetName);
+
+    // A format check that reports the pack whose file holds the given text as retired, and every other pack as supported.
+    private sealed class RetiringResolver(string retiredContent) : TensorModelResolver(null, null)
+    {
+        public const string Reason = "This architecture is no longer supported.";
+
+        public override IReadOnlyList<TensorArtifactRequirement> Requirements => [new("model", "*.gguf")];
+
+        public override async Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
+            ITensorArtifactReader reader, CancellationToken cancellationToken = default)
+        {
+            TensorSourceArtifact artifact = candidate.Artifacts[0];
+            string content = await File.ReadAllTextAsync(artifact.DownloadUri.LocalPath, cancellationToken);
+            return content == retiredContent
+                ? new(new(TensorCompatibilityState.Unsupported, [new(TensorInstalledPacks.RetiredArchitectureCode, Reason)], []))
+                : new(new(TensorCompatibilityState.Supported, [], []));
+        }
+    }
 }

@@ -83,9 +83,9 @@ internal sealed record ConsoleOptions
         models and the setup actions its provider opens over <dir>/<store key>. It reads metadata only; it
         installs, loads and saves nothing, writes no file and makes no network call.
 
-        embedding loads the installed pinned Qwen3-Embedding-0.6B pack without downloading anything.
-        It checks document/query vectors, owned result JSON and runtime shutdown with a live model,
-        then disposes the model and runtime. --store names the Embedding pack store, not its parent.
+        embedding loads the first installed GGUF embedding pack without downloading anything. It checks
+        document/query vectors and owned result JSON with a live model, then disposes the model and
+        runtime. --store names the model store; the packs are read from <dir>/Embedding.
 
         Example:
           tensor qwen --repo ukisai/Swift-1.5-Qwen3.8-27B-GGUF --file Swift-1.5-Qwen3.8-27B-Q4_K_M.gguf \
