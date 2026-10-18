@@ -181,6 +181,17 @@ internal sealed class SavedConversation
             model.MaxOutputTokens, ManagedAgentPolicy.Normalize(_execution, model).ContextPolicy);
     }
 
+    /// <summary>
+    /// The values the window of <paramref name="modelId"/> is the smallest of: the model's listed window, the limit a
+    /// refusal taught, and the policy cap. Each is null when unknown.
+    /// </summary>
+    internal (long? Listed, long? Learned, long? Cap) WindowSources(string modelId)
+    {
+        LlmModel model = _model(modelId);
+        return (model.MaxContextTokens, _learned.Limit(_connectionId, _connection, modelId),
+            ManagedAgentPolicy.Normalize(_execution, model).ContextPolicy.MaxContextTokens);
+    }
+
     private long Correct(string modelId, long local) => _learned.Correct(_connectionId, modelId, local);
 
     /// <summary>

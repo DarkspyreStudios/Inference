@@ -5,6 +5,7 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Microsoft.Extensions.Logging;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -15,6 +16,18 @@ internal sealed partial class ClaudeAgentClient
     private LearnedModelContext Learned => learned;
 
     private IClaudeCliSessionProcessFactory Processes => processFactory;
+
+    private ILogger Logger => logger;
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Claude context on {ConnectionId} thread {ThreadId} at {Point}: model {ModelId}, {UsedTokens} of {WindowTokens} tokens, compaction needed {NeedsCompaction}; window is the smallest of listed {ListedTokens}, learned {LearnedTokens}, policy cap {CapTokens}")]
+    private static partial void LogContextStatus(ILogger logger, string connectionId, string threadId, string point, string modelId,
+        long? usedTokens, long? windowTokens, bool? needsCompaction, long? listedTokens, long? learnedTokens, long? capTokens);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Claude compaction on {ConnectionId} thread {ThreadId} ({Reason}): model {ModelId}, {DroppedEntries} entries replaced by the summary, {ShortenedResults} tool results shortened; target {TargetTokens}, trigger {TriggerTokens}, window {WindowTokens} tokens")]
+    private static partial void LogCompaction(ILogger logger, string connectionId, string threadId, string reason, string modelId,
+        int? droppedEntries, int shortenedResults, long targetTokens, long triggerTokens, long windowTokens);
 
     /// <summary>
     /// The Claude conversation the Host holds. It owns the saved history and the current CLI session, measures before
@@ -396,7 +409,16 @@ internal sealed partial class ClaudeAgentClient
         {
             LlmAgentContextStatus measured = await _history.StatusAsync(turn.ModelId, turn.PendingInput, observe: true, turn.Token);
             turn.Write(new LlmAgentContextStatusEvent(ThreadId, turn.Id, measured));
+            LogStatus("turn start", turn.ModelId, measured);
             return measured.NeedsCompaction is not true || Preserve || await ReopenAsync(turn);
+        }
+
+        /// <summary>Logs a context reading with the values its window is the smallest of.</summary>
+        private void LogStatus(string point, string modelId, LlmAgentContextStatus status)
+        {
+            (long? listed, long? learned, long? cap) = _history.WindowSources(modelId);
+            LogContextStatus(_owner.Logger, _connectionId, ThreadId, point, modelId, status.UsedContextTokens, status.MaxContextTokens,
+                status.NeedsCompaction, listed, learned, cap);
         }
 
         /// <summary>
@@ -417,6 +439,7 @@ internal sealed partial class ClaudeAgentClient
             catch (OperationCanceledException) when (turn.Token.IsCancellationRequested) { return false; }
             turn.Write(new LlmAgentContextStatusEvent(ThreadId, turn.Id, measured));
             if (measured.NeedsCompaction is not true || Preserve) return false;
+            LogStatus("model step", turn.ModelId, measured);
             turn.RequestReopen();
             return true;
         }
@@ -462,6 +485,8 @@ internal sealed partial class ClaudeAgentClient
             if (limits is not null) turn.Write(new LlmAgentActivityEvent(ThreadId, turn.Id, itemId, string.Empty));
             if (changed)
             {
+                LogCompaction(_owner.Logger, _connectionId, ThreadId, "during a turn", turn.ModelId, result!.DroppedMessageCount,
+                    result.ShortenedToolOutputCount, limits!.TargetTokens, limits.TriggerTokens, limits.Window);
                 string requestId = Guid.NewGuid().ToString("N");
                 turn.Write(Compacted(turn.Id, requestId, revision, result!));
                 if (result!.Usage is not null)
@@ -473,6 +498,7 @@ internal sealed partial class ClaudeAgentClient
             // The next send is the first step of the new CLI session: its measure is reported and observed.
             LlmAgentContextStatus measured = await _history.StatusAsync(turn.ModelId, turn.PendingInput, observe: true, token);
             turn.Write(new LlmAgentContextStatusEvent(ThreadId, turn.Id, measured));
+            LogStatus("after reopen", turn.ModelId, measured);
             return true;
         }
 
@@ -500,6 +526,10 @@ internal sealed partial class ClaudeAgentClient
                 if (!result.Changed) return null;
                 await CloseInnerAsync();
                 long revision = await OpenAndInstallAsync(result.Context, replaceHistory: true, cancellationToken);
+                LogCompaction(_owner.Logger, _connectionId, ThreadId, "manual", modelId, result.DroppedMessageCount,
+                    result.ShortenedToolOutputCount, limits.TargetTokens, limits.TriggerTokens, limits.Window);
+                LogStatus("after manual compaction", modelId,
+                    await _history.StatusAsync(modelId, null, observe: false, cancellationToken));
                 return Compacted(lastTurnId, Guid.NewGuid().ToString("N"), revision, result);
             }
             finally

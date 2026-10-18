@@ -10,6 +10,7 @@ using System.Threading.Channels;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Microsoft.Extensions.Logging;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -18,7 +19,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// <see cref="ClaudeConversation"/>, which owns the saved history and runs each CLI process as an inner session.
 /// </summary>
 internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory processFactory,
-    ClaudeCliLlmClient chat, LearnedModelContext learned) : ILlmAgentResumeClient
+    ClaudeCliLlmClient chat, LearnedModelContext learned, ILogger<ClaudeAgentClient> logger) : ILlmAgentResumeClient
 {
     private const string McpServerName = "darkspyre-inference-connect";
 

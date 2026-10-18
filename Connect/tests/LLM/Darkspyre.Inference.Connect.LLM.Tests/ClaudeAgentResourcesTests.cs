@@ -8,6 +8,7 @@ using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
@@ -1333,7 +1334,8 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
     private static readonly HttpClient Http = new();
 
     private static ClaudeAgentClient Client(IClaudeCliSessionProcessFactory factory, Summaries? summaries = null) =>
-        new(factory, new ClaudeCliLlmClient(Http, summaries ?? new Summaries(), factory), new LearnedModelContext());
+        new(factory, new ClaudeCliLlmClient(Http, summaries ?? new Summaries(), factory), new LearnedModelContext(),
+            NullLogger<ClaudeAgentClient>.Instance);
 
     /// <summary>Starts the given processes in order; the last one serves every later start.</summary>
     private sealed class Factory(params IClaudeCliSessionProcess[] processes) : IClaudeCliSessionProcessFactory
