@@ -229,7 +229,6 @@ in its own message by the attachment notice, so any history opens.
 | ResourceObservation | Unsupported | Unsupported | Supported | Unsupported | Unsupported |
 | SupportsFallbackModels | Unsupported | Unsupported | Unknown | Unsupported | Unsupported |
 | SupportsTurnCap | Supported | Supported | Unknown | Unsupported | Supported |
-| SupportsSpendCap | Unsupported | Unsupported | Unknown | Unsupported | Unsupported |
 | SupportsCompactNow | Supported | Supported | Supported | Supported | Supported |
 | CompactionSide | Host | Host | Host | Host | Host |
 

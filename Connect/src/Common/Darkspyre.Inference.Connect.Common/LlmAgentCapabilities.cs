@@ -81,9 +81,6 @@ public sealed record LlmAgentCapabilities
     /// <summary>LlmAgentExecutionOptions.MaxModelIterations ends a turn that reaches it.</summary>
     public InferenceSupport SupportsTurnCap { get; init; }
 
-    /// <summary>LlmAgentExecutionOptions.MaxSpendUsd ends a turn that reaches it.</summary>
-    public InferenceSupport SupportsSpendCap { get; init; }
-
     /// <summary>Whether the session reports the runtime's own background work through its resource members.</summary>
     public LlmOperationSupport ResourceObservation { get; init; } = LlmOperationSupport.Unsupported;
 

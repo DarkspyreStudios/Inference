@@ -97,7 +97,7 @@ public sealed class SupportStateTests
         Assert.Equal(5000, local["gpt-5.5"].MaxContextTokens);
     }
 
-    /// <summary>Another endpoint gets no OpenAI facts; the spend cap is Unsupported everywhere (B11, B12).</summary>
+    /// <summary>Another endpoint gets no OpenAI facts.</summary>
     [Fact]
     public void OtherEndpointMarksServiceFeaturesUnknown()
     {
@@ -115,8 +115,6 @@ public sealed class SupportStateTests
         Assert.Equal([LlmHostedToolKind.ImageGeneration], local.HostedTools);
         Assert.Equal(InferenceSupport.Supported, openAi.SupportsStreaming);
         Assert.NotEmpty(openAi.ReasoningLevels);
-        Assert.Equal(InferenceSupport.Unsupported, local.Agent.SupportsSpendCap);
-        Assert.Equal(InferenceSupport.Unsupported, openAi.Agent.SupportsSpendCap);
     }
 
     /// <summary>On OpenAI's endpoint a reasoning model drops temperature unless the level is None, and a non-reasoning

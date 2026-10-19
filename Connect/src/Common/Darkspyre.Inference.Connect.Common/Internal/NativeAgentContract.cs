@@ -29,7 +29,6 @@ internal static class NativeAgentContract
         SupportsCompactNow = InferenceSupport.Supported,
         SupportsFallbackModels = InferenceSupport.Unknown,
         SupportsTurnCap = InferenceSupport.Unknown,
-        SupportsSpendCap = InferenceSupport.Unknown,
         RichContentSupported = RichContentRoutes.ClaudeMcp,
         SupportedRuntimePolicies = HostControlled,
         ResourceObservation = LlmOperationSupport.Supported
@@ -59,7 +58,6 @@ internal static class NativeAgentContract
         SupportsCompactNow = InferenceSupport.Supported,
         SupportsFallbackModels = InferenceSupport.Unsupported,
         SupportsTurnCap = InferenceSupport.Unsupported,
-        SupportsSpendCap = InferenceSupport.Unsupported,
         RichContentSupported = RichContentRoutes.TextOnly,
         SupportedRuntimePolicies = ProviderConfigured,
         ResourceObservation = LlmOperationSupport.Unsupported

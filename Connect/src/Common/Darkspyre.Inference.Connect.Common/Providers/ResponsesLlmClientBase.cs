@@ -167,8 +167,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         SupportsNativeResume = InferenceSupport.Unsupported,
         SupportsExternalToolHandoff = InferenceSupport.Supported,
         SupportsFallbackModels = InferenceSupport.Unsupported,
-        SupportsTurnCap = InferenceSupport.Supported,
-        SupportsSpendCap = InferenceSupport.Unsupported
+        SupportsTurnCap = InferenceSupport.Supported
     };
 
     private async IAsyncEnumerable<LlmStreamEvent> StreamCoreAsync(LlmConnection connection, LlmChatRequest request,
