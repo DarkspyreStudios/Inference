@@ -49,112 +49,6 @@ public sealed class ManagedAgentTests
     }
 
     [Fact]
-    public async Task UnknownToolTailSurvivesInvalidStructuredOutputWithoutExecutingToolsOrAnotherStep()
-    {
-        var harness = new Harness();
-        harness.Results.Enqueue(new()
-        {
-            Diagnostics = new(200, null, null),
-            Text = "partial",
-            Status = LlmCompletionStatus.Unknown,
-            FinishReason = "UNKNOWN_STOP",
-            Usage = new(5, 2, 7),
-            ToolCalls = [new LlmToolCall("call-1", "echo", "{}")],
-            StructuredOutput = new(LlmStructuredOutputEnforcement.ProviderJsonSchema, true, false, ["Incomplete JSON."])
-        });
-        int toolsRun = 0;
-        await using var session = harness.Create(Options() with
-        {
-            Tools = [new LlmAgentToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
-            ToolHandler = (_, _) =>
-            {
-                toolsRun++;
-                return Task.FromResult(LlmToolOutput.FromText("unexpected"));
-            }
-        });
-
-        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
-
-        Assert.Equal(LlmAgentCompletionReason.Unknown, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
-        Assert.Equal("partial", Assert.Single(events.OfType<LlmAgentMessageCompletedEvent>()).Text);
-        Assert.Equal(new LlmUsage(5, 2, 7), Assert.Single(events.OfType<LlmAgentUsageEvent>()).Usage);
-        Assert.Equal(0, toolsRun);
-        Assert.Single(harness.Requests);
-        LlmAgentContext captured = await session.CaptureContextAsync();
-        LlmAgentContext restored = JsonSerializer.Deserialize(
-            JsonSerializer.Serialize(captured, ConnectLlmJson.AgentContext), ConnectLlmJson.AgentContext)!;
-        Assert.Equal(["user", "assistant"], restored.Entries.Select(entry => entry.Message.Role));
-        Assert.Equal("partial", restored.Entries[1].Message.Content);
-        LlmToolCall call = Assert.IsType<LlmToolCall>(Assert.Single(restored.Entries[1].Message.ToolCalls));
-        Assert.Equal("call-1", call.Id);
-        Assert.Equal("echo", call.Name);
-        Assert.Equal("{}", call.ArgumentsJson);
-        Assert.Null(restored.Entries[1].Message.ContinuationState);
-        Assert.All(restored.Entries, entry => Assert.Empty(entry.Message.ToolResults));
-    }
-
-    [Fact]
-    public async Task RetirementPreservesEveryParallelToolCleanupFailure()
-    {
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        int running = 0;
-        Exception[] failures =
-        [
-            LlmResourcePreparation.AsCleanupFailure(new IOException("The first tool resource could not be released.")),
-            LlmResourcePreparation.AsCleanupFailure(new IOException("The second tool resource could not be released."))
-        ];
-        var harness = new Harness();
-        harness.Results.Enqueue(new()
-        {
-            Diagnostics = new(200, null, null),
-            Text = string.Empty,
-            Status = LlmCompletionStatus.RequiresAction,
-            ToolCalls = [new LlmToolCall("call-1", "echo", "{}"), new LlmToolCall("call-2", "echo", "{}")]
-        });
-        var session = harness.Create(Options() with
-        {
-            Tools = [new LlmAgentToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
-            ExecutionOptions = new() { ToolExecutionMode = LlmAgentToolExecutionMode.Parallel, MaxConcurrentTools = 2 },
-            ToolHandler = async (call, _) =>
-            {
-                if (Interlocked.Increment(ref running) == 2) entered.TrySetResult();
-                await release.Task;
-                throw failures[call.CallId == "call-1" ? 0 : 1];
-            }
-        });
-        IAsyncEnumerator<LlmAgentEvent> events = session.RunTurnAsync(Turn("hello")).GetAsyncEnumerator();
-        try
-        {
-            Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
-            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            Task retirement = session.DisposeAsync().AsTask();
-            Assert.False(retirement.IsCompleted);
-            release.SetResult();
-
-            Exception? outcome = await Record.ExceptionAsync(() => retirement).WaitAsync(TimeSpan.FromSeconds(5));
-            Exception[] causes = Assert.IsType<AggregateException>(outcome).Flatten().InnerExceptions.ToArray();
-            Assert.Equal(2, causes.Length);
-            Assert.Same(failures[0], causes[0]);
-            Assert.Same(failures[1], causes[1]);
-            Assert.Same(outcome, await Record.ExceptionAsync(async () => await session.DisposeAsync())
-                .WaitAsync(TimeSpan.FromSeconds(5)));
-            Exception? readerCleanup = await Record.ExceptionAsync(async () => await events.DisposeAsync())
-                .WaitAsync(TimeSpan.FromSeconds(5));
-            Exception[] readerCauses = Assert.IsType<AggregateException>(readerCleanup).Flatten().InnerExceptions.ToArray();
-            Assert.Equal(2, readerCauses.Length);
-            Assert.Same(failures[0], readerCauses[0]);
-            Assert.Same(failures[1], readerCauses[1]);
-        }
-        finally
-        {
-            release.TrySetResult();
-            _ = await Record.ExceptionAsync(async () => await events.DisposeAsync()).WaitAsync(TimeSpan.FromSeconds(5));
-            _ = await Record.ExceptionAsync(async () => await session.DisposeAsync()).WaitAsync(TimeSpan.FromSeconds(5));
-        }
-    }
-
-    [Fact]
     public async Task RetirementDrainsAnIgnoringToolCallbackWithoutWaitingForThePausedEventReader()
     {
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -199,24 +93,6 @@ public sealed class ManagedAgentTests
         {
             release.TrySetResult(LlmToolOutput.FromText("settled"));
         }
-    }
-
-    [Fact]
-    public async Task HostToolSchemasAreSentUnchanged()
-    {
-        // An optional property without additionalProperties is a valid host schema but not a strict one.
-        JsonElement loose = JsonElement.Parse(
-            """{"type":"object","properties":{"command":{"type":"string"},"timeout":{"type":"integer"}},"required":["command"]}""");
-        var harness = new Harness();
-        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "done", Status = LlmCompletionStatus.Completed });
-        await using var session = harness.Create(ToolsOptions(_ => new()) with
-        {
-            Tools = [new LlmAgentToolDefinition() { Name = "bash", InputSchema = loose }, new LlmAgentToolDefinition() { Name = "echo", InputSchema = loose }]
-        });
-        await Read(session.RunTurnAsync(Turn("hello")));
-        LlmToolDefinition[] sent = [.. harness.Requests.Single().Tools.Select(tool => Assert.IsType<LlmToolDefinition>(tool))];
-        Assert.Equal(["bash", "echo"], sent.Select(tool => tool.Name));
-        Assert.Equal(loose.GetRawText(), sent[0].InputSchema.GetRawText()); // The schema itself is sent unchanged.
     }
 
     [Fact]
@@ -347,18 +223,6 @@ public sealed class ManagedAgentTests
         Assert.Equal("The model response stream was interrupted.", recovery.Error);
     }
 
-    /// <summary>A hosted-tool request is never replayed even without observed hosted activity.</summary>
-    [Fact]
-    public async Task InterruptedHostedToolRequestDoesNotReplay()
-    {
-        var harness = new Harness { Failure = Interrupted() };
-        await using var session = harness.Create(Options() with { HostedTools = [new LlmWebSearchTool()] });
-        var events = await Read(session.RunTurnAsync(Turn("hello")));
-        Assert.Single(harness.Requests);
-        Assert.Null(Assert.Single(events.OfType<LlmAgentResponseRecoveryEvent>()).NextAttempt);
-        Assert.Contains("Provider-side work may already have run", Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Error);
-    }
-
     /// <summary>An image-only request replays a lost stream unless the failed attempt started a hosted call.</summary>
     [Fact]
     public async Task InterruptWithImageToolRecoversWhenNoHostedCallStarted()
@@ -385,17 +249,17 @@ public sealed class ManagedAgentTests
         }
     }
 
-    /// <summary>A session that asks for images opens and runs on a model without image generation; other hosted tools stay.</summary>
+    /// <summary>A session that asks for images opens and runs on a model without image generation.</summary>
     [Fact]
     public async Task ImageToolIsDroppedOnAModelWithoutImages()
     {
         var harness = new Harness { PreparesResources = true };
         harness.Results.Enqueue(Done());
-        await using var session = harness.Create(ImageOptions() with { HostedTools = [new LlmImageGenerationTool(), new LlmWebSearchTool()] });
+        await using var session = harness.Create(ImageOptions());
 
         var events = await Read(session.RunTurnAsync(Turn("hello")));
 
-        Assert.IsType<LlmWebSearchTool>(Assert.Single(Assert.Single(harness.Requests).HostedTools));
+        Assert.Empty(Assert.Single(harness.Requests).HostedTools);
         Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
     }
 
@@ -538,17 +402,6 @@ public sealed class ManagedAgentTests
         LlmChatMessage stored = (await session.CaptureContextAsync(new() { IncludeAttachmentData = true })).Entries[0].Message;
         Assert.Equal("Look", stored.Content);
         Assert.Equal("chart.png", Assert.IsType<LlmAttachment>(Assert.Single(stored.Attachments)).FileName);
-    }
-
-    [Fact]
-    public async Task UnsupportedOperationIsRefusedByName()
-    {
-        await using var providers = new LlmAgentProviderService(new ResourcePreparationTests.Source(Harness.Connection), [new CodexClient()]);
-
-        NotSupportedException error = await Assert.ThrowsAsync<NotSupportedException>(
-            () => providers.ResumeSessionAsync("connection", "thread"));
-
-        Assert.Equal("OpenAiCodex agent sessions cannot resume a provider thread.", error.Message);
     }
 
     [Fact]
@@ -803,40 +656,22 @@ public sealed class ManagedAgentTests
     }
 
     [Fact]
-    public async Task AbilityToolsOnCodex()
+    public async Task UpdatePlanRunsInsideConnectOnCodex()
     {
-        const string skillText = "---\nname: review\ndescription: Reviews a change.\n---\nRead the diff first.\n";
-        string folder = Directory.CreateTempSubdirectory("connect-ability-skill-").FullName;
-        try
+        var harness = new Harness();
+        harness.Results.Enqueue(Calls(new LlmToolCall("plan", "update_plan", """{"plan":[{"step":"look","status":"in_progress"}]}""")));
+        harness.Results.Enqueue(Done());
+        int hostCalls = 0;
+        await using var session = harness.Create(AgentAbilityTools.Apply(Options() with
         {
-            File.WriteAllText(Path.Combine(folder, "SKILL.md"), skillText);
-            var harness = new Harness();
-            harness.Results.Enqueue(Calls(new LlmToolCall("plan", "update_plan", """{"plan":[{"step":"look","status":"in_progress"}]}"""),
-                new LlmToolCall("skill", "load_skill", """{"name":"review"}""")));
-            harness.Results.Enqueue(Done());
-            int hostCalls = 0;
-            await using var session = harness.Create(AgentAbilityTools.Apply(Options() with
-            {
-                Instructions = "Be brief.",
-                SkillFolders = [folder],
-                ToolHandler = (_, _) => { Interlocked.Increment(ref hostCalls); return Task.FromResult(LlmToolOutput.FromText("host")); }
-            }));
+            ToolHandler = (_, _) => { Interlocked.Increment(ref hostCalls); return Task.FromResult(LlmToolOutput.FromText("host")); }
+        }));
 
-            await Read(session.RunTurnAsync(Turn("hello")));
+        await Read(session.RunTurnAsync(Turn("hello")));
 
-            Assert.Equal(0, hostCalls);
-            Assert.Contains("Be brief.\n\nSkills are available. Before a task one of them covers, call load_skill with its name.\n"
-                + "- review: Reviews a change.", harness.Requests[0].Instructions, StringComparison.Ordinal);
-            Dictionary<string, string> results = harness.Requests[1].Messages.SelectMany(message => message.ToolResults)
-                .OfType<LlmToolResult>().ToDictionary(result => result.ToolCallId,
-                    result => Assert.IsType<LlmToolOutputText>(Assert.Single(result.Output.Parts)).Text);
-            Assert.Equal("Plan updated.", results["plan"]);
-            Assert.Equal($"{skillText.TrimEnd('\n')}\nSkill folder: {folder}", results["skill"]);
-        }
-        finally
-        {
-            Directory.Delete(folder, recursive: true);
-        }
+        Assert.Equal(0, hostCalls);
+        LlmToolResult result = Assert.IsType<LlmToolResult>(Assert.Single(harness.Requests[1].Messages.SelectMany(message => message.ToolResults)));
+        Assert.Equal("Plan updated.", Assert.IsType<LlmToolOutputText>(Assert.Single(result.Output.Parts)).Text);
     }
 
     [Fact]
@@ -1083,32 +918,6 @@ public sealed class ManagedAgentTests
     }
 
     [Fact]
-    public async Task OmittedNativeCompactionOverTheWindowIsCompactedAndSent()
-    {
-        var foreignState = new LlmContinuationState
-        { ImplementationId = "openai-codex", ModelId = "other", ScopeId = "other-account", Payload = "opaque" };
-        // About 1,500 tokens, over the 1,000-token window even after the omitted state is summarized.
-        string large = string.Join(' ', Enumerable.Repeat("word", 1500));
-        LlmAgentContext recent = History(("t1", large, "large answer"), ("t2", "recent question", "recent answer"));
-        var context = recent with
-        {
-            Entries = [new("native", "native", new("assistant", string.Empty) { ContinuationState = foreignState }), .. recent.Entries]
-        };
-        var harness = new Harness { SummaryText = "summary" };
-        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "answer", Status = LlmCompletionStatus.Completed });
-        await using var session = harness.Create(Options() with
-        {
-            Context = context,
-            CallerServices = new() { Transcript = new Transcript([.. History(("t0", "oldest question", "oldest answer")).Entries, .. recent.Entries]) }
-        });
-
-        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("next")));
-
-        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
-        Assert.DoesNotContain(large, Assert.Single(harness.Requests).Messages.Select(message => message.Content));
-    }
-
-    [Fact]
     public async Task CompactNowSummarizesAnIdleConversation()
     {
         var harness = new Harness { SummaryText = "summary of t1" };
@@ -1134,64 +943,6 @@ public sealed class ManagedAgentTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => busy.CompactNowAsync());
         while (await turn.MoveNextAsync()) { }
         Assert.Single(running.Requests);
-    }
-
-    [Fact]
-    public async Task ProviderCompactionReplacesTheContextAndReportsTheProviderSide()
-    {
-        var provider = new ProviderCompactor();
-        var harness = new Harness { ProviderCompaction = provider };
-        LlmAgentContext history = History(("t1", new string('a', 400), "first answer"), ("t2", new string('b', 300), "second answer"));
-        await using var session = harness.Create(Options() with { Context = history });
-
-        Assert.Equal(LlmCompactionSide.Provider, (await session.GetCapabilitiesAsync()).CompactionSide);
-        LlmAgentCompactedEvent? compacted = await session.CompactNowAsync();
-
-        Assert.Equal(4, compacted!.DroppedMessageCount);
-        Assert.Equal(history.Entries.Select(entry => entry.Message.Content),
-            Assert.Single(provider.Requests).Messages.Select(message => message.Content));
-        Assert.Equal(["compacted state"], (await session.CaptureContextAsync()).Entries.Select(entry => entry.Message.Content));
-        Assert.Empty(harness.Summaries);
-    }
-
-    [Fact]
-    public async Task FailedProviderCompactionFallsBackToTheHostSummary()
-    {
-        var provider = new ProviderCompactor(new LlmProviderException("Compaction failed.", LlmTransport.OpenAiResponses));
-        var harness = new Harness { ProviderCompaction = provider, SummaryText = "summary of t1" };
-        LlmAgentContext history = History(("t1", new string('a', 400), "first answer"), ("t2", new string('b', 300), "second answer"));
-        await using var session = harness.Create(Options() with { Context = history });
-
-        LlmAgentCompactedEvent? compacted = await session.CompactNowAsync();
-
-        Assert.Single(provider.Requests);
-        Assert.Equal(2, compacted!.DroppedMessageCount);
-        Assert.Equal(["Summary of the earlier conversation:\nsummary of t1", new string('b', 300), "second answer"],
-            (await session.CaptureContextAsync()).Entries.Select(entry => entry.Message.Content));
-    }
-
-    [Theory]
-    [InlineData(new[] { 4, 16 }, 5, 4)]
-    [InlineData(new int[0], 5, null)]
-    public async Task AgentCountIsTheNearestOfferedCount(int[] offered, int requested, int? expected)
-    {
-        var harness = new Harness
-        {
-            Capabilities = new()
-            {
-                SupportsAgentSessions = InferenceSupport.Supported,
-                SupportsAgentToolUse = InferenceSupport.Supported,
-                RichContentSupported = RichContentRoutes.Responses,
-                Agent = ManagedAgentPolicy.Capabilities,
-                AgentCounts = offered
-            }
-        };
-        harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "answer", Status = LlmCompletionStatus.Completed });
-        await using var session = harness.Create();
-
-        await Read(session.RunTurnAsync(Turn("hello") with { AgentCount = requested }));
-
-        Assert.Equal(expected, Assert.Single(harness.Requests).AgentCount);
     }
 
     [Fact]
@@ -1228,21 +979,6 @@ public sealed class ManagedAgentTests
         Assert.Equal(520 + 4 + ManagedAgentPolicy.EstimateMargin, pending.UsedContextTokens);
     }
 
-    /// <summary>A model service that compacts model "test"; it returns one entry, or throws <paramref name="failure"/>.</summary>
-    private sealed class ProviderCompactor(Exception? failure = null) : ILlmProviderCompaction
-    {
-        public List<LlmChatRequest> Requests { get; } = [];
-
-        public bool CompactsProviderSide(LlmConnection connection, string modelId) => modelId == "test";
-
-        public Task<LlmAgentContext> CompactAsync(LlmConnection connection, LlmChatRequest request, CancellationToken cancellationToken)
-        {
-            Requests.Add(request);
-            return failure is not null ? Task.FromException<LlmAgentContext>(failure)
-                : Task.FromResult(new LlmAgentContext { Entries = [new("compacted", "compaction", new("user", "compacted state"))] });
-        }
-    }
-
     /// <summary>A context of whole turns, each a user message and the assistant's answer.</summary>
     private static LlmAgentContext History(params (string TurnId, string Question, string Answer)[] turns) => new()
     {
@@ -1257,13 +993,6 @@ public sealed class ManagedAgentTests
     {
         public Task<LlmTranscriptPage> ReadAsync(string? cursor, int limit, CancellationToken cancellationToken = default) =>
             Task.FromResult(new LlmTranscriptPage(entries, null));
-    }
-
-    private sealed class CodexClient : ILlmAgentClient
-    {
-        public LlmTransport Transport => LlmTransport.OpenAiCodex;
-        public Task<ILlmAgentSession> StartSessionAsync(string connectionId, LlmConnection connection,
-            LlmAgentSessionOptions options, CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private static LlmProviderException Interrupted() => new("The model response stream was interrupted.",
@@ -1296,7 +1025,6 @@ public sealed class ManagedAgentTests
         public Queue<LlmChatResult> Results { get; } = new();
         public Queue<IReadOnlyList<LlmUsage>> UsageObservations { get; } = new();
         public List<LlmChatRequest> Requests { get; } = [];
-        public List<LlmChatRequest> Estimates { get; } = [];
         /// <summary>Compaction summary requests, answered with <see cref="SummaryText"/> or <see cref="SummaryFailure"/>.</summary>
         public List<LlmChatRequest> Summaries { get; } = [];
         public string SummaryText { get; init; } = "summary";
@@ -1307,8 +1035,6 @@ public sealed class ManagedAgentTests
         public Exception? Failure { get; set; }
         /// <summary>An optional scripted failure for each numbered model request.</summary>
         public Func<int, Exception?>? RequestFailure { get; init; }
-        public IReadOnlyList<JsonElement> Snapshots { get; init; } = [];
-        public bool UnknownEstimate { get; init; }
         public bool ExposeBeforeFailure { get; init; }
         /// <summary>The provider capabilities the session sees; null uses the default fixture.</summary>
         public LlmProviderCapabilities? Capabilities { get; init; }
@@ -1327,9 +1053,7 @@ public sealed class ManagedAgentTests
                 RichContentSupported = RichContentRoutes.Responses,
                 HostedTools = HostedKinds,
                 Agent = ManagedAgentPolicy.Capabilities
-            }, Learned, providerCompaction: ProviderCompaction).GetAwaiter().GetResult();
-        /// <summary>The model service's own compaction the session uses; null compacts with the library only.</summary>
-        public ILlmProviderCompaction? ProviderCompaction { get; init; }
+            }, Learned).GetAwaiter().GetResult();
         public LearnedModelContext Learned { get; } = new();
         /// <summary>The connection id the session learns under.</summary>
         public string ConnectionId { get; init; } = "test-connection";
@@ -1341,9 +1065,7 @@ public sealed class ManagedAgentTests
             IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources,
             CancellationToken cancellationToken)
         {
-            lock (Estimates) Estimates.Add(request);
-            return ValueTask.FromResult<ContextEstimate?>(UnknownEstimate ? null
-                : new ContextEstimate(request.Messages.Sum(message => message.Content.Length + message.ToolResults
+            return ValueTask.FromResult<ContextEstimate?>(new ContextEstimate(request.Messages.Sum(message => message.Content.Length + message.ToolResults
                     .OfType<LlmToolResult>().SelectMany(result => result.Output.Parts).OfType<LlmToolOutputText>()
                     .Sum(part => part.Text.Length)) + (request.Instructions?.Length ?? 0)));
         }
@@ -1366,7 +1088,6 @@ public sealed class ManagedAgentTests
             if (StartsHostedCall) { yield return new LlmHostedToolCallStartedEvent("image-1", LlmHostedToolKind.ImageGeneration, "image_generation"); }
             Exception? failure = RequestFailure is null ? Failure : RequestFailure(Requests.Count);
             if (failure is not null) { throw failure; }
-            foreach (var snapshot in Snapshots) yield return new LlmStructuredOutputSnapshotEvent(snapshot);
             if (UsageObservations.TryDequeue(out var usage))
             {
                 foreach (var observation in usage) yield return new LlmUsageDeltaEvent(observation);

@@ -20,9 +20,6 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Darkspyre.Inference.Common\Darkspyre.Inference.Common.csproj" />
     <ProjectReference Include="../../../Connect/src/Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
-    <ProjectReference Include="../../../Connect/src/Image/Darkspyre.Inference.Connect.Image/Darkspyre.Inference.Connect.Image.csproj" />
-    <ProjectReference Include="../../../Connect/src/TTS/Darkspyre.Inference.Connect.TTS/Darkspyre.Inference.Connect.TTS.csproj" />
-    <ProjectReference Include="../../../Connect/src/Audio/Darkspyre.Inference.Connect.Audio/Darkspyre.Inference.Connect.Audio.csproj" />
     <ProjectReference Include="../../../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj" />
   </ItemGroup>
 </Project>

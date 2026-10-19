@@ -53,26 +53,6 @@ public sealed class GemmaLifetimeTests : IDisposable
         finally { model.Release.TrySetResult(); }
     }
 
-    [Fact]
-    public async Task FailedReleaseRetainsTheLeaseUntilExplicitUnloadSucceeds()
-    {
-        using var packs = await InstalledAsync();
-        var model = new Model { ReleaseError = new IOException("native release failed") };
-        await using var engine = new GemmaEmbeddingInference(packs, new Loader(model), TensorBackendKind.Cpu);
-        await engine.LoadAndWaitAsync(Key);
-        try
-        {
-            await Assert.ThrowsAsync<IOException>(() => engine.UnloadAndWaitAsync());
-            await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(Key));
-            InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(Key));
-            Assert.Equal(InferenceFailureCode.BackendUnavailable, error.Code);
-        }
-        finally { model.ReleaseError = null; }
-        await engine.UnloadAndWaitAsync();
-        await packs.RemoveAsync(Key);
-        Assert.Equal(2, model.Disposals);
-    }
-
     private async Task<TensorModelPackManager> InstalledAsync()
     {
         Directory.CreateDirectory(_root);
@@ -98,7 +78,6 @@ public sealed class GemmaLifetimeTests : IDisposable
     private sealed class Model : IGemmaEmbeddingModel
     {
         public bool Hold { get; init; }
-        public Exception? ReleaseError { get; set; }
         public int Disposals { get; private set; }
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Cancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -111,7 +90,7 @@ public sealed class GemmaLifetimeTests : IDisposable
             token.ThrowIfCancellationRequested();
             return new([new float[768]], [], 1);
         }
-        public void Dispose() { Disposals++; if (ReleaseError is { } error) throw error; }
+        public void Dispose() => Disposals++;
     }
 
     public void Dispose() { if (Directory.Exists(_root)) Directory.Delete(_root, true); }

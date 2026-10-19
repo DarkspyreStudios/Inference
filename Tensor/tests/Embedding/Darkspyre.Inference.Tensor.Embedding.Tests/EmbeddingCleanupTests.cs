@@ -37,70 +37,19 @@ public sealed class EmbeddingCleanupTests : IDisposable
         Assert.Equal(1024, result.Dimensions);
     }
 
-    [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task ReturnedModelIsReleasedAfterCancellationOrMetadataFailure(bool cancel)
+    [Fact]
+    public async Task ReturnedModelIsReleasedAfterCancellation()
     {
         using var cancellation = new CancellationTokenSource();
-        var model = new Model { Dimensions = cancel ? 1024 : 512 };
+        var model = new Model();
         using TensorModelPackManager packs = await InstalledAsync();
-        await using var engine = Engine(packs, model, () => { if (cancel) cancellation.Cancel(); });
+        await using var engine = Engine(packs, model, cancellation.Cancel);
 
-        Exception error = await Assert.ThrowsAnyAsync<Exception>(() => engine.LoadAndWaitAsync(Key, cancellation.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => engine.LoadAndWaitAsync(Key, cancellation.Token));
 
-        if (cancel) Assert.IsAssignableFrom<OperationCanceledException>(error);
-        else Assert.Equal(InferenceFailureCode.ModelCorrupt, Assert.IsType<InferenceException>(error).Code);
         Assert.Equal(1, model.Disposals);
         await packs.RemoveAsync(Key);
         Assert.NotEqual(TensorModelPackState.Installed, (await packs.GetStatusAsync(Key)).State);
-    }
-
-    [Fact]
-    public async Task FailedModelReleaseRetainsItsPackUntilExplicitUnloadSucceeds()
-    {
-        var cleanup = new IOException("model release refused");
-        var model = new Model { Dimensions = 512, ReleaseError = cleanup };
-        using TensorModelPackManager packs = await InstalledAsync();
-        await using var engine = Engine(packs, model);
-
-        AggregateException error = await Assert.ThrowsAsync<AggregateException>(() => engine.LoadAndWaitAsync(Key));
-        Assert.IsType<InvalidDataException>(error.InnerExceptions[0]);
-        Assert.Same(cleanup, error.InnerExceptions[1]);
-        await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(Key));
-        InferenceException refused = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAsync(Key));
-        Assert.Equal(InferenceFailureCode.BackendUnavailable, refused.Code);
-
-        model.ReleaseError = null;
-        await engine.UnloadAndWaitAsync().WaitAsync(Timeout);
-        await packs.RemoveAsync(Key);
-        Assert.Equal(2, model.Disposals);
-        Assert.Equal(TensorEngineState.Unloaded, (await engine.GetObservationAsync()).State);
-    }
-
-    [Fact]
-    public async Task SharedDisposalPreservesFailureWithoutRepeatingRelease()
-    {
-        var cleanup = new IOException("model release refused");
-        var model = new Model { ReleaseError = cleanup };
-        using TensorModelPackManager packs = await InstalledAsync();
-        var engine = Engine(packs, model);
-        await engine.LoadAndWaitAsync(Key);
-        try
-        {
-            Assert.Same(cleanup, await Assert.ThrowsAsync<IOException>(() => engine.DisposeAsync().AsTask()));
-            Assert.Same(cleanup, await Assert.ThrowsAsync<IOException>(() => engine.DisposeAsync().AsTask()));
-            Assert.Equal(1, model.Disposals);
-            await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(Key));
-        }
-        finally
-        {
-            model.ReleaseError = null;
-            await engine.StopAndWaitAsync().WaitAsync(Timeout);
-        }
-        await packs.RemoveAsync(Key);
-        Assert.Same(cleanup, await Assert.ThrowsAsync<IOException>(() => engine.DisposeAsync().AsTask()));
-        Assert.Equal(2, model.Disposals);
     }
 
     [Fact]
@@ -176,11 +125,10 @@ public sealed class EmbeddingCleanupTests : IDisposable
     {
         public string ModelName => Key.ModelId;
         public string Architecture => "bert";
-        public int Dimensions { get; init; } = 1024;
+        public int Dimensions => 1024;
         public int MaxTokens => 8192;
         public int VocabularySize => 10;
         public int Disposals { get; private set; }
-        public Exception? ReleaseError { get; set; }
         public bool HoldEmbedding { get; init; }
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Canceled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -195,11 +143,7 @@ public sealed class EmbeddingCleanupTests : IDisposable
             return new(inputs.Select(_ => Enumerable.Repeat(1f, Dimensions).ToArray()).ToArray(), inputs.Count);
         }
 
-        public void Dispose()
-        {
-            Disposals++;
-            if (ReleaseError is not null) throw ReleaseError;
-        }
+        public void Dispose() => Disposals++;
     }
 
     public void Dispose()

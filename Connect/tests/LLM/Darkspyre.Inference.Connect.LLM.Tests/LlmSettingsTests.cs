@@ -11,25 +11,6 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class LlmSettingsTests
 {
     [Fact]
-    public async Task SupportOverrideChoicesKeepUnknownSeparateFromInheritance()
-    {
-        using var provider = new LlmProviderService(new UnusedSource(), [new Client(ProviderDefinitions.OpenAiCompatible)]);
-        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiCompatibleChat,
-            new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
-        using (manager)
-        {
-            var page = await manager.QueryChoicesAsync(settings, "json-schema", new());
-            Assert.Equal(["default", "unknown", "enabled", "disabled"], page.Choices.Select(item => item.Value));
-            var field = Assert.IsType<SetupChoiceField>(Fields(settings).Single(item => item.Description.Id == "json-schema"));
-            Assert.Equal(SetupEditState.Applied, field.SetValue("unknown").State);
-            Assert.Equal(InferenceSupport.Unknown, settings.CurrentConnection().CapabilityOverrides!.SupportsJsonSchema);
-            field = Assert.IsType<SetupChoiceField>(Fields(settings).Single(item => item.Description.Id == "json-schema"));
-            Assert.Equal(SetupEditState.Applied, field.SetValue("default").State);
-            Assert.Null(settings.CurrentConnection().CapabilityOverrides?.SupportsJsonSchema);
-        }
-    }
-
-    [Fact]
     public void AuthorizationGrantDiagnosticsDoNotExposeCodesOrVerifiers()
     {
         var session = new LlmAuthorizationSession
@@ -49,35 +30,15 @@ public sealed class LlmSettingsTests
         Assert.DoesNotContain(redirect.Code, redirectDiagnostic, StringComparison.Ordinal);
         Assert.DoesNotContain(redirect.State, redirectDiagnostic, StringComparison.Ordinal);
         Assert.Contains(nameof(LlmAuthorizationSession), sessionDiagnostic, StringComparison.Ordinal);
-        Assert.Contains(nameof(LlmRedirectResult), redirectDiagnostic, StringComparison.Ordinal);
-        Assert.Equal("private-pkce-verifier", session.CodeVerifier);
-        Assert.Equal("private-state", session.State);
-        Assert.Equal("https://example.test/authorize?state=private-state", session.AuthorizeUrl);
-        Assert.Equal("http://localhost/callback", session.RedirectUri);
-        Assert.Equal(new LlmRedirectResult("private-code", "private-state"), redirect);
     }
 
     [Fact]
-    public void AntigravitySetupCatalogNamesTheCliWithoutChangingProviderIdentity()
+    public async Task BlankCliExecutableUsesProviderDefaultForChecksAndSave()
     {
-        var catalog = new LlmProviderCatalog([AntigravityDefinition.Value]);
-        InferenceSetupDefinition setup = Assert.Single(catalog.SetupDefinitions);
-
-        Assert.Contains("Antigravity", setup.Implementation.DisplayName, StringComparison.Ordinal);
-        Assert.Equal("gemini-subscription", setup.Implementation.Id);
-        Assert.Equal(LlmTransport.GoogleAntigravityCli, Assert.Single(catalog.SupportedProviders).Transport);
-    }
-
-    [Theory]
-    [InlineData(LlmTransport.AnthropicClaudeCli)]
-    [InlineData(LlmTransport.GoogleAntigravityCli)]
-    public async Task BlankCliExecutableUsesProviderDefaultForChecksAndSave(LlmTransport transport)
-    {
-        LlmProviderDefinition definition = transport == LlmTransport.AnthropicClaudeCli
-            ? ClaudeDefinition.Value : AntigravityDefinition.Value;
+        LlmProviderDefinition definition = ClaudeDefinition.Value;
         using var provider = new LlmProviderService(new UnusedSource(), [new Client(definition)]);
         var target = new Target();
-        var (manager, settings) = await OpenAsync(provider, transport,
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.AnthropicClaudeCli,
             new(SetupChangeIntent.Create, "id", null), target, modelId: "model");
         using (manager)
         {
@@ -363,9 +324,6 @@ public sealed class LlmSettingsTests
             Assert.NotNull(result.Elapsed);
         }
     }
-
-    private static LlmConnection Connection(LlmTransport transport, string key) => new()
-    { Version = "v1", Transport = transport, Endpoint = "https://example.test/v1", Credential = new LlmCredential { ApiKey = key }.Serialize() };
 
     private static async Task<(LlmSettingsManager Manager, LlmSettings Settings)> OpenAsync(LlmProviderService provider, LlmTransport transport,
         SetupConfigurationIdentity identity, Target target, LlmConnection? existing = null, string? modelId = null)

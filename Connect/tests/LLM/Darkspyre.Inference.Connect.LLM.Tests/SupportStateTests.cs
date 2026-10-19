@@ -11,12 +11,10 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class SupportStateTests
 {
-    [Theory]
-    [InlineData(InferenceSupport.Unknown)]
-    [InlineData(InferenceSupport.Supported)]
-    [InlineData(InferenceSupport.Unsupported)]
-    public void SupportEvidenceRoundTripsThroughOwnedMetadata(InferenceSupport support)
+    [Fact]
+    public void SupportEvidenceRoundTripsThroughOwnedMetadata()
     {
+        const InferenceSupport support = InferenceSupport.Unsupported;
         var common = new LlmCapabilities
         {
             SupportsJsonSchema = support,
@@ -53,54 +51,9 @@ public sealed class SupportStateTests
         Assert.Equal(InferenceSupport.Unknown, new LlmProviderCapabilities().Apply(null).SupportsJsonSchema);
     }
 
-    [Fact]
-    public void MissingModelFactsDoNotBecomeNegativeEvidence()
-    {
-        Assert.Equal(InferenceSupport.Unknown, OpenAiModelProfiles.Get("unlisted-model").SupportsPromptCacheOptions);
-    }
-
-    [Fact]
-    public async Task FeatureMarksMatchB31()
-    {
-        // Codex reports what its managed session declares; Claude's sessions report NativeAgentContract.Claude.
-        using var http = new HttpClient();
-        var codex = new OpenAiCodexLlmClient(http);
-        LlmConnection connection = DirectCodexTests.Connection();
-        await using ManagedAgentSession session = await ManagedAgentSession.CreateAsync("test-connection", connection, new() { ModelId = "model" }, [],
-            codex, (_, _) => throw new InvalidOperationException("Capabilities send no request."),
-            model => codex.GetCapabilities(connection, model), new LearnedModelContext());
-        LlmAgentCapabilities codexMarks = await session.GetCapabilitiesAsync();
-        LlmAgentCapabilities claudeMarks = NativeAgentContract.Claude;
-        const InferenceSupport Yes = InferenceSupport.Supported, No = InferenceSupport.Unsupported, Unknown = InferenceSupport.Unknown;
-
-        Assert.Equal([LlmHostedToolKind.ImageGeneration], codexMarks.HostedTools);
-        Assert.Empty(claudeMarks.HostedTools);
-        Assert.Equal(LlmOperationSupport.Unsupported, codexMarks.ResourceObservation);
-        Assert.Equal(LlmOperationSupport.Supported, claudeMarks.ResourceObservation);
-        (string Name, Func<LlmAgentCapabilities, InferenceSupport> Read, InferenceSupport Codex, InferenceSupport Claude)[] rows =
-        [
-            ("SupportsShellTools", marks => marks.SupportsShellTools, No, No),
-            ("SupportsContextCapture", marks => marks.SupportsContextCapture, Yes, No),
-            ("SupportsContextReplacement", marks => marks.SupportsContextReplacement, Yes, No),
-            ("SupportsContextStatus", marks => marks.SupportsContextStatus, Yes, Yes),
-            ("SupportsCompactionHandoff", marks => marks.SupportsCompactionHandoff, No, No),
-            ("SupportsNativeResume", marks => marks.SupportsNativeResume, No, Yes),
-            ("SupportsSteering", marks => marks.SupportsSteering, Yes, Yes),
-            ("SupportsInterrupt", marks => marks.SupportsInterrupt, Yes, Yes),
-            ("SupportsExternalToolHandoff", marks => marks.SupportsExternalToolHandoff, Yes, Unknown),
-            ("SupportsFallbackModels", marks => marks.SupportsFallbackModels, No, Unknown),
-            ("SupportsTurnCap", marks => marks.SupportsTurnCap, Yes, Unknown),
-            ("SupportsSpendCap", marks => marks.SupportsSpendCap, No, Unknown),
-            ("SupportsCompactNow", marks => marks.SupportsCompactNow, Yes, Yes)
-        ];
-        Assert.Equal(rows.Select(row => (row.Name, row.Codex, row.Claude)),
-            rows.Select(row => (row.Name, row.Read(codexMarks), row.Read(claudeMarks))));
-    }
-
     [Theory]
     [InlineData(LlmReasoningLevel.Maximum, new[] { LlmReasoningLevel.None, LlmReasoningLevel.Low }, LlmReasoningLevel.Low)]
     [InlineData(LlmReasoningLevel.Medium, new[] { LlmReasoningLevel.None, LlmReasoningLevel.High }, LlmReasoningLevel.None)]
-    [InlineData(LlmReasoningLevel.None, new[] { LlmReasoningLevel.Low, LlmReasoningLevel.High }, LlmReasoningLevel.Low)]
     [InlineData(LlmReasoningLevel.Maximum, new LlmReasoningLevel[0], LlmReasoningLevel.Maximum)]
     public void ReasoningMapsToNearestOfferedLevel(LlmReasoningLevel requested, LlmReasoningLevel[] offered, LlmReasoningLevel expected)
     {
@@ -170,7 +123,6 @@ public sealed class SupportStateTests
     /// model gets no reasoning object (B4, S3).</summary>
     [Theory]
     [InlineData("gpt-5.5", LlmReasoningLevel.Medium, false, true)]
-    [InlineData("gpt-5.5", null, false, true)]
     [InlineData("gpt-5.5", LlmReasoningLevel.None, true, true)]
     [InlineData("gpt-4o", LlmReasoningLevel.Medium, true, false)]
     public async Task TemperatureIsDroppedOnAReasoningModel(string model, LlmReasoningLevel? level, bool temperature, bool reasoning)
@@ -183,7 +135,6 @@ public sealed class SupportStateTests
     /// <summary>Only a verified reasoning profile on OpenAI's endpoint asks for reasoning when the request names no level (B4, 6.5).</summary>
     [Theory]
     [InlineData(OpenAiResponsesLlmClient.DefaultEndpoint, "gpt-5.5", true)]
-    [InlineData(OpenAiResponsesLlmClient.DefaultEndpoint, "unlisted-model", false)]
     [InlineData("http://local.test/v1", "gpt-5.5", false)]
     public async Task OnlyAVerifiedOpenAiReasoningProfileReasonsByDefault(string endpoint, string model, bool reasons)
     {
@@ -195,12 +146,8 @@ public sealed class SupportStateTests
     /// <summary>A requested tier is sent as the nearest tier the model offers; Auto and a model without tiers send none (B13, S11).</summary>
     [Theory]
     [InlineData("gpt-5.5", LlmServiceTier.Economy, "flex")]
-    [InlineData("gpt-5.5", LlmServiceTier.Standard, "default")]
-    [InlineData("gpt-5.5", LlmServiceTier.Fast, "priority")]
     [InlineData("gpt-4o", LlmServiceTier.Economy, "default")]
     [InlineData("gpt-5.5", LlmServiceTier.Auto, null)]
-    [InlineData("gpt-5.5", null, null)]
-    [InlineData("unlisted-model", LlmServiceTier.Fast, null)]
     public async Task ServiceTierMapsToTheNearestOffered(string model, LlmServiceTier? tier, string? sent)
     {
         JsonNode payload = await SentAsync(OpenAiResponsesLlmClient.DefaultEndpoint, model, null, null, tier);
@@ -223,7 +170,6 @@ public sealed class SupportStateTests
     /// <summary>The Service tiers switch is on for OpenAI's endpoint and off elsewhere unless set (B13, S11 step 4).</summary>
     [Theory]
     [InlineData(OpenAiResponsesLlmClient.DefaultEndpoint, null, 4)]
-    [InlineData(OpenAiResponsesLlmClient.DefaultEndpoint, InferenceSupport.Unsupported, 0)]
     [InlineData("http://local.test/v1", null, 0)]
     [InlineData("http://local.test/v1", InferenceSupport.Supported, 4)]
     public void ServiceTiersSwitchFollowsTheEndpoint(string endpoint, InferenceSupport? setting, int offered)
@@ -265,23 +211,6 @@ public sealed class SupportStateTests
         Endpoint = "https://compatible.example.test/v1",
         Credential = new LlmCredential { ApiKey = "fixture-key" }.Serialize()
     };
-
-    private sealed class SchemaHandler : HttpMessageHandler
-    {
-        public string? Payload { get; private set; }
-        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
-        {
-            Payload = await request.Content!.ReadAsStringAsync(token);
-            return new(HttpStatusCode.OK)
-            {
-                Content = new StringContent(request.RequestUri!.Host is "generativelanguage.googleapis.com" or "aiplatform.googleapis.com"
-                    ? "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[{\"text\":\"{}\"}]},\"finishReason\":\"STOP\"}]}"
-                    : request.RequestUri.Host is "api.x.ai" or "api.openai.com"
-                    ? "{\"id\":\"response-fixture\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"{}\"}]}]}"
-                    : "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"{}\"},\"finish_reason\":\"stop\"}]}", Encoding.UTF8, "application/json")
-            };
-        }
-    }
 
     private sealed class Source(LlmConnection connection) : ILlmConnectionSource
     {

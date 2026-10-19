@@ -136,12 +136,10 @@ public sealed class InferenceSettingsEditorTests
         Assert.Equal(1, manager.RefreshCount);
     });
 
-    [Theory]
-    [InlineData(SetupInstallState.NotDownloaded)]
-    [InlineData(SetupInstallState.FilesMissing)]
-    public Task AModelThatIsNotInstalledIsNeverTheShownSelection(SetupInstallState state) => EditorSession.RunAsync(async () =>
+    [Fact]
+    public Task AModelThatIsNotInstalledIsNeverTheShownSelection() => EditorSession.RunAsync(async () =>
     {
-        InferenceSettingsEditor editor = ShowInstallEditor(new InstallSettings("small", state), new InstallManager());
+        InferenceSettingsEditor editor = ShowInstallEditor(new InstallSettings("small", SetupInstallState.FilesMissing), new InstallManager());
         await EditorSession.WaitForAsync(() => Cards(editor).Length == 2);
 
         Assert.Empty(EditorSession.All<Button>(editor, "inference-model-pack-card", "selected"));

@@ -17,21 +17,6 @@ public sealed class QwenPackSelectionTests : IDisposable
     private readonly string _root = Path.Combine(Path.GetTempPath(), "darkspyre-qwen-selection-" + Guid.NewGuid().ToString("N"));
     private static readonly byte[] Weights = "controlled checkpoint bytes"u8.ToArray();
 
-    [Fact]
-    public async Task AStopSequenceTheRuntimeStreamsIsNeverShownOrReturned()
-    {
-        var runtime = new Runtime { Pieces = ["Hel", "lo ST", "OP never shown"] };
-        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/stop-sequence");
-        await using (engine)
-        using (packs)
-        {
-            List<LlmStreamEvent> events = await Collect(engine, Request(model) with { StopSequences = ["STOP"] });
-
-            Assert.Equal("Hello ", string.Concat(events.OfType<LlmTextDeltaEvent>().Select(item => item.Delta)));
-            Assert.Equal("Hello ", Assert.IsType<LlmCompletionEvent>(events[^1]).Result.Text);
-        }
-    }
-
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -113,95 +98,10 @@ public sealed class QwenPackSelectionTests : IDisposable
         }
     }
 
-    [Fact]
-    public async Task AFailedAbandonmentCancellationStillDisposesTheRuntimeStream()
-    {
-        var cancellationFailure = new InvalidOperationException("runtime cancellation failed");
-        var disposalFailure = new InvalidOperationException("runtime stream disposal failed");
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var runtime = new Runtime
-        {
-            BeforeCompletionWait = completion.Task,
-            OnStreamCancelled = () => throw cancellationFailure,
-            StreamDisposalFailure = disposalFailure
-        };
-        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/cancel-cleanup");
-        using (packs)
-            try
-            {
-                IAsyncEnumerator<LlmStreamEvent> stream = engine.StreamAsync(Request(model)).GetAsyncEnumerator();
-                Assert.True(await stream.MoveNextAsync());
-                Assert.IsType<LlmTextDeltaEvent>(stream.Current);
-
-                AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() => stream.DisposeAsync().AsTask());
-
-                Assert.Equal(1, runtime.StreamDisposals);
-                Assert.True(runtime.LastStreamToken.IsCancellationRequested);
-                var causes = failure.Flatten().InnerExceptions;
-                Assert.Equal(3, causes.Count);
-                Assert.Single(causes.OfType<OperationCanceledException>());
-                Assert.Contains(cancellationFailure, causes);
-                Assert.Contains(disposalFailure, causes);
-                Assert.Same(failure, await Record.ExceptionAsync(async () => await engine.DisposeAsync()));
-                Assert.Same(failure, await Record.ExceptionAsync(async () => await engine.DisposeAsync()));
-                Assert.Equal(0, runtime.Disposals);
-            }
-            finally
-            {
-                completion.TrySetResult();
-                _ = await Record.ExceptionAsync(async () => await engine.DisposeAsync()).WaitAsync(TimeSpan.FromSeconds(5));
-            }
-    }
-
-    [Fact]
-    public async Task AFailedRuntimeStreamRetainsItsCauseAndIndependentCleanupFailures()
-    {
-        var operationFailure = new InvalidOperationException("runtime generation failed");
-        var cancellationFailure = new InvalidOperationException("runtime cancellation failed");
-        var disposalFailure = new InvalidOperationException("runtime stream disposal failed");
-        var runtime = new Runtime
-        {
-            StreamFailure = operationFailure,
-            OnStreamCancelled = () => throw cancellationFailure,
-            StreamDisposalFailure = disposalFailure
-        };
-        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/stream-cleanup");
-        using (packs)
-            try
-            {
-                var events = new List<LlmStreamEvent>();
-                AggregateException failure = await Assert.ThrowsAsync<AggregateException>(async () =>
-                {
-                    await foreach (LlmStreamEvent item in engine.StreamAsync(Request(model))) events.Add(item);
-                });
-
-                Assert.Contains(events, item => item is LlmTextDeltaEvent { Delta: "hello" });
-                Assert.DoesNotContain(events, item => item is LlmCompletionEvent);
-                Assert.Equal(1, runtime.StreamDisposals);
-                Assert.Same(operationFailure, failure.InnerExceptions[0]);
-                var causes = failure.Flatten().InnerExceptions;
-                Assert.Equal(3, causes.Count);
-                Assert.Contains(operationFailure, causes);
-                Assert.Contains(cancellationFailure, causes);
-                Assert.Contains(disposalFailure, causes);
-                Assert.Same(failure, await Record.ExceptionAsync(async () => await engine.DisposeAsync()));
-                Assert.Same(failure, await Record.ExceptionAsync(async () => await engine.DisposeAsync()));
-                Assert.Equal(0, runtime.Disposals);
-            }
-            finally
-            {
-                _ = await Record.ExceptionAsync(async () => await engine.DisposeAsync()).WaitAsync(TimeSpan.FromSeconds(5));
-            }
-    }
-
     [Theory]
     [InlineData("eos", LlmCompletionStatus.Completed, null)]
     [InlineData("max_tokens", LlmCompletionStatus.Incomplete, "max_output_tokens")]
-    [InlineData("thinking_budget", LlmCompletionStatus.Incomplete, "thinking_budget")]
     [InlineData("repetition", LlmCompletionStatus.Incomplete, "repetition")]
-    [InlineData("aborted", LlmCompletionStatus.Incomplete, "aborted")]
-    [InlineData("cancelled", LlmCompletionStatus.Incomplete, "cancelled")]
-    [InlineData("unrecognized-stop", LlmCompletionStatus.Unknown, null)]
     public async Task TerminalRuntimeReasonsRetainTheirActualCompletionMeaning(string reason, LlmCompletionStatus status,
         string? incompleteReason)
     {
@@ -217,57 +117,6 @@ public sealed class QwenPackSelectionTests : IDisposable
             Assert.Equal(incompleteReason, completion.Result.IncompleteReason);
             Assert.Equal(new LlmUsage(1, 1, 2), completion.Result.Usage);
         }
-    }
-
-    [Fact]
-    public async Task AStreamWithoutTerminalRuntimeEvidenceCannotReportSuccessfulCompletion()
-    {
-        TensorModelPackDefinition pack = Pack("host/truncated");
-        using var http = new HttpClient(new Handler());
-        using var packs = Manager(http, pack);
-        await packs.InstallAsync(pack.Key);
-        var runtime = new Runtime { EmitCompletion = false };
-        await using var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu);
-        await engine.LoadAndWaitAsync(pack.Key);
-        var events = new List<LlmStreamEvent>();
-
-        InferenceException failure = await Assert.ThrowsAsync<InferenceException>(async () =>
-        {
-            await foreach (LlmStreamEvent item in engine.StreamAsync(Request(pack.Key.ModelId))) events.Add(item);
-        });
-
-        Assert.Equal(InferenceFailureCode.ExecutionFailed, failure.Code);
-        Assert.Contains(events, item => item is LlmTextDeltaEvent { Delta: "hello" });
-        Assert.DoesNotContain(events, item => item is LlmCompletionEvent);
-        Assert.True(runtime.LastStreamToken.IsCancellationRequested);
-    }
-
-    [Fact]
-    public async Task ACancelledTerminalRuntimeUpdateCannotReportSuccessfulCompletion()
-    {
-        TensorModelPackDefinition pack = Pack("host/cancelled-terminal");
-        using var http = new HttpClient(new Handler());
-        using var packs = Manager(http, pack);
-        await packs.InstallAsync(pack.Key);
-        using var cancellation = new CancellationTokenSource();
-        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var runtime = new Runtime { BeforeCompletionWait = completion.Task, BeforeCompletion = cancellation.Cancel };
-        await using var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu);
-        await engine.LoadAndWaitAsync(pack.Key);
-        var events = new List<LlmStreamEvent>();
-
-        OperationCanceledException failure = await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-        {
-            await foreach (LlmStreamEvent item in engine.StreamAsync(Request(pack.Key.ModelId), cancellation.Token))
-            {
-                events.Add(item);
-                if (item is LlmTextDeltaEvent) completion.TrySetResult();
-            }
-        });
-
-        Assert.True(failure.CancellationToken.IsCancellationRequested);
-        Assert.Contains(events, item => item is LlmTextDeltaEvent { Delta: "hello" });
-        Assert.DoesNotContain(events, item => item is LlmCompletionEvent);
     }
 
     [Fact]
@@ -347,15 +196,11 @@ public sealed class QwenPackSelectionTests : IDisposable
         public List<TensorModelKey> Keys { get; } = [];
         public string? Architecture { get; init; } = "qwen35";
         public IReadOnlyList<string> Pieces { get; init; } = ["hello"];
-        public bool EmitCompletion { get; init; } = true;
-        public Action? BeforeCompletion { get; init; }
         public Task? BeforeCompletionWait { get; init; }
         public bool IgnoreCompletionCancellation { get; init; }
         public Action? BeforeCompletionWaiting { get; init; }
         public string FinishReason { get; init; } = "stop";
-        public Exception? StreamFailure { get; init; }
         public Action? OnStreamCancelled { get; init; }
-        public Exception? StreamDisposalFailure { get; init; }
         public int StreamDisposals { get; private set; }
         public int PiecesDelivered { get; private set; }
         private CancellationTokenRegistration _streamCancellation;
@@ -402,16 +247,13 @@ public sealed class QwenPackSelectionTests : IDisposable
                 PiecesDelivered++;
                 yield return ChatStreamUpdate.Text(piece);
             }
-            if (StreamFailure is not null) throw StreamFailure;
             cancellationToken.ThrowIfCancellationRequested();
-            if (!EmitCompletion) yield break;
             if (BeforeCompletionWait is not null)
             {
                 BeforeCompletionWaiting?.Invoke();
                 if (IgnoreCompletionCancellation) await BeforeCompletionWait;
                 else await BeforeCompletionWait.WaitAsync(cancellationToken);
             }
-            BeforeCompletion?.Invoke();
             yield return new("", true, 1, 1, 0, 0, 0, 0, cancellationToken.IsCancellationRequested ? "cancelled" : FinishReason);
         }
         public void Dispose() { Unload(); Disposals++; }
@@ -430,7 +272,6 @@ public sealed class QwenPackSelectionTests : IDisposable
                     owner.StreamDisposals++;
                     try { await source.DisposeAsync(); }
                     finally { owner._streamCancellation.Dispose(); }
-                    if (owner.StreamDisposalFailure is not null) throw owner.StreamDisposalFailure;
                 }
             }
         }

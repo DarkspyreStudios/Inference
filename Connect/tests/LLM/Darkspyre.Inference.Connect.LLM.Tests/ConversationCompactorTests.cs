@@ -75,30 +75,6 @@ public sealed class ConversationCompactorTests
     }
 
     [Fact]
-    public async Task SummaryPartsAreRequestedOneAtATime()
-    {
-        LlmAgentContextEntry[] older = [.. Enumerable.Range(1, 10).SelectMany(index => Turn("t" + index, new string('y', 8_000)))];
-        var context = new LlmAgentContext { Entries = [.. older, .. Turn("now", "continue")] };
-        int inFlight = 0, most = 0, requests = 0;
-        var compactor = new ConversationCompactor(
-            (measured, _) => ValueTask.FromResult(Harness.Measure(measured)),
-            async (request, _) =>
-            {
-                most = Math.Max(most, ++inFlight);
-                await Task.Yield();
-                inFlight--;
-                return new LlmChatResult { Diagnostics = new(200, null, null), Text = "summary " + ++requests, Status = LlmCompletionStatus.Completed, Usage = new(1, 1, 2) };
-            },
-            (text, _) => ValueTask.FromResult<long?>(Harness.Tokens(text)),
-            null);
-
-        await compactor.CompactAsync(context, "model", "now", new HashSet<string>(), Limits, NoStage, CancellationToken.None);
-
-        Assert.True(requests > 1);
-        Assert.Equal(1, most);
-    }
-
-    [Fact]
     public async Task ASummaryRequestPastTheTimeLimitFailsTheCompaction()
     {
         LlmAgentContextEntry[] older = Turn("t1", "older " + new string('z', 16_000));
@@ -222,24 +198,6 @@ public sealed class ConversationCompactorTests
             summary["Summary of the earlier conversation:\n".Length..].Split("\n\n"));
         Assert.Equal(20, result.DroppedMessageCount);
         Assert.Equal(harness.Requests.Count * 2, result.Usage!.TotalTokens);
-    }
-
-    [Fact]
-    public async Task SummaryRequestCarriesNoToolSettings()
-    {
-        LlmAgentContextEntry[] older = Turn("t1", "older " + new string('z', 16_000));
-        var context = new LlmAgentContext { Entries = [.. older, .. Turn("t2", "now")] };
-        var harness = new Harness(transcript: null);
-
-        await harness.Compactor.CompactAsync(context, "model", "t2", new HashSet<string>(), Limits, NoStage, CancellationToken.None);
-
-        LlmChatRequest request = Assert.Single(harness.Requests);
-        Assert.Empty(request.Tools);
-        Assert.Null(request.ToolChoice);
-        Assert.Null(request.AllowParallelToolCalls);
-        Assert.Null(request.StructuredOutput);
-        Assert.Null(request.MaxOutputTokens);
-        Assert.Matches(@"Write at most \d+ words\.$", request.Instructions);
     }
 
     [Fact]

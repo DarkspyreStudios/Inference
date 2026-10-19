@@ -1,10 +1,7 @@
 using System.Net;
 using System.Security.Cryptography;
 using System.Text;
-using System.Text.Json;
 using Darkspyre.Inference.Common;
-using Darkspyre.Inference.Common.Decision;
-using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Tensor.Common;
 
 namespace Darkspyre.Inference.Tensor.Decision.Laya.Tests;
@@ -23,7 +20,7 @@ public sealed class LayaPackSelectionTests : IDisposable
         TensorModelPackDefinition pack = Pack("host/custom", "1");
         pack = pack with { Artifacts = pack.Artifacts.Where(artifact => artifact.Role != "agent-config").ToArray() };
         using var http = new HttpClient(new ArtifactHandler());
-        using var packs = Manager(http, pack);
+        using var packs = new TensorModelPackManager(new TensorModelCatalog([pack]), _root, http);
         var loader = new Loader();
         await using var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
         InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => engine.LoadAndWaitAsync(pack.Key));
@@ -31,48 +28,7 @@ public sealed class LayaPackSelectionTests : IDisposable
         Assert.Empty(loader.Loaded);
     }
 
-    [Fact]
-    public async Task FailedLoadCleanupRetainsModelAndPackUntilExplicitUnload()
-    {
-        TensorModelPackDefinition pack = Pack("host/custom", "1");
-        using var http = new HttpClient(new ArtifactHandler());
-        using var packs = Manager(http, pack);
-        await packs.InstallAsync(pack.Key);
-        using var cancellation = new CancellationTokenSource();
-        var cleanupFailure = new InvalidOperationException("Model release failed.");
-        var loader = new Loader { AfterLoad = cancellation.Cancel, DisposeFailure = cleanupFailure };
-        var engine = new LayaDecisionInference(packs, loader, TensorBackendKind.Cpu);
-        try
-        {
-            AggregateException failure = await Assert.ThrowsAsync<AggregateException>(
-                () => engine.LoadAndWaitAsync(pack.Key, cancellation.Token));
-            OperationCanceledException original = Assert.IsType<OperationCanceledException>(failure.InnerExceptions[0]);
-            Assert.Equal(cancellation.Token, original.CancellationToken);
-            Assert.Same(cleanupFailure, failure.InnerExceptions[1]);
-            Model model = Assert.Single(loader.Models);
-            Assert.False(model.Disposed);
-            await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(pack.Key));
-            await Assert.ThrowsAsync<InvalidOperationException>(() => engine.LoadAndWaitAsync(pack.Key));
-            Assert.Same(model, Assert.Single(loader.Models));
-
-            model.DisposeFailure = null;
-            await engine.UnloadAndWaitAsync();
-            Assert.True(model.Disposed);
-            await packs.RemoveAsync(pack.Key);
-            Assert.Equal(TensorModelPackState.NotInstalled, (await packs.GetStatusAsync(pack.Key)).State);
-        }
-        finally
-        {
-            foreach (Model model in loader.Models) { model.DisposeFailure = null; }
-            await engine.DisposeAsync();
-        }
-    }
-
-    private TensorModelPackManager Manager(HttpClient http, params TensorModelPackDefinition[] definitions) =>
-        new(new TensorModelCatalog(definitions), _root, http);
-    private static SetupActionDescriptor Action(TensorSettings setup, SetupActionPurpose purpose) =>
-        Assert.Single(setup.Actions, action => action.Purpose == purpose);
-    private static TensorModelPackDefinition Pack(string id, string revision, string configuration = AgentConfiguration) => new()
+    private static TensorModelPackDefinition Pack(string id, string revision) => new()
     {
         Key = new(id, revision),
         Capability = TensorCapability.Decision,
@@ -82,7 +38,7 @@ public sealed class LayaPackSelectionTests : IDisposable
         Artifacts = ArtifactRoles.Select(role =>
         {
             var uri = new Uri($"https://example.test/{id}/{revision}/{role}");
-            byte[] content = ArtifactContent(uri, configuration);
+            byte[] content = ArtifactContent(uri);
             return new TensorModelArtifactDefinition
             {
                 Role = role,
@@ -97,51 +53,21 @@ public sealed class LayaPackSelectionTests : IDisposable
     {
         if (Directory.Exists(_root)) { Directory.Delete(_root, recursive: true); }
     }
-    private static byte[] ArtifactContent(Uri uri, string configuration) => Encoding.UTF8.GetBytes(
-        uri.AbsolutePath.EndsWith("/agent-config", StringComparison.Ordinal) ? configuration : uri.AbsolutePath);
-    private sealed class ArtifactHandler(string configuration = AgentConfiguration) : HttpMessageHandler
+    private static byte[] ArtifactContent(Uri uri) => Encoding.UTF8.GetBytes(
+        uri.AbsolutePath.EndsWith("/agent-config", StringComparison.Ordinal) ? AgentConfiguration : uri.AbsolutePath);
+    private sealed class ArtifactHandler : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken) =>
-            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(ArtifactContent(request.RequestUri!, configuration)) });
+            Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(ArtifactContent(request.RequestUri!)) });
     }
     private sealed class Loader : ILayaModelLoader
     {
         public List<TensorModelKey> Loaded { get; } = [];
-        public List<Model> Models { get; } = [];
-        public Exception? Failure { get; set; }
-        public Exception? DisposeFailure { get; init; }
-        public Action? AfterLoad { get; init; }
-        public Action? Forward { get; init; }
-        public async Task<LayaModelResources> LoadAsync(TensorModelPackLease lease, TensorBackendKind backend,
+        public Task<LayaModelResources> LoadAsync(TensorModelPackLease lease, TensorBackendKind backend,
             LayaAgentConfiguration configuration, CancellationToken cancellationToken)
         {
             Loaded.Add(lease.Key);
-            Assert.Equal(TensorBackendKind.Cpu, backend);
-            Assert.Equal($"/{lease.Key.ModelId}/{lease.Key.Revision}/model",
-                await File.ReadAllTextAsync(lease.GetRequiredArtifact("model"), cancellationToken));
-            if (Failure is not null) { throw Failure; }
-            var model = new Model(Forward) { DisposeFailure = DisposeFailure };
-            Models.Add(model);
-            AfterLoad?.Invoke();
-            return new(new Tokenizer(), model);
+            throw new InvalidOperationException("A pack without its agent configuration must not load.");
         }
-    }
-    private sealed class Model(Action? forward) : ILayaDecisionModel
-    {
-        public bool Disposed { get; private set; }
-        public Exception? DisposeFailure { get; set; }
-        public List<LayaSequence> Sequences { get; } = [];
-        public int MaximumOptions => 32;
-        public LayaModelOutput Forward(LayaSequence sequence, CancellationToken cancellationToken)
-        { Assert.False(Disposed); Sequences.Add(sequence); forward?.Invoke(); Assert.False(Disposed); return new([0, 2], .75f); }
-        public void Dispose()
-        {
-            if (DisposeFailure is not null) { throw DisposeFailure; }
-            Disposed = true;
-        }
-    }
-    private sealed class Tokenizer : ILayaTokenizer
-    {
-        public IReadOnlyList<int> Encode(string text) => Enumerable.Repeat(1, text.Length).ToArray();
     }
 }

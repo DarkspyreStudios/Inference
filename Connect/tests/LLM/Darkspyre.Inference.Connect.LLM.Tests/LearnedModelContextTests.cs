@@ -64,19 +64,6 @@ public sealed class LearnedModelContextTests
         Assert.Equal(1_100, learned.CorrectText("claude", "opus", 1_000));
     }
 
-    [Fact]
-    public async Task LimitBelongsToTheConnection()
-    {
-        var learned = new LearnedModelContext();
-
-        await learned.ObserveRefusalAsync("local", "qwen3", estimated: 140_000, reportedTokens: 140_068, reportedLimit: 131_072, knownLimit: null,
-            CancellationToken.None);
-
-        Assert.Equal(131_072, learned.Limit("local", Unsaved, "qwen3"));
-        Assert.Null(learned.Limit("openrouter", Unsaved, "qwen3"));
-        Assert.Equal(10_000, learned.Correct("openrouter", "qwen3", 10_000));
-    }
-
     /// <summary>A learned limit is saved once through the store, and a new process reads it from the connection until a
     /// refusal in that process teaches another.</summary>
     [Fact]

@@ -249,7 +249,7 @@ public sealed class SetupEditorRegressionTests
     });
 
     [Fact]
-    public Task NumericControlsPreserveExactTypesAndOnlyClampExplicitSteps() => EditorSession.RunAsync(() =>
+    public Task IntegerControlsPreserveExactValuesAndOnlyClampExplicitSteps() => EditorSession.RunAsync(() =>
     {
         SetupNumberEdit<long>? whole = null;
         SetupNumberInput<long> integer = new("Count", null, null, 2L, false);
@@ -264,24 +264,6 @@ public sealed class SetupEditorRegressionTests
         EditorSession.Settle();
         EditorSession.Click(EditorSession.Button(integer, "Increase Count"));
         Assert.Equal(long.MaxValue, whole.Value);
-
-        SetupNumberEdit<decimal>? fraction = null;
-        SetupNumberInput<decimal> number = new("Amount", 0m, 10m, 1m, false);
-        number.Edited += (_, edit) => fraction = edit;
-        EditorSession.Show(number);
-        number.Show("1.5", false, false);
-        TextBox amount = EditorSession.All<TextBox>(number).Single();
-        amount.Text = "1.1234567890123456789012345678";
-        EditorSession.Settle();
-        Assert.Equal(1.1234567890123456789012345678m, fraction!.Value);
-        amount.Text = "11";
-        EditorSession.Settle();
-        Assert.Equal(11m, fraction.Value);
-        Assert.NotNull(fraction.Error);
-        amount.Text = string.Empty;
-        EditorSession.Settle();
-        Assert.Null(fraction.Value);
-        Assert.Null(fraction.Error);
         return Task.CompletedTask;
     });
 

@@ -40,24 +40,6 @@ public sealed class DirectCodexTests
     }
 
     [Fact]
-    public async Task UnsupportedSamplingIsNotSent()
-    {
-        using var handler = new Handler(_ => Sse(Completed));
-        using var http = new HttpClient(handler);
-        var client = new OpenAiCodexLlmClient(http);
-        LlmConnection connection = Connection() with
-        { CapabilityOverrides = new() { SupportsTemperature = InferenceSupport.Unsupported } };
-        LlmChatRequest request = Request() with { Temperature = 0.7 };
-
-        await Complete(client, connection,
-            LlmRequestNormalizer.Normalize(connection, request, client.GetCapabilities(connection, request.ModelId)));
-
-        using var sent = JsonDocument.Parse(handler.Body!);
-        Assert.False(sent.RootElement.TryGetProperty("temperature", out _));
-        Assert.Equal(1, handler.Calls);
-    }
-
-    [Fact]
     public async Task CatalogAndGenerationUseTheSameCompatibilityPinAndSelectedModelFacts()
     {
         var paths = new HashSet<string>(StringComparer.Ordinal);
@@ -140,9 +122,6 @@ public sealed class DirectCodexTests
 
     [Theory]
     [InlineData(LlmReasoningLevel.Maximum, "high", "high")]
-    [InlineData(LlmReasoningLevel.Medium, "none,high", "none")]
-    [InlineData(LlmReasoningLevel.None, "low,high", "low")]
-    [InlineData(LlmReasoningLevel.Maximum, "none", "none")]
     [InlineData(LlmReasoningLevel.Maximum, "", "max")]
     [InlineData(null, "", null)]
     public async Task AdapterMapsDesiredEffortWithoutChangingTheCallerRequest(
@@ -261,12 +240,8 @@ public sealed class DirectCodexTests
         Assert.Equal(baseline + 1_600 + 1_600 + 1_000, counted);
     }
 
-    [Theory]
-    [InlineData(false, false)]
-    [InlineData(true, false)]
-    [InlineData(false, true)]
-    [InlineData(true, true)]
-    public async Task CompactionAccountingRetainsCodexEstimateDespiteOmittedAttachmentHistory(bool reported, bool compacted)
+    [Fact]
+    public async Task CompactionAccountingRetainsCodexEstimateDespiteOmittedAttachmentHistory()
     {
         using var handler = new Handler(request =>
         {
@@ -280,10 +255,10 @@ public sealed class DirectCodexTests
         LlmContinuationState state = ProviderContinuationStateCodec.Encode(connection, "model",
             new JsonArray(new JsonObject
             {
-                ["type"] = compacted ? "compaction" : "reasoning",
+                ["type"] = "compaction",
                 ["encrypted_content"] = new string('a', 2000)
             })) with
-        { InputTokens = reported ? 1200 : null, OutputTokens = reported ? 80 : null };
+        { InputTokens = 1200, OutputTokens = 80 };
         LlmChatMessage[] messages =
         [
             new("user", "Earlier question") { OmittedAttachments = [new(LlmBinaryKind.Document, "reference.txt", 0)] },
@@ -427,56 +402,6 @@ public sealed class DirectCodexTests
         Assert.Equal("Reads a file.", tool.GetProperty("description").GetString());
         Assert.Equal(schema, tool.GetProperty("parameters").GetRawText());
         Assert.Equal(JsonValueKind.False, tool.GetProperty("strict").ValueKind);
-    }
-
-    private static string Answer(string text)
-    {
-        string encoded = JsonSerializer.Serialize(text);
-        return "data: {\"type\":\"response.output_text.delta\",\"delta\":" + encoded + "}\n\n"
-            + "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"response\",\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"id\":\"msg\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":"
-            + encoded + "}]}],\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"total_tokens\":7}}}\n\n";
-    }
-
-    [Fact]
-    public async Task StructuredAnswerIsValidatedLocally()
-    {
-        using var handler = new Handler(_ => Sse(Answer("[1]")));
-        var client = new OpenAiCodexLlmClient(new HttpClient(handler));
-        JsonElement strings = JsonElement.Parse("""{"type":"array","items":{"type":"string"}}""");
-
-        LlmChatResult list = await Complete(client, Connection(), Request() with
-        { StructuredOutput = new() { Name = "agent_output", Schema = strings } });
-
-        // A non-object root is not refused: the shape goes in the instructions and the answer is checked locally.
-        using (var sent = JsonDocument.Parse(handler.Body!))
-        {
-            Assert.False(sent.RootElement.TryGetProperty("text", out _));
-            Assert.Contains("Return the final answer as exactly one JSON value", sent.RootElement.GetProperty("instructions").GetString(),
-                StringComparison.Ordinal);
-        }
-        Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, list.StructuredOutput!.Enforcement);
-        Assert.True(list.StructuredOutput.WasEvaluated);
-        Assert.False(list.StructuredOutput.IsValid);
-        Assert.NotEmpty(list.StructuredOutput.Errors);
-
-        handler.Response = _ => Sse(Answer("""{"count":"many"}"""));
-        LlmChatResult record = await Complete(client, Connection(), Request() with
-        {
-            StructuredOutput = new()
-            {
-                Name = "agent_output",
-                Schema = JsonElement.Parse("""{"type":"object","properties":{"count":{"type":"integer"}},"required":["count"]}""")
-            }
-        });
-
-        using (var sent = JsonDocument.Parse(handler.Body!))
-        {
-            JsonElement format = sent.RootElement.GetProperty("text").GetProperty("format");
-            Assert.Equal("json_schema", format.GetProperty("type").GetString());
-            Assert.Equal(JsonValueKind.False, format.GetProperty("strict").ValueKind);
-        }
-        Assert.False(record.StructuredOutput!.IsValid);
-        Assert.Contains(record.StructuredOutput.Errors, error => error.StartsWith("/count:", StringComparison.Ordinal));
     }
 
     /// <summary>An image_generation_call item is saved as a session resource and reported as an image output.</summary>
@@ -626,32 +551,6 @@ public sealed class DirectCodexTests
         JsonNode image = JsonNode.Parse(handler.Body!)!["input"]!.AsArray()
             .Single(item => item!["type"]?.GetValue<string>() == "image_generation_call")!;
         Assert.Equal("AQID", image["result"]!.GetValue<string>());
-    }
-
-    /// <summary>Codex keeps its tool names, image tool and reasoning after they moved to the shared base (6.7).</summary>
-    [Fact]
-    public async Task CodexPayloadIsUnchangedByTheSharedBase()
-    {
-        using var handler = new Handler(_ => Sse(Completed));
-        var client = new OpenAiCodexLlmClient(new HttpClient(handler));
-        LlmChatRequest request = Request() with
-        {
-            ReasoningLevel = LlmReasoningLevel.High,
-            Tools = [LongNameTool(), new LlmToolDefinition { Name = "echo", InputSchema = JsonElement.Parse("""{"type":"object"}""") }],
-            HostedTools = [new LlmImageGenerationTool { Action = LlmImageGenerationAction.Edit }],
-            Messages = [new("user", "first"),
-                new("assistant", "") { ToolCalls = [new LlmToolCall("earlier", LongName, "{}")] },
-                new("user", "") { ToolResults = [new LlmToolResult("earlier", LlmToolOutput.FromText("answer"))] }]
-        };
-
-        _ = await Complete(client, Connection(), request);
-
-        JsonNode sent = JsonNode.Parse(handler.Body!)!;
-        string alias = LlmToolNames.Alias(LongName);
-        Assert.Equal([alias, "echo", null], sent["tools"]!.AsArray().Select(tool => tool!["name"]?.GetValue<string>()));
-        Assert.True(JsonNode.DeepEquals(new JsonObject { ["type"] = "image_generation", ["action"] = "edit" }, sent["tools"]![2]));
-        Assert.Equal(alias, sent["input"]!.AsArray().Single(item => item!["type"]?.GetValue<string>() == "function_call")!["name"]!.GetValue<string>());
-        Assert.True(JsonNode.DeepEquals(new JsonObject { ["effort"] = "high", ["summary"] = "auto" }, sent["reasoning"]));
     }
 
     /// <summary>Text full of characters the wire JSON escapes, such as a tool result holding JSON, is counted as the

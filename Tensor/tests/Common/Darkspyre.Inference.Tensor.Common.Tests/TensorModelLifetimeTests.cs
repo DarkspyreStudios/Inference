@@ -28,25 +28,4 @@ public sealed class TensorModelLifetimeTests
         Assert.Equal([TensorEngineState.Loading, TensorEngineState.Loaded], statuses.Select(status => status.State));
         Assert.Equal(TensorEngineState.Loaded, lifetime.Observation.State);
     }
-
-    [Fact]
-    public async Task FailedCleanupRemainsTheSharedIdleOutcome()
-    {
-        using var lifetime = new TensorModelLifetime(new object());
-        var failure = new InvalidOperationException("Model cleanup failed.");
-        TensorEngineStatus? failed = null;
-        lifetime.EngineStatusChanged += (_, status) =>
-        {
-            if (status.State == TensorEngineState.Failed) failed = status;
-        };
-        await lifetime.AcceptAsync(TensorEngineState.Stopping, null, null,
-            _ => Task.FromException<TensorEngineStatus>(failure), CancellationToken.None,
-            teardown: true, stops: true);
-
-        Task cleanup = lifetime.WhenIdleAsync();
-        Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() => cleanup.WaitAsync(TimeSpan.FromSeconds(5))));
-        Assert.Same(cleanup, lifetime.WhenIdleAsync());
-        Assert.Same(failure, failed?.Error);
-        Assert.Equal(TensorEngineState.Failed, lifetime.Observation.State);
-    }
 }

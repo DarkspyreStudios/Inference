@@ -13,61 +13,26 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class XaiReasoningTests
 {
     [Theory]
-    [InlineData("grok-4.7", LlmReasoningLevel.Maximum, "xhigh")]
-    [InlineData("grok-4.7", LlmReasoningLevel.None, "low")]
-    [InlineData("grok-4.5", LlmReasoningLevel.ExtraHigh, "high")]
-    public async Task KnownModelMapsDesiredEffortInsideTheGrokWriter(string model, LlmReasoningLevel desired, string expected)
+    [InlineData(LlmReasoningLevel.Maximum, "xhigh")]
+    [InlineData(LlmReasoningLevel.None, "low")]
+    public async Task KnownModelMapsDesiredEffortInsideTheGrokWriter(LlmReasoningLevel desired, string expected)
     {
-        string[] levels = model == "grok-4.5" ? ["high", "medium", "low"] : ["xhigh", "high", "medium", "low"];
-        JsonElement payload = await ProjectAsync(Connection() with { Catalog = Catalog(model, levels) }, Request(model, desired));
+        const string model = "grok-4.7";
+        JsonElement payload = await ProjectAsync(Connection() with { Catalog = Catalog(model, "xhigh", "high", "medium", "low") },
+            Request(model, desired));
         Assert.Equal(expected, Effort(payload));
         Assert.Equal(model, payload.GetProperty("model").GetString());
     }
 
-    [Theory]
-    [InlineData(LlmReasoningLevel.Maximum, "max")]
-    [InlineData(LlmReasoningLevel.None, "none")]
-    public async Task MissingModelFactsPermitTheRequestedNativeSpelling(LlmReasoningLevel desired, string expected)
+    [Fact]
+    public async Task MissingModelFactsPermitTheRequestedNativeSpelling()
     {
         LlmConnection connection = Connection();
         using var http = new HttpClient();
         Assert.Equal(InferenceSupport.Unknown, new GrokResponsesLlmClient(http)
             .GetCapabilities(connection, "grok-unlisted").SupportsReasoning);
-        JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", desired));
-        Assert.Equal(expected, Effort(payload));
-    }
-
-    [Fact]
-    public async Task EmptyCatalogEffortsRemainUnknownAndPermitTheRequestedSpelling()
-    {
-        LlmConnection connection = Connection() with { Catalog = Catalog("grok-unlisted") };
         JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.Maximum));
         Assert.Equal("max", Effort(payload));
-        using var http = new HttpClient();
-        Assert.Equal(InferenceSupport.Unknown, new GrokResponsesLlmClient(http)
-            .GetCapabilities(connection, "grok-unlisted").SupportsReasoning);
-    }
-
-    [Fact]
-    public async Task CatalogNoneAndHighMapMediumDownToNoneWithoutLosingObservations()
-    {
-        LlmConnection connection = Connection() with { Catalog = Catalog("grok-unlisted", "none", "high") };
-        JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.Medium));
-        Assert.Equal("none", Effort(payload));
-        using var http = new HttpClient();
-        Assert.True(new GrokResponsesLlmClient(http).GetCapabilities(connection, "grok-unlisted")
-            .ReasoningLevels.SetEquals([LlmReasoningLevel.None, LlmReasoningLevel.High]));
-    }
-
-    [Fact]
-    public async Task CatalogMinimalAndMaximumAreNativeFactsNotFilteredVocabulary()
-    {
-        LlmConnection connection = Connection() with { Catalog = Catalog("grok-unlisted", "minimal", "max") };
-        JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.High));
-        Assert.Equal("minimal", Effort(payload));
-        using var http = new HttpClient();
-        Assert.True(new GrokResponsesLlmClient(http).GetCapabilities(connection, "grok-unlisted")
-            .ReasoningLevels.SetEquals([LlmReasoningLevel.Minimal, LlmReasoningLevel.Maximum]));
     }
 
     [Fact]

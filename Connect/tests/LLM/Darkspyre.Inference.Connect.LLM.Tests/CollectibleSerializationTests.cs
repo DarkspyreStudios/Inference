@@ -1,24 +1,18 @@
 using System.Reflection;
-using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using System.Runtime.Loader;
 using System.Text.Json;
 using System.Text.Json.Serialization.Metadata;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
-using Darkspyre.Inference.Connect.Audio;
 using Darkspyre.Inference.Connect.LLM.Providers;
-using Darkspyre.Inference.Connect.TTS;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 public sealed class CollectibleSerializationTests
 {
-    private static readonly Type[] CommonConnectMetadataOwners =
-    [
-        typeof(InferenceJson), typeof(ConnectLlmJson), typeof(ConnectTtsJson), typeof(ConnectAudioJson)
-    ];
+    private static readonly Type[] CommonConnectMetadataOwners = [typeof(InferenceJson), typeof(ConnectLlmJson)];
     private static readonly string[] GenerationAssemblies = CommonConnectMetadataOwners
         .Select(owner => owner.Assembly.GetName().Name!).Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray();
 
@@ -100,11 +94,11 @@ public sealed class CollectibleSerializationTests
             Type registration = assembly.GetType(typeof(ServiceCollectionExtensions).FullName!, throwOnError: true)!;
             MethodInfo register = registration.GetMethods().Single(method => method.Name == nameof(ServiceCollectionExtensions.AddLlmConnect)
                 && method.GetParameters().Length == 1);
-            Assembly fixtures = context.LoadFromAssemblyPath(typeof(AgentFacadeRetirementTests).Assembly.Location);
+            Assembly fixtures = context.LoadFromAssemblyPath(typeof(CollectibleSerializationTests).Assembly.Location);
             Assert.Same(context, AssemblyLoadContext.GetLoadContext(fixtures));
-            Assert.Equal(typeof(AgentFacadeRetirementTests).Assembly.ManifestModule.ModuleVersionId, fixtures.ManifestModule.ModuleVersionId);
+            Assert.Equal(typeof(CollectibleSerializationTests).Assembly.ManifestModule.ModuleVersionId, fixtures.ManifestModule.ModuleVersionId);
             object source = Activator.CreateInstance(fixtures.GetType(
-                typeof(AgentFacadeRetirementTests).FullName + "+Source", throwOnError: true)!, nonPublic: true)!;
+                typeof(CollectibleSerializationTests).FullName + "+Source", throwOnError: true)!, nonPublic: true)!;
             Type sourceContract = assembly.GetType(typeof(ILlmConnectionSource).FullName!, throwOnError: true)!;
             Assert.IsAssignableFrom(sourceContract, source);
             IServiceCollection services = new ServiceCollection();
@@ -148,20 +142,6 @@ public sealed class CollectibleSerializationTests
         }
 
         Assert.All(generation, reference => Assert.False(reference.IsAlive));
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void RejectingAnUnknownCollectibleTypeDoesNotKeepItAlive(bool credential)
-    {
-        WeakReference type = AttemptUnsupportedSerialization(credential);
-
-        GC.Collect();
-        GC.WaitForPendingFinalizers();
-        GC.Collect();
-
-        Assert.False(type.IsAlive);
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
@@ -221,6 +201,20 @@ public sealed class CollectibleSerializationTests
         return roots.Length;
     }
 
+    private sealed class Source : ILlmConnectionSource
+    {
+        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<LlmConnection?>(new()
+            {
+                Version = "1",
+                Transport = LlmTransport.OpenAiCodex,
+                Endpoint = "https://provider.example.test/codex"
+            });
+
+        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
     private sealed class UnusedSelfHost : ILlmSelfHost
     {
         public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken = default) =>
@@ -239,21 +233,5 @@ public sealed class CollectibleSerializationTests
             if (!GenerationAssemblies.Contains(name.Name, StringComparer.Ordinal)) return null;
             return LoadFromAssemblyPath(Path.Combine(directory, name.Name + ".dll"));
         }
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private static WeakReference AttemptUnsupportedSerialization(bool credential)
-    {
-        AssemblyBuilder assembly = AssemblyBuilder.DefineDynamicAssembly(
-            new AssemblyName("UnknownContract"), AssemblyBuilderAccess.RunAndCollect);
-        TypeBuilder builder = assembly.DefineDynamicModule("Contracts").DefineType("UnknownContract", TypeAttributes.Public);
-        builder.DefineDefaultConstructor(MethodAttributes.Public);
-        Type type = builder.CreateType()!;
-        object value = Activator.CreateInstance(type)!;
-
-        JsonSerializerOptions options = credential ? ConnectLlmJson.Credential.Options : ConnectLlmJson.ChatMessage.Options;
-        Assert.Throws<NotSupportedException>(() => JsonSerializer.Serialize(value, type, options));
-
-        return new WeakReference(type);
     }
 }

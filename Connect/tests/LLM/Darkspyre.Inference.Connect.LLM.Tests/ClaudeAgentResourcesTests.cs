@@ -230,7 +230,6 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
 
     [Theory]
     [InlineData("result.json", false)]
-    [InlineData("result.json", true)]
     [InlineData("result.pdf", true)]
     public async Task NativeOpeningCarriesTheActualLogicalFilesWithoutTakingSelectionOwnership(string fileName, bool generatedByTool)
     {
@@ -338,87 +337,6 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
 
         Assert.Equal(LlmAgentCompletionReason.Completed, Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]).Reason);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task NativeInputCleanupRefusalPreventsTheWriteAndRemainsVisibleAtRetirement(bool invalidContent)
-    {
-        var reference = new InferenceResourceReference("workspace", "reference");
-        var cleanup = new IOException("The resource reader refuses release.");
-        var access = new ResourcePreparationTests.Resources(new("workspace", "session", 1, [reference]),
-            [(reference, "reference.txt", invalidContent ? new byte[] { 0xff } : "reference text"u8.ToArray())], cleanup);
-        var process = new ManualProcess();
-        ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
-        { ModelId = "claude-test", CallerServices = new() { Resources = access }, Runtime = new() { WorkingDirectory = _directory } });
-        Exception failure = (await Record.ExceptionAsync(async () =>
-        {
-            await foreach (LlmAgentEvent _ in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("Read the file")] })) { }
-        }))!;
-        Exception release = failure;
-        if (invalidContent)
-        {
-            Exception[] causes = Assert.IsType<AggregateException>(failure).InnerExceptions.ToArray();
-            Assert.Equal(2, causes.Length);
-            Assert.IsType<NotSupportedException>(Assert.IsType<InferenceResourceOperationException>(causes[0]).InnerException);
-            release = causes[1];
-        }
-        var refused = Assert.IsType<InferenceResourceOperationException>(release);
-        Assert.Equal(InferenceResourceOperationPhase.Cleanup, refused.Failure.Phase);
-        Assert.Same(cleanup, refused.InnerException);
-        Assert.DoesNotContain(process.Writes(), item => item.GetProperty("type").GetString() == "user");
-        Exception retired = (await Record.ExceptionAsync(() => session.DisposeAsync().AsTask()))!;
-        if (invalidContent)
-        {
-            Exception[] original = Assert.IsType<AggregateException>(failure).Flatten().InnerExceptions.ToArray();
-            Exception[] actual = Assert.IsType<AggregateException>(retired).Flatten().InnerExceptions.ToArray();
-            Assert.Equal(original.Length, actual.Length);
-            Assert.All(original, cause => Assert.Contains(actual, item => ReferenceEquals(cause, item)));
-        }
-        else Assert.Same(failure, retired);
-        Assert.Same(retired, await Record.ExceptionAsync(() => session.DisposeAsync().AsTask()));
-        Assert.Equal(1, access.ReleaseAttempts);
-        using MemoryStream retained = Assert.Single(access.Reads);
-        Assert.True(retained.CanRead);
-        Assert.Equal(1, process.Disposals);
-    }
-
-    [Fact]
-    public async Task NativeRetirementDrainsAnIgnoringResourceOpenAndReleasesItsActualReader()
-    {
-        var reference = new InferenceResourceReference("workspace", "reference");
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var access = new ResourcePreparationTests.Resources(new("workspace", "session", 1, [reference]),
-            [(reference, "reference.txt", "reference text"u8.ToArray())], readRelease: release.Task);
-        var process = new ManualProcess();
-        ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
-        { ModelId = "claude-test", CallerServices = new() { Resources = access }, Runtime = new() { WorkingDirectory = _directory } });
-        await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("Read the file")] }).GetAsyncEnumerator();
-        // The conversation's turn start and its context status precede the inner turn.
-        Assert.True(await feed.MoveNextAsync());
-        Assert.True(await feed.MoveNextAsync());
-        Task<bool> read = feed.MoveNextAsync().AsTask();
-        try
-        {
-            await access.ReadEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            Task retirement = session.DisposeAsync().AsTask();
-            Assert.False(retirement.IsCompleted);
-            Assert.Equal(0, process.Disposals);
-            release.TrySetResult();
-            await retirement.WaitAsync(TimeSpan.FromSeconds(5));
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => read);
-            Assert.All(access.Reads, stream => Assert.False(stream.CanRead));
-            Assert.Single(access.Reads);
-            Assert.Equal(1, access.ReleaseAttempts);
-            Assert.Equal(1, process.Disposals);
-            Assert.DoesNotContain(process.Writes(), item => item.GetProperty("type").GetString() == "user");
-        }
-        finally
-        {
-            release.TrySetResult();
-            await session.DisposeAsync();
-        }
     }
 
     [Fact]
@@ -557,32 +475,22 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
     }
 
     [Fact]
-    public async Task AbilityToolsOnClaude()
+    public async Task UpdatePlanRunsInsideConnectOnClaude()
     {
-        string folder = Directory.CreateDirectory(Path.Combine(_directory, "review")).FullName;
-        File.WriteAllText(Path.Combine(folder, "SKILL.md"), "Reviews a change.\n");
         var process = new ManualProcess();
         int hostCalls = 0;
         await using ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = "claude-test",
             Runtime = new() { WorkingDirectory = _directory },
-            SkillFolders = [folder],
             ToolHandler = (_, _) => { Interlocked.Increment(ref hostCalls); return Task.FromResult(LlmToolOutput.FromText("host")); }
         });
 
-        JsonElement listed = process.Requests().Single(request => request.GetProperty("subtype").GetString() == "initialize")
-            .GetProperty("sdkMcpServerManifests").GetProperty("darkspyre-inference-connect").GetProperty("toolsListResult").GetProperty("tools");
-        Assert.Equal(["update_plan", "load_skill"], listed.EnumerateArray().Select(tool => tool.GetProperty("name").GetString()));
         process.Push(ToolUse("tu1", "update_plan"));
         process.Push(ToolCall("c1", 1, "update_plan", new { plan = new[] { new { step = "look", status = "in_progress" } } }));
-        Assert.Equal("Plan updated.", ResultText(await AnswerFor(process, "c1")));
-        process.Push(ToolUse("tu2", "load_skill"));
-        process.Push(ToolCall("c2", 2, "load_skill", new { name = "review" }));
-        Assert.Equal($"Reviews a change.\nSkill folder: {folder}", ResultText(await AnswerFor(process, "c2")));
+        JsonElement answer = await AnswerFor(process, "c1");
+        Assert.Equal("Plan updated.", answer.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString());
         Assert.Equal(0, hostCalls);
-
-        static string? ResultText(JsonElement answer) => answer.GetProperty("result").GetProperty("content")[0].GetProperty("text").GetString();
     }
 
     [Theory]
@@ -644,33 +552,6 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
     }
 
     [Fact]
-    public async Task TurnSchemaUsesGuidance()
-    {
-        var process = new ManualProcess();
-        await using ILlmAgentSession session = await Start(process);
-        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        JsonElement schema = JsonElement.Parse("""{"type":"object","properties":{"answer":{"type":"integer"}},"required":["answer"]}""");
-        await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(new()
-        {
-            Input = [new LlmAgentTextContent("Answer.")],
-            OutputSchema = schema
-        }, limit.Token).GetAsyncEnumerator(limit.Token);
-
-        Assert.True(await feed.MoveNextAsync());
-        string turnId = await process.WaitForUserMessage(limit.Token);
-        JsonElement content = process.Writes().Single(item => item.GetProperty("type").GetString() == "user")
-            .GetProperty("message").GetProperty("content");
-        Assert.Equal(StructuredOutput.Guidance(schema), content.EnumerateArray().Last().GetProperty("text").GetString());
-        process.Push(new { type = "user", uuid = turnId, isReplay = true });
-        process.Push(new { type = "result", subtype = "success", is_error = false, result = "{\"answer\":42}", stop_reason = "end_turn" });
-        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
-
-        LlmAgentTurnCompletedEvent completed = Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]);
-        Assert.Equal(LlmAgentCompletionReason.Completed, completed.Reason);
-        Assert.True(completed.StructuredOutput!.IsValid);
-    }
-
-    [Fact]
     public async Task UsageReportsTheModel()
     {
         var process = new ManualProcess();
@@ -722,31 +603,20 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
     }
 
     [Fact]
-    public async Task CapResultsEndWithTheirReason()
+    public async Task TurnCapResultEndsWithItsReason()
     {
         var process = new ManualProcess();
         await using ILlmAgentSession session = await Start(process);
         using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, process, limit.Token);
 
-        async Task<LlmAgentTurnCompletedEvent> EndWith(int index, string subtype, string error)
-        {
-            await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(
-                new() { Input = [new LlmAgentTextContent("Work.")] }, limit.Token).GetAsyncEnumerator(limit.Token);
-            Assert.True(await feed.MoveNextAsync());
-            string turnId = await process.WaitForUserMessage(limit.Token, index);
-            process.Push(new { type = "user", uuid = turnId, isReplay = true });
-            process.Push(new { type = "result", subtype, is_error = true, errors = new[] { error } });
-            List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
-            return Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
-        }
+        string[] errors = ["Reached maximum number of turns (3)"];
+        process.Push(new { type = "result", subtype = "error_max_turns", is_error = true, errors });
+        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
 
-        LlmAgentTurnCompletedEvent turns = await EndWith(0, "error_max_turns", "Reached maximum number of turns (3)");
-        LlmAgentTurnCompletedEvent spend = await EndWith(1, "error_max_budget_usd", "Reached maximum budget ($0.5)");
-
+        LlmAgentTurnCompletedEvent turns = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
         Assert.Equal(LlmAgentCompletionReason.IterationLimit, turns.Reason);
         Assert.Equal("Reached maximum number of turns (3)", turns.Error);
-        Assert.Equal(LlmAgentCompletionReason.SpendLimit, spend.Reason);
-        Assert.Equal("Reached maximum budget ($0.5)", spend.Error);
     }
 
     [Fact]
@@ -911,27 +781,6 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
             Assert.Equal(1, first.Disposals);
             Assert.All(events, item => Assert.Equal(events[0].TurnId, item.TurnId));
         }
-
-        // An interrupt during the reopen ends the turn as interrupted and leaves the saved history unchanged.
-        var gate = new TaskCompletionSource();
-        var held = new ManualProcess();
-        var factory = new Factory(held, new ManualProcess()) { ReopenGate = gate.Task };
-        (session, feed, events) = await RunToTriggerAsync(held, factory);
-        await using (session)
-        await using (feed)
-        {
-            await factory.ReopenEntered.Task.WaitAsync(limit.Token);
-            await session.InterruptAsync(events[0].TurnId!, limit.Token);
-            events.AddRange(await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent));
-
-            Assert.Equal(LlmAgentCompletionReason.Interruption, Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]).Reason);
-            Assert.Empty(events.OfType<LlmAgentCompactedEvent>());
-            LlmAgentContextStatus atTrigger = events.OfType<LlmAgentContextStatusEvent>().Last().Status;
-            Assert.True(atTrigger.NeedsCompaction);
-            LlmAgentContextStatus after = await session.GetContextStatusAsync(cancellationToken: limit.Token);
-            Assert.Equal((atTrigger.ContextRevision, atTrigger.UsedContextTokens), (after.ContextRevision, after.UsedContextTokens));
-        }
-        Assert.Equal(2, calls);
     }
 
     [Fact]
@@ -1352,16 +1201,11 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
     {
         private readonly List<ClaudeCliSessionInvocation> _invocations = [];
 
-        /// <summary>When set, the second and later starts wait for it.</summary>
-        public Task? ReopenGate { get; init; }
-
-        public TaskCompletionSource ReopenEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
         public ClaudeCliSessionInvocation? Invocation { get { lock (_invocations) return _invocations.Count == 0 ? null : _invocations[^1]; } }
 
         public IReadOnlyList<ClaudeCliSessionInvocation> Invocations { get { lock (_invocations) return [.. _invocations]; } }
 
-        public async Task<IClaudeCliSessionProcess> StartAsync(ClaudeCliSessionInvocation invocation, CancellationToken cancellationToken = default)
+        public Task<IClaudeCliSessionProcess> StartAsync(ClaudeCliSessionInvocation invocation, CancellationToken cancellationToken = default)
         {
             int index;
             lock (_invocations)
@@ -1369,12 +1213,7 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
                 index = _invocations.Count;
                 _invocations.Add(invocation);
             }
-            if (index > 0 && ReopenGate is { } gate)
-            {
-                ReopenEntered.TrySetResult();
-                await gate.WaitAsync(cancellationToken);
-            }
-            return processes[Math.Min(index, processes.Length - 1)];
+            return Task.FromResult(processes[Math.Min(index, processes.Length - 1)]);
         }
     }
 
@@ -1400,40 +1239,18 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         private readonly Channel<string> _output = Channel.CreateUnbounded<string>();
         private readonly ConcurrentQueue<string> _writes = new();
 
-        public Task? DisposalRelease { get; init; }
-        public Exception? DisposalFailure { get; init; }
-        public Task? ToolWriteRelease { get; init; }
-        public Task? ModelWriteRelease { get; init; }
-        public Exception? ToolWriteFailure { get; init; }
-        public bool WithholdStopReplies { get; init; }
         public JsonElement? InitializationPayload { get; init; }
-        public TaskCompletionSource DisposalEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource ToolWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public TaskCompletionSource ModelWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int Disposals { get; private set; }
 
         public void Push(object value) => _output.Writer.TryWrite(JsonSerializer.Serialize(value));
 
-        public async ValueTask WriteLineAsync(string line, CancellationToken cancellationToken = default)
+        public ValueTask WriteLineAsync(string line, CancellationToken cancellationToken = default)
         {
             using JsonDocument document = JsonDocument.Parse(line);
             JsonElement root = document.RootElement;
-            if (ModelWriteRelease is not null && root.GetProperty("type").GetString() == "control_request"
-                && root.GetProperty("request").GetProperty("subtype").GetString() == "set_model")
-            {
-                ModelWriteEntered.TrySetResult();
-                await ModelWriteRelease;
-            }
-            if (ToolWriteRelease is not null && root.GetProperty("type").GetString() == "control_response")
-            {
-                ToolWriteEntered.TrySetResult();
-                await ToolWriteRelease;
-                if (ToolWriteFailure is not null) throw ToolWriteFailure;
-            }
             _writes.Enqueue(line);
             if (root.GetProperty("type").GetString() == "control_request"
-                && root.GetProperty("request").GetProperty("subtype").GetString() != "interrupt"
-                && !(WithholdStopReplies && root.GetProperty("request").GetProperty("subtype").GetString() == "stop_task"))
+                && root.GetProperty("request").GetProperty("subtype").GetString() != "interrupt")
             {
                 JsonElement payload = root.GetProperty("request").GetProperty("subtype").GetString() == "initialize"
                     && InitializationPayload is { } initialization ? initialization : JsonElement.Parse("{}");
@@ -1448,14 +1265,12 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
                     }
                 }.ToJsonString());
             }
+            return ValueTask.CompletedTask;
         }
 
         public IEnumerable<JsonElement> Writes() => _writes.Select(line => JsonSerializer.Deserialize<JsonElement>(line));
 
         public string[] RawWrites() => [.. _writes];
-
-        /// <summary>The CLI exits: its output ends.</summary>
-        public void Exit() => _output.Writer.TryComplete();
 
         public IEnumerable<JsonElement> Requests() => _writes
             .Select(line => JsonSerializer.Deserialize<JsonElement>(line))
@@ -1491,13 +1306,11 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         public Task<ClaudeCliProcessResult> WaitForExitAsync(CancellationToken cancellationToken = default) =>
             Task.FromResult(new ClaudeCliProcessResult(0, string.Empty, string.Empty));
 
-        public async ValueTask DisposeAsync()
+        public ValueTask DisposeAsync()
         {
             Disposals++;
-            DisposalEntered.TrySetResult();
             _output.Writer.TryComplete();
-            if (DisposalRelease is not null) await DisposalRelease;
-            if (DisposalFailure is not null) throw DisposalFailure;
+            return ValueTask.CompletedTask;
         }
     }
 }

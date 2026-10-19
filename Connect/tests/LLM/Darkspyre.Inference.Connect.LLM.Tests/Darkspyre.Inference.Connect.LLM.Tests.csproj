@@ -15,15 +15,10 @@
 
   <ItemGroup>
     <Using Include="Xunit" />
-    <Compile Include="..\..\..\examples\Darkspyre.Inference.Connect.LLM.Examples\WeatherTool.cs" Link="Examples\WeatherTool.cs" />
-    <!-- Phase 1 builds only the Codex and Claude CLI providers. These files test excluded providers and stay in the repository. -->
-    <Compile Remove="AnthropicAdmissionTests.cs;AnthropicUsageStreamTests.cs;ContentFilteredStructuredOutputTests.cs;ContextCacheLifetimeTests.cs;GeminiAdmissionTests.cs;GeminiArgumentStreamTests.cs;ProviderTokenCountCancellationTests.cs" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="../../../src/Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
-    <ProjectReference Include="..\..\..\src\Audio\Darkspyre.Inference.Connect.Audio\Darkspyre.Inference.Connect.Audio.csproj" />
-    <ProjectReference Include="..\..\..\src\TTS\Darkspyre.Inference.Connect.TTS\Darkspyre.Inference.Connect.TTS.csproj" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../../src/Codex/Darkspyre.Inference.Connect.Codex/Darkspyre.Inference.Connect.Codex.csproj" />

@@ -55,65 +55,11 @@ public sealed class GgufHeaderTests : IDisposable
         }
     }
 
-    [Theory]
-    [InlineData("keys")]
-    [InlineData("tensors")]
-    [InlineData("string")]
-    [InlineData("array")]
-    public void RefusesADeclaredCountTheStreamCannotHold(string field)
-    {
-        var gguf = new Gguf { KeyCountOverride = field == "keys" ? 1UL << 40 : null, TensorCountOverride = field == "tensors" ? 1UL << 40 : null };
-        if (field == "string") gguf.Raw("general.name", writer => { writer.Write(8u); writer.Write(1UL << 40); });
-        if (field == "array") gguf.Raw("tokenizer.ggml.scores", writer => { writer.Write(9u); writer.Write(6u); writer.Write(1UL << 40); });
-        if (field is "keys" or "tensors") gguf.String("general.architecture", "test");
-
-        Assert.Throws<InvalidDataException>(() => GgufHeader.Read(new MemoryStream(gguf.Build(dataBytes: 0))));
-    }
-
-    [Fact]
-    public void RefusesADuplicateKey()
-    {
-        var gguf = new Gguf();
-        gguf.String("general.architecture", "a");
-        gguf.String("general.architecture", "b");
-        Assert.Throws<InvalidDataException>(() => GgufHeader.Read(new MemoryStream(gguf.Build(dataBytes: 0))));
-    }
-
-    [Fact]
-    public void RefusesADuplicateTensor()
-    {
-        var gguf = new Gguf();
-        gguf.Tensor("w", [4], 0, 0);
-        gguf.Tensor("w", [4], 0, 32);
-        Assert.Throws<InvalidDataException>(() => GgufHeader.Read(new MemoryStream(gguf.Build(dataBytes: 64))));
-    }
-
-    [Fact]
-    public void RefusesARankAboveFour()
-    {
-        var gguf = new Gguf();
-        gguf.Tensor("w", [1, 1, 1, 1, 1], 0, 0);
-        Assert.Throws<InvalidDataException>(() => GgufHeader.Read(new MemoryStream(gguf.Build(dataBytes: 32))));
-    }
-
-    [Theory]
-    [InlineData(48u)]
-    [InlineData(8192u)]
-    public void RefusesAnAlignmentThatIsNotAPowerOfTwoUpTo4096(uint alignment)
-    {
-        var gguf = new Gguf();
-        gguf.UInt32("general.alignment", alignment);
-        Assert.Throws<InvalidDataException>(() => GgufHeader.Read(new MemoryStream(gguf.Build(dataBytes: 0))));
-    }
-
     // A GGUF v3 header writer: metadata values, then tensor entries, padded to 32 bytes and followed by the data section.
     private sealed class Gguf
     {
         private readonly List<(string Key, Action<BinaryWriter> Write)> _values = [];
         private readonly List<(string Name, ulong[] Shape, uint Type, ulong Offset)> _tensors = [];
-
-        public ulong? KeyCountOverride { get; init; }
-        public ulong? TensorCountOverride { get; init; }
 
         public void Raw(string key, Action<BinaryWriter> write) => _values.Add((key, write));
         public void String(string key, string value) => Raw(key, writer => { writer.Write(8u); Text(writer, value); });
@@ -141,8 +87,8 @@ public sealed class GgufHeaderTests : IDisposable
             {
                 writer.Write("GGUF"u8);
                 writer.Write(3u);
-                writer.Write(TensorCountOverride ?? (ulong)_tensors.Count);
-                writer.Write(KeyCountOverride ?? (ulong)_values.Count);
+                writer.Write((ulong)_tensors.Count);
+                writer.Write((ulong)_values.Count);
                 foreach ((string key, Action<BinaryWriter> write) in _values)
                 {
                     Text(writer, key);

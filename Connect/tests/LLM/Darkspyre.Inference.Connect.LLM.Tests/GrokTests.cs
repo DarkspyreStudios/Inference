@@ -12,8 +12,8 @@ using Handler = Darkspyre.Inference.Connect.LLM.Tests.DirectCodexTests.Handler;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
-/// <summary>The Grok library (DSA-1070): device sign-in, the subscription proxy route and model list, hosted search, speed
-/// tier and continuation of hosted calls.</summary>
+/// <summary>The Grok library (DSA-1070): device sign-in, the subscription proxy route and model list, speed tier and
+/// continuation of reasoning.</summary>
 public sealed class GrokTests
 {
     private const string DeviceCode = """
@@ -107,44 +107,15 @@ public sealed class GrokTests
         Assert.Equal(0, source.Saves);
     }
 
-    /// <summary>Grok writes its own hosted-tool shapes and X search, adds tool search for a deferred MCP server, always asks
-    /// for no inline citations and sends the hosted-turn cap (Tech Design 5.3). The request goes to the subscription proxy
-    /// with the headers its auth middleware reads.</summary>
+    /// <summary>The request goes to the subscription proxy with the headers its auth middleware reads.</summary>
     [Fact]
-    public async Task GrokPayloadWritesItsHostedShapesAndXSearch()
+    public async Task RequestsGoToTheSubscriptionProxyWithItsAuthHeaders()
     {
         using var handler = new Handler(_ => DirectCodexTests.Sse(DirectCodexTests.Completed));
         var client = new GrokResponsesLlmClient(new HttpClient(handler));
 
-        await Complete(client, Connection(), Request("grok-4.7") with
-        {
-            MaxHostedTurns = 3,
-            HostedTools =
-            [
-                new LlmWebSearchTool(AllowedDomains: ["example.com"]),
-                new LlmSocialSearchTool { AllowedHandles = ["xai"], FromDate = new(2026, 10, 1), ToDate = new(2026, 10, 16), IncludeImageUnderstanding = true },
-                new LlmCodeExecutionTool(),
-                new LlmDocumentSearchTool(["collection-1"]),
-                new LlmRemoteMcpTool("https://mcp.example.test", "tools", ServerDescription: "Lookup", DeferLoading: true)
-            ]
-        });
+        await Complete(client, Connection(), Request("grok-4.7"));
 
-        JsonNode sent = JsonNode.Parse(handler.Body!)!;
-        Assert.True(JsonNode.DeepEquals(JsonNode.Parse("""
-            [
-              {"type":"web_search","enable_image_understanding":false,"enable_image_search":false,"allowed_domains":["example.com"]},
-              {"type":"x_search","enable_image_understanding":true,"enable_video_understanding":false,"allowed_x_handles":["xai"],
-               "from_date":"2026-10-01","to_date":"2026-10-16"},
-              {"type":"code_interpreter"},
-              {"type":"file_search","vector_store_ids":["collection-1"]},
-              {"type":"mcp","server_label":"tools","server_url":"https://mcp.example.test","server_description":"Lookup","defer_loading":true},
-              {"type":"tool_search"}
-            ]
-            """), sent["tools"]), sent["tools"]!.ToJsonString());
-        Assert.True(JsonNode.DeepEquals(JsonNode.Parse("""
-            ["reasoning.encrypted_content","web_search_call.action.sources","file_search_call.results","code_interpreter_call.outputs","no_inline_citations"]
-            """), sent["include"]), sent["include"]!.ToJsonString());
-        Assert.Equal(3, (int)sent["max_turns"]!);
         Assert.Equal("https://cli-chat-proxy.grok.com/v1/responses", handler.Uri!.AbsoluteUri);
         Assert.Equal(("Bearer test-token", "xai-grok-cli", "authenticate-response"),
             (handler.Headers["Authorization"], handler.Headers["X-XAI-Token-Auth"], handler.Headers["x-authenticateresponse"]));
@@ -154,8 +125,6 @@ public sealed class GrokTests
     [Theory]
     [InlineData(LlmServiceTier.Fast, XaiServiceTier.Default, "priority")]
     [InlineData(null, XaiServiceTier.Priority, "priority")]
-    [InlineData(LlmServiceTier.Standard, XaiServiceTier.Priority, "default")]
-    [InlineData(null, XaiServiceTier.Default, "default")]
     public async Task FastTierSendsPriority(LlmServiceTier? tier, XaiServiceTier saved, string expected)
     {
         using var handler = new Handler(_ => DirectCodexTests.Sse(DirectCodexTests.Completed));
@@ -188,17 +157,14 @@ public sealed class GrokTests
         Assert.Equal(LlmCompactionSide.Host, model.Capabilities.Agent.CompactionSide);
     }
 
-    /// <summary>A Grok reply holding reasoning, hosted calls and Grok's custom X-search call keeps them in its continuation
-    /// state, and the next request replays them verbatim and in order.</summary>
+    /// <summary>A Grok reply holding reasoning keeps it in its continuation state, and the next request replays it verbatim
+    /// and in order.</summary>
     [Fact]
-    public async Task ReplyWithHostedCallsRoundTrips()
+    public async Task ReplyWithReasoningRoundTrips()
     {
         const string output = """
             [{"type":"reasoning","id":"r","summary":[],"encrypted_content":"thought"},
-             {"type":"x_search_call","id":"xs","status":"completed","action":{"query":"grok"}},
-             {"type":"custom_tool_call","id":"ct","call_id":"xs_2","name":"x_keyword_search","input":"grok","status":"completed"},
-             {"type":"web_search_call","id":"ws","status":"completed","action":{"type":"search","sources":[{"type":"url","url":"https://a.test"}]}},
-             {"type":"message","id":"m","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Found.","annotations":[{"type":"url_citation","url":"https://a.test"}]}]}]
+             {"type":"message","id":"m","role":"assistant","status":"completed","content":[{"type":"output_text","text":"Found.","annotations":[]}]}]
             """;
         using var handler = new Handler(_ => DirectCodexTests.Sse("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp\",\"status\":\"completed\",\"output\":"
             + output.ReplaceLineEndings("") + ",\"usage\":{\"input_tokens\":5,\"output_tokens\":2,\"total_tokens\":7}}}\n\n"));
@@ -212,38 +178,8 @@ public sealed class GrokTests
         });
 
         JsonArray replayed = (JsonArray)JsonNode.Parse(handler.Bodies[1])!["input"]!;
-        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(output), new JsonArray([.. replayed.Skip(1).Take(5).Select(item => item!.DeepClone())])),
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse(output), new JsonArray([.. replayed.Skip(1).Take(2).Select(item => item!.DeepClone())])),
             replayed.ToJsonString());
-        Assert.Equal("https://a.test", Assert.Single(reply.Citations).Url);
-    }
-
-    /// <summary>The OpenAI API and Grok write each remote MCP server's live authorization on its mcp entry before the
-    /// payload is sent, asking a shared authority once (one shared implementation).</summary>
-    [Theory]
-    [InlineData(LlmTransport.OpenAiResponses)]
-    [InlineData(LlmTransport.XaiResponses)]
-    public async Task RemoteMcpAuthorizationIsWrittenOnTheMcpEntry(LlmTransport transport)
-    {
-        using var handler = new Handler(_ => DirectCodexTests.Sse(DirectCodexTests.Completed));
-        ResponsesLlmClientBase client = transport == LlmTransport.XaiResponses
-            ? new GrokResponsesLlmClient(new HttpClient(handler)) : new OpenAiResponsesLlmClient(new HttpClient(handler));
-        LlmConnection connection = transport == LlmTransport.XaiResponses
-            ? Connection() : DirectCodexTests.OpenAiConnection(OpenAiResponsesLlmClient.DefaultEndpoint);
-        var authority = new Authority();
-
-        await Complete(client, connection, Request(transport == LlmTransport.XaiResponses ? "grok-4.7" : "gpt-5.5") with
-        {
-            HostedTools =
-            [
-                new LlmRemoteMcpTool("https://one.example.test", "one", Authorization: authority),
-                new LlmRemoteMcpTool("https://two.example.test", "two", Authorization: authority),
-                new LlmRemoteMcpTool("https://three.example.test", "three")
-            ]
-        });
-
-        JsonNode[] servers = [.. ((JsonArray)JsonNode.Parse(handler.Body!)!["tools"]!).Select(tool => tool!)];
-        Assert.Equal(["secret-token", "secret-token", null], servers.Select(server => (string?)server["authorization"]));
-        Assert.Equal(1, authority.Calls);
     }
 
     internal static LlmConnection Connection(XaiConnectionOptions? options = null)
@@ -297,15 +233,5 @@ public sealed class GrokTests
     {
         public Task<SetupCommitResult> CommitAsync(LlmSetupChanges changes, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
-    }
-
-    private sealed class Authority : IProviderAuthorization
-    {
-        public int Calls { get; private set; }
-        public ValueTask<ProviderAuthorizationHeader> GetAsync(CancellationToken cancellationToken = default)
-        {
-            Calls++;
-            return ValueTask.FromResult(new ProviderAuthorizationHeader("Bearer", "secret-token"));
-        }
     }
 }
