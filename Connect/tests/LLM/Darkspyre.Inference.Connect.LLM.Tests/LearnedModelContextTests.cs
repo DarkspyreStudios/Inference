@@ -96,6 +96,45 @@ public sealed class LearnedModelContextTests
         Assert.Null(new LearnedModelContext().Limit("codex", saved, "other"));
     }
 
+    /// <summary>Read lists each learned value of the connection's models with the time it changed, and only that
+    /// connection's.</summary>
+    [Fact]
+    public async Task ReadReturnsEachLearnedValueWithItsTime()
+    {
+        var clock = new Clock(new(2026, 10, 18, 9, 0, 0, TimeSpan.Zero));
+        var learned = new LearnedModelContext(time: clock);
+
+        learned.ObserveReport("local", "qwen3", estimated: 1_000, reported: 1_500, usableWindow: 100_000);
+        DateTimeOffset framingAt = clock.Now;
+        clock.Now = framingAt.AddMinutes(5);
+        await learned.ObserveRefusalAsync("local", "qwen3", estimated: 50_000, reportedTokens: 80_500, reportedLimit: 70_000, knownLimit: null,
+            CancellationToken.None);
+        DateTimeOffset refusedAt = clock.Now;
+        clock.Now = refusedAt.AddMinutes(5);
+        learned.ObserveRefusedSettings("local", "qwen3", LlmRefusedSettings.Temperature);
+        DateTimeOffset temperatureAt = clock.Now;
+        clock.Now = temperatureAt.AddMinutes(5);
+        learned.ObserveRefusedSettings("local", "qwen3", LlmRefusedSettings.Temperature | LlmRefusedSettings.Reasoning);
+        learned.ObserveReport("other", "model", estimated: 1_000, reported: 1_500, usableWindow: 100_000);
+
+        Assert.Equal(
+        [
+            new LlmLearnedModelFact("qwen3", "Estimated to reported token ratio", "1.6", refusedAt),
+            new LlmLearnedModelFact("qwen3", "Framing tokens", "500", framingAt),
+            new LlmLearnedModelFact("qwen3", "Learned context limit", "70000", refusedAt),
+            new LlmLearnedModelFact("qwen3", "Refused setting", "Temperature", temperatureAt),
+            new LlmLearnedModelFact("qwen3", "Refused setting", "Reasoning", clock.Now)
+        ], learned.Read("local"));
+        Assert.Empty(learned.Read("unknown"));
+    }
+
+    private sealed class Clock(DateTimeOffset now) : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = now;
+
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
     private sealed class Store : ILlmLearnedLimitStore
     {
         public List<(string ConnectionId, string ModelId, long Tokens)> Saves { get; } = [];

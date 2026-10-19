@@ -418,7 +418,7 @@ has neither. A context limit a refusal teaches is saved through the host's `ILlm
 own and an estimate must err high; a count the provider reported in full gets no margin. The status, the request
 accounting and the compaction measures all carry it. The estimate is asynchronous, so a chat client may ask its model
 service to count text, and a failed count uses the local estimate for that text. The rate and any learned limit are
-kept per connection id and model, so a limit learned on one service never applies to another connection. At or above the trigger the session compacts toward the target: it cuts each
+kept per connection id and model, so a limit learned on one service never applies to another connection. A host reads what the process has learned for a connection through `ILlmLearnedModelFacts.Read(connectionId)`, which `AddLlmConnect` registers: for each model, the estimated-to-reported token ratio, the framing tokens, the learned context limit and each refused setting, each a `LlmLearnedModelFact` with the time (`LearnedAt`) its value last changed. It copies the facts and makes no request. A context limit saved by an earlier process is not listed; it is on `LlmConnection.LearnedContextLimits`. At or above the trigger the session compacts toward the target: it cuts each
 unprotected tool-result text part and structured content to its first and last 1,000 characters, sending cut structured
 content as text, and replaces binary parts with a notice,
 then keeps the current turn and the newest whole turns that fit in the room under the target that a 3,000-word

@@ -36,6 +36,7 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<LlmProviderCatalog>();
         services.AddSingleton<LearnedModelContext>();
+        services.AddSingleton<ILlmLearnedModelFacts>(provider => provider.GetRequiredService<LearnedModelContext>());
         services.AddLogging();
         services.AddSingleton<LlmModelListCache>();
         services.AddSingleton<LlmAccountUsageObservations>();
