@@ -373,13 +373,11 @@ matches, code execution its code, logs and image URLs, and MCP its arguments, ou
 annotation of a message raises one citation event, keyed by the message, its content part and the annotation, and
 a top-level `citations` list adds each URL no annotation cited. The completed result carries every citation once.
 
-**Fallback models, caps and retries.** Codex refuses a non-empty `FallbackModelIds` and a `MaxSpendUsd` greater
-than 0 at opening. Claude passes `FallbackModelIds`, without the session model and without repeats, as
+**Fallback models, caps and retries.** Codex refuses a non-empty `FallbackModelIds` at opening. Claude passes `FallbackModelIds`, without the session model and without repeats, as
 `--fallback-model a,b`; the CLI stops at launch when a fallback equals the main model. When `ExecutionOptions` is
-supplied, Claude sends `--max-turns {MaxModelIterations}` and, when `MaxSpendUsd` is greater than 0,
-`--max-budget-usd {MaxSpendUsd}`; the CLI refuses a budget of 0 or less. Every Claude opening of a conversation,
+supplied, Claude sends `--max-turns {MaxModelIterations}`. Every Claude opening of a conversation,
 reopens included, sends the same arguments. A Claude result with subtype `error_max_turns` ends the turn with
-`IterationLimit` and `error_max_budget_usd` with `SpendLimit`, each with the CLI's first error text. A Claude
+`IterationLimit`, with the CLI's first error text. A Claude
 `system` message with subtype `api_retry` becomes `LlmAgentResponseRecoveryEvent` with `NextAttempt` = the CLI's
 `attempt`, `Delay` = `retry_delay_ms` and `Error` = `{error_status}: {error}` (the status is left out when null).
 A Codex retry reports `Delay` as the wait before the next attempt and `Error` as the failure message. A 429, 502,

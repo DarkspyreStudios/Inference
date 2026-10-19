@@ -254,11 +254,6 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         if (execution is not null)
         {
             arguments.AddRange(["--max-turns", execution.MaxModelIterations.ToString(CultureInfo.InvariantCulture)]);
-            // The CLI stops at launch on a budget of 0 or less, which sets no cap.
-            if (execution.MaxSpendUsd > 0)
-            {
-                arguments.AddRange(["--max-budget-usd", execution.MaxSpendUsd.Value.ToString(CultureInfo.InvariantCulture)]);
-            }
         }
 
         return arguments;
@@ -1612,13 +1607,12 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             LlmAgentCompletionReason reason = subtype.Contains("interrupt", StringComparison.OrdinalIgnoreCase)
                 ? LlmAgentCompletionReason.Interruption
                 : subtype == "error_max_turns" ? LlmAgentCompletionReason.IterationLimit
-                : subtype == "error_max_budget_usd" ? LlmAgentCompletionReason.SpendLimit
                 : isError ? LlmAgentCompletionReason.ProviderFailure
                 : stopReason == "refusal" ? LlmAgentCompletionReason.Refusal
                 : stopReason is "max_tokens" or "model_context_window_exceeded" ? LlmAgentCompletionReason.Truncation
                 : subtype == "success" && stopReason is null or "end_turn" or "stop_sequence"
                     ? LlmAgentCompletionReason.Completed : LlmAgentCompletionReason.Unknown;
-            string? error = reason is LlmAgentCompletionReason.IterationLimit or LlmAgentCompletionReason.SpendLimit
+            string? error = reason == LlmAgentCompletionReason.IterationLimit
                 ? FirstError(root)
                 : isError ? "Claude CLI reported a turn error."
                 + ClaudeCliConfiguration.ErrorDetail(root, LlmCredential.Parse(_connection.Credential))

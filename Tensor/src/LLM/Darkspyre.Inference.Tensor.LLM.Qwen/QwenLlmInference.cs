@@ -88,7 +88,6 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             SupportsSeed = InferenceSupport.Supported,
             SupportsPresencePenalty = InferenceSupport.Supported,
             SupportsFrequencyPenalty = InferenceSupport.Supported,
-            MaxStopSequences = 16,
             SupportsToolUse = InferenceSupport.Supported,
             Tools = new() { SupportsParallelCalls = InferenceSupport.Supported },
             SupportsPromptImages = InferenceSupport.Unsupported,
@@ -178,8 +177,6 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         // The architecture's protocol parser separates the answer from thinking and tool calls.
         IOutputParser parser = OutputParserFactory.Create(_runtime.Architecture);
         parser.Init(thinking, tools);
-        // Upstream streams the piece that completes a stop sequence before it stops, so the filter withholds it.
-        StopSequenceFilter? stops = request.StopSequences.Count == 0 ? null : new(request.StopSequences);
         var output = new StringBuilder();
         var toolCalls = new List<LlmToolCall>();
         int? promptTokens = null;
@@ -204,7 +201,6 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             {
                 bool more;
                 ParsedOutput? part = null;
-                ParsedOutput? withheld = null;
                 try
                 {
                     executionToken.ThrowIfCancellationRequested();
@@ -222,7 +218,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
                         {
                             if (update.RawGenerationSuffix is not null)
                                 parser.SetGenerationPromptSuffix(update.RawGenerationSuffix);
-                            string piece = stops is null ? update.Piece ?? "" : stops.Append(update.Piece ?? "");
+                            string piece = update.Piece ?? "";
                             part = update.IsParsed
                                 ? new ParsedOutput { Content = piece, Thinking = update.ThinkingPiece ?? "", ToolCalls = update.ParsedToolCalls?.ToList() }
                                 : string.IsNullOrEmpty(piece) ? null : parser.Add(piece, false);
@@ -233,15 +229,12 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
                         executionToken.ThrowIfCancellationRequested();
                         if (promptTokens is null)
                             throw new InferenceException(InferenceFailureCode.ExecutionFailed, "The Qwen runtime ended without a terminal update.");
-                        if (stops is { Stopped: false } && stops.Complete() is { Length: > 0 } tail)
-                            withheld = parser.Add(tail, false);
                         part = parser.Add(string.Empty, true);
                     }
                 }
                 catch (Exception error) { operationFailure = error; throw; }
 
-                using IEnumerator<LlmStreamEvent> parsed = Events(withheld, output, toolCalls)
-                    .Concat(Events(part, output, toolCalls)).GetEnumerator();
+                using IEnumerator<LlmStreamEvent> parsed = Events(part, output, toolCalls).GetEnumerator();
                 while (true)
                 {
                     bool hasEvent;
@@ -634,7 +627,6 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         if (request.Seed is int seed) sampling.Seed = seed;
         if (request.PresencePenalty is double presence) sampling.PresencePenalty = (float)presence;
         if (request.FrequencyPenalty is double frequency) sampling.FrequencyPenalty = (float)frequency;
-        sampling.StopSequences = request.StopSequences.ToList();
         if (format is null)
         {
             return sampling;
@@ -799,13 +791,9 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
                 "Qwen decodes greedily unless Temperature is positive; TopP, TopK and Seed require a sampling temperature.");
         }
-        if (request.StopSequences is null || request.StopSequences.Any(string.IsNullOrEmpty))
+        if (request.StopSequences is null || request.StopSequences.Count > 0)
         {
-            throw new InferenceException(InferenceFailureCode.InvalidRequest, "Stop sequences must be non-empty strings.");
-        }
-        if (request.StopSequences.Count > 16)
-        {
-            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen accepts at most 16 stop sequences.");
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen does not support stop sequences.");
         }
 
         // The chat template has no control for a forced or serial tool choice.

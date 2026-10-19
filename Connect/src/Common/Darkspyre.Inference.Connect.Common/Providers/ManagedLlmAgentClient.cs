@@ -34,8 +34,6 @@ internal sealed class ManagedLlmAgentClient<TClient>(TClient client, LlmProvider
                 throw new NotSupportedException(NativeAgentContract.AgentToolUseUnsupported);
             if (options.FallbackModelIds.Count > 0 && capabilities.Agent.SupportsFallbackModels == InferenceSupport.Unsupported)
                 throw new NotSupportedException("The selected model does not support fallback models.");
-            if (options.ExecutionOptions?.MaxSpendUsd > 0 && capabilities.Agent.SupportsSpendCap == InferenceSupport.Unsupported)
-                throw new NotSupportedException("The selected model does not support spend caps.");
         }
         connection = await providers.PrepareManagedConnectionAsync(connectionId, connection, client, Preflight, opening.Token).ConfigureAwait(false);
         Fence();

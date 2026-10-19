@@ -188,9 +188,6 @@ public sealed record LlmAgentExecutionOptions
 
     /// <summary>The context limits and compaction policy for the turn.</summary>
     public LlmAgentContextPolicy ContextPolicy { get; init; } = new();
-
-    /// <summary>Spend cap in US dollars for each turn. Null, 0 or less sets no cap.</summary>
-    public decimal? MaxSpendUsd { get; init; }
 }
 
 /// <summary>
@@ -313,8 +310,5 @@ public enum LlmAgentCompletionReason
     Unknown,
 
     /// <summary>The turn ended with the model's tool calls returned unrun (LlmAgentToolHandling.ReturnRequests).</summary>
-    ToolRequests,
-
-    /// <summary>The turn reached LlmAgentExecutionOptions.MaxSpendUsd.</summary>
-    SpendLimit
+    ToolRequests
 }

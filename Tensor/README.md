@@ -553,9 +553,8 @@ compatible pack on the same instance; Stop remains terminal.
 Qwen targets `TensorLlmModels.QwenRuntimeArchitecture`: the Qwen 3.5 family GGUF architectures
 `qwen35`, `qwen35moe` and `qwen3next`, which mixes full-attention layers with GatedDeltaNet
 recurrent layers. Other TensorSharp architectures, including `qwen4exp`, are not loaded. A `qwen3`
-GGUF is reported Unsupported with `TensorLlmModels.Qwen3RetiredReason`. A request's stop sequences
-are withheld from the stream while a piece can still complete one, and neither the stream nor the
-result text contains the matched sequence. Its loader
+GGUF is reported Unsupported with `TensorLlmModels.Qwen3RetiredReason`. A request with stop
+sequences is rejected as UnsupportedFeature, and `MaxStopSequences` is zero. Its loader
 checks the installed GGUF architecture/version, tokenizer and chat metadata, dimensions, storage
 encoding and complete shard declarations before native allocation. It checks the recurrent-state
 keys and layer layout, and
@@ -615,10 +614,9 @@ before model materialization or native entry. Provider-native cache receipts do 
 to the local engine.
 Qwen rejects non-null `ProviderControls` before model materialization or native entry; it does not
 interpret another implementation's provider-specific controls.
-Qwen supports top-p, top-k, seed, presence and frequency penalties, and up to 16 non-empty stop
-strings. The Common request maps directly to TensorSharp's `SamplingConfig`, including requests
+Qwen supports top-p, top-k, seed, presence and frequency penalties, and no stop sequences. The Common request maps directly to TensorSharp's `SamplingConfig`, including requests
 without a structured-output grammar. Top-p, top-k and seed require a positive temperature; null
-or zero temperature decodes greedily. Stops and penalties remain effective with greedy decoding.
+or zero temperature decodes greedily. Penalties remain effective with greedy decoding.
 Numeric controls must be finite and representable by the engine's float fields; penalty values
 have no adapter-imposed [-2, 2] limit. Seed does not guarantee identical output across backends.
 Qwen reports `SupportsReasoningText = InferenceSupport.Supported` because its registered output parser emits thinking
