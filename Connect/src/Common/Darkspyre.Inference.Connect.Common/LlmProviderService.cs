@@ -677,26 +677,42 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         return snapshot;
     }
 
-    /// <summary>Reads the connection's current account usage from the provider. Throws when the connection does not expose account usage.</summary>
+    /// <summary>
+    /// Reads the connection's current account usage: from the provider when its adapter reads account usage, otherwise
+    /// the quota windows the connection's own responses reported, as <see cref="GetObservedAccountUsageAsync"/> returns
+    /// them. Throws <see cref="NotSupportedException"/> when the connection does not expose account usage.
+    /// </summary>
+    /// <gotcha>A connection whose adapter has no account-usage read, such as the Claude CLI, throws
+    /// <see cref="LlmProviderException"/> with provider code <c>account_usage_not_observed</c> until one of its turns
+    /// has reported a quota.</gotcha>
     public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(
         string connectionId,
         CancellationToken cancellationToken = default)
     {
         using var operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
+        LlmAccountUsageObservations.Reservation reservation = _observations.Reserve(connectionId);
         LlmConnection connection = await ResolveConnectionAsync(
             connectionId,
             cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
         LlmProviderCapabilities capabilities = client.GetCapabilities(connection);
         ThrowIfOperationCanceled(cancellationToken);
-        if ((capabilities.SupportsAccountUsage == InferenceSupport.Unsupported)
-            || !_accountUsageClients.TryGetValue(
-                connection.Transport,
-                out ILlmAccountUsageClient? usageClient))
+        if (capabilities.SupportsAccountUsage == InferenceSupport.Unsupported)
         {
             throw new NotSupportedException(
                 $"The {connection.Transport} connection does not expose account usage.");
+        }
+
+        if (!_accountUsageClients.TryGetValue(connection.Transport, out ILlmAccountUsageClient? usageClient))
+        {
+            LlmAccountUsageSnapshot observed = reservation.Get(connection)
+                ?? throw new LlmProviderException(
+                    "The connection has not reported account usage yet.",
+                    connection.Transport,
+                    providerCode: "account_usage_not_observed");
+            ThrowIfOperationCanceled(cancellationToken);
+            return observed;
         }
 
         if (connection.Transport == LlmTransport.OpenAiCodex)

@@ -281,19 +281,28 @@ public sealed class ClaudeCliLlmClientTests
     }
 
     [Fact]
-    public async Task AccountUsageFailurePreservesSanitizedResultDetail()
+    public async Task AccountUsageIsTheQuotaATurnReportedWithoutRunningTheCliAgain()
     {
-        const string detail = """{"refresh_token":"usage-secret","detail":"Account usage is unavailable for this organization."}""";
         var runner = new RecordingRunner(new(0,
-            new JsonObject { ["type"] = "result", ["is_error"] = true, ["result"] = detail }.ToJsonString(), string.Empty));
+            """{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour","utilization":0.42,"resetsAt":1900000000}}"""
+            + "\n"
+            + """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
+            string.Empty));
         using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        var client = new ClaudeCliLlmClient(http, runner, new CatalogProcess());
+        await using var service = new LlmProviderService(new ResourcePreparationTests.Source(CliConnection()), [client]);
 
-        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => client.GetAccountUsageAsync(CliConnection()));
+        LlmProviderException none = await Assert.ThrowsAsync<LlmProviderException>(() => service.GetAccountUsageAsync("connection"));
+        Assert.Equal("account_usage_not_observed", none.ProviderCode);
 
-        Assert.Equal("claude_cli_usage_error", failure.ProviderCode);
-        Assert.Contains("Account usage is unavailable for this organization.", failure.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("usage-secret", failure.ToString(), StringComparison.Ordinal);
+        await ReadAllAsync(service.StreamAsync("connection",
+            new() { ModelId = "cli-returned-alias", Messages = [new("user", "test")] }));
+        LlmAccountUsageSnapshot usage = await service.GetAccountUsageAsync("connection");
+
+        LlmQuotaWindow quota = Assert.Single(usage.Quotas);
+        Assert.Equal("five_hour", quota.Id);
+        Assert.Equal(0.42, quota.UsedFraction!.Value, 3);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1900000000), quota.ResetsAt);
         Assert.Single(runner.Invocations);
     }
 

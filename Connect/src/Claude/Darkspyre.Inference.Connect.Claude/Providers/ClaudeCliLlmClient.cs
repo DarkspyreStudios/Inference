@@ -17,7 +17,6 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runner, IClaudeCliSessionProcessFactory processFactory)
     : LlmClientBase(http),
         ILlmContextEstimator,
-        ILlmAccountUsageClient,
         IExternalLlmAuthenticationProbe,
         IStreamingCredentialRefreshPolicy,
         ILlmCatalogCapabilities
@@ -502,75 +501,6 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         catch (JsonException)
         {
             return ExternalAuthenticationState.SignedOut;
-        }
-    }
-
-    public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(
-        LlmConnection connection,
-        CancellationToken cancellationToken = default)
-    {
-        LlmCredential? credential = ClaudeCliConfiguration.ValidateConnection(connection);
-        ClaudeCliProcessResult result;
-        try
-        {
-            result = await InvokeClaudeAsync(
-                ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint),
-                [
-                    "-p",
-                    "/usage",
-                    "--output-format", "json",
-                    "--no-session-persistence",
-                    "--setting-sources", "user"
-                ],
-                standardInput: null,
-                maxOutputTokens: null,
-                ClaudeCliEnvironment.AccountToken(credential),
-                cancellationToken);
-        }
-        catch (ClaudeCliUnavailableException exception)
-        {
-            throw ClaudeCliConfiguration.Unavailable(exception);
-        }
-
-        if (result.ExitCode != 0 || result.StandardInputError is not null)
-        {
-            throw CreateClaudeExitException(result, credential);
-        }
-
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(result.StandardOutput);
-            JsonElement root = document.RootElement;
-            if (root.TryGetProperty("is_error", out JsonElement error)
-                && error.ValueKind == JsonValueKind.True)
-            {
-                throw new LlmProviderException(
-                    "Claude CLI reported an account-usage error." + ClaudeCliConfiguration.ErrorDetail(root, credential),
-                    Transport,
-                    providerCode: "claude_cli_usage_error");
-            }
-
-            string summary = LlmJson.GetString(root, "result")
-                ?? throw new JsonException("The result property is missing.");
-            return ClaudeAccountUsageParser.Parse(
-                AccountUsageSanitizer.Sanitize(summary, credential),
-                DateTimeOffset.UtcNow);
-        }
-        catch (JsonException exception)
-        {
-            throw new LlmProviderException(
-                "Claude CLI returned invalid account-usage JSON.",
-                Transport,
-                providerCode: "claude_cli_invalid_account_usage",
-                innerException: exception);
-        }
-        catch (FormatException exception)
-        {
-            throw new LlmProviderException(
-                "Claude CLI returned an unrecognized account-usage report.",
-                Transport,
-                providerCode: "claude_cli_invalid_account_usage",
-                innerException: exception);
         }
     }
 
