@@ -366,6 +366,9 @@ tool.
 Grok offers image generation on every model, and web and X search on models whose catalog row enables backend
 search. Its `ILlmSessionHostedTools` supplies web and X search to managed steps only, not summaries. A caller's tool
 of the same kind takes precedence. Application function tools keep their own definitions and execution handler.
+The facade validates model-specific hosted tools immediately after attaching the catalog, before normalization and
+sending (D20). Structural admission and credential/connection checks precede it. An unsupported hosted tool is
+refused after any due credential renewal, with the same refusal.
 
 | Tool | Grok wire entry |
 | --- | --- |

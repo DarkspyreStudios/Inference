@@ -463,7 +463,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         connection = WithContextCache(EmbeddingRequestData.Snapshot(connection), client);
         if (request.ExplicitCache is not null)
             ExplicitCaches.Validate(request, (client.GetCapabilities(connection, request.ModelId).SupportsExplicitCache != InferenceSupport.Unsupported));
-        HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
         ThrowIfOperationCanceled(cancellationToken);
         (connection, request) = await AdmitContextCacheAsync(connectionId, connection, client, request, cacheSequence, cancellationToken).ConfigureAwait(false);
         if (client is not IStreamingCredentialRefreshPolicy refreshPolicy
@@ -517,6 +516,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         }
         (request, int omitted) = ContinuationStateProjection.Project(request, connection);
         connection = await AttachCatalogCoreAsync(connectionId, connection, client, cancellationToken);
+        HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
         ThrowIfOperationCanceled(cancellationToken);
         // The catalog is attached first: it can narrow what the model accepts, such as its reasoning levels.
         request = LlmRequestNormalizer.Normalize(connection, request, client.GetCapabilities(connection, request.ModelId));
