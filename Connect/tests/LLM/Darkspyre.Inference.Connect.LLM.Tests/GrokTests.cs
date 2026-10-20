@@ -182,6 +182,40 @@ public sealed class GrokTests
             replayed.ToJsonString());
     }
 
+    /// <summary>Account usage is the proxy's billing route, sent with the account's x-userid. The period becomes one quota
+    /// window and the cent amounts dollar balances; proto3's omitted zeros read as 0% and $0, and a reply without a
+    /// period fails naming the field, not its values.</summary>
+    [Fact]
+    public async Task AccountUsageMapsTheBillingReply()
+    {
+        var replies = new Queue<string>([
+            """
+            {"config":{"creditUsagePercent":100,"currentPeriod":{"type":"USAGE_PERIOD_TYPE_WEEKLY","start":"2026-10-19T00:00:00Z","end":"2026-10-26T00:00:00Z"},
+              "prepaidBalance":{"val":1250},"onDemandCap":{"val":5000},"onDemandUsed":{"val":355}},"onDemandEnabled":true}
+            """,
+            """{"config":{"currentPeriod":{"type":"USAGE_PERIOD_TYPE_MONTHLY","start":"2026-10-01T00:00:00Z","end":"2026-11-01T00:00:00Z"},"prepaidBalance":{}}}""",
+            """{"config":{"creditUsagePercent":42}}"""]);
+        using var handler = new Handler(_ => Json(replies.Dequeue()));
+        var client = new GrokResponsesLlmClient(new HttpClient(handler));
+
+        LlmAccountUsageSnapshot full = await client.GetAccountUsageAsync(Connection());
+        Assert.Equal("https://cli-chat-proxy.grok.com/v1/billing?format=credits", handler.Uri!.AbsoluteUri);
+        Assert.Equal(("Bearer test-token", "account"), (handler.Headers["Authorization"], handler.Headers["x-userid"]));
+        LlmAccountUsageSnapshot zeros = await client.GetAccountUsageAsync(Connection());
+        LlmProviderException unrecognized = await Assert.ThrowsAsync<LlmProviderException>(() => client.GetAccountUsageAsync(Connection()));
+
+        LlmQuotaWindow weekly = Assert.Single(full.Quotas);
+        Assert.Equal(("Weekly limit", 1d, LlmQuotaState.Exhausted, TimeSpan.FromDays(7), new DateTimeOffset(2026, 10, 26, 0, 0, 0, TimeSpan.Zero)),
+            (weekly.DisplayName, weekly.UsedFraction, weekly.State, weekly.WindowDuration, weekly.ResetsAt));
+        Assert.Equal([("prepaid", (decimal?)12.50m, "usd"), ("on-demand", 46.45m, "usd")],
+            full.Credits.Select(credit => (credit.Id, credit.Remaining, credit.Unit)));
+        LlmQuotaWindow monthly = Assert.Single(zeros.Quotas);
+        Assert.Equal(("Monthly limit", 0d, LlmQuotaState.Available), (monthly.DisplayName, monthly.UsedFraction, monthly.State));
+        Assert.Equal([("prepaid", (decimal?)0m)], zeros.Credits.Select(credit => (credit.Id, credit.Remaining)));
+        Assert.Equal("Grok account usage returned an unrecognized reply: config.currentPeriod is missing.", unrecognized.Message);
+        Assert.Null(unrecognized.SanitizedResponseBody);
+    }
+
     internal static LlmConnection Connection(XaiConnectionOptions? options = null)
     {
         options ??= new();

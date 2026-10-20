@@ -10,7 +10,7 @@ The conversation libraries are independently consumable:
 | `Darkspyre.Inference.Connect.Codex` | Native Codex client and authentication |
 | `Darkspyre.Inference.Connect.Claude` | Official Claude CLI conversations and authentication |
 | `Darkspyre.Inference.Connect.Antigravity` | Official Antigravity CLI conversations, native resume, host tools and account usage |
-| `Darkspyre.Inference.Connect.Grok` | Grok (xAI) Responses conversations on xAI's subscription proxy, with a Grok subscription's device sign-in and hosted search |
+| `Darkspyre.Inference.Connect.Grok` | Grok (xAI) Responses conversations on xAI's subscription proxy, with a Grok subscription's device sign-in, hosted search and account usage |
 | `Darkspyre.Inference.Connect.HostTools` | The host-tools local service, bundled under `hosttools/service`, its client, and the `darkspyre-host-tools-mcp` program; source-only, built with Darkspyre.Common's local-service libraries |
 | `Darkspyre.Inference.Connect.OpenAiApi` | OpenAI Responses conversations and text embeddings |
 | `Darkspyre.Inference.Connect.SelfHost` | Conversations and text/image embeddings through caller-owned engines |
@@ -277,6 +277,19 @@ in order: messages, reasoning, function calls, hosted calls (`web_search_call`, 
 `view_image_call`, `view_x_video_call`, `custom_tool_call`, `tool_search_call`, `tool_search_output`). A
 `context_length_exceeded` code in an HTTP error or a stream `error` event is a too-long refusal. The proxy lists no
 embedding model, so Grok offers no embeddings.
+
+Grok account usage is the proxy's `GET billing?format=credits`, the read the Grok Build CLI makes for its usage view.
+It carries the chat headers and `x-userid`, the account's `user_id` saved at sign-in; the facade refreshes the token
+first. Chat replies carry no usage headers, so Grok has no observed usage. `XaiAccountUsageParser` maps the reply's
+`config` to one quota window and dollar balances. The window is named by `currentPeriod.type`: `Weekly limit`,
+`Monthly limit`, or `Usage limit` when the type is absent or unspecified. Its used fraction is
+`creditUsagePercent / 100`, it resets at `currentPeriod.end`, it lasts from `start` to `end`, and it is Exhausted at
+100%. The cent amounts (`{"val": n}`) become `usd` balances: `Prepaid credits` from `prepaidBalance`, and, when the
+reply has `onDemandEnabled: true`, `On-demand credits` as `onDemandCap` minus `onDemandUsed`, never below zero.
+`subscriptionTier`, when present, is the plan. The reply is proto3 JSON, which omits zero values, so an absent
+percentage is 0% and an absent or empty amount is $0. A reply without `config` or `currentPeriod`, with an unknown
+period type, a missing timestamp or a field of the wrong kind fails with `LlmProviderException` code
+`xai_account_usage_unrecognized`, whose message names the field and carries no value from the reply.
 
 **Settings a model or service does not accept.** No setting refuses a turn. On OpenAI's endpoint a reasoning model
 that accepts temperature only at reasoning None loses temperature and top-p at any other level, and when the request
@@ -4183,7 +4196,7 @@ LlmAccountUsageSnapshot usage = await llms.GetAccountUsageAsync(connectionId);
 The snapshot separates proportional or absolute quota windows, credit balances, and aggregate usage
 metrics. Reset times are UTC `DateTimeOffset` values; `IsApproximate` identifies estimates. A CLI may
 also supply a sanitized `Summary` for display only—hosts must not parse that text as a stable contract.
-Credentials, account email, and raw protocol responses are never included. Codex, Antigravity and
+Credentials, account email, and raw protocol responses are never included. Codex, Antigravity, Grok and
 compatible connections whose endpoint host is exactly `openrouter.ai` expose queried usage; Claude
 subscription exposes observed usage. OpenRouter reads the authenticated key's `/key` report, not the management-only account balance.
 Other compatible endpoints reject account-usage overrides that claim this operation. A missing

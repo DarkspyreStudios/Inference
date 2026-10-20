@@ -15,7 +15,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// credential. The proxy serves no compaction or tokenizer route, so the host compacts and estimates Grok conversations.
 /// </summary>
 internal sealed class GrokResponsesLlmClient(HttpClient http) : ResponsesLlmClientBase(http), ILlmCatalogCapabilities,
-    IExternalLlmAuthenticationProbe, ILlmCredentialAdmissionPolicy
+    IExternalLlmAuthenticationProbe, ILlmCredentialAdmissionPolicy, ILlmAccountUsageClient
 {
     private const int MaxImageBytes = 20 * 1024 * 1024;
 
@@ -54,7 +54,7 @@ internal sealed class GrokResponsesLlmClient(HttpClient http) : ResponsesLlmClie
         SupportsStreamingUsage = InferenceSupport.Supported,
         SupportsReasoningText = InferenceSupport.Supported,
         SupportsModelListing = InferenceSupport.Supported,
-        SupportsAccountUsage = InferenceSupport.Unsupported,
+        SupportsAccountUsage = InferenceSupport.Supported,
         SupportsJsonSchema = InferenceSupport.Supported,
         SupportsJsonObject = InferenceSupport.Supported,
         SupportsToolUse = InferenceSupport.Supported,
@@ -113,6 +113,48 @@ internal sealed class GrokResponsesLlmClient(HttpClient http) : ResponsesLlmClie
         LlmConnection published = connection with { Catalog = models };
         return consumption.Publish<IReadOnlyList<LlmModel>>(
             Array.AsReadOnly(models.Select(model => model with { Capabilities = GetCapabilities(published, model.Id) }).ToArray()));
+    }
+
+    /// <summary>The account's credit usage from the subscription proxy's billing route, the read the Grok Build CLI makes for
+    /// its usage view. The proxy finds the account by the x-userid header.</summary>
+    public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(LlmConnection connection, CancellationToken cancellationToken = default)
+    {
+        if (GetCapabilities(connection).SupportsAccountUsage == InferenceSupport.Unsupported)
+            throw new NotSupportedException("The connection disables account usage.");
+        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken);
+        cancellationToken = consumption.Token;
+        LlmCredential? credential = LlmCredential.Parse(connection.Credential);
+        using var request = new HttpRequestMessage(HttpMethod.Get, ProviderHttp.BuildUri(connection, "billing?format=credits"));
+        XaiRequestHeaders.Apply(request, connection, false);
+        if (credential?.OAuth?.AccountId is { Length: > 0 } userId) request.Headers.TryAddWithoutValidation("x-userid", userId);
+        string[] secrets = connection.AdditionalHeaders.Values.Concat(request.Headers.SelectMany(header => header.Value)).ToArray();
+        HttpResponseMessage sent;
+        try
+        {
+            sent = await Http.SendAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception error) when (error is HttpRequestException or OperationCanceledException)
+        {
+            throw XaiErrorClassifier.HttpSendFailure(error, credential, secrets);
+        }
+        using HttpResponseMessage response = sent;
+        await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(response, credential, secrets, cancellationToken).ConfigureAwait(false);
+        string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
+        // The reply holds the account's balances, so a failure names the field and never carries the body.
+        string? problem = null;
+        LlmAccountUsageSnapshot? result = null;
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(body);
+            if (document.RootElement.ValueKind != JsonValueKind.Object) problem = "the reply is not a JSON object";
+            else result = XaiAccountUsageParser.Parse(document.RootElement, DateTimeOffset.UtcNow);
+        }
+        catch (JsonException) { problem = "the reply is not JSON"; }
+        catch (FormatException error) { problem = error.Message; }
+        if (result is null)
+            throw new LlmProviderException($"Grok account usage returned an unrecognized reply: {problem}.", Transport,
+                response.StatusCode, "xai_account_usage_unrecognized", ProviderHttp.ReadRequestId(response, credential, secrets));
+        return consumption.Publish(result);
     }
 
     protected override LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) => null;

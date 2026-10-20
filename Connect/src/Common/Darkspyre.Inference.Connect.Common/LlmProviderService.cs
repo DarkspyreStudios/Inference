@@ -715,7 +715,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             return observed;
         }
 
-        if (connection.Transport == LlmTransport.OpenAiCodex)
+        if (connection.Transport is LlmTransport.OpenAiCodex or LlmTransport.XaiResponses)
         {
             connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken);
         }
