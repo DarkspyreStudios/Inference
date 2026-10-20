@@ -2527,7 +2527,7 @@ disposal kill the process tree.
 
 A Claude CLI is never killed early. The CLI refreshes its OAuth tokens and saves the rotated pair to the
 keychain; a CLI killed between the refresh and the save leaves a spent refresh token behind, and the next
-refresh signs the user out. Every Claude CLI process (chat, `auth status`, model listing and agent
+refresh signs the user out. Every Claude CLI process (chat, `auth status`, `/usage`, model listing and agent
 sessions) therefore ends by standard-input EOF. A one-shot run whose input is already closed also
 receives `SIGTERM`, then `SIGCONT`, on its process group. The process exits on its own; its process group
 receives `SIGKILL` only after 30 seconds, and a Warning log entry records that kill. A caller that cancels,
@@ -4213,9 +4213,9 @@ LlmAccountUsageSnapshot usage = await llms.GetAccountUsageAsync(connectionId);
 The snapshot separates proportional or absolute quota windows, credit balances, and aggregate usage
 metrics. Reset times are UTC `DateTimeOffset` values; `IsApproximate` identifies estimates. A CLI may
 also supply a sanitized `Summary` for display only—hosts must not parse that text as a stable contract.
-Credentials, account email, and raw protocol responses are never included. Codex, Antigravity, Grok and
-compatible connections whose endpoint host is exactly `openrouter.ai` expose queried usage; Claude
-subscription exposes observed usage. OpenRouter reads the authenticated key's `/key` report, not the management-only account balance.
+Credentials, account email, and raw protocol responses are never included. Codex, Claude subscription,
+Antigravity, Grok and compatible connections whose endpoint host is exactly `openrouter.ai` expose
+queried usage. OpenRouter reads the authenticated key's `/key` report, not the management-only account balance.
 Other compatible endpoints reject account-usage overrides that claim this operation. A missing
 `IsUnlimited` value is null, distinct from an explicit false.
 
@@ -4228,7 +4228,7 @@ without disposing borrowed clients or the borrowed observation store.
 `GetObservedAccountUsageAsync(connectionId)` reads passive provider evidence without a provider call.
 It returns null until that connection identity reports a quota. OpenAI Responses and compatible Chat
 Completions read rate-limit headers, Anthropic Messages reads its rate-limit headers, Codex reads quota
-headers, and both Claude CLI lanes record `rate_limit_event`. HTTP observations precede status handling,
+headers. Claude subscription quotas come only from the CLI's `/usage` read. HTTP observations precede status handling,
 including failed responses, and cover streaming and complete response paths. Vertex Claude does not
 inherit Anthropic account observations. These measurements are separate from generation-token usage
 and are not public stream events.
@@ -4841,7 +4841,7 @@ claude
   text the callback page shows. Connect exchanges it for a `user:inference` token with a one-year
   lifetime, the token `claude setup-token` creates, and saves it as the connection's
   `LlmCredential.OAuth`. Every Claude CLI process for the connection (chat, streaming, agent sessions,
-  `auth status` and model discovery) then starts with `CLAUDE_CODE_OAUTH_TOKEN` set to that
+  `auth status`, `/usage` and model discovery) then starts with `CLAUDE_CODE_OAUTH_TOKEN` set to that
   token, and without `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_SCOPES`, which
   the CLI would prefer to the token or read as its scopes. The machine's login is neither used nor
   changed, so connections on different accounts run at the same time. The token is never refreshed;
@@ -4861,15 +4861,26 @@ discovery uses the Anthropic Models API with the account token.
 The installed CLI 2.1.289 discovery path is qualified through the public Connect facade with 12 native
 choices. Other versions, refresh, generation and target-platform paths remain separate qualifications.
 
-Claude subscription account usage is the quota the connection's own turns report. Both Claude CLI
-lanes read each `rate_limit_event` (`ClaudeRateLimitEvent`): one window per event (the 5-hour,
-7-day, 7-day Opus or 7-day Sonnet limit, or overage) with its used fraction when the CLI sends one,
-its reset time and its status. The observation store keeps the latest reading of each window.
-The adapter has no account-usage read of its own, so `GetAccountUsageAsync` returns those windows and
-reports `account_usage_not_observed` until a turn has reported one. The CLI's `/usage` command is not
-run: from Claude CLI 2.1.302 its headless report carries no quota windows.
-API-key connections do not advertise account usage because
-Anthropic does not expose the subscription report through the Messages API.
+Claude subscription account usage runs `claude -p /usage --output-format json
+--no-session-persistence --setting-sources user` as a separate read, under the connection's account.
+The adapter implements `ILlmAccountUsageClient`, so `GetAccountUsageAsync` reads current quotas before
+any turn and never substitutes passive observations. Neither Claude CLI lane produces quota observations
+from `rate_limit_event`.
+The parser reads the 5-hour current session, weekly all-models and weekly per-model windows, including
+model labels such as Fable. It normalizes percentages to used and remaining fractions, preserves actual
+zero, and converts reset times from the stated time zone to UTC. The local activity section, request and
+session counts, and indented activity percentages produce no quotas or metrics. Sanitized report text
+remains available as the display-only `Summary`.
+A report without recognizable quota windows fails with `claude_cli_invalid_account_usage`. Its diagnostic
+says `Claude /usage reported no quota windows` and includes the first non-empty sanitized result line,
+bounded to 200 characters. A CLI-reported error retains its sanitized explanation. An unavailable executable reports `claude_cli_not_found`.
+The read sends no generation prompt, has a 30-second deadline and observes caller cancellation and
+adapter retirement. Timeout reports `claude_cli_usage_timeout`; process retirement follows the graceful
+CLI exit policy above.
+The captured CLI 2.1.302 machine-login report is covered by offline tests. Connection-token output,
+current authenticated execution and other platforms are not live-qualified by those tests.
+API-key connections do not advertise account usage because Anthropic does not expose the subscription
+report through the Messages API.
 
 Native chat-style tools are enabled for API-key connections. Claude subscription chat requests remain
 isolated one-shot generations, report `SupportsToolUse = InferenceSupport.Unsupported`, and launch the CLI with tools disabled.
