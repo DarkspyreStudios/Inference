@@ -4219,6 +4219,12 @@ queried usage. OpenRouter reads the authenticated key's `/key` report, not the m
 Other compatible endpoints reject account-usage overrides that claim this operation. A missing
 `IsUnlimited` value is null, distinct from an explicit false.
 
+Connect reads usage on demand; it owns no startup or polling schedule. Darkspyre's core.inference
+`AccountUsage` owner starts an independent read for each connection at activation and after configuration
+changes. It refreshes after turns and at reported reset times, without blocking startup or other
+connections. Each connection has one in-memory observation, published to all consumers; no session or
+disk quota cache owns another copy.
+
 Facade account-usage operations check caller cancellation and facade retirement after capability
 callbacks, before queried dispatch and before publishing completed results. Passive polling checks
 the same owner fence after connection resolution and after reading the observation store,
@@ -4234,8 +4240,8 @@ inherit Anthropic account observations. These measurements are separate from gen
 and are not public stream events.
 
 The store merges each reported bucket by its own observation time. Each observed quota or credit
-retains `Observation.ObservedAt` and `Source`; reset and expiry stay unknown unless reported. Raw Claude
-utilization uses a fraction and its reset uses Unix seconds. Codex raw utilization uses percent.
+retains `Observation.ObservedAt` and `Source`; reset and expiry stay unknown unless reported.
+Codex raw utilization uses percent.
 Anthropic token remaining counts are approximate. Codex observed IDs match queried meter/window IDs.
 Connection version, provider or account-scope replacement clears prior observations and fences late
 results from the old binding. A generation-owned reservation is taken before each chat, polling or
