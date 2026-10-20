@@ -41,6 +41,9 @@ public sealed class LlmProviderException : Exception
     /// <summary>The request id the provider assigned to the failed request, when it reported one.</summary>
     public string? RequestId { get; }
 
+    /// <summary>The service's x-should-retry header; false ends retries, null means absent.</summary>
+    internal bool? ShouldRetry { get; init; }
+
     /// <summary>The delay the provider asked for before a retry, when it sent one.</summary>
     public TimeSpan? RetryAfter { get; }
 

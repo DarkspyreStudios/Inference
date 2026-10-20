@@ -32,6 +32,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private readonly ConversationCompactor _compactor;
     // The model service's own compaction, used for the models it reports; null when the client has none.
     private readonly ILlmProviderCompaction? _providerCompaction;
+    private readonly ILlmStepRetryPolicy _retryPolicy;
+    private readonly IReadOnlyList<LlmHostedTool> _sessionHostedTools;
     // Entries an opening left empty by omitting their native compaction state; summarized at the first decision point.
     private HashSet<string> _emptiedByOmission;
     private IReadOnlyList<LlmHostedTool> _hostedTools;
@@ -53,7 +55,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         IReadOnlyList<LlmModel> models, ILlmContextEstimator estimator,
         Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> stream,
         Func<string, LlmProviderCapabilities> capabilities, LearnedModelContext learned, Action? openingFence = null,
-        ILlmProviderCompaction? providerCompaction = null, CancellationToken cancellationToken = default)
+        ILlmProviderCompaction? providerCompaction = null, ILlmStepRetryPolicy? retryPolicy = null,
+        ILlmSessionHostedTools? sessionHostedTools = null, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         openingFence?.Invoke();
@@ -63,7 +66,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         cancellationToken.ThrowIfCancellationRequested();
         openingFence?.Invoke();
         var session = new ManagedAgentSession(connectionId, connection, options, models, estimator, stream, capabilities,
-            supportsResources, learned, providerCompaction);
+            supportsResources, learned, providerCompaction, retryPolicy, sessionHostedTools);
         try
         {
             using var operation = session._resourceCallbacks.Enter(cancellationToken);
@@ -96,7 +99,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         IReadOnlyList<LlmModel> models, ILlmContextEstimator estimator,
         Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> stream,
         Func<string, LlmProviderCapabilities> capabilities, bool supportsResources, LearnedModelContext learned,
-        ILlmProviderCompaction? providerCompaction)
+        ILlmProviderCompaction? providerCompaction, ILlmStepRetryPolicy? retryPolicy, ILlmSessionHostedTools? sessionHostedTools)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(options.ModelId);
         _supportsResources = supportsResources;
@@ -104,6 +107,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         _learned = learned;
         _compactor = new(MeasureForCompactionAsync, SideRequestAsync, EstimateTextAsync, options.CallerServices?.Transcript);
         _providerCompaction = providerCompaction;
+        _retryPolicy = retryPolicy ?? DefaultStepRetryPolicy.Instance;
+        _sessionHostedTools = sessionHostedTools?.SessionHostedTools ?? [];
         _connection = connection;
         _models = Array.AsReadOnly(models.ToArray());
         _estimator = estimator;
@@ -613,6 +618,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     await writer.WriteAsync(new LlmAgentContextStatusEvent(ThreadId, run.Id, status), token);
                 }
                 string stepId = NewId();
+                var retries = new Dictionary<LlmStepRetryKind, int>();
+                LlmChatRequest originalRequest = request;
                 LlmChatResult? result = null;
                 try
                 {
@@ -622,7 +629,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                         bool hostedStarted = false;
                         try
                         {
-                            await foreach (var item in StreamModelAsync(run, request, stepId, writer, token))
+                            await foreach (var item in StreamModelAsync(run, originalRequest, request, stepId, retries, writer, token))
                             {
                                 if (request.Resources is not null)
                                 {
@@ -641,7 +648,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                                         LlmUsage? runningTotal = run.UsageUnknown ? null
                                             : UsageTotals.Add(run.Usage, usage.Cumulative, run.UsageCalls == 0);
                                         await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, stepId,
-                                            usage.Cumulative, runningTotal) { ModelId = request.ModelId }, token);
+                                            usage.Cumulative, runningTotal)
+                                        { ModelId = request.ModelId }, token);
                                         break;
                                     case LlmTextDeltaEvent text:
                                         await writer.WriteAsync(new LlmAgentTextDeltaEvent(ThreadId, run.Id, stepId, text.Delta), token);
@@ -683,28 +691,40 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                             }
                             break;
                         }
-                        catch (Exception error) when (result is null && !token.IsCancellationRequested &&
-                            error is LlmProviderException { IsResponseStreamInterrupted: true })
+                        catch (StepResend resend) when (result is null && !token.IsCancellationRequested)
                         {
-                            // An image-only request replays unless a hosted call started, since that call may already have run.
-                            bool hostedTools = hostedStarted || request.HostedTools.Any(tool => tool is not LlmImageGenerationTool);
-                            int? nextAttempt = hostedTools || attempt == 3 ? null : attempt + 1;
+                            bool hostedTools = hostedStarted || _hostedTools.Any(tool => tool is not LlmImageGenerationTool);
+                            int? nextAttempt = hostedTools ? null : retries.Values.Sum() + 2;
                             run.UsageUnknown = true;
                             await writer.WriteAsync(new LlmAgentResponseRecoveryEvent(ThreadId, run.Id, stepId, nextAttempt)
                             {
-                                Delay = nextAttempt is null ? null : TimeSpan.FromSeconds(attempt),
-                                Error = error.Message
+                                Delay = hostedTools ? null : resend.Retry.Delay,
+                                Error = resend.Message
                             }, token);
-                            if (nextAttempt is null)
+                            if (hostedTools)
                             {
-                                string message = hostedTools
-                                    ? "The model response stream was interrupted. Provider-side work may already have run. This request was not replayed because provider-hosted tools are enabled. Completed application-tool results are retained."
-                                    : "The model response stream was interrupted. Recovery failed after 3 attempts. Completed tool results are retained. Resume to continue.";
-                                await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, message);
+                                await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, HostedReplayMessage);
                                 return;
                             }
-                            await Task.Delay(TimeSpan.FromSeconds(attempt), token);
+                            CountRetry(retries, resend.Retry);
+                            if (resend.Retry.Kind == LlmStepRetryKind.StreamInterrupted) retries[LlmStepRetryKind.Transient] = 0;
+                            await Task.Delay(resend.Retry.Delay, token);
+                            request = WithReminder(originalRequest, resend.Retry.Reminder);
                             stepId = NewId();
+                        }
+                        catch (LlmProviderException error) when (result is null && !token.IsCancellationRequested
+                            && error.IsResponseStreamInterrupted)
+                        {
+                            bool hostedTools = hostedStarted || _hostedTools.Any(tool => tool is not LlmImageGenerationTool);
+                            run.UsageUnknown = true;
+                            await writer.WriteAsync(new LlmAgentResponseRecoveryEvent(ThreadId, run.Id, stepId, null)
+                            {
+                                Error = error.Message
+                            }, token);
+                            string message = hostedTools ? HostedReplayMessage
+                                : $"The model response stream was interrupted. Recovery failed after {retries.Values.Sum() + 1} attempts. Completed tool results are retained. Resume to continue.";
+                            await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, message);
+                            return;
                         }
                     }
                 }
@@ -744,6 +764,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 }
                 if (result is null) { throw new InvalidOperationException("Model stream ended without completion."); }
                 if (estimate is { IncludesProviderReport: false } observed && result.Usage?.InputTokens is int reported
+                    && result.Usage.HostedToolCallCount is null or 0
                     && Limits(request.ModelId) is { } window)
                     _learned.ObserveReport(_connectionId, request.ModelId, observed.Tokens, reported, window.UsableWindow);
                 run.Iterations++;
@@ -1161,10 +1182,19 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 LlmAgentShellTool shell => shell.Tool,
                 _ => throw new NotSupportedException("Unknown agent tool definition.")
             }).ToArray(),
-            HostedTools = HostedTools.WithoutUnofferedImages(_hostedTools, _capabilities(turn.ModelId!).HostedTools),
+            HostedTools = StepHostedTools(turn.ModelId!),
             MaxHostedTurns = _options.MaxHostedTurns,
             Resources = _callerServices?.Resources
         }, _capabilities(turn.ModelId!)));
+
+    /// <summary>The caller's tools, with unoffered images dropped, followed by offered session tools of other kinds.</summary>
+    private IReadOnlyList<LlmHostedTool> StepHostedTools(string modelId)
+    {
+        IReadOnlySet<LlmHostedToolKind> offered = _capabilities(modelId).HostedTools;
+        IReadOnlyList<LlmHostedTool> caller = HostedTools.WithoutUnofferedImages(_hostedTools, offered);
+        return [.. caller, .. _sessionHostedTools.Where(tool => offered.Contains(tool.Kind)
+            && !_hostedTools.Any(existing => existing.Kind == tool.Kind))];
+    }
 
     /// <summary>The request without the values a refusal taught this connection and model to leave out (5.10).</summary>
     private LlmChatRequest WithoutRefused(LlmChatRequest request)
@@ -1405,22 +1435,28 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
 
     /// <summary>
     /// Sends one summary request on this conversation's connection and returns its result. A refusal a model step would
-    /// repeat, or an interrupted stream, sends the request again inside the session, up to the three attempts a model step
-    /// gets; the caller sees only the last failure. Nothing of a summary reaches the caller before it completes, so a
+    /// repeat, or an interrupted stream, follows the client's retry policy; the caller sees only the last failure.
+    /// Nothing of a summary reaches the caller before it completes, so a
     /// repeat replays nothing.
     /// </summary>
     private async Task<LlmChatResult> SideRequestAsync(LlmChatRequest request, CancellationToken token)
     {
-        for (int attempt = 0; ; attempt++)
+        var retries = new Dictionary<LlmStepRetryKind, int>();
+        LlmChatRequest originalRequest = request;
+        while (true)
         {
             try
             {
                 return await SummaryRequest.ReadAsync(_stream(request, token), token).ConfigureAwait(false);
             }
-            catch (Exception error) when (!token.IsCancellationRequested && attempt < 2
-                && (RetryDelay(error, attempt) is not null || error is LlmProviderException { IsResponseStreamInterrupted: true }))
+            catch (Exception caught) when (!token.IsCancellationRequested)
             {
-                await Task.Delay(RetryDelay(error, attempt) ?? TimeSpan.FromSeconds(attempt + 1), token).ConfigureAwait(false);
+                Exception error = Unwrapped(caught);
+                LlmStepRetry? retry = _retryPolicy.Decide(error, new(retries, false, true));
+                if (retry is null) { ExceptionDispatchInfo.Throw(error); }
+                CountRetry(retries, retry);
+                await Task.Delay(retry.Delay, token).ConfigureAwait(false);
+                request = WithReminder(originalRequest, retry.Reminder);
             }
         }
     }
@@ -1578,15 +1614,14 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         }
     }
 
-    private async IAsyncEnumerable<LlmStreamEvent> StreamModelAsync(LiveRun run, LlmChatRequest request, string stepId,
+    private async IAsyncEnumerable<LlmStreamEvent> StreamModelAsync(LiveRun run, LlmChatRequest originalRequest,
+        LlmChatRequest request, string stepId, Dictionary<LlmStepRetryKind, int> retries,
         ChannelWriter<LlmAgentEvent> writer, [EnumeratorCancellation] CancellationToken token)
     {
-        // Only pre-output transient failures are repeatable. Never splice a new response into an exposed stream.
-        // A repeated send repeats no resource effect: inline preparation only reads.
-        for (int attempt = 0; ; attempt++)
+        while (true)
         {
             bool exposed = false;
-            TimeSpan? retryDelay = null;
+            LlmStepRetry? retry = null;
             Exception? failure = null;
             await using var stream = _stream(request, token).GetAsyncEnumerator(token);
             while (true)
@@ -1596,12 +1631,13 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 catch (Exception caught)
                 {
                     Exception error = Unwrapped(caught);
-                    retryDelay = token.IsCancellationRequested || exposed || attempt >= 2 ? null : RetryDelay(error, attempt);
-                    if (retryDelay is null)
+                    retry = token.IsCancellationRequested ? null : _retryPolicy.Decide(error, new(retries, exposed, false));
+                    if (retry is null)
                     {
                         if (ReferenceEquals(error, caught)) throw;
                         ExceptionDispatchInfo.Throw(error);
                     }
+                    if (exposed || retry.NewStep) throw new StepResend(retry, error);
                     failure = error;
                     run.UsageUnknown = true;
                     break;
@@ -1610,12 +1646,15 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 exposed = true;
                 yield return stream.Current;
             }
-            await writer.WriteAsync(new LlmAgentResponseRecoveryEvent(ThreadId, run.Id, stepId, NextAttempt: attempt + 2)
+            int nextAttempt = retries.Values.Sum() + 2;
+            CountRetry(retries, retry!);
+            await writer.WriteAsync(new LlmAgentResponseRecoveryEvent(ThreadId, run.Id, stepId, NextAttempt: nextAttempt)
             {
-                Delay = retryDelay,
+                Delay = retry!.Delay,
                 Error = failure!.Message
             }, token);
-            await Task.Delay(retryDelay!.Value, token);
+            await Task.Delay(retry.Delay, token);
+            request = WithReminder(originalRequest, retry.Reminder);
         }
     }
 
@@ -1628,16 +1667,20 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         InnerException: LlmProviderException provider
     } ? provider : error;
 
-    private static TimeSpan? RetryDelay(Exception error, int attempt)
+    private const string HostedReplayMessage = "The model response stream was interrupted. Provider-side work may already have run. This request was not replayed because provider-hosted tools are enabled. Completed application-tool results are retained.";
+
+    private sealed class StepResend(LlmStepRetry retry, Exception failure) : Exception(failure.Message, failure)
     {
-        if (error is not HttpRequestException && error is not LlmProviderException
-            {
-                StatusCode: System.Net.HttpStatusCode.TooManyRequests or System.Net.HttpStatusCode.BadGateway
-                or System.Net.HttpStatusCode.ServiceUnavailable or System.Net.HttpStatusCode.GatewayTimeout
-            }) { return null; }
-        var delay = (error as LlmProviderException)?.RetryAfter ?? TimeSpan.FromMilliseconds(250 * (attempt + 1));
-        return delay >= TimeSpan.Zero && delay <= TimeSpan.FromSeconds(30) ? delay : null;
+        internal LlmStepRetry Retry { get; } = retry;
     }
+
+    private static void CountRetry(Dictionary<LlmStepRetryKind, int> retries, LlmStepRetry retry)
+    {
+        retries[retry.Kind] = retries.GetValueOrDefault(retry.Kind) + 1;
+    }
+
+    private static LlmChatRequest WithReminder(LlmChatRequest request, string? text) => text is null ? request
+        : request with { Messages = [.. request.Messages, new LlmChatMessage("user", text)] };
 
     private sealed record Segment(ChannelReader<LlmAgentEvent> Reader, CancellationTokenSource Cancellation, Task Producer);
 

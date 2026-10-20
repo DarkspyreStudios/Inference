@@ -29,7 +29,7 @@ public sealed class XaiReasoningTests
     {
         LlmConnection connection = Connection();
         using var http = new HttpClient();
-        Assert.Equal(InferenceSupport.Unknown, new GrokResponsesLlmClient(http)
+        Assert.Equal(InferenceSupport.Unknown, new GrokResponsesLlmClient(http, TimeProvider.System)
             .GetCapabilities(connection, "grok-unlisted").SupportsReasoning);
         JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.Maximum));
         Assert.Equal("max", Effort(payload));
@@ -64,7 +64,10 @@ public sealed class XaiReasoningTests
 
     private static LlmConnection Connection() => new()
     {
-        Version = "1", Transport = LlmTransport.XaiResponses, Endpoint = XaiRequestHeaders.SubscriptionEndpoint, Xai = new(),
+        Version = "1",
+        Transport = LlmTransport.XaiResponses,
+        Endpoint = XaiRequestHeaders.SubscriptionEndpoint,
+        Xai = new(),
         Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize(),
         CapabilityOverrides = new() { SupportsStreaming = InferenceSupport.Unsupported }
     };
@@ -88,7 +91,7 @@ public sealed class XaiReasoningTests
         LlmReasoningLevel? desired = request.ReasoningLevel;
         using var boundary = new Boundary(request.ModelId);
         using var http = new HttpClient(boundary);
-        var client = new GrokResponsesLlmClient(http);
+        var client = new GrokResponsesLlmClient(http, TimeProvider.System);
         IReadOnlySet<LlmReasoningLevel> before = client.GetCapabilities(connection, request.ModelId).ReasoningLevels;
         LlmChatResult? result = null;
         await foreach (LlmStreamEvent item in client.StreamAsync(connection, request))
@@ -112,10 +115,13 @@ public sealed class XaiReasoningTests
             Body = JsonElement.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
             string response = new JsonObject
             {
-                ["id"] = "response-1", ["model"] = model, ["status"] = "completed",
+                ["id"] = "response-1",
+                ["model"] = model,
+                ["status"] = "completed",
                 ["output"] = new JsonArray(new JsonObject
                 {
-                    ["type"] = "message", ["role"] = "assistant",
+                    ["type"] = "message",
+                    ["role"] = "assistant",
                     ["content"] = new JsonArray(new JsonObject { ["type"] = "output_text", ["text"] = "answer" })
                 })
             }.ToJsonString();

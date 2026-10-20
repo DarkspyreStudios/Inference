@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -36,8 +37,16 @@ internal static class XaiErrorClassifier
         (string? safeCode, string? safeMessage, bool fromJson) = ReadError(sanitizedBody);
         string safe = diagnosticBody ? sanitizedBody
             : fromJson && !string.IsNullOrWhiteSpace(safeMessage) ? safeMessage : diagnosticMessage;
+        bool? shouldRetry = response.Headers.TryGetValues("x-should-retry", out IEnumerable<string>? values)
+            && bool.TryParse(values.FirstOrDefault(), out bool retry) ? retry : null;
+        bool outOfCredits = response.StatusCode == HttpStatusCode.PaymentRequired
+            || response.StatusCode == HttpStatusCode.TooManyRequests
+                && (body.Contains("subscription:free-usage-exhausted", StringComparison.Ordinal) || body.Contains("spending-limit", StringComparison.Ordinal))
+            || response.StatusCode == HttpStatusCode.Forbidden && body.Contains("run out of credits", StringComparison.OrdinalIgnoreCase);
+        string entitlementMessage = Regex.Replace(safeMessage ?? sanitizedBody, @"\[WKE=[^\]]*\]", string.Empty,
+            RegexOptions.CultureInvariant, TimeSpan.FromSeconds(1)).Trim().TrimEnd('.').TrimEnd();
         throw Classify(response.StatusCode, code, message, safe, requestId: requestId, retryAfter: retryAfter,
-            diagnosticCode: safeCode);
+            diagnosticCode: safeCode, shouldRetry: shouldRetry, outOfCredits: outOfCredits, entitlementMessage: entitlementMessage);
     }
 
     internal static Exception HttpSendFailure(Exception original, LlmCredential? credential, string[] secrets)
@@ -66,39 +75,41 @@ internal static class XaiErrorClassifier
     }
 
     private static Exception Classify(HttpStatusCode status, string? code, string? message, string safe,
-        Exception? evidence = null, string? requestId = null, TimeSpan? retryAfter = null, string? diagnosticCode = null)
+        Exception? evidence = null, string? requestId = null, TimeSpan? retryAfter = null, string? diagnosticCode = null,
+        bool? shouldRetry = null, bool outOfCredits = false, string? entitlementMessage = null)
     {
         bool requiresSignIn = status == HttpStatusCode.Unauthorized
             || (status == HttpStatusCode.Forbidden
                 && string.Equals(message?.Trim(), InvalidTokenMessage, StringComparison.Ordinal))
-            || (status == HttpStatusCode.BadRequest && code is "invalid_grant" or "invalid_token");
+            || (status == HttpStatusCode.BadRequest && (code is "invalid_grant" or "invalid_token"
+                || code is null && message is "invalid_grant" or "invalid_token"));
         if (requiresSignIn)
         {
             return new InferenceException(InferenceFailureCode.AuthenticationRequired,
                 "Grok authorization is no longer valid; sign in again.",
-                Failure(status, "xai_authentication_required", safe, evidence, requestId, retryAfter));
+                Failure(status, "xai_authentication_required", safe, evidence, requestId, retryAfter, shouldRetry: shouldRetry));
         }
 
-        if (status == HttpStatusCode.PaymentRequired)
+        if (outOfCredits)
         {
-            return EntitlementFailure(status, safe, evidence, requestId, retryAfter);
+            return EntitlementFailure(status, entitlementMessage!, evidence, requestId, retryAfter, shouldRetry);
         }
 
-        // Subscription-specific 403 matching requires a qualified provider response.
-        return Failure(status, diagnosticCode, safe, evidence, requestId, retryAfter, LlmContextOverflow.Responses(code));
+        return Failure(status, diagnosticCode, safe, evidence, requestId, retryAfter, LlmContextOverflow.Responses(code), shouldRetry);
     }
 
     private static InferenceException EntitlementFailure(HttpStatusCode status, string safe, Exception? evidence = null,
-        string? requestId = null, TimeSpan? retryAfter = null) =>
+        string? requestId = null, TimeSpan? retryAfter = null, bool? shouldRetry = null) =>
         new(InferenceFailureCode.AccessDenied,
             $"Grok requires an eligible subscription or available credits: {safe}",
-            Failure(status, "xai_entitlement_required", safe, evidence, requestId, retryAfter));
+            Failure(status, "xai_entitlement_required", safe, evidence, requestId, retryAfter, shouldRetry: shouldRetry));
 
     private static LlmProviderException Failure(HttpStatusCode status, string? code, string safe, Exception? evidence = null,
-        string? requestId = null, TimeSpan? retryAfter = null, bool isContextOverflow = false) =>
+        string? requestId = null, TimeSpan? retryAfter = null, bool isContextOverflow = false, bool? shouldRetry = null) =>
         new($"Grok request failed ({(int)status}): {safe}", LlmTransport.XaiResponses,
             status, code, requestId, retryAfter, sanitizedResponseBody: safe, innerException: evidence,
-            isContextOverflow: isContextOverflow);
+            isContextOverflow: isContextOverflow)
+        { ShouldRetry = shouldRetry };
 
     private static (string? Code, string? Message, bool FromJson) ReadError(string body)
     {
@@ -107,7 +118,7 @@ internal static class XaiErrorClassifier
             using JsonDocument document = JsonDocument.Parse(body);
             JsonElement root = document.RootElement;
             JsonElement error = LlmJson.GetObject(root, "error") ?? root;
-            return (LlmJson.GetString(error, "code") ?? LlmJson.GetString(root, "error"),
+            return (LlmJson.GetString(error, "code"),
                 LlmJson.GetString(error, "message") ?? LlmJson.GetString(root, "error_description")
                 ?? LlmJson.GetString(root, "error"), true);
         }

@@ -41,6 +41,7 @@ internal sealed class ManagedLlmAgentClient<TClient>(TClient client, LlmProvider
         return await ManagedAgentSession.CreateAsync(connectionId, connection, options, connection.Catalog ?? [], client,
             (request, token) => providers.StreamAgentAsync(connectionId, request, scope, token),
             model => client.GetCapabilities(connection, model), learned, openingFence: Fence,
-            providerCompaction: client as ILlmProviderCompaction, cancellationToken: opening.Token).ConfigureAwait(false);
+            providerCompaction: client as ILlmProviderCompaction, retryPolicy: client as ILlmStepRetryPolicy,
+            sessionHostedTools: client as ILlmSessionHostedTools, cancellationToken: opening.Token).ConfigureAwait(false);
     }
 }

@@ -7,7 +7,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>
 /// Signs in to a Grok subscription with the xAI device-code flow (B2). A credential is returned only after
-/// <c>GET /v1/me</c> names the account and the account is not team-blocked.
+/// the subscription proxy's <c>GET /v1/user</c> names the account.
 /// </summary>
 internal sealed class GrokAuthenticator(HttpClient http) : OAuthAuthenticatorBase(http), ILlmDeviceLogin
 {
@@ -17,6 +17,8 @@ internal sealed class GrokAuthenticator(HttpClient http) : OAuthAuthenticatorBas
     public override LlmTransport Transport => LlmTransport.XaiResponses;
     protected override string ClientId => "b1a00492-073a-47ea-816f-4c329264a828";
     protected override string TokenEndpoint => $"{AuthBase}/oauth2/token";
+    /// <summary>The CLI's five-minute early-invalidation window.</summary>
+    protected override TimeSpan RefreshSkew => TimeSpan.FromSeconds(300);
 
     public async Task<LlmDeviceCode> StartAsync(CancellationToken cancellationToken = default)
     {
@@ -101,22 +103,16 @@ internal sealed class GrokAuthenticator(HttpClient http) : OAuthAuthenticatorBas
             using JsonDocument document = await ParseJsonAsync(response, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
             LlmCredential credential = BuildCredential(document.RootElement, null);
-            using var meRequest = new HttpRequestMessage(HttpMethod.Get, "https://api.x.ai/v1/me");
-            meRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", credential.OAuth!.AccessToken);
+            using var meRequest = new HttpRequestMessage(HttpMethod.Get, $"{XaiRequestHeaders.SubscriptionEndpoint}/user");
+            XaiRequestHeaders.ApplyProxyHeaders(meRequest, new AuthenticationHeaderValue("Bearer", credential.OAuth!.AccessToken), stream: false);
             using HttpResponseMessage meResponse = await Http.SendAsync(meRequest, cancellationToken);
             await XaiErrorClassifier.ThrowIfUnsuccessfulAsync(meResponse, credential,
                 [deviceAuthId, userCode], cancellationToken);
             using JsonDocument me = await ParseJsonAsync(meResponse, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
-            string userId = RequiredString(me.RootElement, "user_id");
-            if (me.RootElement.TryGetProperty("team_blocked", out JsonElement blocked))
-            {
-                if (blocked.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw ProtocolFailure();
-                if (blocked.GetBoolean())
-                {
-                    throw new InferenceException(InferenceFailureCode.AccessDenied, "This Grok account is not entitled to API access.");
-                }
-            }
+            if (!XaiFields.TryGet(me.RootElement, "user_id", "userId", out JsonElement account)
+                || account.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(account.GetString())) throw ProtocolFailure();
+            string userId = account.GetString()!;
 
             result = credential with { OAuth = credential.OAuth with { AccountId = userId } };
         }

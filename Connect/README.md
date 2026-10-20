@@ -251,10 +251,13 @@ window and output limit, and elsewhere the listed values are used as they are.
 signs in with a Grok subscription through the xAI device code and only that way; it has no API key field. Setup's
 `authorize` action (`Sign in with Grok`) starts the device grant at `auth.x.ai` and shows the code and the https
 link; its continuation polls at the device interval through the shared device-login seam, five seconds slower after
-`slow_down`. The approved token is saved only after `GET https://api.x.ai/v1/me` returns a `user_id` and the account
-is not team-blocked. A denied or expired code ends with `Grok sign-in was denied or expired. Start sign-in again.`
-and a team-blocked account with `This Grok account is not entitled to API access.`; neither saves anything. The
-check reports Signed in when the connection holds a usable OAuth token. Refresh goes through `LlmConnectionAccess`.
+`slow_down`. The approved token is saved only after `GET https://cli-chat-proxy.grok.com/v1/user` returns a nonempty
+`user_id` or `userId`. Other account fields do not refuse sign-in. A failed lookup fails sign-in without saving.
+A denied or expired code ends with `Grok sign-in was denied or expired. Start sign-in again.` The check reports
+Signed in when the connection holds a usable OAuth token. `LlmConnectionAccess` renews Grok tokens within 300 seconds
+of expiry. A 401 before stream output forces renewal; renewal is serialized per connection. A waiting caller
+re-reads the saved credential and uses a preceding caller's renewal. Each save checks the stored connection version.
+A refused refresh ends with `Grok authorization is no longer valid; sign in again.`.
 
 Every Grok request goes to xAI's subscription proxy, `https://cli-chat-proxy.grok.com/v1`, the host the Grok Build CLI
 uses for a Grok sign-in; `api.x.ai` serves API keys only. Each request carries the bearer token and the headers the
@@ -264,13 +267,18 @@ proxy's auth middleware reads: `X-XAI-Token-Auth: xai-grok-cli`, `x-authenticate
 endpoint refuses before sending with `This Grok connection uses an old endpoint. Open its settings and save it to move
 it to the Grok subscription service.`; opening its settings sets the proxy endpoint. Setup has no region field.
 
-The model list is the proxy's `GET models`. Each row's `context_window` is the model's window, and its
-`reasoning_efforts` objects are its reasoning levels, the one marked `default` being the level the proxy uses when a
-request names none. A model the list does not name offers no levels. The proxy lists no multi-agent model, so Grok
+The model list is the proxy's `GET models`, with `x-userid` and `x-email` when the credential has them. Hidden rows
+and rows whose `api_backend` or `apiBackend` names a protocol other than `responses` are omitted. A row without a
+backend stays. Each row's `context_window` is the model's window. Its `reasoning_efforts` objects are its reasoning
+levels, the one marked `default` being the level the proxy uses when a request names none. A model the list does not
+name offers no levels. `stream_tool_calls` enables argument streaming for that model and the same request flag;
+`supports_backend_search` enables web and X search. `inference_idle_timeout_secs` sets the stream idle timeout,
+floored at 10 seconds, with 600 seconds when absent. These three fields also accept `streamToolCalls`,
+`supportsBackendSearch` and `inferenceIdleTimeoutSecs`, snake spelling first. Fields of the wrong kind are absent. The proxy lists no multi-agent model, so Grok
 offers no agent counts. Grok conversations run on the shared managed session with the feature list above. The proxy
 serves no `responses/compact` or `tokenize-text` route (both answer 404), so the host compacts Grok conversations and
 the estimate is the local count. The proxy adds framing the request does not show, about 1,400 tokens on `grok-4.7`
-and 360 on `grok-4.5`. The first reported step teaches it, and later estimates add it; the first request after the
+and 360 on `grok-4.5`. The first reported step with no hosted calls teaches it, and later estimates add it; the first request after the
 process starts is underestimated by that much. Grok's continuation state keeps its output verbatim and
 in order: messages, reasoning, function calls, hosted calls (`web_search_call`, `x_search_call`,
 `code_interpreter_call`, `code_execution_call`, `file_search_call`, `mcp_call`, `image_generation_call`,
@@ -305,9 +313,8 @@ Standard, Fast; null is Auto). `LlmProviderCapabilities.ServiceTiers` lists the 
 normalizer maps the requested tier to the nearest offered one: Auto stays Auto, an offered tier is itself, and a
 missing Economy or Fast becomes Standard when offered, else Auto. A model that offers no tier gets none. The
 Responses payload sends `service_tier` `flex` for Economy, `default` for Standard and `priority` for Fast, and nothing
-for Auto. Codex and Claude offer no tiers, so a requested tier is dropped and the turn runs. Grok offers Standard
-and Fast; a turn with no tier, or Auto, takes the connection's saved `XaiConnectionOptions.ServiceTier`, `Priority`
-as Fast and `Default` as Standard, so a Grok request always sends `service_tier`. An OpenAI API connection
+for Auto. Codex, Claude and Grok offer no tiers, so a requested tier is dropped and the turn runs. Grok never sends
+`service_tier` and does not read saved `XaiConnectionOptions`. An OpenAI API connection
 has a Service tiers switch, `CapabilityOverrides.SupportsServiceTiers`, shown as the `Service tiers` checkbox in its
 editor. Unset, it is on for `api.openai.com` and off elsewhere; a checkbox value equal to the endpoint's default
 stores null, so the default follows a later endpoint change. With the switch on, OpenAI's endpoint offers the
@@ -356,21 +363,23 @@ fields are not sent there. `HostedIncludes` adds `web_search_call.action.sources
 on the OpenAI API: its Responses API has no `max_turns`. A provider whose wire differs overrides either hook per
 tool.
 
-Grok offers every hosted tool, X search included, and overrides the wire where xAI's differs:
+Grok offers image generation on every model, and web and X search on models whose catalog row enables backend
+search. Its `ILlmSessionHostedTools` supplies web and X search to managed steps only, not summaries. A caller's tool
+of the same kind takes precedence. Application function tools keep their own definitions and execution handler.
 
 | Tool | Grok wire entry |
 | --- | --- |
-| Web search | `{"type":"web_search","enable_image_understanding","enable_image_search","allowed_domains"?,"excluded_domains"?}` |
-| X search | `{"type":"x_search","enable_image_understanding","enable_video_understanding","allowed_x_handles"?,"excluded_x_handles"?,"from_date"?,"to_date"?}` |
-| Code execution | `{"type":"code_interpreter"}` |
-| Remote MCP | the OpenAI entry without `require_approval`, with `server_description` and `defer_loading` when set; a deferred server adds `{"type":"tool_search"}` |
+| Image generation | The shared `image_generation` entry |
+| Web search | `{"type":"web_search"}`, with `filters.allowed_domains` or `filters.excluded_domains` when listed |
+| X search | `{"type":"x_search"}`, with optional `from_date` and `to_date` as `yyyy-MM-dd` |
 
-Grok always adds `no_inline_citations` to `include` and sends `MaxHostedTurns` as `max_turns`. It refuses, by xAI's
-published limits, more than 350 wire tools, more than 10 collections in a document search, allowed and excluded
-domains together or more than 5 in either, a web-search user location, and allowed and excluded X handles together
-or more than 20 in either.
+Grok's `include` holds only `reasoning.encrypted_content`. It never sends `no_inline_citations`, so a searched reply
+can carry its sources inline in the reply text (D18). It sends `MaxHostedTurns` as `max_turns` when set. It refuses
+more than 350 wire tools, allowed and excluded domains together, more than 5 domains in either filter, a web-search
+user location, either web image switch, and X handles or understanding switches. Code execution, document search
+and remote MCP are not offered and refuse through the shared hosted-tool validation.
 
-A remote MCP server's `Authorization` is resolved before the payload is sent, on both the OpenAI API and Grok, by
+A remote MCP server's `Authorization` is resolved before the OpenAI API payload is sent by
 the shared `RemoteMcpAuthorization`: each authority is asked once per request, its bearer token is written as the
 `authorization` field of that server's `mcp` entry, and the token and the static MCP header values are removed
 from diagnostics. An authority that returns no header, or one that is not a bearer token, fails the request with
@@ -392,11 +401,29 @@ reopens included, sends the same arguments. A Claude result with subtype `error_
 `IterationLimit`, with the CLI's first error text. A Claude
 `system` message with subtype `api_retry` becomes `LlmAgentResponseRecoveryEvent` with `NextAttempt` = the CLI's
 `attempt`, `Delay` = `retry_delay_ms` and `Error` = `{error_status}: {error}` (the status is left out when null).
-A Codex retry reports `Delay` as the wait before the next attempt and `Error` as the failure message. A 429, 502,
-503 or 504, or an `HttpRequestException`, before any output is sent again up to three attempts in all, with or
-without resource access, and each wait is reported first as an `LlmAgentResponseRecoveryEvent`. A provider error
-that resource preparation wrapped before any resource effect reaches the retry, the too-long refusal handling and
-the turn's final message as the provider's own `LlmProviderException`.
+A Codex retry reports `Delay` as the wait before the next attempt and `Error` as the failure message. Managed
+sessions route model sends, replacement steps and summary requests through `ILlmStepRetryPolicy`. Its default
+policy permits three attempts for a 429, 502, 503, 504 or connection failure before output, and three interrupted
+stream attempts with 1 and 2 second waits. A provider error that resource preparation wraps before any resource
+effect reaches the policy, too-long refusal handling and final message as the provider's own exception.
+
+Grok supplies its own policy. Transient 5xx failures except 525 and 526, connection failures and interrupted streams
+get up to 15 sends. Waits start at 2 seconds, double to 30 seconds and carry ±20% jitter; the first connection
+failure waits 200 milliseconds. A positive `Retry-After` replaces that wait, capped at 30 seconds before jitter.
+A 429 gets one retry only as the step's first retry, capped at 120 seconds without jitter for a server hint.
+`x-should-retry: false`, a too-long refusal and an out-of-credits refusal stop retries. Out-of-credits includes
+402, a 429 naming free-usage or spending-limit exhaustion, and a 403 saying the account ran out of credits.
+The entitlement message strips `[WKE=...]` markers. A renewed 401 resends at once, then after 1, 2 and 4 seconds.
+An idle stream resends after 2, 10 and 30 seconds. Each stream read restarts the idle deadline on the injected clock.
+The loop-check headers are `x-grok-doom-loop-check: 1024` and `x-grok-exact-repetition-check: 64`. A reported
+`tail_repetition` on the thinking channel at threshold 64 or below resamples twice with the CLI reminder as a user
+message on the next send only. Failed-attempt text and reminders never enter the stored context. A third report
+ends with `Grok kept repeating itself; the turn stopped.`
+
+Each resend reports `LlmAgentResponseRecoveryEvent` before waiting. Exposed output or an explicit policy request
+starts a new step so partial output is replaced, not spliced. A started hosted call blocks replacement because it
+may already have run. The guard also blocks requests whose caller named a non-image hosted tool. Session-added
+search does not block replacement before a call starts. Stop cancels both the wait and the request.
 
 `LlmAgentUsageEvent.ModelId` names the model a Codex step used: the step request's model on
 streamed usage, and the reported model on the step's final usage. On Claude it is the `model` the CLI reports on
@@ -422,7 +449,10 @@ model's framing: the reported input above the local estimate, which is text the 
 show, such as a hidden system prompt. A local count above the report teaches no framing. A step at a quarter of the
 window or more teaches the rate, taken with the framing removed. The correction is the estimate times the rate, plus
 the framing. The rate and the framing last only for the process, so a model's first request after the process starts
-has neither. A context limit a refusal teaches is saved through the host's `ILlmLearnedLimitStore`, and
+has neither. A step whose usage reports hosted calls teaches neither rate nor framing: its input usage includes
+the service's internal search turns, which the local request does not contain. Its billing still contributes to run
+usage. The context window counts the outgoing conversation, replayed output items including search calls, and the
+reply, not the service's internal pages. No `context_details` or context-window header is requested. A context limit a refusal teaches is saved through the host's `ILlmLearnedLimitStore`, and
 `LlmConnection.LearnedContextLimits` brings it back to later sessions; a limit learned in the process takes its place. Every measurement that is not entirely provider-reported then adds
 300 tokens (`ManagedAgentPolicy.EstimateMargin`) to its estimated part, because a local tokenizer is not the model's
 own and an estimate must err high; a count the provider reported in full gets no margin. The status, the request
@@ -1062,18 +1092,11 @@ authorization refusal converters; live authorization cannot be serialized or rec
 data, and serialization never invokes its callback. The separate credential codec keeps its
 existing Web names and null omission.
 
-The private xAI Responses adapter maps DocumentSearch, WebSearch, SocialSearch, CodeExecution,
-ImageGeneration and RemoteMcp with positive typed hosted-turn limits. Document search sends exact
-collection IDs and optional result limits; each descriptor accepts at most ten collections.
-Actual built `input_file` content also enables implicit document-search observations. Both paths
-request `file_search_call.results`. Hosted-tool include strings use primitive JSON nodes without
-default reflection metadata. Web controls use flat domains and image controls. X controls
-preserve exact handles and apply the [published 20-handle limit](https://docs.x.ai/developers/tools/x-search)
-to each allowed or excluded filter before effects. Oversized lists refuse without truncation.
-Typed date bounds project as `YYYY-MM-DD` without date interpretation. Deferred MCP
-adds the server-side `tool_search` descriptor and retains its ordered opaque call/output items.
-Pure preflight counts all wire tools before effects. Authorization resolves once per distinct
-borrowed authority during generation, never during estimation or serialization.
+The Grok subscription adapter maps ImageGeneration and model-offered WebSearch and SocialSearch. Web controls
+accept allowed or excluded domains under `filters`, at most five in either list, with no image controls or location.
+X controls accept only date bounds, projected as `yyyy-MM-dd`. DocumentSearch, CodeExecution and RemoteMcp refuse
+before provider effects. The shared Responses observer still retains the service's actual hosted output items.
+Pure preflight counts every function and hosted wire tool before effects, including session-added search.
 Other built-in adapters and unmapped hosted kinds reject unsupported options before provider effects.
 Native start/resume also rejects these unmapped options. Existing Anthropic server-tool configuration
 is separate and does not advertise the new hosted API.
@@ -1120,10 +1143,9 @@ and 17 output tokens. Caller bounds are 128 output tokens and two hosted turns. 
 selected code-tool route in both modes, not downloadable artifacts, progress events or other hosted
 families. The tester uses its own saved OAuth credential without retries or account/route fallback.
 
-Citations preserve first-observed annotation order and suppress terminal copies of the same
-occurrence. The adapter requests `no_inline_citations` in the existing `include` array, as the
-[Responses citation protocol](https://docs.x.ai/developers/tools/citations) specifies; it sends no
-top-level boolean for that control. Offset units are unqualified, so positions remain absent.
+Citations preserve first-observed annotation order and suppress terminal copies of the same occurrence.
+Grok does not request `no_inline_citations`; sources can appear inline in reply text (D18).
+Offset units are unqualified, so positions remain absent.
 Two bounded OAuth requests against source `8db9204` use Global/Default
 `grok-4.20-0309-non-reasoning`, WebSearch restricted to `docs.x.ai`, 64 requested output tokens
 and two hosted turns. Each reports three actual terminal web calls with status `completed` and
@@ -1796,8 +1818,9 @@ read the same list, and a failed listing is not kept. Common's `ILlmInference` c
 hand without the shared cache keeps its own.
 
 A tuple change or explicit refresh fences publication from the replaced in-flight listing.
-Its waiting callers receive cancellation if it returns after replacement. The current entry remains
-unchanged. Replacement does not cancel the provider's entered call. An already-cancelled request
+Its waiting callers follow the replacing epoch to the newest listing and receive that listing's result or failure.
+Only their own cancellation or cache retirement cancels their wait. Replacement does not cancel the provider's
+entered call. An already-cancelled request
 does not start or replace a listing.
 An xAI epoch shares one generic REST listing and lazily reads only requested chat, image, video or
 embedding family listings. Replacement fences each subsequent route and publication. Exact model
@@ -3411,15 +3434,9 @@ managed stack frames before the generic failure completion. The diagnostic omits
 source-file paths and provider payloads. Darkspyre records this warning in the application log,
 not in the conversation.
 
-Grok uses the separate provider-owned automatic mode. A known threshold triggers
-one `/responses/compact` call before the model step. Known hard-window excess or provider overflow ends
-`ProviderFailure` without a host handoff or over-window retry. The complete returned opaque context
-replaces transcript state once after resource/revision admission; steering queued during compaction
-follows it. Compacted and usage events retain actual request ID, nullable dropped-message count and
-nullable usage. Compaction billing contributes to turn usage, not model iterations or context occupancy.
-Compaction uses the official `/responses/compact` request with `model` and `input` for either selected
-generation tier. The endpoint has no documented tier field. The selected generation tier remains unchanged;
-an unqualified compaction attempt is not refused locally. This does not claim live Priority compaction qualification.
+Grok uses the shared managed session's host compaction and local estimation. The subscription proxy offers no
+`responses/compact` route. A too-long refusal teaches the limit, compacts and resends once through the common path.
+Search billing does not teach context correction; the context-limit section describes the counted request.
 Compaction failures redact selected and effective outgoing header values captured after the send,
 including borrowed HttpClient defaults, from provider codes and request IDs. Raw response bodies stay withheld.
 
@@ -3615,13 +3632,10 @@ by the typed request. Conversation affinity is a hint, not an explicit billed ca
 Existing provider JSON, headers and model-specific overrides are retained; the editor does not turn them into
 an arbitrary JSON settings payload.
 
-`XaiResponses` defines the Grok OAuth connection and settings contract. `LlmConnection.Xai` holds
-`XaiConnectionOptions`: `Global` selects `https://api.x.ai/v1`, and `UnitedStates` selects
-`https://us.api.x.ai/v1`. `GetEndpoint()` derives that fixed URL. Setup offers the region choice and the
-`authorize` sign-in action, with no endpoint or API-key field; a region edit replaces the endpoint, and a draft
-whose endpoint does not match its region shows `Select an API region; the endpoint follows the region.` and
-blocks Save. Save needs a completed sign-in or a kept saved credential. The saved service tier and multi-agent
-count have no setup field; they are the defaults a turn without its own tier or agent count takes.
+`XaiResponses` defines the Grok OAuth connection and settings contract. Setup fixes the subscription proxy endpoint,
+offers the `authorize` sign-in action and has no region, endpoint or API-key field. Save needs a completed sign-in
+or a kept saved credential. New drafts do not create `LlmConnection.Xai`; the Grok client ignores any saved Xai options.
+`XaiConnectionOptions` remains for the out-of-build STT, Video and Resources adapters.
 
 `GrokAuthenticator` implements `ILlmDeviceLogin`, which supplies the device grant to `StartDeviceLoginAsync`,
 `CompleteDeviceLoginAsync` and `SignInAsync`. Completion performs one token poll; interactive sign-in owns the polling loop.
@@ -3638,10 +3652,10 @@ before saving. Both paths retain their rejection of a nonempty API-key field, in
 
 The internal `GrokAuthenticator` implements the [RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)
 device grant against `auth.x.ai` with form-encoded requests and a public client. A successful token
-exchange calls `GET https://api.x.ai/v1/me` once and requires a non-blocked account. Credentials contain
+exchange calls the proxy's `GET /v1/user` once and requires a nonempty `user_id` or `userId`. Credentials contain
 only OAuth tokens. Expiry comes from `expires_in` or the access-token JWT; account identity comes from
-`/v1/me`, and the optional ID-token email is display metadata, not a locally verified identity claim.
-The shared OAuth pipeline refreshes within 60 seconds of expiry. It preserves account metadata,
+`/v1/user`, and the optional ID-token email is display metadata, not a locally verified identity claim.
+The shared OAuth pipeline refreshes Grok within 300 seconds of expiry and other OAuth providers within 60 seconds. It preserves account metadata,
 accepts rotated tokens and saves through `LlmConnectionAccess`'s version-conditional source seam.
 
 ConsoleTester qualification uses its separate credential store and the Global/Default route.

@@ -39,15 +39,19 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
         if (snapshot.Version != scope.Version) throw new ArgumentException("The catalog scope must match the admitted connection.", nameof(scope));
         ThrowIfCanceled(admission.Token);
         Task<IReadOnlyList<LlmModel>> listing;
+        Epoch epoch;
         lock (_gate)
         {
             ThrowIfCanceled(admission.Token);
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (refresh || !_entries.TryGetValue(connectionId, out Epoch? epoch) || epoch.Scope != scope)
+            _entries.TryGetValue(connectionId, out Epoch? previous);
+            if (refresh || previous is null || previous.Scope != scope)
             {
                 epoch = new(scope);
+                if (previous is not null) previous.Next = epoch;
                 _entries[connectionId] = epoch;
             }
+            else epoch = previous;
             if (!epoch.Families.TryGetValue(family, out Task<IReadOnlyList<LlmModel>>? current)
                 || current.IsCanceled || current.IsFaulted)
             {
@@ -61,9 +65,24 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
             listing = current;
         }
         // A facade's retirement/cancellation cannot retire the cache producer.
-        IReadOnlyList<LlmModel> published = await listing.WaitAsync(admission.Token).ConfigureAwait(false);
-        ThrowIfCanceled(admission.Token);
-        return published;
+        while (true)
+        {
+            try
+            {
+                IReadOnlyList<LlmModel> published = await listing.WaitAsync(admission.Token).ConfigureAwait(false);
+                ThrowIfCanceled(admission.Token);
+                return published;
+            }
+            catch (OperationCanceledException) when (!admission.Token.IsCancellationRequested)
+            {
+                lock (_gate)
+                {
+                    if (_disposed || epoch.Next is null) throw;
+                    while (epoch.Next is { } next) epoch = next;
+                    listing = epoch.Families[family];
+                }
+            }
+        }
     }
 
     [SuppressMessage("Design", "CA1031", Justification = "The shared completion preserves provider failures and observes abandoned faults.")]
@@ -142,6 +161,8 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
     private sealed class Epoch(Scope scope)
     {
         internal Scope Scope { get; } = scope;
+        /// <summary>The replacing epoch, set under the cache's gate.</summary>
+        internal Epoch? Next { get; set; }
         internal Dictionary<ModelCatalogFamily, Task<IReadOnlyList<LlmModel>>> Families { get; } = [];
     }
 

@@ -1,16 +1,18 @@
 using System.Collections.Frozen;
 using System.Text.Json;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-/// <summary>A Grok model's reasoning levels and its default level. Sampling and image support are not published.</summary>
-internal sealed record XaiModelProfile(IReadOnlySet<LlmReasoningLevel> ReasoningLevels, LlmReasoningLevel? DefaultReasoningLevel);
+/// <summary>A Grok model's reasoning levels, argument streaming, idle timeout and backend search facts.</summary>
+internal sealed record XaiModelProfile(IReadOnlySet<LlmReasoningLevel> ReasoningLevels, LlmReasoningLevel? DefaultReasoningLevel,
+    bool StreamsToolCalls, TimeSpan? IdleTimeout, bool SearchesOnBackend);
 
 /// <summary>Grok model facts, read from the subscription proxy's model list.</summary>
 internal static class XaiModelProfiles
 {
-    private static readonly XaiModelProfile Unknown = new(LlmReasoningEffort.Levels(), null);
+    private static readonly XaiModelProfile Unknown = new(LlmReasoningEffort.Levels(), null, false, null, false);
 
     /// <summary>
     /// The model's levels from its catalog entry's reasoning_efforts, each an object whose value names the level and
@@ -19,9 +21,16 @@ internal static class XaiModelProfiles
     /// </summary>
     internal static XaiModelProfile Get(LlmConnection connection, string? modelId)
     {
-        if (XaiCatalog.FindModel(connection.Catalog, modelId)?.CatalogEntry is not { } catalog
-            || !catalog.TryGetProperty("reasoning_efforts", out JsonElement efforts) || efforts.ValueKind != JsonValueKind.Array)
-            return Unknown;
+        if (XaiCatalog.FindModel(connection.Catalog, modelId)?.CatalogEntry is not { } catalog) return Unknown;
+        bool streams = XaiFields.TryGet(catalog, "stream_tool_calls", "streamToolCalls", out JsonElement streaming)
+            && streaming.ValueKind == JsonValueKind.True;
+        bool searches = XaiFields.TryGet(catalog, "supports_backend_search", "supportsBackendSearch", out JsonElement search)
+            && search.ValueKind == JsonValueKind.True;
+        TimeSpan? idle = XaiFields.TryGet(catalog, "inference_idle_timeout_secs", "inferenceIdleTimeoutSecs", out JsonElement timeout)
+            && timeout.ValueKind == JsonValueKind.Number && timeout.TryGetInt32(out int seconds) && seconds > 0
+            ? TimeSpan.FromSeconds(Math.Max(10, seconds)) : null;
+        if (!catalog.TryGetProperty("reasoning_efforts", out JsonElement efforts) || efforts.ValueKind != JsonValueKind.Array)
+            return Unknown with { StreamsToolCalls = streams, IdleTimeout = idle, SearchesOnBackend = searches };
         var levels = new HashSet<LlmReasoningLevel>();
         LlmReasoningLevel? defaultLevel = null;
         foreach (JsonElement effort in efforts.EnumerateArray())
@@ -33,7 +42,7 @@ internal static class XaiModelProfiles
             if (effort.TryGetProperty("default", out JsonElement isDefault) && isDefault.ValueKind == JsonValueKind.True)
                 defaultLevel = level;
         }
-        return new(levels.ToFrozenSet(), defaultLevel);
+        return new(levels.ToFrozenSet(), defaultLevel, streams, idle, searches);
     }
 
     internal static LlmReasoningLevel? MapReasoning(IReadOnlySet<LlmReasoningLevel> offered, LlmReasoningLevel? requested)

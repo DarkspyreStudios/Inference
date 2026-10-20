@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
@@ -10,6 +12,7 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
     private readonly Dictionary<LlmTransport, ILlmAuthenticator> _authenticators;
     private readonly HashSet<LlmTransport> _ignoresStoredCredential;
     private readonly LlmOperationLifetime _lifetime = new();
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _rejectedRenewals = new(StringComparer.Ordinal);
 
     internal LlmConnectionAccess(ILlmConnectionSource connections, IEnumerable<ILlmAuthenticator> authenticators,
         IEnumerable<ILlmClient>? clients = null)
@@ -83,6 +86,31 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
         return connection;
     }
 
+    /// <summary>Renews a rejected credential once per connection. Waiters re-read the saved credential after admission
+    /// and use another caller's renewal. Saves against the stored connection's version.</summary>
+    internal async Task RenewRejectedAsync(string connectionId, LlmConnection rejected, CancellationToken cancellationToken)
+    {
+        using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
+        SemaphoreSlim gate = _rejectedRenewals.GetOrAdd(connectionId, static _ => new(1, 1));
+        await gate.WaitAsync(operation.Token).ConfigureAwait(false);
+        try
+        {
+            ThrowIfAcquisitionCanceled(operation.Token);
+            LlmConnection stored = await LlmConnectionResolver.ResolveAsync(Connections, connectionId, operation.Token).ConfigureAwait(false);
+            ThrowIfAcquisitionCanceled(operation.Token);
+            if (stored.Credential != rejected.Credential) return;
+            LlmCredential? credential = LlmCredential.Parse(stored.Credential);
+            if (credential?.OAuth is null || !_authenticators.TryGetValue(stored.Transport, out ILlmAuthenticator? authenticator)
+                || authenticator is not OAuthAuthenticatorBase oauth) return;
+            LlmCredential fresh = await oauth.RefreshAsync(credential, operation.Token).ConfigureAwait(false);
+            ThrowIfAcquisitionCanceled(operation.Token);
+            RuntimeInputAdmission.ValidateCredential(stored.Transport, fresh);
+            await Connections.SaveCredentialAsync(connectionId, fresh.Serialize(), stored.Version, operation.Token).ConfigureAwait(false);
+            ThrowIfAcquisitionCanceled(operation.Token);
+        }
+        finally { gate.Release(); }
+    }
+
     private async Task<LlmConnection> RefreshCoreAsync(string connectionId, LlmConnection connection,
         Action<LlmConnection>? validate, Action? admissionFence, CancellationToken cancellationToken)
     {
@@ -135,6 +163,8 @@ public sealed class LlmConnectionAccess : IDisposable, IAsyncDisposable
         _connections = null;
         _authenticators.Clear();
         _ignoresStoredCredential.Clear();
+        foreach (SemaphoreSlim gate in _rejectedRenewals.Values) gate.Dispose();
+        _rejectedRenewals.Clear();
         return Task.CompletedTask;
     }));
 

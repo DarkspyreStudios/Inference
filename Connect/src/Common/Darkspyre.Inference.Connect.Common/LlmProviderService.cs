@@ -522,6 +522,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         request = LlmRequestNormalizer.Normalize(connection, request, client.GetCapabilities(connection, request.ModelId));
         IAsyncEnumerable<LlmStreamEvent> stream = client.StreamAsync(connection, request, cancellationToken);
         IAsyncEnumerator<LlmStreamEvent> enumerator = stream.GetAsyncEnumerator(cancellationToken);
+        bool exposed = false;
         Exception? operationFailure = null;
         try
         {
@@ -543,7 +544,20 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
                         })
                         : streamEvent;
                 }
+                catch (InferenceException error) when (!exposed && client is ILlmUnauthorizedRenewal
+                    && error is
+                    {
+                        Code: InferenceFailureCode.AuthenticationRequired,
+                        InnerException: LlmProviderException { StatusCode: System.Net.HttpStatusCode.Unauthorized }
+                    })
+                {
+                    try { await ConnectionAccess.RenewRejectedAsync(connectionId, connection, cancellationToken).ConfigureAwait(false); }
+                    catch (Exception renewalFailure) { operationFailure = renewalFailure; throw; }
+                    operationFailure = error;
+                    throw;
+                }
                 catch (Exception error) { operationFailure = error; throw; }
+                exposed = true;
                 yield return projected;
             }
             try

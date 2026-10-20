@@ -5,7 +5,8 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthenticator
 {
-    private static readonly TimeSpan RefreshSkew = TimeSpan.FromSeconds(60);
+    /// <summary>How long before expiry a credential is renewed.</summary>
+    protected virtual TimeSpan RefreshSkew => TimeSpan.FromSeconds(60);
 
     protected HttpClient Http { get; } = http;
 
@@ -26,7 +27,15 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
             return credential;
         }
 
-        if (string.IsNullOrEmpty(credential.OAuth.RefreshToken))
+        return await RefreshAsync(credential, cancellationToken);
+    }
+
+    /// <summary>Refreshes the OAuth credential now, whatever its expiry.</summary>
+    internal async Task<LlmCredential> RefreshAsync(LlmCredential credential, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        RuntimeInputAdmission.ValidateCredential(Transport, credential);
+        if (string.IsNullOrEmpty(credential.OAuth?.RefreshToken))
         {
             throw new InvalidOperationException(
                 $"{Transport} credentials have expired and have no refresh token; sign in again.");
@@ -110,7 +119,7 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
             ? complete
             : verificationUrl;
 
-    private static bool ShouldRefresh(LlmOAuthTokens tokens)
+    private bool ShouldRefresh(LlmOAuthTokens tokens)
     {
         DateTimeOffset? expiry = tokens.ExpiresAtUnixSeconds is { } seconds
             ? DateTimeOffset.FromUnixTimeSeconds(seconds)

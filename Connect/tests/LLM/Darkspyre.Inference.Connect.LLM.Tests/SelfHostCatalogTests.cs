@@ -41,7 +41,9 @@ public sealed class SelfHostCatalogTests
             .StartSessionAsync("connection", new() { ModelId = "model" });
         await foreach (var _ in session.RunTurnAsync(new()
         {
-            Input = [new LlmAgentTextContent("Describe")], Temperature = 0.4, MaxOutputTokens = 16,
+            Input = [new LlmAgentTextContent("Describe")],
+            Temperature = 0.4,
+            MaxOutputTokens = 16,
             ReasoningLevel = LlmReasoningLevel.High,
             Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "photo.png", MediaType = "image/png", Data = new byte[] { 1 } }]
         })) { }
@@ -65,6 +67,31 @@ public sealed class SelfHostCatalogTests
         var refreshed = Assert.Single(await service.RefreshModelsAsync("connection"));
         Assert.Equal("second", refreshed.Id);
         Assert.Equal(8192, refreshed.MaxContextTokens);
+    }
+
+    /// <summary>A refresh during an entered listing replaces its waiters' result, not their requests.</summary>
+    [Fact]
+    public async Task RefreshDuringAPendingListingReturnsTheRefreshedModels()
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var engine = new Engine();
+        int calls = 0;
+        engine.Listing = async token =>
+        {
+            if (Interlocked.Increment(ref calls) != 1) return [new("second", "Second")];
+            entered.SetResult();
+            await release.Task.WaitAsync(token);
+            return [new("first", "First")];
+        };
+        await using ServiceProvider provider = Services(engine);
+        var service = provider.GetRequiredService<LlmProviderService>();
+        Task<IReadOnlyList<LlmModel>> pending = service.ListModelsAsync("connection");
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal("second", Assert.Single(await service.RefreshModelsAsync("connection")).Id);
+        release.SetResult();
+        Assert.Equal("second", Assert.Single(await pending.WaitAsync(TimeSpan.FromSeconds(10))).Id);
+        Assert.Equal(2, calls);
     }
 
     private static ServiceProvider Services(Engine engine)
@@ -99,26 +126,31 @@ public sealed class SelfHostCatalogTests
     private sealed class Engine : ILlmInference
     {
         public bool CallTool { get; init; }
+        public Func<CancellationToken, Task<IReadOnlyList<LlmModelInfo>>>? Listing { get; set; }
         public IReadOnlyList<LlmModelInfo> Models { get; set; } = [new("model", "Model") { MaxContextTokens = 4096 }];
         public LlmCapabilities Capabilities { get; } = new()
         {
-            SupportsModelListing = InferenceSupport.Supported, SupportsStreaming = InferenceSupport.Supported,
-            SupportsToolUse = InferenceSupport.Supported, SupportsTemperature = InferenceSupport.Unsupported,
-            SupportsPromptImages = InferenceSupport.Unsupported, OutputLimitEnforcement = LlmOutputLimitEnforcement.Unsupported,
+            SupportsModelListing = InferenceSupport.Supported,
+            SupportsStreaming = InferenceSupport.Supported,
+            SupportsToolUse = InferenceSupport.Supported,
+            SupportsTemperature = InferenceSupport.Unsupported,
+            SupportsPromptImages = InferenceSupport.Unsupported,
+            OutputLimitEnforcement = LlmOutputLimitEnforcement.Unsupported,
             ReasoningLevels = new HashSet<LlmReasoningLevel> { LlmReasoningLevel.Low }
         };
         public List<LlmInferenceRequest> Requests { get; } = [];
         public InferenceImplementationDescriptor Descriptor { get; } = new("engine", "Engine", InferenceImplementationKind.Tensor, InferenceTask.TextGeneration);
         public Task<LlmCapabilities> GetCapabilitiesAsync(string? modelId = null, CancellationToken cancellationToken = default) => Task.FromResult(Capabilities);
-        public Task<IReadOnlyList<LlmModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default) => Task.FromResult(Models);
-        public Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(CancellationToken cancellationToken = default) => Task.FromResult(Models);
+        public Task<IReadOnlyList<LlmModelInfo>> ListModelsAsync(CancellationToken cancellationToken = default) => Listing?.Invoke(cancellationToken) ?? Task.FromResult(Models);
+        public Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(CancellationToken cancellationToken = default) => ListModelsAsync(cancellationToken);
         public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmInferenceRequest request, CancellationToken cancellationToken = default)
         {
             Requests.Add(request);
             bool tool = CallTool && Requests.Count == 1;
             return LlmInferenceExtensions.CompleteAsStreamAsync(new()
             {
-                Text = tool ? "" : "engine answer", Status = LlmCompletionStatus.Completed,
+                Text = tool ? "" : "engine answer",
+                Status = LlmCompletionStatus.Completed,
                 ToolCalls = tool ? [new LlmToolCall("call", "read_fact", "{}")] : [],
                 Provenance = new() { ImplementationId = "engine", ModelId = request.ModelId }
             }, cancellationToken);

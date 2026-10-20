@@ -321,14 +321,38 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         }
     }
 
-    private async IAsyncEnumerable<string> ReadResponseDataAsync(Stream stream, HttpResponseMessage response,
+    /// <summary>The longest wait for the next stream chunk, or null for none.</summary>
+    protected virtual TimeSpan? StreamIdleTimeout(LlmConnection connection, string modelId) => null;
+
+    /// <summary>The clock the stream idle timeout runs on.</summary>
+    protected virtual TimeProvider StreamClock => TimeProvider.System;
+
+    /// <summary>Whether a non-overflow stream error is classified as interrupted and eligible for replay.</summary>
+    protected virtual bool RetriesStreamError(JsonElement errorEvent) => false;
+
+    /// <summary>Observes an event before base handling; a returned exception ends the stream.</summary>
+    protected virtual Exception? ObserveStreamEvent(string? type, JsonElement root, HttpResponseMessage response) => null;
+
+    /// <summary>Observes the terminal response before completion; a returned exception ends the stream.</summary>
+    protected virtual Exception? ObserveTerminalResponse(JsonElement terminalEvent, HttpResponseMessage response) => null;
+
+    private async IAsyncEnumerable<string> ReadResponseDataAsync(Stream stream, HttpResponseMessage response, TimeSpan? idle,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        await using var data = Sse.ReadDataPayloadsAsync(stream, cancellationToken).GetAsyncEnumerator(cancellationToken);
+        using var timer = idle is null ? null : new CancellationTokenSource(Timeout.InfiniteTimeSpan, StreamClock);
+        using var linked = timer is null ? null : CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, timer.Token);
+        CancellationToken readToken = linked?.Token ?? cancellationToken;
+        await using var data = Sse.ReadDataPayloadsAsync(stream, readToken).GetAsyncEnumerator(readToken);
         while (true)
         {
             bool moved;
+            timer?.CancelAfter(idle!.Value);
             try { moved = await data.MoveNextAsync().ConfigureAwait(false); }
+            catch (OperationCanceledException) when (timer?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested)
+            {
+                throw new LlmProviderException($"The model stopped responding after {(int)idle!.Value.TotalSeconds}s.",
+                    Transport, response.StatusCode, "grok_stream_idle_timeout");
+            }
             catch (IOException error) when (!cancellationToken.IsCancellationRequested)
             {
                 throw new LlmProviderException("The model response stream was interrupted.", Transport,
@@ -367,7 +391,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         bool completed = false;
         string? observedModel = null;
 
-        await foreach (string data in ReadResponseDataAsync(stream!, response, cancellationToken))
+        await foreach (string data in ReadResponseDataAsync(stream!, response, StreamIdleTimeout(connection, request.ModelId), cancellationToken))
         {
             if (data == "[DONE]")
             {
@@ -396,6 +420,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 if (LlmJson.GetObject(root, "response") is { } modelResponse)
                     observedModel = ObservedModel.Read(modelResponse, "model", Transport, connection,
                         credential, response.RequestMessage, observedModel, secrets);
+                if (ObserveStreamEvent(type, root, response) is { } eventFailure) throw eventFailure;
                 foreach (LlmStreamEvent observed in hosted.Observe(root)) yield return consumption.Publish(observed);
                 switch (type)
                 {
@@ -466,6 +491,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                     case "response.failed":
                     case "response.cancelled":
                         {
+                            if (ObserveTerminalResponse(root, response) is { } terminalFailure) throw terminalFailure;
                             JsonElement terminalOutput = CompleteOutput(root, completedOutput, Transport);
                             LlmChatResult result = BuildResult(
                                 terminalOutput,
@@ -1054,7 +1080,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             code,
             ProviderHttp.ReadRequestId(response, credential, extraSecrets),
             sanitizedResponseBody: safe,
-            isContextOverflow: IsContextOverflow(root))
+            isContextOverflow: IsContextOverflow(root),
+            isResponseStreamInterrupted: !IsContextOverflow(root) && RetriesStreamError(root))
         {
             Usage = ReadUsage(root)
         };

@@ -88,8 +88,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         {
             Version = "0",
             Transport = transport,
-            Endpoint = definition.DefaultEndpoint,
-            Xai = transport == LlmTransport.XaiResponses ? new() : null
+            Endpoint = definition.DefaultEndpoint
         }
             : existing with
             {

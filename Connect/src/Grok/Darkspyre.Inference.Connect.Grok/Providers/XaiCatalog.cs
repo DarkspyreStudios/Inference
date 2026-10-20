@@ -24,6 +24,7 @@ internal static class XaiCatalog
             Fence();
             request = new(HttpMethod.Get, ProviderHttp.BuildUri(connection, "models"));
             XaiRequestHeaders.Apply(request, connection, false);
+            XaiRequestHeaders.ApplyAccount(request, connection);
             Fence();
             try
             {
@@ -95,6 +96,9 @@ internal static class XaiCatalog
         {
             string? id = String(row, "id");
             if (string.IsNullOrWhiteSpace(id)) continue;
+            if (row.TryGetProperty("hidden", out JsonElement hidden) && hidden.ValueKind == JsonValueKind.True) continue;
+            if (XaiFields.TryGet(row, "api_backend", "apiBackend", out JsonElement backend)
+                && backend.ValueKind == JsonValueKind.String && backend.GetString() != "responses") continue;
             if (!ids.Add(id)) throw new LlmProviderException("Grok model discovery returned duplicate model identifiers.", LlmTransport.XaiResponses);
             results.Add(new(id, String(row, "name") ?? id, String(row, "owned_by"))
             {

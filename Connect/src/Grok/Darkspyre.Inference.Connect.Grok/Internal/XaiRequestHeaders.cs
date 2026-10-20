@@ -18,6 +18,11 @@ internal static class XaiRequestHeaders
     {
         AuthenticationHeaderValue authorization = Require(connection);
         ProviderHttp.ApplyHeaders(message, connection, applyApiKeyAsBearer: false);
+        ApplyProxyHeaders(message, authorization, stream);
+    }
+
+    internal static void ApplyProxyHeaders(HttpRequestMessage message, AuthenticationHeaderValue authorization, bool stream)
+    {
         message.Headers.Authorization = authorization;
         // The proxy's auth middleware reads the Grok sign-in only with these headers (Grok Build proxy_headers.rs).
         message.Headers.TryAddWithoutValidation("X-XAI-Token-Auth", "xai-grok-cli");
@@ -27,6 +32,13 @@ internal static class XaiRequestHeaders
         message.Headers.TryAddWithoutValidation("x-grok-client-mode", "headless");
         message.Headers.Accept.Clear();
         message.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue(stream ? "text/event-stream" : "application/json"));
+    }
+
+    internal static void ApplyAccount(HttpRequestMessage message, LlmConnection connection)
+    {
+        LlmOAuthTokens? tokens = LlmCredential.Parse(connection.Credential)?.OAuth;
+        if (tokens?.AccountId is { Length: > 0 } userId) message.Headers.TryAddWithoutValidation("x-userid", userId);
+        if (tokens?.Email is { Length: > 0 } email) message.Headers.TryAddWithoutValidation("x-email", email);
     }
 
     internal static AuthenticationHeaderValue Require(LlmConnection connection)
@@ -39,8 +51,6 @@ internal static class XaiRequestHeaders
     {
         RuntimeInputAdmission.Validate(connection);
         if (connection.Transport != LlmTransport.XaiResponses) throw new ArgumentException("Select the Grok Responses transport.", nameof(connection));
-        XaiConnectionOptions options = connection.Xai ?? new();
-        if (!Enum.IsDefined(options.ServiceTier)) throw new ArgumentOutOfRangeException(nameof(connection), "Select an xAI service tier.");
         if (!string.Equals(connection.Endpoint.TrimEnd('/'), SubscriptionEndpoint, StringComparison.Ordinal))
             throw new ArgumentException("This Grok connection uses an old endpoint. Open its settings and save it to move it to the Grok subscription service.", nameof(connection));
     }
