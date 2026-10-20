@@ -140,7 +140,7 @@ Every package carries a readable README and the repository license. `eng/VerifyP
 
 Phase 1 of the conversation contract builds only the native Codex client and the Claude CLI. These stay in the repository on purpose and are not dead code under L2:
 
-- **Excluded provider files.** The LLM provider files excluded with `Compile Remove` in `Connect/src/LLM/Darkspyre.Inference.Connect.LLM/Darkspyre.Inference.Connect.LLM.csproj`, and the xAI transport files excluded in the Image and TTS projects. Their source is unchanged.
+- **Excluded provider files.** The LLM provider files excluded with `Compile Remove` in `Connect/src/Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj`, and the xAI transport files excluded in the Image and TTS projects. Their source is unchanged.
 - **Projects out of the build.** The Bedrock, Vertex and Azure projects, and the STT, Realtime, Video and Resources projects. They are out of the solution, the package and the source references, and their source is unchanged.
 - **Tensor projects that do not compile.** Any Tensor project that does not compile against the phase-1 library is out of this phase's build.
 - **Facades with no built implementer.** The tokenizer facade (`TokenizeAsync`, `ILlmTextTokenizer`, `LlmTokenization`) and the context-cache facade stay compiled. Each refuses with its documented message until a provider that implements it returns.
