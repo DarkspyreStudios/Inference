@@ -68,9 +68,9 @@ rejects foreign DLLs, native binaries and shader sources, local-only dependencie
 assemblies or documentation, and mismatched Common versions.
 
 Whisper runtime build assets flow through its public NuGet dependency (`PrivateAssets="none"`).
-The shared build target marks assets imported from both `Whisper.net.Runtime` and `Whisper.net.Runtime.Metal`
-non-packable for Whisper and its consumers without disabling consumer output copying. `ggml-metal.metal` must come only from the
-public runtime dependency, never from Tensor's `content` or `contentFiles`.
+The shared build target marks assets imported from `Whisper.net.Runtime`, `Whisper.net.Runtime.Metal` and
+`Whisper.net.Runtime.Cuda12.Linux` non-packable for Whisper and its consumers without disabling consumer output copying.
+`ggml-metal.metal` must come only from the public runtime dependency, never from Tensor's `content` or `contentFiles`.
 
 `eng/VerifyConsumer` is a non-packable release smoke test with explicit library PackageReferences and no source
 project references. It checks loaded assembly source identities, the Settings contracts and Whisper's

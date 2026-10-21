@@ -26,7 +26,7 @@
        runtime NuGet, not this product archive. Preserve build output copying and the dependency. -->
   <Target Name="DoNotRepackWhisperRuntime" BeforeTargets="_GetPackageFiles">
     <ItemGroup>
-      <None Update="@(None)" Condition="'%(None.DefiningProjectName)' == 'Whisper.net.Runtime' Or '%(None.DefiningProjectName)' == 'Whisper.net.Runtime.Metal'" Pack="false" />
+      <None Update="@(None)" Condition="'%(None.DefiningProjectName)' == 'Whisper.net.Runtime' Or '%(None.DefiningProjectName)' == 'Whisper.net.Runtime.Metal' Or '%(None.DefiningProjectName)' == 'Whisper.net.Runtime.Cuda12.Linux'" Pack="false" />
     </ItemGroup>
   </Target>
   <Import Project="$(MSBuildThisFileDirectory)eng/ConnectDiscovery.targets" />
