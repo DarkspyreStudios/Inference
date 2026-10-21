@@ -58,7 +58,7 @@ internal static class AttachmentTokens
     {
         ReadOnlySpan<byte> marker = "/Type"u8;
         long pages = 0;
-        for (int index = data.IndexOf(marker); index >= 0; )
+        for (int index = data.IndexOf(marker); index >= 0;)
         {
             int at = index + marker.Length;
             while (at < data.Length && data[at] is (byte)' ' or (byte)'\r' or (byte)'\n' or (byte)'\t') at++;

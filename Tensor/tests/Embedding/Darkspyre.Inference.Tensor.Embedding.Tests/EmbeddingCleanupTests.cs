@@ -31,7 +31,8 @@ public sealed class EmbeddingCleanupTests : IDisposable
 
         EmbeddingResult result = await engine.EmbedAsync(new()
         {
-            ModelId = Key.ModelId, Inputs = [new TextEmbeddingInput("reference")]
+            ModelId = Key.ModelId,
+            Inputs = [new TextEmbeddingInput("reference")]
         });
         Assert.Single(result.Vectors);
         Assert.Equal(1024, result.Dimensions);

@@ -90,7 +90,7 @@ public sealed record TensorModelCandidate(
     string SourceId, TensorCandidateSelection Selection, TensorCandidateMetadata Metadata,
     string? License, bool? IsPrivate, bool? IsGated, IReadOnlyList<TensorSourceArtifact> Artifacts)
 {
-/// <summary>Maps each resolved artifact role to the path of the artifact that fills it.</summary>
+    /// <summary>Maps each resolved artifact role to the path of the artifact that fills it.</summary>
     public IReadOnlyDictionary<string, string> ArtifactRoles { get; init; } = new Dictionary<string, string>();
 }
 
@@ -116,22 +116,22 @@ public sealed record TensorMetadataContent(ReadOnlyMemory<byte> Bytes, long Offs
 /// <summary>Read-only source discovery. None of these operations installs or loads model weights.</summary>
 public interface ITensorArtifactReader
 {
-/// <summary>Reads a bounded metadata range or the complete metadata file of an artifact without downloading its weights.</summary>
+    /// <summary>Reads a bounded metadata range or the complete metadata file of an artifact without downloading its weights.</summary>
     Task<TensorSourceResult<TensorMetadataContent>> ReadMetadataAsync(TensorSourceArtifact artifact, TensorMetadataRead read, CancellationToken cancellationToken = default);
 }
 
 /// <summary>Optional repository browsing adapter. File and URL access do not require a repository.</summary>
 public interface ITensorModelSource : ITensorArtifactReader
 {
-/// <summary>The source id recorded as a candidate's <see cref="TensorModelCandidate.SourceId"/>.</summary>
+    /// <summary>The source id recorded as a candidate's <see cref="TensorModelCandidate.SourceId"/>.</summary>
     string Id { get; }
-/// <summary>Searches the source for repositories and returns one page of matches.</summary>
+    /// <summary>Searches the source for repositories and returns one page of matches.</summary>
     Task<TensorSourceResult<TensorSourcePage<TensorSourceModel>>> SearchAsync(TensorSourceQuery query, CancellationToken cancellationToken = default);
-/// <summary>Lists one page of a repository's revisions.</summary>
+    /// <summary>Lists one page of a repository's revisions.</summary>
     Task<TensorSourceResult<TensorSourcePage<TensorSourceRevision>>> ListRevisionsAsync(TensorRepositoryQuery query, CancellationToken cancellationToken = default);
-/// <summary>Lists the artifacts at one repository revision that can be selected as a candidate's primary file.</summary>
+    /// <summary>Lists the artifacts at one repository revision that can be selected as a candidate's primary file.</summary>
     Task<TensorSourceResult<TensorSourcePage<TensorSourceArtifact>>> ListVariantsAsync(TensorVariantQuery query, CancellationToken cancellationToken = default);
-/// <summary>Returns the candidate for a repository, revision and primary artifact, with its metadata and artifacts.</summary>
+    /// <summary>Returns the candidate for a repository, revision and primary artifact, with its metadata and artifacts.</summary>
     Task<TensorSourceResult<TensorModelCandidate>> GetCandidateAsync(TensorCandidateSelection selection, CancellationToken cancellationToken = default);
 }
 
@@ -172,7 +172,7 @@ public sealed class TensorSourceCredential
         return new("Basic", Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{username}:{password}")));
     }
 
-/// <summary>Returns a fixed placeholder, so formatting the credential never reveals its value.</summary>
+    /// <summary>Returns a fixed placeholder, so formatting the credential never reveals its value.</summary>
     public override string ToString() => "[protected source credential]";
 }
 

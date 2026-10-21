@@ -1472,7 +1472,8 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                             if (observation is not null)
                             {
                                 Emit(new LlmAgentUsageEvent(ThreadId, target.Id, target.UsageId,
-                                    observation.Cumulative, target.Totals(observation.Cumulative)) { ModelId = target.ModelId });
+                                    observation.Cumulative, target.Totals(observation.Cumulative))
+                                { ModelId = target.ModelId });
                             }
                             foreach (LlmAgentEvent item in MapStreamEvent(root, target.Id, target.ReasoningText))
                             {

@@ -152,7 +152,9 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
             error = "invalid_request",
             message = new
             {
-                id = "synthetic", role = "assistant", model = "<synthetic>",
+                id = "synthetic",
+                role = "assistant",
+                model = "<synthetic>",
                 content = new[] { new { type = "text", text = "Prompt is too long" } },
             },
         });
@@ -570,7 +572,11 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         });
         process.Push(new
         {
-            type = "result", subtype = "success", is_error = false, result = "OK", stop_reason = "end_turn",
+            type = "result",
+            subtype = "success",
+            is_error = false,
+            result = "OK",
+            stop_reason = "end_turn",
             usage = new { input_tokens = 10, output_tokens = 2 }
         });
         List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
@@ -1227,7 +1233,11 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
             Invocations.Enqueue(invocation);
             return Task.FromResult(new ClaudeCliProcessResult(0, JsonSerializer.Serialize(new
             {
-                type = "result", subtype = "success", is_error = false, result = text, stop_reason = "end_turn",
+                type = "result",
+                subtype = "success",
+                is_error = false,
+                result = text,
+                stop_reason = "end_turn",
                 usage = new { input_tokens = 7, output_tokens = 3 }
             }), string.Empty));
         }

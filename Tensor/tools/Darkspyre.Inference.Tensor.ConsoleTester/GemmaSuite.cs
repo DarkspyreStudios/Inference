@@ -62,7 +62,8 @@ internal static class GemmaSuite
                 : new TextEmbeddingInput(item.GetProperty("text").GetString()!, item.TryGetProperty("title", out var title) ? title.GetString() : null);
             var request = new EmbeddingRequest
             {
-                ModelId = definition.Key.ModelId, Inputs = [input],
+                ModelId = definition.Key.ModelId,
+                Inputs = [input],
                 Kind = item.GetProperty("kind").GetString() == "query" ? EmbeddingInputKind.Query : EmbeddingInputKind.Document
             };
             watch.Restart();
@@ -90,15 +91,21 @@ internal static class GemmaSuite
         // A rejected batch and a cancelled call must leave the loaded engine usable.
         try
         {
-            await engine.EmbedAsync(new() { ModelId = definition.Key.ModelId,
-                Inputs = [new TextEmbeddingInput("valid"), new TextEmbeddingInput(string.Concat(Enumerable.Repeat("word ", 9000)))] });
+            await engine.EmbedAsync(new()
+            {
+                ModelId = definition.Key.ModelId,
+                Inputs = [new TextEmbeddingInput("valid"), new TextEmbeddingInput(string.Concat(Enumerable.Repeat("word ", 9000)))]
+            });
             throw new InvalidDataException("The over-limit request was accepted.");
         }
         catch (EmbeddingInputTooLongException error) when (error.Inputs.Count == 1 && error.Inputs[0].Index == 1) { }
         using (var cancellation = new CancellationTokenSource())
         {
-            Task<EmbeddingResult> pending = engine.EmbedAsync(new() { ModelId = definition.Key.ModelId,
-                Inputs = [new TextEmbeddingInput(string.Concat(Enumerable.Repeat("word ", 1024)))] }, cancellation.Token);
+            Task<EmbeddingResult> pending = engine.EmbedAsync(new()
+            {
+                ModelId = definition.Key.ModelId,
+                Inputs = [new TextEmbeddingInput(string.Concat(Enumerable.Repeat("word ", 1024)))]
+            }, cancellation.Token);
             cancellation.CancelAfter(TimeSpan.FromMilliseconds(50));
             try { await pending; throw new InvalidDataException("The request completed before cancellation could be observed."); }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }

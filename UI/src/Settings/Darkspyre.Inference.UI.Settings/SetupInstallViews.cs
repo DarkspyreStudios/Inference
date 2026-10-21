@@ -25,8 +25,13 @@ public sealed class SetupInstallChip : ContentControl
             Avalonia.Controls.Shapes.Path icon = new()
             {
                 Data = Geometry.Parse(state == SetupInstallState.Installed ? CheckPath : DownloadPath),
-                Width = 14, Height = 14, Stretch = Stretch.Uniform, StrokeThickness = 2,
-                StrokeLineCap = PenLineCap.Round, StrokeJoin = PenLineJoin.Round, VerticalAlignment = VerticalAlignment.Center,
+                Width = 14,
+                Height = 14,
+                Stretch = Stretch.Uniform,
+                StrokeThickness = 2,
+                StrokeLineCap = PenLineCap.Round,
+                StrokeJoin = PenLineJoin.Round,
+                VerticalAlignment = VerticalAlignment.Center,
             };
             icon.Classes.Add("inference-install-chip-icon");
             line.Children.Add(icon);

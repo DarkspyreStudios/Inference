@@ -39,7 +39,10 @@ public static class GemmaEmbeddingModels
 
     private static TensorModelArtifactDefinition Artifact(string role, string path, string source, long length, string hash) => new()
     {
-        Role = role, RelativePath = path, Length = length, Sha256 = hash,
+        Role = role,
+        RelativePath = path,
+        Length = length,
+        Sha256 = hash,
         Provenance = new(new("https://huggingface.co/"), Repository, Revision, source, "Apache-2.0"),
         Sources = Array.AsReadOnly<Uri>([new($"https://huggingface.co/{Repository}/resolve/{Revision}/{source}")])
     };

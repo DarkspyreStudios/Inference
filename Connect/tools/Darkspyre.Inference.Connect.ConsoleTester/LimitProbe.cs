@@ -80,10 +80,10 @@ internal static partial class LimitProbe
         try
         {
             await foreach (LlmAgentEvent item in session.RunTurnAsync(new LlmAgentTurnRequest
-                           {
-                               Input = [new LlmAgentTextContent(text)],
-                               ReasoningLevel = LlmReasoningLevel.Low
-                           }, token))
+            {
+                Input = [new LlmAgentTextContent(text)],
+                ReasoningLevel = LlmReasoningLevel.Low
+            }, token))
             {
                 if (item is LlmAgentUsageEvent { Usage: { } reported }) usage = reported;
                 if (item is LlmAgentTurnCompletedEvent end) completed = end;

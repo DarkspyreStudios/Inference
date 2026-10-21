@@ -289,7 +289,9 @@ public sealed class SetupFieldInput : UserControl
             // Providers can give distinct values one display name, so the value names the choice.
             this.openChoices = new AutoCompleteBox
             {
-                ItemTemplate = template, MinimumPrefixLength = 0, FilterMode = AutoCompleteFilterMode.Custom,
+                ItemTemplate = template,
+                MinimumPrefixLength = 0,
+                FilterMode = AutoCompleteFilterMode.Custom,
                 ItemFilter = (typed, item) => item is SetupChoice option && (string.IsNullOrEmpty(typed)
                     || ChoiceSearchText(option).Contains(typed, StringComparison.OrdinalIgnoreCase)),
                 ItemSelector = (_, item) => item is SetupChoice option ? option.Value : string.Empty,
@@ -496,7 +498,8 @@ public sealed class SetupFieldInput : UserControl
                 ModelPackCard card = new(option, option.Value == shown, () =>
                 {
                     if (!this.Unavailable && option.Value != this.Value && this.field is SetupChoiceField current) _ = this.ChooseAsync(current, option.Value);
-                }) { IsEnabled = !unavailable };
+                })
+                { IsEnabled = !unavailable };
                 this.packCards.Children.Add(card);
             }
         }

@@ -70,7 +70,10 @@ public sealed class ConnectionTabs : UserControl
         if (this.editor is { } existing) return existing;
         InferenceSettingsEditor created = new(this.settings, this.manager, this.host)
         {
-            ShowSaveButton = false, ShowHeading = false, ShowActionEffects = false, StepNavigation = false,
+            ShowSaveButton = false,
+            ShowHeading = false,
+            ShowActionEffects = false,
+            StepNavigation = false,
             MoreOptionsContent = this.MoreOptionsContent,
         };
         created.CommitCompleted += (_, result) => this.CommitCompleted?.Invoke(this, result);

@@ -192,7 +192,7 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
             ]);
             if (_additionalArtifactRolePrefix is { } prefix)
                 elsewhere.Add(new SetupRepeatableGroupField(new("additional-artifacts", "Additional shards")
-                    { HelpText = "For split files, select every remaining shard explicitly, or select their containing folder." },
+                { HelpText = "For split files, select every remaining shard explicitly, or select their containing folder." },
                     _companions.Where(item => item.Key.StartsWith(prefix, StringComparison.Ordinal)).Select(item => new SetupFieldRow(item.Key,
                         [new SetupTextField(new("companion-" + item.Key, "Shard path or URL"), item.Value, string.Empty,
                             value => EditSource("companion-" + item.Key, value), pathSelection: SetupPathSelectionKind.File)])).ToArray(),

@@ -69,7 +69,8 @@ public sealed class ToolOutputProjectorTests
 
         ProjectedToolOutput withText = ToolOutputProjector.Project(new LlmToolOutput
         {
-            Parts = [new LlmToolOutputText("the result")], StructuredContent = structured
+            Parts = [new LlmToolOutputText("the result")],
+            StructuredContent = structured
         }, RichContentRoutes.Responses, RichContentRoutes.Responses);
         ProjectedToolOutput alone = ToolOutputProjector.Project(new LlmToolOutput { StructuredContent = structured },
             RichContentRoutes.Responses, RichContentRoutes.Responses);

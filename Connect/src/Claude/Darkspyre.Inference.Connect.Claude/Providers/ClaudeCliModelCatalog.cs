@@ -96,7 +96,9 @@ internal static class ClaudeCliModelCatalog
             ClaudeModelLimit limit = ClaudeModelLimits.Get(resolved);
             result.Add(new(value.GetString()!, name.GetString()!)
             {
-                CatalogEntry = model.Clone(), MaxContextTokens = limit.ContextTokens, MaxOutputTokens = limit.OutputTokens,
+                CatalogEntry = model.Clone(),
+                MaxContextTokens = limit.ContextTokens,
+                MaxOutputTokens = limit.OutputTokens,
             });
         }
         return Array.AsReadOnly(result.ToArray());

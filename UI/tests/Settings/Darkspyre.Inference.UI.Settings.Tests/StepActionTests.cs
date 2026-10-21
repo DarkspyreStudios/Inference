@@ -152,7 +152,8 @@ public sealed class StepActionTests
 
         public TwoStepSettings() : base(
             new(new("tool", "Tool provider", InferenceImplementationKind.Connect, InferenceTask.TextGeneration), "A provider with a tool"),
-            new(SetupChangeIntent.Create, "entry", null)) { }
+            new(SetupChangeIntent.Create, "entry", null))
+        { }
 
         public bool NameActions { get; init; } = true;
 

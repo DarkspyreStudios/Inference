@@ -39,13 +39,13 @@ internal static class ClientTools
     /// </summary>
     internal static LlmStructuredOutputValidation? AnswerCheck(JsonElement schema, string answer,
         LlmAgentCompletionReason reason, LlmStructuredOutputEnforcement enforcement) => reason switch
-    {
-        LlmAgentCompletionReason.Completed or LlmAgentCompletionReason.Unknown =>
-            StructuredOutput.Validate(answer, new() { Name = "agent_output", Schema = schema }, enforcement),
-        LlmAgentCompletionReason.Refusal or LlmAgentCompletionReason.Truncation =>
-            new(enforcement, false, false, [$"The answer was not evaluated: {reason}."]),
-        _ => null
-    };
+        {
+            LlmAgentCompletionReason.Completed or LlmAgentCompletionReason.Unknown =>
+                StructuredOutput.Validate(answer, new() { Name = "agent_output", Schema = schema }, enforcement),
+            LlmAgentCompletionReason.Refusal or LlmAgentCompletionReason.Truncation =>
+                new(enforcement, false, false, [$"The answer was not evaluated: {reason}."]),
+            _ => null
+        };
 
     internal static void ValidateManagedOpening(LlmAgentSessionOptions options, LlmProviderCapabilities capabilities, bool supportsResources = false)
     {

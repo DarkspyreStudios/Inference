@@ -5,15 +5,15 @@ namespace Darkspyre.Inference.Tensor.Common;
 /// <summary>The kind of inference a model pack serves.</summary>
 public enum TensorCapability
 {
-/// <summary>Large language model text generation.</summary>
+    /// <summary>Large language model text generation.</summary>
     Llm,
-/// <summary>Image generation.</summary>
+    /// <summary>Image generation.</summary>
     Image,
-/// <summary>Decision models, such as Laya.</summary>
+    /// <summary>Decision models, such as Laya.</summary>
     Decision,
-/// <summary>Speech-to-text transcription.</summary>
+    /// <summary>Speech-to-text transcription.</summary>
     SpeechTranscription,
-/// <summary>Text embedding.</summary>
+    /// <summary>Text embedding.</summary>
     Embedding,
     /// <summary>Text recognition in images.</summary>
     TextRecognition,
@@ -24,25 +24,25 @@ public enum TensorCapability
 /// <summary>An execution backend a Tensor engine can run a model pack on.</summary>
 public enum TensorBackendKind
 {
-/// <summary>The engine picks a backend the pack supports.</summary>
+    /// <summary>The engine picks a backend the pack supports.</summary>
     Auto,
-/// <summary>The CPU outside GGML.</summary>
+    /// <summary>The CPU outside GGML.</summary>
     Cpu,
-/// <summary>GGML on the CPU.</summary>
+    /// <summary>GGML on the CPU.</summary>
     GgmlCpu,
-/// <summary>GGML on Apple Metal.</summary>
+    /// <summary>GGML on Apple Metal.</summary>
     GgmlMetal,
-/// <summary>GGML on NVIDIA CUDA.</summary>
+    /// <summary>GGML on NVIDIA CUDA.</summary>
     GgmlCuda,
-/// <summary>GGML on Vulkan.</summary>
+    /// <summary>GGML on Vulkan.</summary>
     GgmlVulkan,
-/// <summary>NVIDIA CUDA outside GGML.</summary>
+    /// <summary>NVIDIA CUDA outside GGML.</summary>
     Cuda,
-/// <summary>Apple MLX.</summary>
+    /// <summary>Apple MLX.</summary>
     Mlx,
-/// <summary>Apple Core ML.</summary>
+    /// <summary>Apple Core ML.</summary>
     CoreMl,
-/// <summary>ONNX Runtime through the packaged WebGPU execution provider.</summary>
+    /// <summary>ONNX Runtime through the packaged WebGPU execution provider.</summary>
     WebGpu
 }
 

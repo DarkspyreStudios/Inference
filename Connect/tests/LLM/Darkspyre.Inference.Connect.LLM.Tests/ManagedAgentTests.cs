@@ -20,7 +20,9 @@ public sealed class ManagedAgentTests
         var harness = new Harness();
         harness.Results.Enqueue(new()
         {
-            Diagnostics = new(200, null, null), Text = string.Empty, Status = LlmCompletionStatus.RequiresAction,
+            Diagnostics = new(200, null, null),
+            Text = string.Empty,
+            Status = LlmCompletionStatus.RequiresAction,
             ToolCalls = [new LlmToolCall("call-1", "echo", "{}")]
         });
         harness.Results.Enqueue(new()
@@ -166,8 +168,10 @@ public sealed class ManagedAgentTests
         var harness = new Harness { RequestFailure = number => number == 2 ? Interrupted() : null, ExposeBeforeFailure = true };
         harness.Results.Enqueue(new()
         {
-            Diagnostics = new(200, null, null), Status = LlmCompletionStatus.Completed,
-            ToolCalls = [new LlmToolCall("call-1", "echo", "{}")], Text = "tool step"
+            Diagnostics = new(200, null, null),
+            Status = LlmCompletionStatus.Completed,
+            ToolCalls = [new LlmToolCall("call-1", "echo", "{}")],
+            Text = "tool step"
         });
         harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Status = LlmCompletionStatus.Completed, Text = "recovered" });
         int calls = 0;
@@ -363,7 +367,9 @@ public sealed class ManagedAgentTests
         var harness = new Harness { Capabilities = Capable(InferenceSupport.Supported, LlmOutputLimitEnforcement.ProviderEnforced) };
         harness.Results.Enqueue(new()
         {
-            Diagnostics = new(200, null, null), Text = string.Empty, Status = LlmCompletionStatus.RequiresAction,
+            Diagnostics = new(200, null, null),
+            Text = string.Empty,
+            Status = LlmCompletionStatus.RequiresAction,
             ToolCalls = [new LlmToolCall("call-1", "echo", "{}")]
         });
         harness.Results.Enqueue(Done());
@@ -492,7 +498,10 @@ public sealed class ManagedAgentTests
 
     private static LlmChatResult Calls(params LlmToolCall[] calls) => new()
     {
-        Diagnostics = new(200, null, null), Text = string.Empty, Status = LlmCompletionStatus.RequiresAction, ToolCalls = calls
+        Diagnostics = new(200, null, null),
+        Text = string.Empty,
+        Status = LlmCompletionStatus.RequiresAction,
+        ToolCalls = calls
     };
 
     private static LlmAgentToolDefinition Lookup() => new()
@@ -590,7 +599,8 @@ public sealed class ManagedAgentTests
     {
         var harness = new Harness();
         harness.Results.Enqueue(Calls(new LlmToolCall("good", "lookup", """{"city":"Paris"}"""),
-            new LlmToolCall("bad", "lookup", "{}")) with { Text = "checking" });
+            new LlmToolCall("bad", "lookup", "{}")) with
+        { Text = "checking" });
         harness.Results.Enqueue(Done());
         // No handler: the calls are returned, not run.
         await using var session = harness.Create(Options() with
@@ -681,7 +691,9 @@ public sealed class ManagedAgentTests
         var harness = new Harness { Window = 10000 };
         harness.Results.Enqueue(new()
         {
-            Diagnostics = new(200, null, null), Text = string.Empty, Status = LlmCompletionStatus.RequiresAction,
+            Diagnostics = new(200, null, null),
+            Text = string.Empty,
+            Status = LlmCompletionStatus.RequiresAction,
             ToolCalls = [new LlmToolCall("call-1", "echo", "{}")]
         });
         harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "done", Status = LlmCompletionStatus.Completed });
