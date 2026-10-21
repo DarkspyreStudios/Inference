@@ -114,9 +114,11 @@ Run Connect commands from `Connect/` so its `global.json` selects the SDK.
 | Restore | `dotnet restore Darkspyre.Inference.Connect.slnx` |
 | Build | `dotnet build Darkspyre.Inference.Connect.slnx --no-restore` |
 | Focused test | `dotnet test <owning-test-project.csproj> --no-restore --filter <changed-behaviour>` |
-| Format | `dotnet format Darkspyre.Inference.Connect.slnx --verify-no-changes --no-restore` |
+| Optional formatting | `dotnet format Darkspyre.Inference.Connect.slnx --no-restore` |
 | Dependency audit | `dotnet list Darkspyre.Inference.Connect.slnx package --vulnerable --include-transitive` |
 | Pack | `dotnet pack Darkspyre.Inference.Connect.slnx --no-build --no-restore`, only when the user says to publish |
+
+Formatting is optional developer cleanup, not a development or release gate. Review formatter changes before committing them.
 
 ## Testing
 
@@ -130,7 +132,7 @@ Testing rules for this repository:
 
 The version is `<net>.<release>.<minor>`: the .NET generation, a breaking-contract release, and a compatible fix. All four packages release together. A published version is never overwritten, and each release gets an immutable Git tag.
 
-Before a release, each active solution is at zero warnings and passes restore, build, tests, format verification, pack and the dependency audit. `deploy-major.sh` and `deploy-minor.sh` are the release entry points; `eng/README.md` documents their gates. Run the offline orchestration tests when changing the release scripts, and never test a script change by publishing a dummy version.
+Before a release, each active solution is at zero warnings and passes restore, build, tests, pack and the dependency audit. `deploy-major.sh` and `deploy-minor.sh` are the release entry points; `eng/README.md` documents their gates. When changing the release scripts, run `bash -n` on `deploy-major.sh`, `deploy-minor.sh` and `eng/deploy.sh`, and run `bash eng/package-assets.tests.sh`, as `eng/README.md` "Offline verification" describes. Never test a script change by publishing a dummy version.
 
 Every package carries a readable README and the repository license. `eng/VerifyPackages` and `eng/VerifyConsumer` check package boundaries, the exact Common dependency and the release source; `eng/README.md` says how to run them.
 

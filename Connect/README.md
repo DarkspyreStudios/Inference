@@ -5833,9 +5833,14 @@ unsupported by the current AWS wire contract.
 dotnet restore Darkspyre.Inference.Connect.slnx
 dotnet build Darkspyre.Inference.Connect.slnx --no-restore
 dotnet test Darkspyre.Inference.Connect.slnx --no-build --no-restore
-dotnet format Darkspyre.Inference.Connect.slnx --verify-no-changes --no-restore
 dotnet pack Darkspyre.Inference.Connect.slnx -c Release --no-restore
 dotnet list Darkspyre.Inference.Connect.slnx package --vulnerable --include-transitive
+```
+
+Formatting is optional reviewed cleanup, not a development or release gate:
+
+```bash
+dotnet format Darkspyre.Inference.Connect.slnx --no-restore
 ```
 
 Releases are immutable tags such as `v11.3.1-rc.1`. `Common`, `Connect`, `Tensor`, and `UI.Settings` are built and

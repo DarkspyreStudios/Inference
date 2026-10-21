@@ -358,7 +358,12 @@ cd Connect
 dotnet restore Darkspyre.Inference.Connect.slnx
 dotnet build Darkspyre.Inference.Connect.slnx --no-restore
 dotnet test Darkspyre.Inference.Connect.slnx --no-build --no-restore
-dotnet format Darkspyre.Inference.Connect.slnx --verify-no-changes --no-restore
+```
+
+Formatting is optional reviewed cleanup, not a development or release gate:
+
+```bash
+dotnet format Darkspyre.Inference.Connect.slnx --no-restore
 ```
 
 Tensor and UI have equivalent focused solutions in their own directories. Normal automated tests

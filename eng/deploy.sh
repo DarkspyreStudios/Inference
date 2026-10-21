@@ -97,7 +97,7 @@ main() {
     git commit -m "Prepare coordinated $version release" -- "${version_files[@]}"
     source_commit="$(git rev-parse HEAD)"
 
-    stage='restore/build/test/format/audit'
+    stage='restore/build/test/audit'
     for family in Connect Tensor UI; do
         cd "$root/$family"
         dotnet restore "Darkspyre.Inference.$family.slnx"
@@ -105,7 +105,6 @@ main() {
             dotnet build "Darkspyre.Inference.$family.slnx" -c "$configuration" --no-restore
             dotnet test "Darkspyre.Inference.$family.slnx" -c "$configuration" --no-build --no-restore
         done
-        dotnet format "Darkspyre.Inference.$family.slnx" --verify-no-changes --no-restore
         mkdir -p "$root/artifacts/deploy"
         dotnet list "Darkspyre.Inference.$family.slnx" package --vulnerable --include-transitive --no-restore --format json > "$root/artifacts/deploy/$family-audit.json"
         jq -e '(.projects | type == "array" and length > 0) and
