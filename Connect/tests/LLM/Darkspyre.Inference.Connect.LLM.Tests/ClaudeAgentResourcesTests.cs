@@ -477,6 +477,44 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
     }
 
     [Fact]
+    public async Task BridgeMatchesOneOfBranchesWhoseArgumentsCarryAnotherBranchsMembers()
+    {
+        // The search and read forms of a tool such as file_search: each branch is closed, and the CLI shows the model one
+        // merged object, so a search can carry a read-only member.
+        var process = new ManualProcess();
+        var received = new List<JsonElement>();
+        await using ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        {
+            ModelId = "claude-test",
+            Runtime = new() { WorkingDirectory = _directory },
+            Tools = [new LlmAgentToolDefinition
+            {
+                Name = "lookup",
+                InputSchema = JsonElement.Parse("""
+                    {"type":"object","oneOf":[
+                     {"type":"object","additionalProperties":false,"required":["operation","query"],
+                      "properties":{"operation":{"const":"search"},"query":{"type":"string"}}},
+                     {"type":"object","additionalProperties":false,"required":["operation","reference"],
+                      "properties":{"operation":{"const":"read"},"reference":{"type":"object","additionalProperties":false,
+                       "required":["id"],"properties":{"id":{"type":"string"}}},"maxBytes":{"type":"integer"}}}]}
+                    """)
+            }],
+            ToolHandler = (call, _) => { lock (received) received.Add(call.Arguments); return Task.FromResult(LlmToolOutput.FromText("found")); }
+        });
+
+        process.Push(ToolUse("tu1", "lookup"));
+        process.Push(ToolCall("c1", 1, "lookup", new { operation = "search", query = "pangolin", maxBytes = 4096 }));
+        Assert.False((await AnswerFor(process, "c1")).GetProperty("result").GetProperty("isError").GetBoolean());
+        process.Push(ToolCall("c2", 2, "lookup", new { operation = "read", reference = new { id = "a" } }));
+        Assert.False((await AnswerFor(process, "c2")).GetProperty("result").GetProperty("isError").GetBoolean());
+        process.Push(ToolCall("c3", 3, "lookup", new { operation = "read", query = "pangolin" }));
+        JsonElement mixed = (await AnswerFor(process, "c3")).GetProperty("result");
+        Assert.True(mixed.GetProperty("isError").GetBoolean());
+        Assert.StartsWith("Tool 'lookup' arguments were rejected:\n", mixed.GetProperty("content")[0].GetProperty("text").GetString(), StringComparison.Ordinal);
+        Assert.Equal(["search", "read"], received.Select(arguments => arguments.GetProperty("operation").GetString()));
+    }
+
+    [Fact]
     public async Task UpdatePlanRunsInsideConnectOnClaude()
     {
         var process = new ManualProcess();

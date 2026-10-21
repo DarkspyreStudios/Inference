@@ -11,13 +11,6 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// </summary>
 internal static class ToolSchemas
 {
-    // The keywords whose value is one schema, or an array of schemas, besides the name-keyed ones.
-    private static readonly string[] SubschemaKeywords = ["items", "prefixItems", "oneOf", "anyOf", "allOf", "not", "if", "then",
-        "else", "contains", "propertyNames", "unevaluatedItems", "unevaluatedProperties"];
-
-    // The keywords whose value is an object of schemas keyed by a name, which is never itself a keyword.
-    private static readonly string[] NamedSubschemaKeywords = ["properties", "patternProperties", "dependentSchemas", "$defs", "definitions"];
-
     /// <summary>
     /// The schema a host tool definition is sent to a model with: <see cref="Wire"/>, without any
     /// <c>additionalProperties</c> keyword at any depth. A property named <c>additionalProperties</c> stays.
@@ -25,21 +18,8 @@ internal static class ToolSchemas
     internal static JsonElement Sent(JsonElement schema)
     {
         JsonNode? copy = JsonNode.Parse(Wire(schema).GetRawText());
-        WithoutAdditionalProperties(copy);
+        StructuredOutput.RemoveKeywords(copy, (keyword, _) => keyword == "additionalProperties");
         return JsonSerializer.SerializeToElement(copy);
-    }
-
-    private static void WithoutAdditionalProperties(JsonNode? node)
-    {
-        if (node is not JsonObject schema) return;
-        schema.Remove("additionalProperties");
-        foreach (string keyword in SubschemaKeywords)
-        {
-            if (schema[keyword] is JsonArray branches) foreach (JsonNode? branch in branches) WithoutAdditionalProperties(branch);
-            else WithoutAdditionalProperties(schema[keyword]);
-        }
-        foreach (string keyword in NamedSubschemaKeywords)
-            if (schema[keyword] is JsonObject named) foreach ((string _, JsonNode? value) in named) WithoutAdditionalProperties(value);
     }
 
     /// <summary>The tool's own schema when its root is an object, otherwise the wrapper; arguments are evaluated against it.</summary>

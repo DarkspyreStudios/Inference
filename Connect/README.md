@@ -151,7 +151,9 @@ tools, and through the MCP tool bridge. Nothing else in the schema changes. The 
 the schema the caller gave, so the change alters no check.
 
 Before a handler runs, the arguments are checked against the tool's schema without downloading anything. Members the
-schema does not declare are ignored, and the handler receives the arguments as the model sent them. Arguments that
+schema does not declare are ignored at every depth: each `additionalProperties` or `unevaluatedProperties` of `false`
+is left out of the check, so a `oneOf` or `anyOf` branch matches arguments that carry another branch's members. The
+handler receives the arguments as the model sent them. Arguments that
 fail the check go back to the model as the error result `Tool '{name}' arguments were rejected:` followed by one
 `{location}: {message}` line per error, the handler does not run and the turn continues. A schema that cannot be
 checked lets the handler run. The tool event records the model's arguments as JSON when they parse, otherwise as a
