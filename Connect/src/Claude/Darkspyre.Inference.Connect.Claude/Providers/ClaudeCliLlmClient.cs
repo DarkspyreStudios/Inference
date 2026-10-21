@@ -17,7 +17,6 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runner, IClaudeCliSessionProcessFactory processFactory)
     : LlmClientBase(http),
         ILlmContextEstimator,
-        ILlmAccountUsageClient,
         IExternalLlmAuthenticationProbe,
         IStreamingCredentialRefreshPolicy,
         ILlmCatalogCapabilities
@@ -249,10 +248,14 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
 
             ParsedClaudeLine parsed;
             LlmUsageDeltaEvent? observation;
+            LlmAccountUsageSnapshot? accountObservation;
             try
             {
                 using JsonDocument document = JsonDocument.Parse(outputLine.Line);
                 observedModel = ReadObservedModel(document.RootElement, connection, credential) ?? observedModel;
+                accountObservation = LlmJson.GetString(document.RootElement, "type") == "rate_limit_event"
+                    && document.RootElement.TryGetProperty("rate_limit_info", out JsonElement info)
+                    ? ClaudeRateLimitEvent.Parse(info, DateTimeOffset.UtcNow) : null;
                 observation = usage.Observe(document.RootElement);
                 parsed = ParseClaudeLine(
                     document.RootElement,
@@ -269,6 +272,7 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
                 continue;
             }
 
+            if (accountObservation is not null) { yield return new AccountUsageObservedEvent(accountObservation); }
             if (observation is not null) { yield return observation; }
             if ((capabilities.SupportsReasoningText != InferenceSupport.Unsupported) && parsed.ReasoningDelta is { Length: > 0 } reasoning)
             { yield return new LlmReasoningDeltaEvent(reasoning, IsSummary: true); }
@@ -497,87 +501,6 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
         catch (JsonException)
         {
             return ExternalAuthenticationState.SignedOut;
-        }
-    }
-
-    public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(
-        LlmConnection connection,
-        CancellationToken cancellationToken = default)
-    {
-        LlmCredential? credential = ClaudeCliConfiguration.ValidateConnection(connection);
-        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken);
-        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(consumption.Token);
-        deadline.CancelAfter(TimeSpan.FromSeconds(30));
-        ClaudeCliProcessResult result;
-        try
-        {
-            result = await InvokeClaudeAsync(
-                ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint),
-                [
-                    "-p",
-                    "/usage",
-                    "--output-format", "json",
-                    "--no-session-persistence",
-                    "--setting-sources", "user"
-                ],
-                standardInput: null,
-                maxOutputTokens: null,
-                ClaudeCliEnvironment.AccountToken(credential),
-                deadline.Token);
-            consumption.Fence();
-        }
-        catch (ClaudeCliUnavailableException exception)
-        {
-            throw ClaudeCliConfiguration.Unavailable(exception);
-        }
-        catch (OperationCanceledException exception) when (!consumption.Token.IsCancellationRequested)
-        {
-            throw new LlmProviderException(
-                "Claude CLI account usage timed out after 30 seconds.",
-                Transport,
-                providerCode: "claude_cli_usage_timeout",
-                innerException: exception);
-        }
-
-        if (result.ExitCode != 0 || result.StandardInputError is not null)
-        {
-            throw CreateClaudeExitException(result, credential);
-        }
-
-        try
-        {
-            using JsonDocument document = JsonDocument.Parse(result.StandardOutput);
-            JsonElement root = document.RootElement;
-            if (root.TryGetProperty("is_error", out JsonElement error)
-                && error.ValueKind == JsonValueKind.True)
-            {
-                throw new LlmProviderException(
-                    "Claude CLI reported an account-usage error." + ClaudeCliConfiguration.ErrorDetail(root, credential),
-                    Transport,
-                    providerCode: "claude_cli_usage_error");
-            }
-
-            string summary = LlmJson.GetString(root, "result")
-                ?? throw new JsonException("The result property is missing.");
-            return consumption.Publish(ClaudeAccountUsageParser.Parse(
-                AccountUsageSanitizer.Sanitize(summary, credential),
-                DateTimeOffset.UtcNow));
-        }
-        catch (JsonException exception)
-        {
-            throw new LlmProviderException(
-                "Claude CLI returned invalid account-usage JSON.",
-                Transport,
-                providerCode: "claude_cli_invalid_account_usage",
-                innerException: exception);
-        }
-        catch (FormatException exception)
-        {
-            throw new LlmProviderException(
-                "Claude CLI returned an unrecognized account-usage report. " + exception.Message,
-                Transport,
-                providerCode: "claude_cli_invalid_account_usage",
-                innerException: exception);
         }
     }
 

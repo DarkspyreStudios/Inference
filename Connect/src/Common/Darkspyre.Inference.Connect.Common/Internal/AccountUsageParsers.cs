@@ -29,6 +29,8 @@ internal static partial class AccountUsageValues
         ? parsed : null;
     internal static LlmQuotaState State(decimal? remaining) => remaining switch
     { <= 0 => LlmQuotaState.Exhausted, > 0 => LlmQuotaState.Available, _ => LlmQuotaState.Unknown };
+    internal static LlmQuotaState ClaudeState(string? status) => status switch
+    { "rejected" => LlmQuotaState.Exhausted, "allowed" or "allowed_warning" => LlmQuotaState.Available, _ => LlmQuotaState.Unknown };
     internal static LlmAccountUsageSnapshot? Snapshot(DateTimeOffset observedAt, List<LlmQuotaWindow> quotas,
         List<LlmCreditBalance>? credits = null) => quotas.Count == 0 && (credits is null || credits.Count == 0)
         ? null : new() { RetrievedAt = observedAt, Quotas = quotas, Credits = credits ?? [] };
@@ -208,5 +210,77 @@ internal static class CodexRateLimitHeaders
             });
         }
         return AccountUsageValues.Snapshot(observedAt, quotas, credits);
+    }
+}
+
+internal static class ClaudeRateLimitEvent
+{
+    internal static LlmAccountUsageSnapshot? Parse(JsonElement root, DateTimeOffset observedAt)
+    {
+        if (root.ValueKind != JsonValueKind.Object) { return null; }
+        decimal? rawUtilization = AccountUsageValues.Number(root, "utilization");
+        double? fraction = rawUtilization is >= 0 and <= 1 ? (double)rawUtilization.Value : null;
+        decimal? rawReset = AccountUsageValues.Number(root, "resetsAt");
+        DateTimeOffset? reset = AccountUsageValues.Unix(rawReset);
+        string? status = AccountUsageValues.String(root, "status");
+        string? type = AccountUsageValues.String(root, "rateLimitType");
+        (string id, string name) = type switch
+        {
+            "five_hour" => ("five_hour", "5-hour limit"),
+            "seven_day" => ("seven_day", "7-day limit"),
+            "seven_day_opus" => ("seven_day_opus", "7-day Opus limit"),
+            "seven_day_sonnet" => ("seven_day_sonnet", "7-day Sonnet limit"),
+            "seven_day_overage_included" => ("seven_day_overage_included", "7-day limit (overage included)"),
+            "overage" => ("overage", "Overage"),
+            _ => ("current", "Current limit")
+        };
+        var quotas = new List<LlmQuotaWindow>();
+        if (fraction is not null || reset is not null || AccountUsageValues.ClaudeState(status) != LlmQuotaState.Unknown)
+        {
+            quotas.Add(new()
+            {
+                Id = id,
+                DisplayName = name,
+                UsedFraction = fraction,
+                RemainingFraction = fraction is null ? null : 1 - fraction,
+                ResetsAt = reset,
+                State = AccountUsageValues.ClaudeState(status),
+                Observation = new()
+                {
+                    ObservedAt = observedAt,
+                    Source = "claude-cli-rate-limit-event",
+                    RawUtilization = rawUtilization,
+                    UtilizationUnit = rawUtilization is null ? null : "fraction",
+                    RawReset = rawReset?.ToString(CultureInfo.InvariantCulture),
+                    ResetUnit = rawReset is null ? null : "unix-seconds"
+                }
+            });
+        }
+        string? overageStatus = AccountUsageValues.String(root, "overageStatus");
+        decimal? overageReset = AccountUsageValues.Number(root, "overageResetsAt");
+        if (AccountUsageValues.ClaudeState(overageStatus) != LlmQuotaState.Unknown || AccountUsageValues.Unix(overageReset) is not null)
+        {
+            LlmQuotaWindow? sameBucket = quotas.FirstOrDefault(quota => quota.Id == "overage");
+            quotas.RemoveAll(quota => quota.Id == "overage");
+            quotas.Add(new()
+            {
+                Id = "overage",
+                DisplayName = "Overage",
+                State = AccountUsageValues.ClaudeState(overageStatus),
+                UsedFraction = sameBucket?.UsedFraction,
+                RemainingFraction = sameBucket?.RemainingFraction,
+                ResetsAt = AccountUsageValues.Unix(overageReset) ?? sameBucket?.ResetsAt,
+                Observation = new()
+                {
+                    ObservedAt = observedAt,
+                    Source = "claude-cli-rate-limit-event",
+                    RawUtilization = sameBucket?.Observation?.RawUtilization,
+                    UtilizationUnit = sameBucket?.Observation?.UtilizationUnit,
+                    RawReset = overageReset?.ToString(CultureInfo.InvariantCulture) ?? sameBucket?.Observation?.RawReset,
+                    ResetUnit = overageReset is null ? sameBucket?.Observation?.ResetUnit : "unix-seconds"
+                }
+            });
+        }
+        return AccountUsageValues.Snapshot(observedAt, quotas);
     }
 }

@@ -696,7 +696,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
     /// the quota windows the connection's own responses reported, as <see cref="GetObservedAccountUsageAsync"/> returns
     /// them. Throws <see cref="NotSupportedException"/> when the connection does not expose account usage.
     /// </summary>
-    /// <gotcha>A connection whose adapter has no account-usage read throws
+    /// <gotcha>A connection whose adapter has no account-usage read, such as the Claude CLI, throws
     /// <see cref="LlmProviderException"/> with provider code <c>account_usage_not_observed</c> until one of its turns
     /// has reported a quota.</gotcha>
     public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(

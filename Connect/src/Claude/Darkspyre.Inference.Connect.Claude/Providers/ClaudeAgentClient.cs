@@ -1425,6 +1425,11 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                 string? parent = OptionalString(root, "parent_tool_use_id");
                 switch (OptionalString(root, "type"))
                 {
+                    case "rate_limit_event":
+                        if (root.TryGetProperty("rate_limit_info", out JsonElement rateLimit)
+                            && ClaudeRateLimitEvent.Parse(rateLimit, DateTimeOffset.UtcNow) is { } observed)
+                        { _connection.AccountUsageObservationBinding?.Record(observed); }
+                        break;
                     case "control_response":
                         CompleteControlRequest(root);
                         break;

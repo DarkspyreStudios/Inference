@@ -157,148 +157,30 @@ public sealed class ClaudeCliLlmClientTests
         Assert.DoesNotContain("catalog-secret", failure.ToString(), StringComparison.Ordinal);
     }
 
-    /// <summary>The CLI report supplies subscription quotas, not local activity percentages.</summary>
     [Fact]
-    public async Task AccountUsageParsesTheRealCliReport()
+    public async Task AccountUsageIsTheQuotaATurnReportedWithoutRunningTheCliAgain()
     {
-        using JsonDocument report = JsonDocument.Parse(await ReadUsageFixtureAsync());
-        LlmAccountUsageSnapshot usage = ClaudeAccountUsageParser.Parse(
-            report.RootElement.GetProperty("result").GetString()!,
-            new DateTimeOffset(2026, 10, 20, 22, 0, 0, TimeSpan.Zero));
-
-        Assert.Collection(usage.Quotas,
-            session =>
-            {
-                Assert.Equal("Current session", session.DisplayName);
-                Assert.Null(session.MeterId);
-                Assert.Equal(TimeSpan.FromHours(5), session.WindowDuration);
-                Assert.Equal(0.13, session.UsedFraction);
-                Assert.Equal(0.87, session.RemainingFraction);
-                Assert.Equal(new DateTimeOffset(2026, 10, 21, 2, 29, 0, TimeSpan.Zero), session.ResetsAt);
-            },
-            weekly =>
-            {
-                Assert.Equal("Current week (all models)", weekly.DisplayName);
-                Assert.Null(weekly.MeterId);
-                Assert.Equal(TimeSpan.FromDays(7), weekly.WindowDuration);
-                Assert.Equal(0.14, weekly.UsedFraction);
-                Assert.Equal(0.86, weekly.RemainingFraction);
-                Assert.Equal(new DateTimeOffset(2026, 10, 26, 9, 59, 0, TimeSpan.Zero), weekly.ResetsAt);
-            },
-            model =>
-            {
-                Assert.Equal("Current week (Fable)", model.DisplayName);
-                Assert.Equal("Fable", model.MeterId);
-                Assert.Equal(TimeSpan.FromDays(7), model.WindowDuration);
-                Assert.Equal(0, model.UsedFraction);
-                Assert.Equal(1, model.RemainingFraction);
-                Assert.Equal(new DateTimeOffset(2026, 10, 26, 10, 0, 0, TimeSpan.Zero), model.ResetsAt);
-            });
-        Assert.All(usage.Quotas, quota => Assert.Equal(LlmQuotaState.Available, quota.State));
-        Assert.Empty(usage.Metrics);
-    }
-
-    private static Task<string> ReadUsageFixtureAsync() => File.ReadAllTextAsync(
-        Path.Combine(AppContext.BaseDirectory, "Fixtures", "claude-usage-2.1.302.json"));
-
-    /// <summary>Usage reads work before a turn and select the connection's account without model discovery.</summary>
-    [Theory]
-    [InlineData(null)]
-    [InlineData("account-token")]
-    public async Task AccountUsageReadsTheCliThroughTheFacade(string? accountToken)
-    {
-        var runner = new RecordingRunner(new(0, await ReadUsageFixtureAsync(), string.Empty));
+        var runner = new RecordingRunner(new(0,
+            """{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour","utilization":0.42,"resetsAt":1900000000}}"""
+            + "\n"
+            + """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
+            string.Empty));
         using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
-        LlmConnection connection = CliConnection() with
-        {
-            Credential = accountToken is null ? null
-                : new LlmCredential { OAuth = new() { AccessToken = accountToken } }.Serialize()
-        };
-        await using var service = new LlmProviderService(new ResourcePreparationTests.Source(connection), [client]);
+        var client = new ClaudeCliLlmClient(http, runner, new CatalogProcess());
+        await using var service = new LlmProviderService(new ResourcePreparationTests.Source(CliConnection()), [client]);
 
+        LlmProviderException none = await Assert.ThrowsAsync<LlmProviderException>(() => service.GetAccountUsageAsync("connection"));
+        Assert.Equal("account_usage_not_observed", none.ProviderCode);
+
+        await ReadAllAsync(service.StreamAsync("connection",
+            new() { ModelId = "cli-returned-alias", Messages = [new("user", "test")] }));
         LlmAccountUsageSnapshot usage = await service.GetAccountUsageAsync("connection");
 
-        Assert.Equal(3, usage.Quotas.Count);
-        Assert.Null(await service.GetObservedAccountUsageAsync("connection"));
-        ClaudeCliInvocation invocation = Assert.Single(runner.Invocations);
-        Assert.Equal("-p /usage --output-format json --no-session-persistence --setting-sources user",
-            string.Join(' ', invocation.Arguments));
-        Assert.Equal(accountToken, invocation.AccountToken);
-        Assert.Null(invocation.StandardInput);
-        Assert.Null(invocation.MaxOutputTokens);
-        Assert.False(Directory.Exists(invocation.WorkingDirectory));
-    }
-
-    /// <summary>A local-activity-only report fails clearly without inventing subscription quotas.</summary>
-    [Fact]
-    public async Task AccountUsageRejectsAnActivityOnlyReport()
-    {
-        JsonObject report = JsonNode.Parse(await ReadUsageFixtureAsync())!.AsObject();
-        string summary = report["result"]!.GetValue<string>();
-        report["result"] = "\n\n" + summary[summary.IndexOf("What's contributing", StringComparison.Ordinal)..]
-            .Replace("What's contributing", "account-token What's contributing", StringComparison.Ordinal);
-        var runner = new RecordingRunner(new(0, report.ToJsonString(), string.Empty));
-        using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
-
-        LlmConnection connection = CliConnection() with
-        { Credential = new LlmCredential { OAuth = new() { AccessToken = "account-token" } }.Serialize() };
-        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => client.GetAccountUsageAsync(connection));
-
-        Assert.Equal("claude_cli_invalid_account_usage", failure.ProviderCode);
-        Assert.Contains("Claude /usage reported no quota windows.", failure.Message, StringComparison.Ordinal);
-        Assert.Contains("What's contributing to your limits usage?", failure.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("account-token", failure.ToString(), StringComparison.Ordinal);
-    }
-
-    /// <summary>Signed-out or denied usage retains the CLI explanation without disclosing credentials.</summary>
-    [Fact]
-    public async Task AccountUsageFailurePreservesSanitizedResultDetail()
-    {
-        const string detail = """{"refresh_token":"usage-secret","detail":"Account usage is unavailable for this organization. account-token"}""";
-        var runner = new RecordingRunner(new(0,
-            new JsonObject { ["is_error"] = true, ["result"] = detail }.ToJsonString(), string.Empty));
-        using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
-        LlmConnection connection = CliConnection() with
-        { Credential = new LlmCredential { OAuth = new() { AccessToken = "account-token" } }.Serialize() };
-
-        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => client.GetAccountUsageAsync(connection));
-
-        Assert.Equal("claude_cli_usage_error", failure.ProviderCode);
-        Assert.Contains("Account usage is unavailable for this organization.", failure.Message, StringComparison.Ordinal);
-        Assert.DoesNotContain("usage-secret", failure.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain("account-token", failure.ToString(), StringComparison.Ordinal);
-    }
-
-    /// <summary>A missing CLI reports the adapter's unavailable error without another process or a turn.</summary>
-    [Fact]
-    public async Task AccountUsageReportsAMissingCli()
-    {
-        var runner = new RecordingRunner(new(0, string.Empty, string.Empty))
-        { OnInvocation = invocation => throw new ClaudeCliUnavailableException(invocation.Executable, new FileNotFoundException()) };
-        using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
-
-        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => client.GetAccountUsageAsync(CliConnection()));
-
-        Assert.Equal("claude_cli_not_found", failure.ProviderCode);
+        LlmQuotaWindow quota = Assert.Single(usage.Quotas);
+        Assert.Equal("five_hour", quota.Id);
+        Assert.Equal(0.42, quota.UsedFraction!.Value, 3);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1900000000), quota.ResetsAt);
         Assert.Single(runner.Invocations);
-    }
-
-    /// <summary>An unresponsive usage process cannot hold a startup caller indefinitely.</summary>
-    [Fact]
-    public async Task AccountUsageReportsItsDeadline()
-    {
-        var runner = new RecordingRunner(new(0, string.Empty, string.Empty)) { WaitUntilCancelled = true };
-        using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
-
-        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => client.GetAccountUsageAsync(CliConnection()));
-
-        Assert.Equal("claude_cli_usage_timeout", failure.ProviderCode);
-        Assert.False(Directory.Exists(Assert.Single(runner.Invocations).WorkingDirectory));
     }
 
     [Fact]
@@ -461,16 +343,14 @@ public sealed class ClaudeCliLlmClientTests
     {
         public List<ClaudeCliInvocation> Invocations { get; } = [];
         public Action<ClaudeCliInvocation>? OnInvocation { get; init; }
-        public bool WaitUntilCancelled { get; init; }
 
-        public async Task<ClaudeCliProcessResult> RunAsync(
+        public Task<ClaudeCliProcessResult> RunAsync(
             ClaudeCliInvocation invocation,
             CancellationToken cancellationToken = default)
         {
             Invocations.Add(invocation);
             OnInvocation?.Invoke(invocation);
-            if (WaitUntilCancelled) await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
-            return result;
+            return Task.FromResult(result);
         }
     }
 
