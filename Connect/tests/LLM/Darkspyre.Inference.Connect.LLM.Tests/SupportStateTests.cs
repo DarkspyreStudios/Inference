@@ -269,7 +269,8 @@ public sealed class SupportStateTests
         string reflected = $"{apiKey}-{selected}-{borrowed}";
         using var handler = new TokenizerHandler(malformedSuccess ? "{}" :
             JsonSerializer.Serialize(new { error = new { code = reflected, message = reflected } }),
-            malformedSuccess ? HttpStatusCode.OK : HttpStatusCode.BadRequest) { RequestId = reflected };
+            malformedSuccess ? HttpStatusCode.OK : HttpStatusCode.BadRequest)
+        { RequestId = reflected };
         using var http = new HttpClient(handler);
         http.DefaultRequestHeaders.Authorization = new("Bearer", borrowed);
         var connection = TokenizerConnection() with
@@ -332,7 +333,9 @@ public sealed class SupportStateTests
 
     private static LlmConnection TokenizerConnection() => new()
     {
-        Version = "1", Transport = LlmTransport.OpenAiResponses, Endpoint = "http://native.test/v1",
+        Version = "1",
+        Transport = LlmTransport.OpenAiResponses,
+        Endpoint = "http://native.test/v1",
         LlamaCppTokenizationEndpoint = new Uri("http://native.test/tokenize")
     };
 

@@ -133,8 +133,11 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
         // Text and model identity are opaque data. Changing either changes the provider's tokens.
         var payload = new JsonObject
         {
-            ["model"] = modelId, ["content"] = text,
-            ["add_special"] = false, ["parse_special"] = false, ["with_pieces"] = true
+            ["model"] = modelId,
+            ["content"] = text,
+            ["add_special"] = false,
+            ["parse_special"] = false,
+            ["with_pieces"] = true
         };
         request.Content = new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json");
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
