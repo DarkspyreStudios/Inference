@@ -1237,8 +1237,10 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
     private static readonly HttpClient Http = new();
 
     private static ClaudeAgentClient Client(IClaudeCliSessionProcessFactory factory, Summaries? summaries = null) =>
-        new(factory, new ClaudeCliLlmClient(Http, summaries ?? new Summaries(), factory), new LearnedModelContext(),
-            NullLogger<ClaudeAgentClient>.Instance);
+        new(factory, new ClaudeCliLlmClient(Http, summaries ?? new Summaries(), factory, NoRateLimitLog), new LearnedModelContext(),
+            NoRateLimitLog, NullLogger<ClaudeAgentClient>.Instance);
+
+    private static readonly ClaudeRateLimitLog NoRateLimitLog = new(NullLogger<ClaudeRateLimitLog>.Instance);
 
     /// <summary>Starts the given processes in order; the last one serves every later start.</summary>
     private sealed class Factory(params IClaudeCliSessionProcess[] processes) : IClaudeCliSessionProcessFactory

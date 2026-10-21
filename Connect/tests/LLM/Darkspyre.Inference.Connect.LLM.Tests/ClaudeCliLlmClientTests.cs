@@ -8,6 +8,7 @@ using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -21,7 +22,7 @@ public sealed class ClaudeCliLlmClientTests
             """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
             string.Empty));
         using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses(), RateLimits());
 
         await ReadAllAsync(client.StreamAsync(CliConnection(),
             new() { ModelId = "claude-test", Messages = [new("user", "test")] }));
@@ -44,7 +45,7 @@ public sealed class ClaudeCliLlmClientTests
             )
         };
         using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, new RecordingRunner(new(0, string.Empty, string.Empty)), process);
+        var client = new ClaudeCliLlmClient(http, new RecordingRunner(new(0, string.Empty, string.Empty)), process, RateLimits());
         LlmConnection connection = CliConnection() with
         { CapabilityOverrides = new() { ReasoningLevels = ClaudeCliLlmClient.ReasoningLevels } };
         await using var service = new LlmProviderService(new ResourcePreparationTests.Source(connection), [client]);
@@ -62,7 +63,7 @@ public sealed class ClaudeCliLlmClientTests
             """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
             string.Empty));
         using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses(), RateLimits());
         LlmConnection connection = CliConnection() with
         {
             ModelCapabilityOverrides = new Dictionary<string, LlmCapabilityOverrides>
@@ -91,7 +92,7 @@ public sealed class ClaudeCliLlmClientTests
         var runner = new RecordingRunner(new(0,
             """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""", string.Empty));
         using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses(), RateLimits());
 
         await ReadAllAsync(client.StreamAsync(CliConnection(), new LlmChatRequest
         { ModelId = "unrecognized-model", Messages = [new("user", "test")], ReasoningLevel = LlmReasoningLevel.None }));
@@ -113,7 +114,7 @@ public sealed class ClaudeCliLlmClientTests
         }.ToJsonString();
         var runner = new RecordingRunner(new(0, output, string.Empty));
         using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses(), RateLimits());
         LlmConnection connection = CliConnection() with
         {
             Credential = new LlmCredential { OAuth = new() { AccessToken = "catalog-secret" } }.Serialize()
@@ -142,7 +143,7 @@ public sealed class ClaudeCliLlmClientTests
         }.ToJsonString();
         var runner = new RecordingRunner(new(1, output, "Request rejected (429) for auth catalog-secret"));
         using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses(), RateLimits());
         LlmConnection connection = CliConnection() with
         {
             Credential = new LlmCredential { OAuth = new() { AccessToken = "catalog-secret" } }.Serialize()
@@ -166,7 +167,7 @@ public sealed class ClaudeCliLlmClientTests
             + """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
             string.Empty));
         using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new CatalogProcess());
+        var client = new ClaudeCliLlmClient(http, runner, new CatalogProcess(), RateLimits());
         await using var service = new LlmProviderService(new ResourcePreparationTests.Source(CliConnection()), [client]);
 
         LlmProviderException none = await Assert.ThrowsAsync<LlmProviderException>(() => service.GetAccountUsageAsync("connection"));
@@ -184,6 +185,52 @@ public sealed class ClaudeCliLlmClientTests
     }
 
     [Fact]
+    public async Task ARateLimitEventIsLoggedOnceAndARepeatIsNot()
+    {
+        const string info = """{"status":"allowed","rateLimitType":"five_hour","resetsAt":1900000000,"isUsingOverage":false}""";
+        var runner = new RecordingRunner(new(0,
+            $$"""{"type":"rate_limit_event","rate_limit_info":{{info}},"session_id":"private-session"}"""
+            + "\n"
+            + """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
+            string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var logger = new RecordingLogger();
+        var client = new ClaudeCliLlmClient(http, runner, new CatalogProcess(), new ClaudeRateLimitLog(logger));
+        await using var service = new LlmProviderService(new ResourcePreparationTests.Source(CliConnection()), [client]);
+
+        for (int turn = 0; turn < 2; turn++)
+        {
+            await ReadAllAsync(service.StreamAsync("connection",
+                new() { ModelId = "cli-returned-alias", Messages = [new("user", "test")] }));
+        }
+
+        (LogLevel level, string message) = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Information, level);
+        Assert.Equal($"Claude rate_limit_event on connection (five_hour): {info}", message);
+    }
+
+    private sealed class RecordingLogger : ILogger<ClaudeRateLimitLog>
+    {
+        private readonly Lock _gate = new();
+        private readonly List<(LogLevel, string)> _entries = [];
+
+        internal IReadOnlyList<(LogLevel Level, string Message)> Entries
+        {
+            get { lock (_gate) return [.. _entries]; }
+        }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            lock (_gate) _entries.Add((logLevel, formatter(state, exception)));
+        }
+    }
+
+    private static ClaudeRateLimitLog RateLimits() => new(NullLogger<ClaudeRateLimitLog>.Instance);
+
+    [Fact]
     public async Task CatalogOAuthProtocolFailureRedactsTheActualHttpHeadersWithoutLaunchingTheCli()
     {
         using var handler = new UnexpectedHttpHandler(request =>
@@ -197,7 +244,7 @@ public sealed class ClaudeCliLlmClientTests
         using var http = new HttpClient(handler);
         http.DefaultRequestHeaders.Add("X-Trace", "header-value");
         var runner = new RecordingRunner(new(0, string.Empty, string.Empty));
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses(), RateLimits());
         LlmConnection connection = CliConnection() with
         { Credential = new LlmCredential { OAuth = new() { AccessToken = "test-token" } }.Serialize() };
 
@@ -215,7 +262,7 @@ public sealed class ClaudeCliLlmClientTests
         var process = new CatalogProcess();
         var runner = new RecordingRunner(new(0, string.Empty, string.Empty));
         using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, process);
+        var client = new ClaudeCliLlmClient(http, runner, process, RateLimits());
 
         IReadOnlyList<LlmModel> models = await client.ListModelsAsync(CliConnection());
 
@@ -235,7 +282,7 @@ public sealed class ClaudeCliLlmClientTests
             """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
             string.Empty));
         using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses(), RateLimits());
         LlmConnection connection = CliConnection() with
         {
             Credential = new LlmCredential { OAuth = new() { AccessToken = "account-token" } }.Serialize()
@@ -262,7 +309,7 @@ public sealed class ClaudeCliLlmClientTests
             """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
             string.Empty));
         using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses(), RateLimits());
 
         await ReadAllAsync(client.StreamAsync(CliConnection(), new() { ModelId = "claude-test", Messages = [new("user", "test")] }));
 
@@ -303,7 +350,7 @@ public sealed class ClaudeCliLlmClientTests
     public async Task OnlyAFirstPartySignInIsSignedIn(string output, string expected)
     {
         using var http = new HttpClient(new UnexpectedHttpHandler());
-        var client = new ClaudeCliLlmClient(http, new RecordingRunner(new(0, output, string.Empty)), new NoSessionProcesses());
+        var client = new ClaudeCliLlmClient(http, new RecordingRunner(new(0, output, string.Empty)), new NoSessionProcesses(), RateLimits());
 
         Assert.Equal(Enum.Parse<ExternalAuthenticationState>(expected), await client.CheckAuthenticationAsync(CliConnection()));
     }
@@ -316,7 +363,7 @@ public sealed class ClaudeCliLlmClientTests
         {
             OnInvocation = invocation => throw new ClaudeCliUnavailableException(invocation.Executable, new FileNotFoundException())
         };
-        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses());
+        var client = new ClaudeCliLlmClient(http, runner, new NoSessionProcesses(), RateLimits());
 
         Assert.Equal(ExternalAuthenticationState.NotInstalled, await client.CheckAuthenticationAsync(CliConnection()));
     }

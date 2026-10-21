@@ -14,6 +14,7 @@ internal sealed class ClaudeConnectProviderAttribute : LlmConnectProviderAttribu
         services.AddSingleton(ClaudeDefinition.Value);
         services.AddInferenceHttpClient<ClaudeCliLlmClient>();
         services.AddSingleton<ClaudeCliExits>();
+        services.AddSingleton<ClaudeRateLimitLog>();
         services.AddSingleton<IClaudeCliRunner, ClaudeCliProcessRunner>();
         services.AddSingleton<IClaudeCliSessionProcessFactory, ClaudeCliSessionProcessFactory>();
         services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<ClaudeCliLlmClient>());

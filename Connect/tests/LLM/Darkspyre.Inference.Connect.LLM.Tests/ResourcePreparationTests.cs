@@ -15,7 +15,8 @@ public sealed class ResourcePreparationTests
             [(reference, "reference.txt", "reference text"u8.ToArray())]);
         var connection = new LlmConnection { Version = "claude-cli", Transport = LlmTransport.AnthropicClaudeCli, Endpoint = "claude" };
         using var http = new HttpClient(new NoHttp());
-        var estimator = new ClaudeCliLlmClient(http, new NoRuns(), new NoSessionProcesses());
+        var estimator = new ClaudeCliLlmClient(http, new NoRuns(), new NoSessionProcesses(),
+            new ClaudeRateLimitLog(Microsoft.Extensions.Logging.Abstractions.NullLogger<ClaudeRateLimitLog>.Instance));
         var request = new LlmChatRequest
         {
             ModelId = "claude-sonnet-4-6",

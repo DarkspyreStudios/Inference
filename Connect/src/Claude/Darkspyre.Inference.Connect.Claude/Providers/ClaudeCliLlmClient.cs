@@ -14,7 +14,8 @@ using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Chat-style adapter over the separately authenticated official Claude CLI.</summary>
-internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runner, IClaudeCliSessionProcessFactory processFactory)
+internal sealed class ClaudeCliLlmClient(
+    HttpClient http, IClaudeCliRunner runner, IClaudeCliSessionProcessFactory processFactory, ClaudeRateLimitLog rateLimits)
     : LlmClientBase(http),
         ILlmContextEstimator,
         IExternalLlmAuthenticationProbe,
@@ -253,9 +254,13 @@ internal sealed class ClaudeCliLlmClient(HttpClient http, IClaudeCliRunner runne
             {
                 using JsonDocument document = JsonDocument.Parse(outputLine.Line);
                 observedModel = ReadObservedModel(document.RootElement, connection, credential) ?? observedModel;
-                accountObservation = LlmJson.GetString(document.RootElement, "type") == "rate_limit_event"
-                    && document.RootElement.TryGetProperty("rate_limit_info", out JsonElement info)
-                    ? ClaudeRateLimitEvent.Parse(info, DateTimeOffset.UtcNow) : null;
+                accountObservation = null;
+                if (LlmJson.GetString(document.RootElement, "type") == "rate_limit_event"
+                    && document.RootElement.TryGetProperty("rate_limit_info", out JsonElement info))
+                {
+                    rateLimits.Record(connection, info);
+                    accountObservation = ClaudeRateLimitEvent.Parse(info, DateTimeOffset.UtcNow);
+                }
                 observation = usage.Observe(document.RootElement);
                 parsed = ParseClaudeLine(
                     document.RootElement,

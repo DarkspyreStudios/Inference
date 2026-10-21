@@ -4881,6 +4881,8 @@ Claude subscription account usage is the quota the connection's own turns report
 lanes read each `rate_limit_event` (`ClaudeRateLimitEvent`): one window per event (the 5-hour,
 7-day, 7-day Opus or 7-day Sonnet limit, or overage) with its used fraction when the CLI sends one,
 its reset time and its status. The observation store keeps the latest reading of each window.
+`ClaudeRateLimitLog` also logs each event's `rate_limit_info` object as received, at Information, once per
+connection and `rateLimitType` until the object changes. Nothing else of the stream is logged.
 The adapter has no account-usage read of its own, so `GetAccountUsageAsync` returns those windows and
 reports `account_usage_not_observed` until a turn has reported one. The CLI's `/usage` command is not
 run: from Claude CLI 2.1.302 its headless report carries no quota windows.

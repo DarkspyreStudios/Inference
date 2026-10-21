@@ -498,6 +498,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
                 && ProviderContinuationStateCodec.Scope(persisted) == ProviderContinuationStateCodec.Scope(connection)
                 ? observationReservation.Bind(persisted) : null;
         }
+        // The adapter names the connection in its logs through the binding; the service alone records chat observations.
+        connection = connection with { AccountUsageObservationBinding = observationBinding };
         if (client is ILlmConnectionPreparation preparation)
         {
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);

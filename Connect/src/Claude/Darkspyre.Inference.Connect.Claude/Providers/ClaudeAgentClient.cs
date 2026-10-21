@@ -19,7 +19,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// <see cref="ClaudeConversation"/>, which owns the saved history and runs each CLI process as an inner session.
 /// </summary>
 internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory processFactory,
-    ClaudeCliLlmClient chat, LearnedModelContext learned, ILogger<ClaudeAgentClient> logger) : ILlmAgentResumeClient
+    ClaudeCliLlmClient chat, LearnedModelContext learned, ClaudeRateLimitLog rateLimits, ILogger<ClaudeAgentClient> logger) : ILlmAgentResumeClient
 {
     private const string McpServerName = "darkspyre-inference-connect";
 
@@ -186,7 +186,8 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             connection,
             record,
             steerSettled,
-            beforeResults);
+            beforeResults,
+            rateLimits);
         try
         {
             session.Start();
@@ -296,6 +297,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         // The last model acknowledged by the CLI; _route guards reads and changes.
         private string? _selectedModelId;
         private LlmConnection _connection;
+        private readonly ClaudeRateLimitLog _rateLimits;
         private readonly HashSet<string> _accountedCalls = new(StringComparer.Ordinal);
         private readonly HashSet<string> _completedResults = new(StringComparer.Ordinal);
         // The host tools the CLI reaches through its in-process MCP server.
@@ -360,8 +362,10 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             LlmConnection connection,
             Action<LlmAgentEvent> record,
             Action<string, bool> steerSettled,
-            Func<CancellationToken, ValueTask<bool>> beforeResults)
+            Func<CancellationToken, ValueTask<bool>> beforeResults,
+            ClaudeRateLimitLog rateLimits)
         {
+            _rateLimits = rateLimits;
             _process = process;
             _record = record;
             _steerSettled = steerSettled;
@@ -1426,9 +1430,12 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                 switch (OptionalString(root, "type"))
                 {
                     case "rate_limit_event":
-                        if (root.TryGetProperty("rate_limit_info", out JsonElement rateLimit)
-                            && ClaudeRateLimitEvent.Parse(rateLimit, DateTimeOffset.UtcNow) is { } observed)
-                        { _connection.AccountUsageObservationBinding?.Record(observed); }
+                        if (root.TryGetProperty("rate_limit_info", out JsonElement rateLimit))
+                        {
+                            _rateLimits.Record(_connection, rateLimit);
+                            if (ClaudeRateLimitEvent.Parse(rateLimit, DateTimeOffset.UtcNow) is { } observed)
+                            { _connection.AccountUsageObservationBinding?.Record(observed); }
+                        }
                         break;
                     case "control_response":
                         CompleteControlRequest(root);
