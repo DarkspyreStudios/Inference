@@ -14,7 +14,11 @@ public enum TensorCapability
 /// <summary>Speech-to-text transcription.</summary>
     SpeechTranscription,
 /// <summary>Text embedding.</summary>
-    Embedding
+    Embedding,
+    /// <summary>Text recognition in images.</summary>
+    TextRecognition,
+    /// <summary>Decoding images and sampling video frames.</summary>
+    MediaDecoding
 }
 
 /// <summary>An execution backend a Tensor engine can run a model pack on.</summary>

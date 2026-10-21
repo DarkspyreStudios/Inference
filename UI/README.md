@@ -48,7 +48,12 @@ store, with the file count, size and licence and a **Show** button that calls th
 naming the missing file, with Download again and Delete download; or Not supported, with the
 status's `UnsupportedReason` as a line under the chip and the actions the status gives. A disabled
 card action shows its reason beside it. The card's buttons run through the manager like any other
-action, with the editor's progress and Cancel. A choice whose `SetupChoice.Install` is set shows a
+action, with the editor's progress and Cancel. Common's `SetupInstallActions.For` gives the card's
+actions for each state: **Download (<size>)**; **Download again** and **Delete download**; or
+**Delete download**, disabled with its reason while the item cannot be removed. The action ids are
+`SetupInstallActions.Download` and `SetupInstallActions.Remove`. A host that shows a local install
+outside the editor builds the public `SetupInstallStatusCard` from a `SetupInstallStatus` with those
+actions, and handles the two ids in its `run` callback. A choice whose `SetupChoice.Install` is set shows a
 chip for its `State`: "Installed", "Not downloaded" with its download size, or "Not supported".
 An Installed chip uses the success style with a check mark, a Not downloaded chip the warning style
 with a download arrow, and Files missing and Not supported chips the destructive style with no icon.

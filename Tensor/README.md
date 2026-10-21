@@ -394,7 +394,8 @@ its value only while the selected model is Installed (`SetupChoiceField.ShowValu
 selected model's `SetupInstallStatus` card. An Installed model offers **Delete download**, enabled only
 while the instance holds no model; otherwise its reason reads "Unload the model first." A NotDownloaded
 model offers **Download (<size>)**. A FilesMissing model names the missing file and offers **Download
-again** and **Delete download**. Download and Download again run the `download` action: register,
+again** and **Delete download**. Common's `SetupInstallActions.For` builds these actions, so every
+install card in a local store shows the same buttons. Download and Download again run the `download` action: register,
 install, verify and refresh; a FilesMissing pack is downloaded again in full. Delete download runs the
 `remove` action: it registers the definition, removes the pack's files and refreshes. The pack's
 contents, files and provenance fold away under "Model definition (what the pack contains, not whether
@@ -744,6 +745,12 @@ the one owner read by `TensorModelPackManager.GetDefinitionsAsync` and `GetRequi
 not a separate discovery cache.
 The host persists chosen definitions and reconstructs registrations after restart. Registration,
 installation and configuration Save remain separate operations.
+
+A definition's `TensorCapability` names the work its files serve: `Llm`, `Image`, `Decision`,
+`SpeechTranscription`, `Embedding`, `TextRecognition` or `MediaDecoding`. No Tensor engine loads a
+`TextRecognition` or `MediaDecoding` pack. A host that runs its own native engine installs that
+engine's files as a pack of one of these capabilities and receives their paths from the lease. New
+values are appended, so the number of an existing value never changes.
 
 Install progress includes per-artifact and overall byte counts, Completed/Failed/Cancelled terminal
 states, and `SupportsResume = InferenceSupport.Unsupported`. Duplicate installs serialize and verify existing artifacts.

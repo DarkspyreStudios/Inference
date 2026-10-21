@@ -214,30 +214,8 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
         TensorListedModel listed = SelectedListing() ?? new(selection, SetupInstallState.NotDownloaded, null, null);
         long size = selection.Artifacts.Sum(artifact => artifact.Length);
         bool valid = ValidateDraft().IsValid;
-        SetupActionDescriptor[] actions = listed.State switch
-        {
-            SetupInstallState.NotDownloaded =>
-            [
-                new("download", $"Download ({SetupByteSize.Format(size)})", SetupActionPurpose.Install,
-                    SetupSideEffect.Network | SetupSideEffect.Download, IsEnabled: valid)
-            ],
-            SetupInstallState.FilesMissing =>
-            [
-                new("download", "Download again", SetupActionPurpose.Install,
-                    SetupSideEffect.Network | SetupSideEffect.Download, IsEnabled: valid),
-                new("remove", "Delete download", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles, IsEnabled: true)
-            ],
-            SetupInstallState.NotSupported =>
-            [
-                new("remove", "Delete download", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles, IsEnabled: true)
-            ],
-            _ =>
-            [
-                new("remove", "Delete download", SetupActionPurpose.Remove, SetupSideEffect.DeleteFiles,
-                    IsEnabled: InstanceObservation?.Model is null,
-                    UnavailableReason: InstanceObservation?.Model is null ? null : "Unload the model first.")
-            ]
-        };
+        IReadOnlyList<SetupActionDescriptor> actions = SetupInstallActions.For(listed.State, size, valid,
+            InstanceObservation?.Model is null ? null : "Unload the model first.");
         return new(listed.State, selection.Key.ModelId, Listing.Store, selection.Artifacts.Count, size, selection.License,
             listed.MissingFile, listed.UnsupportedReason, actions);
     }
@@ -543,8 +521,8 @@ public sealed class TensorSettingsManager : InferenceSettingsManager<TensorSetti
             case "backend-check": return await CheckBackendAsync(settings, cancellationToken).ConfigureAwait(false);
             case "resolve": return await ResolveAsync(settings, progress, cancellationToken).ConfigureAwait(false);
             case "import": return await ImportAsync(settings, progress, cancellationToken).ConfigureAwait(false);
-            case "download": return await InstallAsync(settings, progress, cancellationToken).ConfigureAwait(false);
-            case "remove":
+            case SetupInstallActions.Download: return await InstallAsync(settings, progress, cancellationToken).ConfigureAwait(false);
+            case SetupInstallActions.Remove:
                 // An unreported saved model is not in the pack manager's catalog, and removal needs it there.
                 await _packs.RegisterAsync(settings.SelectedDefinition()!, cancellationToken).ConfigureAwait(false);
                 await _packs.RemoveAsync(settings.Model!, cancellationToken).ConfigureAwait(false);
