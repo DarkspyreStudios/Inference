@@ -159,10 +159,10 @@ public sealed class ClaudeCliLlmClientTests
     }
 
     [Fact]
-    public async Task AccountUsageIsTheQuotaATurnReportedWithoutRunningTheCliAgain()
+    public async Task AccountUsageIsEveryWindowATurnReportedWithoutRunningTheCliAgain()
     {
         var runner = new RecordingRunner(new(0,
-            """{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour","utilization":0.42,"resetsAt":1900000000}}"""
+            """{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","resetsAt":1792633200,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"org_level_disabled","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.13,"resetsAt":1792633200},"seven_day":{"utilization":0.34,"resetsAt":1793008800}}}}"""
             + "\n"
             + """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
             string.Empty));
@@ -177,10 +177,15 @@ public sealed class ClaudeCliLlmClientTests
             new() { ModelId = "cli-returned-alias", Messages = [new("user", "test")] }));
         LlmAccountUsageSnapshot usage = await service.GetAccountUsageAsync("connection");
 
-        LlmQuotaWindow quota = Assert.Single(usage.Quotas);
-        Assert.Equal("five_hour", quota.Id);
-        Assert.Equal(0.42, quota.UsedFraction!.Value, 3);
-        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1900000000), quota.ResetsAt);
+        LlmQuotaWindow fiveHour = Assert.Single(usage.Quotas, quota => quota.Id == "five_hour");
+        Assert.Equal(0.87, fiveHour.RemainingFraction!.Value, 3);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1792633200), fiveHour.ResetsAt);
+        Assert.Equal(LlmQuotaState.Available, fiveHour.State);
+        LlmQuotaWindow sevenDay = Assert.Single(usage.Quotas, quota => quota.Id == "seven_day");
+        Assert.Equal(0.66, sevenDay.RemainingFraction!.Value, 3);
+        Assert.Equal(DateTimeOffset.FromUnixTimeSeconds(1793008800), sevenDay.ResetsAt);
+        Assert.Equal(LlmQuotaState.Available, sevenDay.State);
+        Assert.Equal(LlmQuotaState.Exhausted, Assert.Single(usage.Quotas, quota => quota.Id == "overage").State);
         Assert.Single(runner.Invocations);
     }
 

@@ -218,44 +218,22 @@ internal static class ClaudeRateLimitEvent
     internal static LlmAccountUsageSnapshot? Parse(JsonElement root, DateTimeOffset observedAt)
     {
         if (root.ValueKind != JsonValueKind.Object) { return null; }
-        decimal? rawUtilization = AccountUsageValues.Number(root, "utilization");
-        double? fraction = rawUtilization is >= 0 and <= 1 ? (double)rawUtilization.Value : null;
-        decimal? rawReset = AccountUsageValues.Number(root, "resetsAt");
-        DateTimeOffset? reset = AccountUsageValues.Unix(rawReset);
         string? status = AccountUsageValues.String(root, "status");
         string? type = AccountUsageValues.String(root, "rateLimitType");
-        (string id, string name) = type switch
-        {
-            "five_hour" => ("five_hour", "5-hour limit"),
-            "seven_day" => ("seven_day", "7-day limit"),
-            "seven_day_opus" => ("seven_day_opus", "7-day Opus limit"),
-            "seven_day_sonnet" => ("seven_day_sonnet", "7-day Sonnet limit"),
-            "seven_day_overage_included" => ("seven_day_overage_included", "7-day limit (overage included)"),
-            "overage" => ("overage", "Overage"),
-            _ => ("current", "Current limit")
-        };
+        string id = type ?? "current";
         var quotas = new List<LlmQuotaWindow>();
-        if (fraction is not null || reset is not null || AccountUsageValues.ClaudeState(status) != LlmQuotaState.Unknown)
+        if (root.TryGetProperty("unifiedWindows", out JsonElement windows) && windows.ValueKind == JsonValueKind.Object)
         {
-            quotas.Add(new()
+            foreach (JsonProperty window in windows.EnumerateObject())
             {
-                Id = id,
-                DisplayName = name,
-                UsedFraction = fraction,
-                RemainingFraction = fraction is null ? null : 1 - fraction,
-                ResetsAt = reset,
-                State = AccountUsageValues.ClaudeState(status),
-                Observation = new()
-                {
-                    ObservedAt = observedAt,
-                    Source = "claude-cli-rate-limit-event",
-                    RawUtilization = rawUtilization,
-                    UtilizationUnit = rawUtilization is null ? null : "fraction",
-                    RawReset = rawReset?.ToString(CultureInfo.InvariantCulture),
-                    ResetUnit = rawReset is null ? null : "unix-seconds"
-                }
-            });
+                if (Window(window.Name, window.Name == id ? status : null, AccountUsageValues.Number(window.Value, "utilization"),
+                        AccountUsageValues.Number(window.Value, "resetsAt"), observedAt) is { } quota)
+                { quotas.Add(quota); }
+            }
         }
+        if (quotas.All(quota => quota.Id != id)
+            && Window(id, status, null, AccountUsageValues.Number(root, "resetsAt"), observedAt) is { } reported)
+        { quotas.Add(reported); }
         string? overageStatus = AccountUsageValues.String(root, "overageStatus");
         decimal? overageReset = AccountUsageValues.Number(root, "overageResetsAt");
         if (AccountUsageValues.ClaudeState(overageStatus) != LlmQuotaState.Unknown || AccountUsageValues.Unix(overageReset) is not null)
@@ -282,5 +260,43 @@ internal static class ClaudeRateLimitEvent
             });
         }
         return AccountUsageValues.Snapshot(observedAt, quotas);
+    }
+
+    private static LlmQuotaWindow? Window(string id, string? status, decimal? rawUtilization, decimal? rawReset, DateTimeOffset observedAt)
+    {
+        double? fraction = rawUtilization is >= 0 and <= 1 ? (double)rawUtilization.Value : null;
+        DateTimeOffset? reset = AccountUsageValues.Unix(rawReset);
+        LlmQuotaState state = status is null
+            ? fraction is null ? LlmQuotaState.Unknown : fraction >= 1 ? LlmQuotaState.Exhausted : LlmQuotaState.Available
+            : AccountUsageValues.ClaudeState(status);
+        if (fraction is null && reset is null && state == LlmQuotaState.Unknown) { return null; }
+        return new()
+        {
+            Id = id,
+            DisplayName = id switch
+            {
+                "five_hour" => "5-hour limit",
+                "seven_day" => "7-day limit",
+                "seven_day_opus" => "7-day Opus limit",
+                "seven_day_sonnet" => "7-day Sonnet limit",
+                "seven_day_overage_included" => "7-day limit (overage included)",
+                "overage" => "Overage",
+                "current" => "Current limit",
+                _ => id.Replace('_', ' ')
+            },
+            UsedFraction = fraction,
+            RemainingFraction = fraction is null ? null : 1 - fraction,
+            ResetsAt = reset,
+            State = state,
+            Observation = new()
+            {
+                ObservedAt = observedAt,
+                Source = "claude-cli-rate-limit-event",
+                RawUtilization = rawUtilization,
+                UtilizationUnit = rawUtilization is null ? null : "fraction",
+                RawReset = rawReset?.ToString(CultureInfo.InvariantCulture),
+                ResetUnit = rawReset is null ? null : "unix-seconds"
+            }
+        };
     }
 }

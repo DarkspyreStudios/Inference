@@ -4878,9 +4878,13 @@ The installed CLI 2.1.289 discovery path is qualified through the public Connect
 choices. Other versions, refresh, generation and target-platform paths remain separate qualifications.
 
 Claude subscription account usage is the quota the connection's own turns report. Both Claude CLI
-lanes read each `rate_limit_event` (`ClaudeRateLimitEvent`): one window per event (the 5-hour,
-7-day, 7-day Opus or 7-day Sonnet limit, or overage) with its used fraction when the CLI sends one,
-its reset time and its status. The observation store keeps the latest reading of each window.
+lanes read each `rate_limit_event` (`ClaudeRateLimitEvent`): every entry of the `unifiedWindows` object
+(`five_hour`, `seven_day` and any other key the CLI sends) is one window, keyed by its name, with its
+`utilization` (the used fraction; the remaining fraction is `1 - utilization`) and its `resetsAt`. The
+event's top-level `status` is the state of the window named by `rateLimitType`; the other windows are
+Available below full utilization and Exhausted at full. An event without `unifiedWindows` yields the
+`rateLimitType` window with its status and reset time and no fraction, plus the overage window from
+`overageStatus`. The observation store keeps the latest reading of each window.
 `ClaudeRateLimitLog` also logs each event's `rate_limit_info` object as received, at Information, once per
 connection and `rateLimitType` until the object changes. Nothing else of the stream is logged.
 The adapter has no account-usage read of its own, so `GetAccountUsageAsync` returns those windows and
