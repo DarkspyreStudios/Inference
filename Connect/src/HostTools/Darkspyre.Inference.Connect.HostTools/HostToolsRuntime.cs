@@ -8,19 +8,22 @@ namespace Darkspyre.Inference.Connect.HostTools;
 /// <summary>Installs the bundled host-tools service and connects to it, starting it when no process owns it.</summary>
 public static partial class HostToolsRuntime
 {
-    /// <summary>The folder beside this library that holds the service's manifest.json and payload/.</summary>
-    internal const string PackageFolder = "hosttools/service";
+    /// <summary>
+    /// The folder, beside the library that bundles the service, that holds the service's manifest.json and payload/. The
+    /// MCP program in the sibling hosttools/mcp/ folder uses this same package and carries no copy of its own.
+    /// </summary>
+    public const string PackageFolder = "hosttools/service";
 
-    /// <summary>Installs the bundled service, connects to it and returns a client that owns the subscription.</summary>
+    /// <summary>Installs the service package in <paramref name="package"/>, connects to it and returns a client that owns the subscription.</summary>
+    /// <param name="package">The folder holding the service's manifest.json and payload/, built with this library.</param>
+    /// <param name="cancellationToken">Cancels the installation and the connection.</param>
     /// <gotcha>The caller disposes the client. It never owns or terminates the shared service process.</gotcha>
-    public static async Task<HostToolsClient> ConnectAsync(CancellationToken cancellationToken = default)
+    public static async Task<HostToolsClient> ConnectAsync(string package, CancellationToken cancellationToken = default)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(package);
         IServicePlatform platform = CreatePlatform();
         Assembly assembly = typeof(HostToolsRuntime).Assembly;
-        string directory = Path.GetDirectoryName(assembly.Location)
-            ?? throw new InvalidDataException("The host-tools client has no physical location.");
         var metadata = assembly.GetCustomAttributes<AssemblyMetadataAttribute>().ToDictionary(a => a.Key, a => a.Value, StringComparer.Ordinal);
-        string package = Path.Combine(directory, PackageFolder);
         var manifest = ServicePackageManifest.Parse(await File.ReadAllBytesAsync(Path.Combine(package, "manifest.json"), cancellationToken).ConfigureAwait(false));
         ServiceRegistration registration = await platform.InstallAsync(new("HostTools", ServiceFamily.HostTools,
             Required("HostTools.LayoutId"), Required("HostTools.ClientBuildDigest"), Path.Combine(package, "payload"), manifest,

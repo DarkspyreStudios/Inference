@@ -20,6 +20,13 @@ internal sealed class AntigravityHostTools : IAsyncDisposable
     internal const string CallMcpTool = "call_mcp_tool";
 
     private static readonly SemaphoreSlim Connecting = new(1, 1);
+
+    /// <summary>The host-tools service package beside the host-tools library.</summary>
+    private static readonly string ServicePackage = Path.Combine(
+        Path.GetDirectoryName(typeof(HostToolsRuntime).Assembly.Location)
+            ?? throw new InvalidDataException("The host-tools client has no physical location."),
+        HostToolsRuntime.PackageFolder);
+
     private static HostToolsClient? s_client;
 
     private readonly McpToolBridge _bridge;
@@ -159,7 +166,7 @@ internal sealed class AntigravityHostTools : IAsyncDisposable
         {
             if (s_client is { } open && !open.Closed.IsCompleted) return open;
             if (s_client is { } closed) await closed.DisposeAsync().ConfigureAwait(false);
-            s_client = await HostToolsRuntime.ConnectAsync(cancellationToken).ConfigureAwait(false);
+            s_client = await HostToolsRuntime.ConnectAsync(ServicePackage, cancellationToken).ConfigureAwait(false);
             return s_client;
         }
         finally

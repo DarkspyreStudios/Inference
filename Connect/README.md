@@ -5306,6 +5306,8 @@ per open session, with an open standard input and one output reader.
   process registers its session's MCP tool list with the service under a fresh session ID and starts AGY with that ID
   in `DARKSPYRE_HOST_TOOLS_SESSION`. AGY's global MCP entry `darkspyre-host-tools` starts the stdio MCP program
   `darkspyre-host-tools-mcp`, which reads the ID, lists the session's tools and forwards each call to the service.
+  The program ships as the flat `hosttools/mcp/` folder beside the Antigravity library, and it installs and connects
+  to the service from the sibling `hosttools/service/` package; it carries no service package of its own.
   The service passes the call back to the registering host, which runs it through the session's tool handler as the
   Claude CLI bridge does. The first session with host tools in a process runs `agy mcp add darkspyre-host-tools
   <program>` and adds `mcp(darkspyre-host-tools/*)` to `permissions.allow` in `~/.gemini/antigravity-cli/settings.json`;

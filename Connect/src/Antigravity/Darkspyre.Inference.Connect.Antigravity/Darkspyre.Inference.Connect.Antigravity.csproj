@@ -14,8 +14,11 @@
   </ItemGroup>
 
   <!--
-    AGY starts the host-tools MCP program from hosttools/mcp/ beside this library: the program's whole output folder,
-    apphost and dependencies included. It runs after AssignTargetPaths, so a build and a no-build publish both carry it.
+    AGY starts the host-tools MCP program from hosttools/mcp/ beside this library: the files of the program's output
+    folder, apphost and dependencies included. The program's output is flat, and its subfolders are not part of it: a
+    runtime-specific build of the program writes a <rid>/ subfolder, such as win-x64/, holding a whole self-contained
+    runtime, and hosttools/service is the service package, which the program uses from the sibling hosttools/service/. It
+    runs after AssignTargetPaths, so a build and a no-build publish both carry it.
   -->
   <Target Name="AddHostToolsMcpProgram" AfterTargets="AssignTargetPaths">
     <MSBuild Projects="../../HostTools/Darkspyre.Inference.Connect.HostTools.Mcp/Darkspyre.Inference.Connect.HostTools.Mcp.csproj"
@@ -26,9 +29,9 @@
       <_HostToolsMcpOutput>@(_HostToolsMcpAssembly->'%(RootDir)%(Directory)')</_HostToolsMcpOutput>
     </PropertyGroup>
     <ItemGroup>
-      <_HostToolsMcpFile Include="$(_HostToolsMcpOutput)**/*" />
+      <_HostToolsMcpFile Include="$(_HostToolsMcpOutput)*" />
       <ContentWithTargetPath Include="@(_HostToolsMcpFile)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest">
-        <TargetPath>hosttools/mcp/%(_HostToolsMcpFile.RecursiveDir)%(_HostToolsMcpFile.Filename)%(_HostToolsMcpFile.Extension)</TargetPath>
+        <TargetPath>hosttools/mcp/%(_HostToolsMcpFile.Filename)%(_HostToolsMcpFile.Extension)</TargetPath>
       </ContentWithTargetPath>
     </ItemGroup>
   </Target>
