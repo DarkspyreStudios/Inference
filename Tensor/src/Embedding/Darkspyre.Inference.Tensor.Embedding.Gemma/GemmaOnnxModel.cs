@@ -9,7 +9,7 @@ internal sealed record GemmaEmbeddingRun(IReadOnlyList<float[]> Vectors, IReadOn
 
 internal interface IGemmaEmbeddingModel : IDisposable
 {
-    Task<GemmaEmbeddingRun> EmbedAsync(EmbeddingRequest request, CancellationToken token);
+    Task<GemmaEmbeddingRun> EmbedAsync(EmbeddingRequest request, TensorModelLifetime.ExecutionLease execution);
 }
 
 internal interface IGemmaEmbeddingLoader
@@ -50,11 +50,13 @@ internal sealed class GemmaOnnxModel : IGemmaEmbeddingModel
         catch { model.Dispose(); throw; }
     }
 
-    public Task<GemmaEmbeddingRun> EmbedAsync(EmbeddingRequest request, CancellationToken token) =>
-        Task.Run(() => Embed(request, token), CancellationToken.None);
+    public Task<GemmaEmbeddingRun> EmbedAsync(EmbeddingRequest request, TensorModelLifetime.ExecutionLease execution) =>
+        Task.Run(() => EmbedCoreAsync(request, execution), CancellationToken.None);
 
-    private GemmaEmbeddingRun Embed(EmbeddingRequest request, CancellationToken token)
+    // A waiting query takes the engine before each input is prepared and before each ONNX run (execution.YieldAsync).
+    private async Task<GemmaEmbeddingRun> EmbedCoreAsync(EmbeddingRequest request, TensorModelLifetime.ExecutionLease execution)
     {
+        CancellationToken token = execution.CancellationToken;
         if (request.Inputs is null || request.Inputs.Count == 0 || !Enum.IsDefined(request.Kind))
             throw Invalid("An embedding request needs content and a defined input kind.");
         if (request.Dimensions is not null and not GemmaEmbeddingModels.Dimensions)
@@ -67,6 +69,7 @@ internal sealed class GemmaOnnxModel : IGemmaEmbeddingModel
         // Admission covers the entire batch before either graph executes.
         for (int index = 0; index < request.Inputs.Count; index++)
         {
+            await execution.YieldAsync().ConfigureAwait(false);
             token.ThrowIfCancellationRequested();
             prepared[index] = Prepare(request.Inputs[index], request.Kind);
             if (prepared[index].Ids.Length <= GemmaEmbeddingModels.MaximumTokens) continue;
@@ -95,6 +98,7 @@ internal sealed class GemmaOnnxModel : IGemmaEmbeddingModel
                 using var memory = HostMemory();
                 using OrtValue pixels = OrtValue.CreateTensorValueFromMemory<float>(memory, image.Patches, [1, GemmaImageInput.MaxPatches, GemmaImageInput.PatchPixels]);
                 using OrtValue positions = OrtValue.CreateTensorValueFromMemory<long>(memory, image.Positions, [1, GemmaImageInput.MaxPatches, 2]);
+                await execution.YieldAsync().ConfigureAwait(false);
                 float[] imageFeatures = Run(_vision!, ["pixel_values", "pixel_position_ids"], [pixels, positions], "image_features", token);
                 if (imageFeatures.Length != (input.Ids.Length - 4) * 512)
                     throw new InvalidDataException("The vision encoder returned an unexpected feature shape.");
@@ -106,6 +110,7 @@ internal sealed class GemmaOnnxModel : IGemmaEmbeddingModel
             using OrtValue maskValues = OrtValue.CreateTensorValueFromMemory<long>(hostMemory, mask, [batch.Length, length]);
             using OrtValue images = OrtValue.CreateTensorValueFromMemory<float>(hostMemory, features.ToArray(), [features.Count / 512, 512]);
             using OrtValue absent = OrtValue.CreateTensorValueFromMemory<float>(hostMemory, Array.Empty<float>(), [0, 512]);
+            await execution.YieldAsync().ConfigureAwait(false);
             float[] embeddings = Run(_text!, ["input_ids", "attention_mask", "image_features", "video_features", "audio_features"],
                 [idValues, maskValues, images, absent, absent], "sentence_embedding", token);
             if (embeddings.Length != batch.Length * GemmaEmbeddingModels.Dimensions)

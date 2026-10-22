@@ -82,7 +82,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(request);
         ValidateRequest(request);
-        await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(cancellationToken)
+        await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(urgent: false, cancellationToken)
             .ConfigureAwait(false);
         CancellationToken executionToken = modelUse.CancellationToken;
         LayaModelResources resources = _resources
@@ -169,7 +169,7 @@ public sealed class LayaDecisionInference : ITensorDecisionInference, IDecisionI
         ValidateRequest(request);
         // The lease keeps an unload from releasing the tokenizer; no backend is needed, so the
         // execution coordinator is not acquired.
-        await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(cancellationToken)
+        await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(urgent: false, cancellationToken)
             .ConfigureAwait(false);
         LayaInputMeter meter = _meter
             ?? throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The Laya model was not loaded.");

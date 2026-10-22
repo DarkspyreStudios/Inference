@@ -26,6 +26,11 @@ Library boundaries:
   verification, the local pack directory, execution coordination and all Tensor capability interfaces.
   The capability namespaces remain `.Tensor.LLM`, `.Image`, `.Decision`, `.STT` and `.Embedding`;
   they resolve from the Common assembly without loading a model implementation.
+  `TensorModelLifetime` admits one request, load or unload at a time through its request gate. A request
+  entered as urgent takes the gate before every waiting request that is not urgent and before waiting
+  load and unload work. A request made of several native runs calls `ExecutionLease.YieldAsync` before
+  each run: waiting urgent requests run first, and the request then takes the gate back before every
+  other waiter, so no load or unload runs between two runs of one request.
 - `Darkspyre.Inference.Tensor.Ggml` — `GgmlRuntimeOwner`, the one owner of the process's GGML and MLX
   native runtime that every engine running on GGML or MLX borrows.
 - `Darkspyre.Inference.Tensor.LLM.Qwen` — Qwen-compatible GGUF text inference.
@@ -56,7 +61,8 @@ Library boundaries:
   On Auto and the GGML backends the engine borrows the shared `GgmlRuntimeOwner`, so it runs on the
   backend the process's other GGML engines use; a pack that does not support that backend fails to
   load. The runtime formats queries itself: callers state whether inputs are queries or documents,
-  using Common's `TextEmbeddingInput`. Capabilities declare text support; a batch containing
+  using Common's `TextEmbeddingInput`. A query request (`EmbeddingInputKind.Query`) is urgent: it
+  runs before waiting document requests. Capabilities declare text support; a batch containing
   `MediaEmbeddingInput` fails with `UnsupportedFeature` before the model runs.
   Documents are embedded as given; BERT queries take the `query: ` prefix. The runtime counts every input before
   embedding any; an input over the limit fails the request with `EmbeddingInputTooLongException`,
@@ -84,6 +90,11 @@ Library boundaries:
   faster than one at a time and inputs of about 600 tokens at the same speed, because longer inputs
   are compute-bound. The graph supplies pooling and projection. A cancelled ONNX call is joined before tensors, sessions or pack leases
   are released. Tensor's existing lifecycle serializes calls and drains before unloading.
+  A query request (`EmbeddingInputKind.Query`) is urgent. A document request yields before each
+  input's preparation and before each ONNX run, so a query waits for at most the one run in
+  progress, never for the rest of a large document request. On Apple WebGPU, while one request
+  embeds the 263 chunks of a 471 KB file, a query takes a median of 148 ms and at most 313 ms, and
+  with no query the file embeds within 2% of its rate without the yield points.
   OrtEnv owns process-wide WebGPU registration; each engine owns two sessions. Explicit CPU input
   memory uses the Default memory type required by the external WebGPU provider. GPU absence is
   reported as BackendUnavailable. No implicit CPU fallback occurs.

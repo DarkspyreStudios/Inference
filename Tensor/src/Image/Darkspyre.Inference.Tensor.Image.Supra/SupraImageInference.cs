@@ -80,7 +80,7 @@ public sealed class SupraImageInference : ITensorImageInference
         ArgumentNullException.ThrowIfNull(request);
         ValidateRequest(request);
         progress?.Report(new ImageGenerationProgress(ImageGenerationStage.Queued));
-        await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(cancellationToken)
+        await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(urgent: false, cancellationToken)
             .ConfigureAwait(false);
         await ValidateModelIdAsync(request.ModelId, cancellationToken).ConfigureAwait(false);
         TensorModelPackDefinition definition = _definition!;

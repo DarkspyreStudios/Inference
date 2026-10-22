@@ -142,7 +142,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             request = request with { Messages = request.Messages.Select(message => message with { ContinuationState = null }).ToArray() };
         }
         ValidateRequest(request);
-        await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(cancellationToken)
+        await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(urgent: false, cancellationToken)
             .ConfigureAwait(false);
         await ValidateModelIdAsync(request.ModelId, cancellationToken).ConfigureAwait(false);
         TensorModelPackDefinition definition = _definition!;

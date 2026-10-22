@@ -82,8 +82,9 @@ public sealed class GemmaLifetimeTests : IDisposable
         public TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Cancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-        public async Task<GemmaEmbeddingRun> EmbedAsync(EmbeddingRequest request, CancellationToken token)
+        public async Task<GemmaEmbeddingRun> EmbedAsync(EmbeddingRequest request, TensorModelLifetime.ExecutionLease execution)
         {
+            CancellationToken token = execution.CancellationToken;
             using var registration = token.Register(() => Cancelled.TrySetResult());
             Entered.TrySetResult();
             if (Hold) await Release.Task;

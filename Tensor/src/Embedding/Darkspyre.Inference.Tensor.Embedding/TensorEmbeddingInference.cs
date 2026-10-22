@@ -175,12 +175,13 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
 
     /// <summary>
     /// Embeds the request's inputs with the resident model and returns the vectors, usage and provenance. The request must
-    /// name the resident model.
+    /// name the resident model. A query request runs before waiting document requests.
     /// </summary>
     public async Task<EmbeddingResult> EmbedAsync(EmbeddingRequest request, CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); ArgumentNullException.ThrowIfNull(request);
-        await using TensorModelLifetime.ExecutionLease execution = await _lifetime.EnterExecutionAsync(cancellationToken).ConfigureAwait(false);
+        await using TensorModelLifetime.ExecutionLease execution = await _lifetime.EnterExecutionAsync(
+            request.Kind == EmbeddingInputKind.Query, cancellationToken).ConfigureAwait(false);
         ThrowIfStopped();
         ThrowIfReleaseRequired();
         TensorModelPackDefinition definition = _definition!;

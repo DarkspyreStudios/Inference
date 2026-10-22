@@ -13,6 +13,7 @@ namespace Darkspyre.Inference.Tensor.Embedding.Tests;
 /// attention_mask-weighted mean of token and position embeddings. Left padding, a mask that covers padding, or rows returned
 /// out of order change that mean. The test covers the request's batching, right padding, mask, row order and
 /// normalization. It does not cover EmbeddingGemma's own attention; the real-model parity is the DSA-1204 probe measurement.
+/// The same graph runs a many-run document request beside a query, to show that the query takes the next run.
 /// </summary>
 public sealed class GemmaBatchingTests : IDisposable
 {
@@ -42,6 +43,23 @@ public sealed class GemmaBatchingTests : IDisposable
         Assert.NotEqual(together.Vectors[0], together.Vectors[1], (left, right) => Math.Abs(left - right) < 1e-5f);
 
         static EmbeddingInput Text(string text) => new TextEmbeddingInput(text);
+    }
+
+    [Fact]
+    public async Task QueryRunsBeforeTheRemainingRunsOfADocumentRequest()
+    {
+        using TensorModelPackManager packs = await InstalledAsync();
+        await using var engine = new GemmaEmbeddingInference(packs, TensorBackendKind.Cpu);
+        await engine.LoadAndWaitAsync(Key);
+        // About 480 tokens each: two inputs fill one run, so the request is 1,000 runs.
+        EmbeddingInput[] chunks = [.. Enumerable.Range(0, 2000).Select(index => new TextEmbeddingInput(index + new string('d', 450)))];
+
+        Task<EmbeddingResult> document = engine.EmbedAsync(new() { ModelId = Key.ModelId, Inputs = chunks });
+        EmbeddingResult query = await engine.EmbedAsync(new() { ModelId = Key.ModelId, Inputs = [new TextEmbeddingInput("needle")], Kind = EmbeddingInputKind.Query });
+
+        Assert.False(document.IsCompleted, "The query ran after every run of the document request.");
+        Assert.Single(query.Vectors);
+        Assert.Equal(chunks.Length, (await document).Vectors.Count);
     }
 
     private async Task<TensorModelPackManager> InstalledAsync()

@@ -158,12 +158,15 @@ public sealed class GemmaEmbeddingInference : ITensorEmbeddingInference
 
     /// <summary>
     /// Embeds the request's inputs with the resident model and returns the vectors, usage and provenance. The request must
-    /// name the resident model.
+    /// name the resident model. A query request runs before waiting document requests, and a document request lets a
+    /// waiting query go before each of its inputs is prepared and before each of its ONNX runs, so a query waits for at most
+    /// one run.
     /// </summary>
     public async Task<EmbeddingResult> EmbedAsync(EmbeddingRequest request, CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); ArgumentNullException.ThrowIfNull(request);
-        await using TensorModelLifetime.ExecutionLease execution = await _lifetime.EnterExecutionAsync(cancellationToken).ConfigureAwait(false);
+        await using TensorModelLifetime.ExecutionLease execution = await _lifetime.EnterExecutionAsync(
+            request.Kind == EmbeddingInputKind.Query, cancellationToken).ConfigureAwait(false);
         ThrowIfStopped();
         ThrowIfReleaseRequired();
         TensorModelPackDefinition definition = _definition!;
@@ -171,7 +174,7 @@ public sealed class GemmaEmbeddingInference : ITensorEmbeddingInference
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The request does not identify the resident embedding model.");
         long started = Stopwatch.GetTimestamp();
         GemmaEmbeddingRun run;
-        try { run = await _model!.EmbedAsync(request, execution.CancellationToken).ConfigureAwait(false); }
+        try { run = await _model!.EmbedAsync(request, execution).ConfigureAwait(false); }
         catch (Exception exception) when (exception is not OperationCanceledException and not InferenceException and not EmbeddingInputTooLongException)
         {
             throw new InferenceException(exception is OutOfMemoryException ? InferenceFailureCode.CapacityExhausted : InferenceFailureCode.ExecutionFailed,

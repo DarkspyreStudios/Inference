@@ -146,7 +146,7 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
     public async Task<SpeechTranscriptionResult> TranscribeAsync(SpeechTranscriptionRequest request, CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); ArgumentNullException.ThrowIfNull(request); ArgumentNullException.ThrowIfNull(request.Audio);
-        await using TensorModelLifetime.ExecutionLease execution = await _lifetime.EnterExecutionAsync(cancellationToken).ConfigureAwait(false);
+        await using TensorModelLifetime.ExecutionLease execution = await _lifetime.EnterExecutionAsync(urgent: false, cancellationToken).ConfigureAwait(false);
         if (request.ModelId is not null && request.ModelId != _lease!.Key.ModelId)
             throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The request does not identify the resident Whisper model.");
         return await TranscribeCoreAsync(request.Audio, request.Options ?? new(), execution.CancellationToken).ConfigureAwait(false);
@@ -157,7 +157,7 @@ public sealed class WhisperSpeechToTextInference : ITensorSpeechToTextInference
         SpeechToTextOptions options, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         ThrowIfStopped(); ArgumentNullException.ThrowIfNull(windows); ArgumentNullException.ThrowIfNull(options);
-        await using TensorModelLifetime.ExecutionLease execution = await _lifetime.EnterExecutionAsync(cancellationToken).ConfigureAwait(false);
+        await using TensorModelLifetime.ExecutionLease execution = await _lifetime.EnterExecutionAsync(urgent: false, cancellationToken).ConfigureAwait(false);
         _ = _model!.Metadata.Language(options);
         await foreach (SpeechAudioWindow window in windows.WithCancellation(execution.CancellationToken).ConfigureAwait(false))
         {
