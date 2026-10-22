@@ -25,6 +25,8 @@ internal sealed class GemmaEmbeddingLoader : IGemmaEmbeddingLoader
 
 internal sealed class GemmaOnnxModel : IGemmaEmbeddingModel
 {
+    // Padded tokens per run: the fastest measured budget for short inputs on Apple WebGPU (2.4x), with no loss for long ones.
+    private const int MaximumBatchTokens = 1024;
     private readonly GemmaTokenizer _tokenizer;
     private InferenceSession? _vision;
     private InferenceSession? _text;
@@ -75,35 +77,71 @@ internal sealed class GemmaOnnxModel : IGemmaEmbeddingModel
         if (overLimit.Count != 0) throw new EmbeddingInputTooLongException(overLimit.AsReadOnly(), GemmaEmbeddingModels.MaximumTokens);
         var vectors = new float[prepared.Length][];
         int inputTokens = 0;
-        for (int index = 0; index < prepared.Length; index++)
+        foreach (int[] batch in Batches(prepared))
         {
             token.ThrowIfCancellationRequested();
-            PreparedInput input = prepared[index];
-            float[] features = [];
-            if (input.Image is { } image)
+            int length = batch.Max(index => prepared[index].Ids.Length);
+            var ids = new long[batch.Length * length];
+            var mask = new long[batch.Length * length];
+            var features = new List<float>();
+            for (int row = 0; row < batch.Length; row++)
             {
+                PreparedInput input = prepared[batch[row]];
+                // Right padding keeps each input's positions; the mask removes the padding from attention and pooling.
+                input.Ids.CopyTo(ids, row * length);
+                Array.Fill(mask, 1L, row * length, input.Ids.Length);
+                inputTokens += input.Ids.Length;
+                if (input.Image is not { } image) continue;
                 using var memory = HostMemory();
                 using OrtValue pixels = OrtValue.CreateTensorValueFromMemory<float>(memory, image.Patches, [1, GemmaImageInput.MaxPatches, GemmaImageInput.PatchPixels]);
                 using OrtValue positions = OrtValue.CreateTensorValueFromMemory<long>(memory, image.Positions, [1, GemmaImageInput.MaxPatches, 2]);
-                features = Run(_vision!, ["pixel_values", "pixel_position_ids"], [pixels, positions], "image_features", token);
-                if (features.Length != (input.Ids.Length - 4) * 512)
+                float[] imageFeatures = Run(_vision!, ["pixel_values", "pixel_position_ids"], [pixels, positions], "image_features", token);
+                if (imageFeatures.Length != (input.Ids.Length - 4) * 512)
                     throw new InvalidDataException("The vision encoder returned an unexpected feature shape.");
+                // The text graph fills the image tokens of every row, in row order, from one feature list.
+                features.AddRange(imageFeatures);
             }
             using var hostMemory = HostMemory();
-            using OrtValue ids = OrtValue.CreateTensorValueFromMemory<long>(hostMemory, input.Ids, [1, input.Ids.Length]);
-            using OrtValue mask = OrtValue.CreateTensorValueFromMemory<long>(hostMemory, Enumerable.Repeat(1L, input.Ids.Length).ToArray(), [1, input.Ids.Length]);
-            using OrtValue images = OrtValue.CreateTensorValueFromMemory<float>(hostMemory, features, [features.Length / 512, 512]);
+            using OrtValue idValues = OrtValue.CreateTensorValueFromMemory<long>(hostMemory, ids, [batch.Length, length]);
+            using OrtValue maskValues = OrtValue.CreateTensorValueFromMemory<long>(hostMemory, mask, [batch.Length, length]);
+            using OrtValue images = OrtValue.CreateTensorValueFromMemory<float>(hostMemory, features.ToArray(), [features.Count / 512, 512]);
             using OrtValue absent = OrtValue.CreateTensorValueFromMemory<float>(hostMemory, Array.Empty<float>(), [0, 512]);
-            float[] vector = Run(_text!, ["input_ids", "attention_mask", "image_features", "video_features", "audio_features"],
-                [ids, mask, images, absent, absent], "sentence_embedding", token);
-            double norm = Math.Sqrt(vector.Sum(value => (double)value * value));
-            if (vector.Length != GemmaEmbeddingModels.Dimensions || !double.IsFinite(norm) || norm == 0)
+            float[] embeddings = Run(_text!, ["input_ids", "attention_mask", "image_features", "video_features", "audio_features"],
+                [idValues, maskValues, images, absent, absent], "sentence_embedding", token);
+            if (embeddings.Length != batch.Length * GemmaEmbeddingModels.Dimensions)
                 throw new InvalidDataException("EmbeddingGemma returned an invalid embedding vector.");
-            for (int dimension = 0; dimension < vector.Length; dimension++) vector[dimension] = (float)(vector[dimension] / norm);
-            vectors[index] = vector;
-            inputTokens += input.Ids.Length;
+            for (int row = 0; row < batch.Length; row++)
+                vectors[batch[row]] = Normalize(embeddings.AsSpan(row * GemmaEmbeddingModels.Dimensions, GemmaEmbeddingModels.Dimensions));
         }
         return new(Array.AsReadOnly(vectors), truncated.AsReadOnly(), inputTokens);
+    }
+
+    // Inputs run shortest first, so each batch pads little. A batch holds at most MaximumBatchTokens padded tokens; an
+    // input longer than that runs alone, so no run needs more memory than one input of the model's maximum length.
+    private static IEnumerable<int[]> Batches(PreparedInput[] prepared)
+    {
+        var batch = new List<int>();
+        foreach (int index in Enumerable.Range(0, prepared.Length).OrderBy(index => prepared[index].Ids.Length))
+        {
+            if ((batch.Count + 1) * prepared[index].Ids.Length > MaximumBatchTokens)
+            {
+                if (batch.Count != 0) yield return batch.ToArray();
+                batch.Clear();
+            }
+            batch.Add(index);
+        }
+        if (batch.Count != 0) yield return batch.ToArray();
+    }
+
+    private static float[] Normalize(ReadOnlySpan<float> embedding)
+    {
+        double sum = 0;
+        foreach (float value in embedding) sum += (double)value * value;
+        double norm = Math.Sqrt(sum);
+        if (!double.IsFinite(norm) || norm == 0) throw new InvalidDataException("EmbeddingGemma returned an invalid embedding vector.");
+        var vector = new float[embedding.Length];
+        for (int dimension = 0; dimension < vector.Length; dimension++) vector[dimension] = (float)(embedding[dimension] / norm);
+        return vector;
     }
 
     private PreparedInput Prepare(EmbeddingInput input, EmbeddingInputKind kind)

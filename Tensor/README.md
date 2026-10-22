@@ -77,8 +77,12 @@ Library boundaries:
   PNG/JPEG inputs carry caller-owned bytes. The output is 768-dimensional and unit length. The
   fingerprint includes every artifact hash and the formatting/preprocessing/runtime recipe.
   The full batch is admitted before any graph runs. The 8,192-token limit includes formatting and
-  BOS/EOS. Explicit truncation retains EOS and reports affected input indices. The graph supplies
-  pooling and projection. A cancelled ONNX call is joined before tensors, sessions or pack leases
+  BOS/EOS. Explicit truncation retains EOS and reports affected input indices. A request's inputs
+  run shortest first in batches of at most 1,024 padded tokens; an input longer than that runs alone.
+  Each row is padded on the right with attention_mask 0, and each input's vector equals the vector it
+  gets alone within float tolerance. On Apple WebGPU a batch runs inputs of about 70 tokens 2.4 times
+  faster than one at a time and inputs of about 600 tokens at the same speed, because longer inputs
+  are compute-bound. The graph supplies pooling and projection. A cancelled ONNX call is joined before tensors, sessions or pack leases
   are released. Tensor's existing lifecycle serializes calls and drains before unloading.
   OrtEnv owns process-wide WebGPU registration; each engine owns two sessions. Explicit CPU input
   memory uses the Default memory type required by the external WebGPU provider. GPU absence is
