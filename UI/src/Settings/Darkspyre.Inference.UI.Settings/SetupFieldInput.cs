@@ -558,7 +558,10 @@ public sealed class SetupFieldInput : UserControl
             else if (current is SetupExecutableField executable) await this.SetExecutableAsync(executable, value);
         }
         catch (OperationCanceledException) { }
-        catch (Exception) when (!this.disposed) { await this.InvalidAsync("The host could not select a path. Enter it manually or try again."); }
+        catch (Exception error) when (!this.disposed)
+        {
+            await this.InvalidAsync($"The host could not select a path ({error.GetType().Name}): {error.Message} Enter it manually or try again.");
+        }
         finally
         {
             this.picking = false;
@@ -679,7 +682,7 @@ public sealed class SetupFieldInput : UserControl
             else this.choiceIssue = page.Issues is { Count: > 0 } issues ? issues[0].Message : page.State.ToString();
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-        catch (Exception) when (IsCurrent()) { this.choiceIssue = "Choices could not be loaded."; }
+        catch (Exception error) when (IsCurrent()) { this.choiceIssue = $"Choices could not be loaded ({error.GetType().Name}): {error.Message}"; }
         finally
         {
             if (generation == this.choiceGeneration) this.loading = false;

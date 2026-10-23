@@ -75,9 +75,9 @@ public static class TensorBackendProbes
                 };
             }
             catch (Exception exception) when (exception is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException or PlatformNotSupportedException)
-            { available = false; reason = "The native CUDA runtime is unavailable on this machine."; }
+            { available = false; reason = $"The native CUDA runtime is unavailable on this machine: {exception.Message}"; }
             catch (Exception exception) when (exception is InvalidOperationException or IOException)
-            { available = null; reason = "Backend availability could not be determined."; }
+            { available = null; reason = $"Backend availability could not be determined: {exception.Message}"; }
             cancellationToken.ThrowIfCancellationRequested();
             return TensorBackendAvailability.Observe(request, available switch
             {

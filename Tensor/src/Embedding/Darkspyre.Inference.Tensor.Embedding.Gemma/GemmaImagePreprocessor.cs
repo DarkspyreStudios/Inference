@@ -26,7 +26,7 @@ internal static class GemmaImagePreprocessor
         ImageResult decoded;
         try { decoded = ImageResult.FromMemory(image, ColorComponents.RedGreenBlueAlpha); }
         catch (Exception error) when (error is not OutOfMemoryException)
-        { throw new InvalidDataException("The image could not be decoded.", error); }
+        { throw new InvalidDataException($"The image could not be decoded: {error.Message}", error); }
         CanvasSize(decoded.Width, decoded.Height, out int width, out int height);
         return (Resize(decoded.Data, decoded.Width, decoded.Height, width, height), width, height);
     }

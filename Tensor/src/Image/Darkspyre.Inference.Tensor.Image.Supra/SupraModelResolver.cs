@@ -82,9 +82,9 @@ public sealed class SupraModelResolver : TensorModelResolver
         catch (TensorSourceException exception)
         { return Failure(TensorCompatibilityState.Unverified, exception.Code, exception.Message, exception.State); }
         catch (Exception exception) when (exception is InvalidDataException or NotSupportedException or JsonException or OverflowException or ArgumentException or InvalidOperationException)
-        { return Failure(TensorCompatibilityState.Unsupported, "supra-schema", "The checkpoint metadata does not satisfy this adapter's complete Supra2 pipeline schema."); }
-        catch (IOException)
-        { return Failure(TensorCompatibilityState.Unverified, "metadata-incomplete", "The complete checkpoint metadata could not be inspected."); }
+        { return Failure(TensorCompatibilityState.Unsupported, "supra-schema", $"The checkpoint metadata does not satisfy this adapter's complete Supra2 pipeline schema: {exception.Message}"); }
+        catch (IOException exception)
+        { return Failure(TensorCompatibilityState.Unverified, "metadata-incomplete", $"The complete checkpoint metadata could not be inspected: {exception.Message}"); }
     }
 
     private static void ValidateIntegrity(TensorSourceArtifact artifact)

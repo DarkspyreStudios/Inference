@@ -96,8 +96,12 @@ public abstract class TensorModelResolver : ITensorModelResolver
         catch (UnauthorizedAccessException) { return new(TensorSourceState.AccessDenied, Issues: [new("source-access", "The host does not have access to the selected location.")]); }
         catch (DirectoryNotFoundException) { return new(TensorSourceState.NotFound, Issues: [new("source-missing", "The selected folder does not exist.")]); }
         catch (FileNotFoundException) { return new(TensorSourceState.NotFound, Issues: [new("source-missing", "The selected file does not exist.")]); }
-        catch (ArgumentException) { return new(TensorSourceState.InvalidRequest, Issues: [new("source-input", "Check the location, primary artifact, companion roles, and expected integrity values.")]); }
-        catch (IOException) { return new(TensorSourceState.Unverified, Issues: [new("source-read", "The selected location could not be inspected.")]); }
+        catch (ArgumentException error)
+        {
+            return new(TensorSourceState.InvalidRequest, Issues: [new("source-input",
+                $"Check the location, primary artifact, companion roles, and expected integrity values. {error.Message}")]);
+        }
+        catch (IOException error) { return new(TensorSourceState.Unverified, Issues: [new("source-read", $"The selected location could not be inspected: {error.Message}")]); }
     }
 
     private async Task<TensorModelCandidate> ReadLocationAsync(TensorModelLocation location, string? license,

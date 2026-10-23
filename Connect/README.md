@@ -3436,9 +3436,10 @@ xAI input overflow raises this failure instead of returning an incomplete comple
 truncation remains an incomplete completion.
 
 An unclassified managed-run exception emits a `LlmAgentWarningEvent` with its runtime type and
-managed stack frames before the generic failure completion. The diagnostic omits exception messages,
+managed stack frames, then the failure completion. The warning omits exception messages,
 source-file paths and provider payloads. Darkspyre records this warning in the application log,
-not in the conversation.
+not in the conversation. The failure completion's diagnostic is the exception's type name and its
+message with the connection's credentials removed by `SecretRedactor.Sanitize`.
 
 Grok uses the shared managed session's host compaction and local estimation. The subscription proxy offers no
 `responses/compact` route. A too-long refusal teaches the limit, compacts and resends once through the common path.

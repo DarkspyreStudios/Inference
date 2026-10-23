@@ -165,7 +165,7 @@ internal sealed class GemmaOnnxModel : IGemmaEmbeddingModel
         GemmaImageInput image;
         try { image = GemmaImageInput.Prepare(media.Media.Data.ToArray()); }
         catch (Exception error) when (error is not OutOfMemoryException)
-        { throw new InferenceException(InferenceFailureCode.InvalidRequest, "The supplied image could not be decoded.", error); }
+        { throw new InferenceException(InferenceFailureCode.InvalidRequest, $"The supplied image could not be decoded: {error.Message}", error); }
         int softTokens = image.Width / 48 * (image.Height / 48);
         return new([2, 255999, .. Enumerable.Repeat(258880L, softTokens), 258882, 1], image);
     }

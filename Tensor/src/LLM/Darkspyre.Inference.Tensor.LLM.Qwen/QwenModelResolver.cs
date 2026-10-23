@@ -72,9 +72,9 @@ public sealed partial class QwenModelResolver : TensorModelResolver
         catch (TensorSourceException exception)
         { return Failure(TensorCompatibilityState.Unverified, exception.Code, exception.Message, exception.State); }
         catch (Exception exception) when (exception is InvalidDataException or NotSupportedException or OverflowException or FormatException or ArgumentException)
-        { return Failure(TensorCompatibilityState.Unsupported, "qwen-schema", "The checkpoint metadata does not satisfy this adapter's Qwen GGUF schema."); }
-        catch (IOException)
-        { return Failure(TensorCompatibilityState.Unverified, "metadata-incomplete", "The complete checkpoint header could not be inspected."); }
+        { return Failure(TensorCompatibilityState.Unsupported, "qwen-schema", $"The checkpoint metadata does not satisfy this adapter's Qwen GGUF schema: {exception.Message}"); }
+        catch (IOException exception)
+        { return Failure(TensorCompatibilityState.Unverified, "metadata-incomplete", $"The complete checkpoint header could not be inspected: {exception.Message}"); }
     }
 
     private static TensorSourceArtifact[] CompleteSet(TensorModelCandidate candidate, TensorSourceArtifact selected)

@@ -133,6 +133,19 @@ public sealed class StepActionTests
         Assert.Contains(states, state => state.HasUnsavedChanges);
     });
 
+    [Fact]
+    public Task AnActionTheHostCannotRunShowsWhy() => EditorSession.RunAsync(async () =>
+    {
+        InferenceSettingsEditor editor = new(new TwoStepSettings(), new Manager(), new Host { ExecuteFailure = new IOException("The tool is locked.") })
+        { ShowActionEffects = false };
+        EditorSession.Show(editor);
+
+        EditorSession.Click(EditorSession.Button(editor, "Check"));
+
+        await EditorSession.WaitForAsync(() => EditorSession.TextOf(editor)
+            .Contains("The host could not run the action (IOException): The tool is locked.", StringComparison.Ordinal));
+    });
+
     private static InferenceSettingsEditor Show(TwoStepSettings settings, Manager manager)
     {
         InferenceSettingsEditor editor = new(settings, manager, new Host()) { ShowActionEffects = false };
@@ -229,11 +242,14 @@ public sealed class StepActionTests
 
     private sealed class Host : IInferenceSettingsInteractionHost
     {
+        /// <summary>The exception every action run throws, or null to run the action.</summary>
+        public Exception? ExecuteFailure { get; init; }
+
         public ValueTask<bool> AuthorizeAsync(string operation, SetupSideEffect sideEffects, CancellationToken cancellationToken = default) =>
             ValueTask.FromResult(true);
         public Task<SetupActionResult> ExecuteAsync(IInferenceSettingsManager manager, InferenceSettings settings, SetupActionDescriptor action,
             IProgress<SetupProgress> progress, CancellationToken cancellationToken = default) =>
-            manager.RunAsync(settings, action.Id, progress, cancellationToken);
+            ExecuteFailure is { } failure ? Task.FromException<SetupActionResult>(failure) : manager.RunAsync(settings, action.Id, progress, cancellationToken);
         public ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
         public Task RevealFolderAsync(string folder, CancellationToken cancellationToken) => Task.CompletedTask;
         public Task CopyToClipboardAsync(Avalonia.Visual source, string text, string copied) => Task.CompletedTask;

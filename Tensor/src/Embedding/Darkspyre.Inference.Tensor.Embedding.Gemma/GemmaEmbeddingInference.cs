@@ -128,7 +128,11 @@ public sealed class GemmaEmbeddingInference : ITensorEmbeddingInference
             throw new InferenceException(InferenceFailureCode.BackendUnavailable, "The previous embedding model ownership must be released before loading another model.");
         TensorModelPackLease lease;
         try { lease = await _packs.AcquireAsync(definition.Key, cancellationToken).ConfigureAwait(false); }
-        catch (TensorModelPackException) { throw new InferenceException(InferenceFailureCode.ModelUnavailable, "The embedding pack must be installed and verified before Load."); }
+        catch (TensorModelPackException error)
+        {
+            throw new InferenceException(InferenceFailureCode.ModelUnavailable,
+                $"The embedding pack must be installed and verified before Load. {error.Message}", error);
+        }
         _lease = lease;
         try
         {

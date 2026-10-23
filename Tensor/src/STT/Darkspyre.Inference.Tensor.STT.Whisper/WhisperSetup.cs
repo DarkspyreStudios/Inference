@@ -65,7 +65,7 @@ public sealed class WhisperModelResolver : TensorModelResolver
         }
         catch (TensorSourceException exception) { return new(new(TensorCompatibilityState.Unverified, [new(exception.Code, exception.Message)], [], exception.State)); }
         catch (Exception exception) when (exception is InvalidDataException or ArgumentException or OverflowException)
-        { return Failure(TensorCompatibilityState.Unsupported, "whisper-header", "The model metadata is not supported by this Whisper adapter."); }
-        catch (IOException) { return Failure(TensorCompatibilityState.Unverified, "whisper-metadata-incomplete", "The model header could not be inspected completely."); }
+        { return Failure(TensorCompatibilityState.Unsupported, "whisper-header", $"The model metadata is not supported by this Whisper adapter: {exception.Message}"); }
+        catch (IOException exception) { return Failure(TensorCompatibilityState.Unverified, "whisper-metadata-incomplete", $"The model header could not be inspected completely: {exception.Message}"); }
     }
 }

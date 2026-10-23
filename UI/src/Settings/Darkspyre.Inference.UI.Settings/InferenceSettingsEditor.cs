@@ -690,9 +690,9 @@ public sealed class InferenceSettingsEditor : UserControl
     {
         bool authorized;
         try { authorized = await this.host.AuthorizeAsync(action.DisplayName, action.SideEffects); }
-        catch (Exception)
+        catch (Exception error)
         {
-            this.actionResult = new(SetupActionState.Failed);
+            this.actionResult = Failed("authorization-failed", "The host could not authorize the action", error);
             this.Changed();
             return;
         }
@@ -712,7 +712,7 @@ public sealed class InferenceSettingsEditor : UserControl
         }));
         try { this.actionResult = await this.host.ExecuteAsync(this.manager, this.settings, action, reported, cancellation.Token); }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { this.actionResult = new(SetupActionState.Cancelled); }
-        catch (Exception) { this.actionResult = new(SetupActionState.Failed); }
+        catch (Exception error) { this.actionResult = Failed("action-failed", "The host could not run the action", error); }
         finally
         {
             if (ReferenceEquals(this.actionCancellation, cancellation)) this.actionCancellation = null;
@@ -737,13 +737,17 @@ public sealed class InferenceSettingsEditor : UserControl
             if (await this.host.AuthorizeAsync("Open authorization page", SetupSideEffect.BrowserInteraction) && !this.closed)
                 await this.host.OpenBrowserAsync(uri);
         }
-        catch (Exception) when (!this.closed)
+        catch (Exception error) when (!this.closed)
         {
             this.resultAction = null;
-            this.actionResult = new(SetupActionState.Failed);
+            this.actionResult = Failed("browser-failed", "The authorization page could not be opened", error);
             this.Changed();
         }
     }
+
+    // A failed action whose issue names what failed, then the exception's type and message.
+    private static SetupActionResult Failed(string code, string what, Exception error) =>
+        new(SetupActionState.Failed, [new(code, $"{what} ({error.GetType().Name}): {error.Message}")]);
 
     // The clipboard write needs no provider effect or host consent; the code is shown on screen already.
     private Task CopyCodeAsync(string code) => this.closed ? Task.CompletedTask : this.host.CopyToClipboardAsync(this, code, "Sign-in code copied to clipboard.");

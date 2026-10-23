@@ -60,7 +60,7 @@ public sealed class TensorArtifactReader(ITensorModelSource? repository = null, 
         catch (TensorSourceException exception) { return new(exception.State, Issues: [new(exception.Code, exception.Message)]); }
         catch (UnauthorizedAccessException) { return new(TensorSourceState.AccessDenied, Issues: [new("source-access", "The host does not have access to this location.")]); }
         catch (FileNotFoundException) { return new(TensorSourceState.NotFound, Issues: [new("source-missing", "The selected artifact is missing.")]); }
-        catch (ArgumentException) { return new(TensorSourceState.InvalidRequest, Issues: [new("source-input", "The artifact location or inspection range is invalid.")]); }
-        catch (IOException) { return new(TensorSourceState.Unverified, Issues: [new("source-read", "The artifact could not be inspected.")]); }
+        catch (ArgumentException error) { return new(TensorSourceState.InvalidRequest, Issues: [new("source-input", $"The artifact location or inspection range is invalid: {error.Message}")]); }
+        catch (IOException error) { return new(TensorSourceState.Unverified, Issues: [new("source-read", $"The artifact could not be inspected: {error.Message}")]); }
     }
 }

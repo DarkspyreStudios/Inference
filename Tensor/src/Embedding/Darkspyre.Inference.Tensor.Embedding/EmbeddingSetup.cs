@@ -73,8 +73,8 @@ public sealed class EmbeddingModelResolver : TensorModelResolver
         { return Failure(TensorCompatibilityState.Unverified, exception.Code, exception.Message, exception.State); }
         catch (Exception exception) when (exception is InvalidDataException or FormatException or ArgumentException or OverflowException)
         { return Failure(TensorCompatibilityState.Unsupported, "embedding-schema", exception.Message); }
-        catch (IOException)
-        { return Failure(TensorCompatibilityState.Unverified, "metadata-incomplete", "The embedding GGUF header could not be inspected completely."); }
+        catch (IOException exception)
+        { return Failure(TensorCompatibilityState.Unverified, "metadata-incomplete", $"The embedding GGUF header could not be inspected completely: {exception.Message}"); }
     }
 }
 

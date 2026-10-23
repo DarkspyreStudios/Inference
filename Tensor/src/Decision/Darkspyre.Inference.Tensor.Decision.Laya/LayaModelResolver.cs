@@ -55,7 +55,7 @@ public sealed class LayaModelResolver(ITensorModelSource? source = null, ITensor
         }
         catch (TensorSourceException exception) { return new(new(TensorCompatibilityState.Unverified, [new(exception.Code, exception.Message)], [], exception.State)); }
         catch (Exception exception) when (exception is InvalidDataException or JsonException or ArgumentException or InvalidOperationException or KeyNotFoundException or OverflowException or FormatException)
-        { return Fail(TensorCompatibilityState.Unsupported, "laya-schema", "The artifacts do not satisfy the Laya ONNX, tokenizer and agent configuration contract."); }
-        catch (IOException) { return Fail(TensorCompatibilityState.Unverified, "metadata-incomplete", "The Laya metadata could not be inspected completely."); }
+        { return Fail(TensorCompatibilityState.Unsupported, "laya-schema", $"The artifacts do not satisfy the Laya ONNX, tokenizer and agent configuration contract: {exception.Message}"); }
+        catch (IOException exception) { return Fail(TensorCompatibilityState.Unverified, "metadata-incomplete", $"The Laya metadata could not be inspected completely: {exception.Message}"); }
     }
 }

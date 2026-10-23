@@ -177,7 +177,7 @@ internal sealed class WhisperBackendProbe(Func<WhisperRuntimeState>? runtimeInfo
                 };
             }
             catch (Exception exception) when (exception is not OperationCanceledException and not OutOfMemoryException)
-            { available = false; reason = "The Whisper native runtime could not be initialized on this machine."; }
+            { available = false; reason = $"The Whisper native runtime could not be initialized on this machine ({exception.GetType().Name}): {exception.Message}"; }
             cancellationToken.ThrowIfCancellationRequested();
             return TensorBackendAvailability.Observe(request, available switch
             {

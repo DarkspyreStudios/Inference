@@ -120,8 +120,11 @@ public sealed class TangoFluxHttpProvider(HttpClient httpClient) : IAudioProvide
                 }
                 catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
                 { throw new InferenceException(InferenceFailureCode.TimedOut, "TangoFlux request timed out; it was not retried."); }
-                catch (HttpRequestException) { throw new InferenceException(InferenceFailureCode.ExecutionFailed, "TangoFlux HTTP transport failed; it was not retried."); }
-                catch (IOException) { throw new InferenceException(InferenceFailureCode.ExecutionFailed, "TangoFlux response could not be read; it was not retried."); }
+                // .NET transport and stream messages name the host and port, never a header or the request body.
+                catch (HttpRequestException error)
+                { throw new InferenceException(InferenceFailureCode.ExecutionFailed, $"TangoFlux HTTP transport failed; it was not retried. {error.Message}"); }
+                catch (IOException error)
+                { throw new InferenceException(InferenceFailureCode.ExecutionFailed, $"TangoFlux response could not be read; it was not retried. {error.Message}"); }
             }
             return consumption.Publish(result);
         }

@@ -3,7 +3,10 @@ using System.Net.Http.Headers;
 
 namespace Darkspyre.Inference.Tensor.Common;
 
-/// <summary>A sanitized source failure. Remote response bodies, URLs and credentials are never included.</summary>
+/// <summary>
+/// A sanitized source failure. Remote response bodies, URLs and credentials are never included; a .NET transport message,
+/// which names at most the host and port, is.
+/// </summary>
 public sealed class TensorSourceException(TensorSourceState state, string code, string message) : IOException(message)
 {
     /// <summary>The state that classifies the failure, such as a transient failure or an invalid request.</summary>
@@ -43,9 +46,9 @@ internal sealed class TensorSourceHttp(HttpClient client, TensorSourceAccess? ac
             {
                 throw new TensorSourceException(TensorSourceState.TransientFailure, "source-timeout", "The source request timed out.");
             }
-            catch (HttpRequestException)
+            catch (HttpRequestException error)
             {
-                throw new TensorSourceException(TensorSourceState.TransientFailure, "source-network", "The source could not be reached.");
+                throw new TensorSourceException(TensorSourceState.TransientFailure, "source-network", $"The source could not be reached: {error.Message}");
             }
             if (response.RequestMessage?.RequestUri is Uri actual && actual != uri)
             {

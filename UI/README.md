@@ -102,7 +102,10 @@ enables its Save from `CanSave` and asks before discarding unsaved changes.
 
 `IInferenceSettingsInteractionHost.RevealFolderAsync(folder, token)` shows a folder in the platform's
 file manager. The install card's **Show** button calls it with the model store folder; an exception
-shows its message as the action result.
+shows its message as the action result. Every host call the editor makes reports a failure the same
+way: a failed authorization, action run or browser open is a Failed action result whose issue names
+what failed and the exception's type and message, and a failed path pick or choice query shows the
+same on its field.
 
 ## Optional native path selection
 

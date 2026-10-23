@@ -78,9 +78,11 @@ internal abstract class OAuthAuthenticatorBase(HttpClient http) : ILlmAuthentica
             await using (Stream stream = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken))
             {
                 try { result = await JsonDocument.ParseAsync(stream, cancellationToken: cancellationToken); }
-                catch (JsonException)
+                catch (JsonException error)
                 {
-                    throw new InvalidOperationException("The authorization server returned invalid JSON.");
+                    // The parser's message can quote the reply, which can hold a token, so only its position is kept.
+                    throw new InvalidOperationException(
+                        $"The authorization server returned invalid JSON at line {error.LineNumber}, byte {error.BytePositionInLine}.");
                 }
             }
             return result;

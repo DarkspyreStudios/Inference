@@ -163,13 +163,15 @@ public sealed class HuggingFaceModelSource : ITensorModelSource, IDisposable
         token.ThrowIfCancellationRequested();
         try { return new(TensorSourceState.Available, await action().ConfigureAwait(false)); }
         catch (TensorSourceException exception) { return new(exception.State, Issues: [new(exception.Code, exception.Message)]); }
-        catch (ArgumentException) { return new(TensorSourceState.InvalidRequest, Issues: [new("source-query", "The source query or artifact path is invalid.")]); }
+        catch (ArgumentException exception)
+        { return new(TensorSourceState.InvalidRequest, Issues: [new("source-query", $"The source query or artifact path is invalid: {exception.Message}")]); }
+        // Hugging Face metadata is public model metadata, so the parser's message can quote it.
         catch (Exception exception) when (exception is JsonException or InvalidOperationException or KeyNotFoundException or FormatException)
-        { return new(TensorSourceState.Unverified, Issues: [new("source-metadata", "The source metadata is missing, malformed or unsupported.")]); }
+        { return new(TensorSourceState.Unverified, Issues: [new("source-metadata", $"The source metadata is missing, malformed or unsupported: {exception.Message}")]); }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
         { return new(TensorSourceState.TransientFailure, Issues: [new("source-timeout", "The source request timed out.")]); }
         catch (Exception exception) when (exception is IOException or HttpRequestException)
-        { return new(TensorSourceState.TransientFailure, Issues: [new("source-read", "The source response could not be read.")]); }
+        { return new(TensorSourceState.TransientFailure, Issues: [new("source-read", $"The source response could not be read: {exception.Message}")]); }
     }
 
     private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response, CancellationToken token)

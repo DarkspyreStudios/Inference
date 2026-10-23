@@ -680,6 +680,11 @@ identifies the imported content, not its publisher. Expected hashes must match. 
 commits a complete compatible definition; neither Save nor Import loads the model. Closing an
 unsaved editor does not remove an imported pack.
 
+An issue from Inspect, a source query or a family's compatibility check names what failed, then the
+message of the exception behind it: the local file error, the .NET transport error (which names at
+most a host and port), the metadata parser's error, or the family schema check's error. A source
+issue never carries a remote response body, a URL path or query, or a credential.
+
 ```csharp
 var resolver = new QwenModelResolver();
 var selection = new TensorModelSelection(
