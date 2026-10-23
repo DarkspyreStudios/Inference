@@ -70,11 +70,11 @@ public abstract class InferenceSettingsManager<TSettings, TChanges> : IInference
         {
             return new(SetupActionState.Cancelled);
         }
-        catch (Exception)
+        catch (Exception error)
         {
-            // Protocol exceptions can contain credentials or raw responses. Never project them.
+            // Adapters sanitize provider text where it enters (L14), so the failure's own message is shown.
             return new(SetupActionState.Failed,
-                [new("operation-failed", "The operation failed. Check configuration and provider availability.")]);
+                [new("operation-failed", $"The operation failed {Cause(error)} Check configuration and provider availability.")]);
         }
     }
 
@@ -104,10 +104,10 @@ public abstract class InferenceSettingsManager<TSettings, TChanges> : IInference
         {
             return new([], State: SetupChoiceState.Cancelled);
         }
-        catch (Exception)
+        catch (Exception error)
         {
             return new([], State: SetupChoiceState.Failed,
-                Issues: [new("choices-unavailable", "The choices could not be retrieved.", fieldId)]);
+                Issues: [new("choices-unavailable", $"Retrieving the choices failed {Cause(error)}", fieldId)]);
         }
     }
 
@@ -152,13 +152,21 @@ public abstract class InferenceSettingsManager<TSettings, TChanges> : IInference
             typed.SaveOutcomeUncertain = true;
             return new(SetupCommitState.Uncertain);
         }
-        catch (Exception)
+        catch (Exception error)
         {
-            // Host exceptions may contain secrets and do not prove that no write occurred.
+            // A host exception does not prove that no write occurred.
             typed.IsSaved = true;
             typed.SaveOutcomeUncertain = true;
-            return new(SetupCommitState.Uncertain, Issues: [new("commit-outcome-unknown", "Read the saved configuration before retrying.")]);
+            return new(SetupCommitState.Uncertain,
+                Issues: [new("commit-outcome-unknown", $"Read the saved configuration before retrying. The save failed {Cause(error)}")]);
         }
+    }
+
+    // The failure's type in parentheses, a colon and its message, followed by a period when it has none.
+    private static string Cause(Exception error)
+    {
+        string message = error.Message.Trim();
+        return $"({error.GetType().Name}): {message}{(message.EndsWith('.') ? "" : ".")}";
     }
 
     /// <summary>
