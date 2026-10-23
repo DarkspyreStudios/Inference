@@ -14,6 +14,7 @@ internal static class CodexDefinition
         DisplayOrder = 20,
         Icon = SetupIcons.FromResource(typeof(SetupIcons).Assembly, SetupIcons.OpenAiResource),
         Group = SetupProviderGroup.Subscription,
+        HomeFolder = ".codex",
         SetupSteps =
         [
             new SetupStep

@@ -14,6 +14,7 @@ internal static class AntigravityDefinition
         DefaultModelId = "auto",
         DisplayOrder = 40,
         Group = SetupProviderGroup.Subscription,
+        HomeFolder = ".gemini",
         SetupSteps =
         [
             new SetupStep

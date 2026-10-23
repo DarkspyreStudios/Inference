@@ -14,6 +14,7 @@ internal static class ClaudeDefinition
         DisplayOrder = 30,
         Icon = SetupIcons.FromResource(typeof(ClaudeDefinition).Assembly, "Icons/claude.svg"),
         Group = SetupProviderGroup.Subscription,
+        HomeFolder = ".claude",
         SetupSteps =
         [
             new SetupStep

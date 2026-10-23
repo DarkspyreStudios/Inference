@@ -3597,6 +3597,9 @@ model step names `test`. A CLI or Apple helper executable field sits in the conn
 advanced section, "More options". `LlmProviderDefinition.Icon` and `Group` carry the provider's logo
 and add-connection group, and `SetupDefinition` copies both. Claude embeds its own logo; ChatGPT and
 the OpenAI API use the shared OpenAI mark in Common (`SetupIcons.OpenAiResource`).
+`LlmProviderDefinition.HomeFolder` names the provider's own folder in the user's home folder: `.claude`
+for Claude, `.codex` for ChatGPT and `.gemini` for Antigravity. A host lets sandboxed commands read it.
+Grok, the OpenAI API and self-hosted providers name none.
 
 The `check` action on a Claude or Antigravity connection asks the CLI for its sign-in. It reports the
 CLI as installed or not in `Status.Installed`, and signed in or not in `Status.Authenticated`. A

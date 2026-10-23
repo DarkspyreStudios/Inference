@@ -42,6 +42,12 @@ public sealed record LlmProviderDefinition
     /// <summary>The add-connection group the provider is listed under.</summary>
     public SetupProviderGroup Group { get; init; } = SetupProviderGroup.More;
 
+    /// <summary>
+    /// The provider's own folder in the user's home folder, such as <c>.claude</c>, relative to it; null when the provider
+    /// keeps none. A host lets sandboxed commands read it.
+    /// </summary>
+    public string? HomeFolder { get; init; }
+
     /// <summary>The provider as a text-generation setup definition for the inference catalog, with its icon and group.</summary>
     public InferenceSetupDefinition SetupDefinition => new(
         new(Id, DisplayName, InferenceImplementationKind.Connect, InferenceTask.TextGeneration),
