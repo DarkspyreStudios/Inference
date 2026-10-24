@@ -1930,14 +1930,12 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             }.ToJsonString());
 
         /// <summary>
-        /// The name the CLI offers the model a bridge tool under, for a logical name; a name that is not a bridge tool
-        /// stays as it is. Carried history uses it, so the model sees each past call under the name it can call.
+        /// The name the CLI gives a host tool, for a logical name. Carried history uses it, so the model sees each past
+        /// call under the name it can call. Every carried call is a host tool, because the CLI runs with its own tools
+        /// off, so a call to a tool this conversation does not offer, such as one whose plugin had not loaded when it
+        /// opened, takes the same form.
         /// </summary>
-        private string CliToolName(string name)
-        {
-            string native = _bridge.Names.Native(name);
-            return _bridge.Names.Logical(native) is null ? name : McpToolName(native);
-        }
+        private string CliToolName(string name) => McpToolName(_bridge.Names.Native(name));
 
         /// <summary>A bridge tool's logical name; any other tool keeps the name the CLI reported.</summary>
         private string LogicalToolName(string name)

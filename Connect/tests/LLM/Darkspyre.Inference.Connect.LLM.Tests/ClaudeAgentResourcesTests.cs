@@ -440,8 +440,8 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
     }
 
     /// <summary>
-    /// A conversation opened from host history shows each past call under the name the CLI offers that tool, so the
-    /// model calls the tool it can reach.
+    /// A conversation opened from host history shows each past call under the name the CLI gives that tool, so the
+    /// model calls the tool it can reach. A call to a tool this conversation does not offer takes the same form.
     /// </summary>
     [Fact]
     public async Task OpeningHistoryNamesToolCallsAsTheCliOffersThem()
@@ -460,14 +460,18 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
                     new("e1", "t1", new("user", "Population of Lyon?")),
                     new("e2", "t1", new("assistant", string.Empty) { ToolCalls = [new LlmToolCall("c1", "lookup", """{"city":"Lyon"}""")] }),
                     new("e3", "t1", new("user", string.Empty) { ToolResults = [new LlmToolResult("c1", LlmToolOutput.FromText("522,250"))] }),
-                    new("e4", "t1", new("assistant", "About 522,000."))
+                    new("e4", "t1", new("assistant", string.Empty) { ToolCalls = [new LlmToolCall("c2", "ticket_search", "{}")] }),
+                    new("e5", "t1", new("user", string.Empty) { ToolResults = [new LlmToolResult("c2", LlmToolOutput.FromText("[]"))] }),
+                    new("e6", "t1", new("assistant", "About 522,000."))
                 ]
             }
         });
 
         await CompleteTurnAsync(session, process);
 
-        Assert.Contains("[TOOL CALL id=c1 name=mcp__darkspyre-inference-connect__lookup]", UserText(process), StringComparison.Ordinal);
+        string opening = UserText(process);
+        Assert.Contains("[TOOL CALL id=c1 name=mcp__darkspyre-inference-connect__lookup]", opening, StringComparison.Ordinal);
+        Assert.Contains("[TOOL CALL id=c2 name=mcp__darkspyre-inference-connect__ticket_search]", opening, StringComparison.Ordinal);
     }
 
     [Fact]
