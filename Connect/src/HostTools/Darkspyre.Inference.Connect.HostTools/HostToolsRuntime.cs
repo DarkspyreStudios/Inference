@@ -27,7 +27,7 @@ public static partial class HostToolsRuntime
         var manifest = ServicePackageManifest.Parse(await File.ReadAllBytesAsync(Path.Combine(package, "manifest.json"), cancellationToken).ConfigureAwait(false));
         ServiceRegistration registration = await platform.InstallAsync(new("HostTools", ServiceFamily.HostTools,
             Required("HostTools.LayoutId"), Required("HostTools.ClientBuildDigest"), Path.Combine(package, "payload"), manifest,
-            manifest.BuildDigest()), cancellationToken).ConfigureAwait(false);
+            manifest.BuildDigest(), DataRoot: null), cancellationToken).ConfigureAwait(false); // Host tools keep no durable data.
         IServiceSubscription subscription = await new ServiceConnector(platform, registration, ObserveLaunch)
             .ConnectAsync(cancellationToken).ConfigureAwait(false);
         return new HostToolsClient(subscription);
