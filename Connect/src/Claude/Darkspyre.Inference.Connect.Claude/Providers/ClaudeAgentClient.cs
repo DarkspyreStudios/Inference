@@ -485,7 +485,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
 
             JsonElement initialization = await SendControlRequestAsync(request, cancellationToken);
             if (initialization.ValueKind == JsonValueKind.Object && initialization.TryGetProperty("models", out _))
-                _connection = _connection with { Catalog = ClaudeCliModelCatalog.Project(initialization) };
+                _connection = _connection with { Catalog = ClaudeCliModelCatalog.Project(initialization, _connection.Catalog) };
             await SetThinkingDisplayAsync(requestReasoningText, cancellationToken);
             cancellationToken.ThrowIfCancellationRequested();
         }

@@ -11,6 +11,8 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
     private ILlmConnectionSource? _connections;
     private ILlmConnectionSource Connections => _connections ?? throw new ObjectDisposedException(nameof(LlmAgentProviderService));
     private readonly Dictionary<LlmTransport, ILlmAgentClient> _clients;
+    // Attaches the connection's discovered model list, so an agent session reads each model's limits from it.
+    private readonly LlmProviderService _catalogs;
     private readonly LlmAccountUsageObservations _observations;
     private readonly bool _ownsObservations;
     private readonly LlmOperationLifetime _lifetime = new();
@@ -22,11 +24,14 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
     internal LlmAgentProviderService(
         ILlmConnectionSource connections,
         IEnumerable<ILlmAgentClient> clients,
+        LlmProviderService catalogs,
         LlmAccountUsageObservations? observations = null)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(clients);
+        ArgumentNullException.ThrowIfNull(catalogs);
         _connections = connections;
+        _catalogs = catalogs;
         _observations = observations ?? new();
         _ownsObservations = observations is null;
         ILlmAgentClient[] clientArray = [.. clients];
@@ -88,6 +93,7 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
             Connections,
             connectionId,
             cancellationToken);
+        connection = await _catalogs.AttachCatalogAsync(connectionId, connection, cancellationToken);
         connection = connection with { AccountUsageObservationBinding = reservation.Bind(connection) };
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfOpeningCanceled(cancellationToken);
@@ -118,6 +124,7 @@ public sealed class LlmAgentProviderService : IDisposable, IAsyncDisposable
             Connections,
             connectionId,
             cancellationToken);
+        connection = await _catalogs.AttachCatalogAsync(connectionId, connection, cancellationToken);
         connection = connection with { AccountUsageObservationBinding = reservation.Bind(connection) };
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfOpeningCanceled(cancellationToken);

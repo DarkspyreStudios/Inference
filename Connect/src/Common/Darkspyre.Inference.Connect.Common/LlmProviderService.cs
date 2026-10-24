@@ -789,6 +789,19 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         return await AttachCatalogCoreAsync(connectionId, connection, client, operation.Token).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// <see cref="AttachCatalogAsync(string, LlmConnection, ILlmClient, CancellationToken)"/> with the transport's chat
+    /// client, for an agent session opened on the connection. A transport with no chat client keeps the connection.
+    /// </summary>
+    internal async Task<LlmConnection> AttachCatalogAsync(string connectionId, LlmConnection connection,
+        CancellationToken cancellationToken)
+    {
+        using var operation = _lifetime.Enter(cancellationToken);
+        return _clients.TryGetValue(connection.Transport, out ILlmClient? client)
+            ? await AttachCatalogCoreAsync(connectionId, connection, client, operation.Token).ConfigureAwait(false)
+            : connection;
+    }
+
     private async Task<LlmConnection> AttachCatalogCoreAsync(string connectionId, LlmConnection connection,
         ILlmClient client, CancellationToken cancellationToken)
     {

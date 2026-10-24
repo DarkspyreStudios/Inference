@@ -515,8 +515,11 @@ when a model step's last host tool call settles, before its result is written. A
 step's input and output plus the corrected estimate of the entries recorded after it; otherwise it is the corrected
 estimate of the whole history and the input. After a native resume the CLI holds its own saved session, which the
 saved history does not measure, so the measure reports no used size until the first step reports. The window and
-output limit come from the CLI's model list, else the
-published table. At or above the trigger, or after the turn's first too-long refusal, the conversation closes the CLI
+output limit come from the connection's discovered model list: `LlmAgentProviderService` attaches the same cached
+list `LlmProviderService` keeps, which for a connection signed in to a Claude account is Anthropic's model listing with
+its `max_input_tokens` and `max_tokens`. A CLI model takes the discovered limits of the model it resolves to, and a
+discovered model the CLI lists only by alias stays available under its own id. A model with no discovered size takes
+the published table. At or above the trigger, or after the turn's first too-long refusal, the conversation closes the CLI
 session, compacts the saved history with this turn's entries as the current turn, and opens a new CLI session with the
 compacted history as its opening. It then sends the turn's input, or `Continue from where you stopped. The tool
 results above are complete; do not repeat finished tool calls.` when the turn already ran a step. The conversation

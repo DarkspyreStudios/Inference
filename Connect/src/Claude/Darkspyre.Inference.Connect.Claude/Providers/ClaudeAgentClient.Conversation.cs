@@ -710,7 +710,7 @@ internal sealed partial class ClaudeAgentClient
             long estimate = await _history.EstimateAsync(_history.Saved, turn.ModelId, added, turn.Token);
             (long? reportedTokens, long? reportedLimit) = ReadRefusalSizes(detail);
             await _owner.Learned.ObserveRefusalAsync(_connectionId, turn.ModelId, estimate, reportedTokens, reportedLimit,
-                ClaudeModelLimits.Get(turn.ModelId).ContextTokens, turn.Token);
+                Model(turn.ModelId).MaxContextTokens, turn.Token);
         }
 
         /// <summary>

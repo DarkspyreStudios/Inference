@@ -261,7 +261,9 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         LlmAgentContext restored = JsonSerializer.Deserialize(JsonSerializer.SerializeToUtf8Bytes(context, ConnectLlmJson.AgentContext),
             ConnectLlmJson.AgentContext)!;
         var process = new ManualProcess();
-        await using var providers = new LlmAgentProviderService(new ResourcePreparationTests.Source(Connection()), [Client(new Factory(process))]);
+        var connections = new ResourcePreparationTests.Source(Connection());
+        await using var catalogs = new LlmProviderService(connections, [], []);
+        await using var providers = new LlmAgentProviderService(connections, [Client(new Factory(process))], catalogs);
         await using ILlmAgentSession session = await providers.StartSessionAsync("connection", new()
         {
             ModelId = "claude-test",
@@ -962,6 +964,48 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         Assert.False(status.NeedsCompaction);
         Assert.Equal(LlmContextMeasurementSource.Estimated, status.Source);
         Assert.True(prospective.UsedContextTokens >= status.UsedContextTokens + 100);
+    }
+
+    /// <summary>
+    /// A session opened through the agent facade reads its model's window from the connection's discovered model list,
+    /// for a model the published table does not list and the CLI names only by an alias.
+    /// </summary>
+    [Fact]
+    public async Task AgentSessionTakesTheDiscoveredWindow()
+    {
+        var process = new ManualProcess
+        {
+            InitializationPayload = JsonElement.Parse("""{"models":[{"value":"haiku","resolvedModel":"claude-haiku-9","displayName":"Haiku"}]}""")
+        };
+        var factory = new Factory(process);
+        var source = new ResourcePreparationTests.Source(Connection());
+        await using var catalogs = new LlmProviderService(source,
+            [new DiscoveredModels(factory, new LlmModel("claude-haiku-9", "Claude Haiku 9") { MaxContextTokens = 400_000 })], []);
+        await using var providers = new LlmAgentProviderService(source, [Client(factory)], catalogs);
+        await using ILlmAgentSession session = await providers.StartSessionAsync("connection", new()
+        {
+            ModelId = "claude-haiku-9",
+            Runtime = new() { WorkingDirectory = _directory }
+        });
+
+        await CompleteTurnAsync(session, process);
+
+        Assert.Equal(400_000, (await session.GetContextStatusAsync()).MaxContextTokens);
+    }
+
+    /// <summary>A Claude chat client whose model list is the given models.</summary>
+    private sealed class DiscoveredModels(IClaudeCliSessionProcessFactory factory, params LlmModel[] models) : ILlmClient, ILlmCatalogCapabilities
+    {
+        private readonly ClaudeCliLlmClient _claude = new(Http, new Summaries(), factory, NoRateLimitLog);
+
+        public LlmTransport Transport => _claude.Transport;
+        public LlmProviderDefinition ProviderDefinition => _claude.ProviderDefinition;
+        public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) =>
+            _claude.GetCapabilities(connection, modelId);
+        public IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
+            CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default) =>
+            Task.FromResult<IReadOnlyList<LlmModel>>(models);
     }
 
     [Fact]

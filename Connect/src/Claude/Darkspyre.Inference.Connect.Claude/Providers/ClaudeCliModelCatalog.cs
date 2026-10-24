@@ -78,7 +78,15 @@ internal static class ClaudeCliModelCatalog
         return models!;
     }
 
-    internal static ReadOnlyCollection<LlmModel> Project(JsonElement initialization)
+    /// <summary>
+    /// The CLI's models. The CLI reports no window, so each model takes the window and output limit
+    /// <paramref name="discovered"/> lists for the model it resolves to, or for its own id; a model it does not list, or
+    /// lists without a size, takes the published limits. A discovered model the CLI does not list under its id follows
+    /// the CLI's models, so a session on that id reads its discovered limits.
+    /// </summary>
+    /// <param name="initialization">The CLI's initialize response.</param>
+    /// <param name="discovered">The connection's discovered catalog, such as Anthropic's model listing, or null.</param>
+    internal static ReadOnlyCollection<LlmModel> Project(JsonElement initialization, IReadOnlyList<LlmModel>? discovered = null)
     {
         if (initialization.ValueKind != JsonValueKind.Object
             || !initialization.TryGetProperty("models", out JsonElement models) || models.ValueKind != JsonValueKind.Array)
@@ -90,18 +98,20 @@ internal static class ClaudeCliModelCatalog
                 || value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString())
                 || !model.TryGetProperty("displayName", out JsonElement name) || name.ValueKind != JsonValueKind.String)
                 throw ProtocolFailure();
-            // The CLI reports no window; the published limits of the model an alias resolves to supply it.
             string resolved = model.TryGetProperty("resolvedModel", out JsonElement target) && target.ValueKind == JsonValueKind.String
                 && !string.IsNullOrWhiteSpace(target.GetString()) ? target.GetString()! : value.GetString()!;
+            LlmModel? known = discovered?.FirstOrDefault(item => item.Id == resolved)
+                ?? discovered?.FirstOrDefault(item => item.Id == value.GetString());
             ClaudeModelLimit limit = ClaudeModelLimits.Get(resolved);
             result.Add(new(value.GetString()!, name.GetString()!)
             {
                 CatalogEntry = model.Clone(),
-                MaxContextTokens = limit.ContextTokens,
-                MaxOutputTokens = limit.OutputTokens,
+                MaxContextTokens = known?.MaxContextTokens ?? limit.ContextTokens,
+                MaxOutputTokens = known?.MaxOutputTokens ?? limit.OutputTokens,
             });
         }
-        return Array.AsReadOnly(result.ToArray());
+        LlmModel[] unlisted = [.. discovered?.Where(item => result.All(model => model.Id != item.Id)) ?? []];
+        return Array.AsReadOnly([.. result, .. unlisted]);
     }
 
     private static LlmProviderException ProtocolFailure(Exception? evidence = null) => new("Claude CLI returned invalid model initialization.",

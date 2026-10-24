@@ -51,7 +51,7 @@ public static class ServiceCollectionExtensions
             provider.GetRequiredService<LlmConnectionAccess>()));
         services.AddScoped(provider => new LlmAgentProviderService(
             provider.GetRequiredService<ILlmConnectionSource>(), provider.GetServices<ILlmAgentClient>(),
-            provider.GetRequiredService<LlmAccountUsageObservations>()));
+            provider.GetRequiredService<LlmProviderService>(), provider.GetRequiredService<LlmAccountUsageObservations>()));
         services.AddScoped(provider => new LlmEmbeddingProviderService(
             provider.GetRequiredService<ILlmConnectionSource>(), provider.GetServices<ILlmEmbeddingClient>(),
             provider.GetServices<ILlmAuthenticator>(), provider.GetRequiredService<LlmConnectionAccess>()));

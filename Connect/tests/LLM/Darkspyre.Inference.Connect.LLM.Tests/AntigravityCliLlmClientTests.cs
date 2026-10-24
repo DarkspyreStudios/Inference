@@ -143,8 +143,9 @@ public sealed class AntigravityCliLlmClientTests
     public async Task ResumeReopensTheProviderConversationThroughTheFacade()
     {
         var process = new TerminalProcess();
-        await using var providers = new LlmAgentProviderService(new ResourcePreparationTests.Source(Connection()),
-            [Agents(process)]);
+        var source = new ResourcePreparationTests.Source(Connection());
+        await using var catalogs = new LlmProviderService(source, [], []);
+        await using var providers = new LlmAgentProviderService(source, [Agents(process)], catalogs);
 
         await using ILlmAgentSession session = await providers.ResumeSessionAsync("connection", "conversation-1",
             new() { Runtime = ProviderRuntime() });
