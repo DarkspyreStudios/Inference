@@ -646,7 +646,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                 AgentOpeningContext? opening = openingContext is null ? null : AgentOpeningContext.From(openingContext with
                 {
                     Entries = openingContext.Entries.Select((entry, index) => entry with { Message = prepared.Messages[index] }).ToArray()
-                }, _openingOmitted, carriesAttachments: true);
+                }, _openingOmitted, carriesAttachments: true, CliToolName);
                 return (opening is null ? SerializeInput(input, prepared.Messages[^1].Attachments)
                     : SerializeInput([new LlmAgentTextContent(opening.Text), .. input],
                         [.. opening.Attachments, .. prepared.Messages[^1].Attachments]), opening?.Notice);
@@ -1928,6 +1928,16 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                 ["id"] = JsonNode.Parse(id.GetRawText()),
                 ["error"] = new JsonObject { ["code"] = code, ["message"] = message }
             }.ToJsonString());
+
+        /// <summary>
+        /// The name the CLI offers the model a bridge tool under, for a logical name; a name that is not a bridge tool
+        /// stays as it is. Carried history uses it, so the model sees each past call under the name it can call.
+        /// </summary>
+        private string CliToolName(string name)
+        {
+            string native = _bridge.Names.Native(name);
+            return _bridge.Names.Logical(native) is null ? name : McpToolName(native);
+        }
 
         /// <summary>A bridge tool's logical name; any other tool keeps the name the CLI reported.</summary>
         private string LogicalToolName(string name)

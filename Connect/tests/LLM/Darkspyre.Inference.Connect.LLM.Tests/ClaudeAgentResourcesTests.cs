@@ -437,6 +437,37 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         Assert.All(events.OfType<LlmAgentToolEvent>(), item => Assert.Equal(name, item.Tool));
     }
 
+    /// <summary>
+    /// A conversation opened from host history shows each past call under the name the CLI offers that tool, so the
+    /// model calls the tool it can reach.
+    /// </summary>
+    [Fact]
+    public async Task OpeningHistoryNamesToolCallsAsTheCliOffersThem()
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await Client(new Factory(process)).StartSessionAsync("connection", Connection(), new()
+        {
+            ModelId = "claude-test",
+            Runtime = new() { WorkingDirectory = _directory },
+            Tools = [new LlmAgentToolDefinition { Name = "lookup", InputSchema = Json(new { type = "object" }) }],
+            ToolHandler = (_, _) => Task.FromResult(LlmToolOutput.FromText("done")),
+            Context = new()
+            {
+                Entries =
+                [
+                    new("e1", "t1", new("user", "Population of Lyon?")),
+                    new("e2", "t1", new("assistant", string.Empty) { ToolCalls = [new LlmToolCall("c1", "lookup", """{"city":"Lyon"}""")] }),
+                    new("e3", "t1", new("user", string.Empty) { ToolResults = [new LlmToolResult("c1", LlmToolOutput.FromText("522,250"))] }),
+                    new("e4", "t1", new("assistant", "About 522,000."))
+                ]
+            }
+        });
+
+        await CompleteTurnAsync(session, process);
+
+        Assert.Contains("[TOOL CALL id=c1 name=mcp__darkspyre-inference-connect__lookup]", UserText(process), StringComparison.Ordinal);
+    }
+
     [Fact]
     public async Task BridgeValidatesArgumentsBeforeHandler()
     {

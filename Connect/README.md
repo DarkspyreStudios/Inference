@@ -172,8 +172,10 @@ Codex prepares caller-owned resources inline, so a context with resources opens 
 access.
 
 On Claude the MCP bridge applies the same rules. A name outside the MCP rule `[A-Za-z0-9_.-]{1,128}` is sent as
-its alias in `--allowedTools`, the MCP tool list and calls, and every event carries the logical name. The first
-definition of a duplicated name is used. A schema whose root is not an object is listed as
+its alias in `--allowedTools`, the MCP tool list and calls, and every event carries the logical name. The CLI offers
+the model each bridge tool as `mcp__darkspyre-inference-connect__<name>`. History carried into a new CLI session as
+opening context names each call to a bridge tool that way, so the model sees its past calls under the names it can
+call; a call to any other tool keeps its logical name. The first definition of a duplicated name is used. A schema whose root is not an object is listed as
 `{"type":"object","properties":{"value":<schema>},"required":["value"]}`, and `value` is checked and handed to the
 handler. The bridge holds one lock per session around each call to a tool with `RequiresSequentialExecution`, so two
 such calls never overlap. With tools and no handler, each call gets the error result

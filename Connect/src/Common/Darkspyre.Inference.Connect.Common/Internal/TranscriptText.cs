@@ -5,7 +5,9 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 /// <summary>
 /// The text form of a history, for providers that take one prompt: each message under its role header, with
-/// tool calls and tool results as labelled blocks. The CLI chat clients and agent opening context share it.
+/// tool calls and tool results as labelled blocks. The CLI chat clients and agent opening context share it. A tool call
+/// is written under the name <c>toolName</c> gives it, so a provider that offers the model its tools under other names
+/// writes the history under those names; without <c>toolName</c> a call keeps its own name.
 /// </summary>
 internal static class TranscriptText
 {
@@ -14,7 +16,7 @@ internal static class TranscriptText
         RichContentRoutes.TextOnly with { ErrorFlag = LlmRichContentCarriage.Native };
 
     public static void Append(StringBuilder text, IEnumerable<LlmChatMessage> messages,
-        Func<LlmToolOutput, ProjectedToolOutput>? project = null)
+        Func<LlmToolOutput, ProjectedToolOutput>? project = null, Func<string, string>? toolName = null)
     {
         foreach (LlmChatMessage message in messages)
         {
@@ -22,7 +24,7 @@ internal static class TranscriptText
             text.AppendLine(message.Content);
             foreach (LlmToolCall call in ClientTools.Functions(message.ToolCalls))
             {
-                text.Append("[TOOL CALL id=").Append(call.Id).Append(" name=").Append(call.Name).AppendLine("]");
+                text.Append("[TOOL CALL id=").Append(call.Id).Append(" name=").Append(toolName is null ? call.Name : toolName(call.Name)).AppendLine("]");
                 text.AppendLine(call.ArgumentsJson);
             }
             var omittedNames = new List<string>();

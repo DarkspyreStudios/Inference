@@ -27,7 +27,12 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
         return ManagedAgentContext.WithoutContinuationState(options.Context, supportsResources);
     }
 
-    internal static AgentOpeningContext? From(LlmAgentContext context, int omitted, bool carriesAttachments)
+    /// <summary>
+    /// The opening context for <paramref name="context"/>, with each carried tool call under the name
+    /// <paramref name="toolName"/> gives it: the name the provider offers the model that tool under.
+    /// </summary>
+    internal static AgentOpeningContext? From(LlmAgentContext context, int omitted, bool carriesAttachments,
+        Func<string, string>? toolName = null)
     {
         if (context.Entries.Count == 0)
         {
@@ -36,7 +41,7 @@ internal sealed record AgentOpeningContext(string Text, IReadOnlyList<LlmAttachm
 
         var text = new StringBuilder();
         text.AppendLine(Header);
-        TranscriptText.Append(text, context.Entries.Select(entry => entry.Message));
+        TranscriptText.Append(text, context.Entries.Select(entry => entry.Message), toolName: toolName);
         // History images and documents travel as first-turn attachments; tool-output audio, other binaries and
         // resource byte bodies have no attachment form and count as not carried.
         LlmToolOutputPart[] toolBytes = [.. context.Entries.SelectMany(entry => ClientTools.Functions(entry.Message.ToolResults))
