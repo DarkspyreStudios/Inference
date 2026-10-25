@@ -502,16 +502,20 @@ public sealed class InferenceSettingsEditor : UserControl
                 line.Children.Add(code);
                 line.Children.Add(new TextBlock { Text = "to finish connecting." });
                 view.Children.Add(line);
+                view.Children.Add(AddressLine(device.VerificationUri));
                 actions.Children.Add(Button("Copy code", "outline", () => this.CopyCodeAsync(device.UserCode)));
+                actions.Children.Add(Button("Copy link", "outline", () => this.CopyLinkAsync(device.VerificationUri)));
                 actions.Children.Add(Button("Open authorization page", "primary", () => this.OpenBrowserAsync(device.VerificationUri)));
                 actions.Children.Add(Enabled(Button("Continue", "primary", () => this.RunActionAsync(device.Continue)), !this.Busy));
                 actions.Children.Add(Enabled(Button("Cancel connection", "outline", () => this.RunActionAsync(device.Cancel)), !this.Busy));
                 view.Children.Add(actions);
                 break;
             case SetupBrowserAuthorization browser:
-                Button open = Button("Open authorization page", "primary", () => this.OpenBrowserAsync(browser.AuthorizationUri));
-                open.HorizontalAlignment = HorizontalAlignment.Left;
-                view.Children.Add(open);
+                WrapPanel opening = new() { ItemSpacing = 12, LineSpacing = 8 };
+                opening.Children.Add(Button("Open authorization page", "primary", () => this.OpenBrowserAsync(browser.AuthorizationUri)));
+                opening.Children.Add(Button("Copy link", "outline", () => this.CopyLinkAsync(browser.AuthorizationUri)));
+                view.Children.Add(opening);
+                view.Children.Add(AddressLine(browser.AuthorizationUri));
                 this.callback ??= new SetupFieldInput(browser.Callback, this.settings, this.manager, this.host, this.inputs, this.OnFieldEditedAsync,
                     sensitiveInput: true);
                 Detach(this.callback);
@@ -751,6 +755,20 @@ public sealed class InferenceSettingsEditor : UserControl
 
     // The clipboard write needs no provider effect or host consent; the code is shown on screen already.
     private Task CopyCodeAsync(string code) => this.closed ? Task.CompletedTask : this.host.CopyToClipboardAsync(this, code, "Sign-in code copied to clipboard.");
+
+    private Task CopyLinkAsync(Uri address) => this.closed ? Task.CompletedTask : this.host.CopyToClipboardAsync(this, address.AbsoluteUri, "Sign-in link copied to clipboard.");
+
+    // The sign-in page's address as selectable text, for a person whose browser did not open or who signs in on another device.
+    private static StackPanel AddressLine(Uri address)
+    {
+        StackPanel line = new() { Spacing = 4 };
+        line.Children.Add(SetupFieldInput.Text("Or open this address in any browser:"));
+        SelectableTextBlock link = new() { Text = address.AbsoluteUri, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap };
+        link.Classes.Add("inference-settings-auth-link");
+        global::Avalonia.Automation.AutomationProperties.SetName(link, "Sign-in address");
+        line.Children.Add(link);
+        return line;
+    }
 
     // Each applicable status fact as a chip: what is true, what is not, or that it is not checked.
     private IEnumerable<(string Text, bool? Value)> StatusChips()

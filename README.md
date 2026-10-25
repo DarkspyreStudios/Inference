@@ -20,7 +20,7 @@ directly without an HTTP bridge. A web service can host the same libraries and t
 into their typed contracts. In either case, the application owns startup, configuration, credentials,
 persistence, user consent, and shutdown.
 
-Current source package version: **11.17.1-rc.1**, targeting **.NET 11**.
+Current source package version: **11.17.2-rc.1**, targeting **.NET 11**.
 The library family is distributed through the private
 [DarkspyreStudios GitHub Packages feed](https://github.com/orgs/DarkspyreStudios/packages).
 The restore source is `https://nuget.pkg.github.com/DarkspyreStudios/index.json`.
@@ -142,23 +142,23 @@ Install only the products your application needs, keeping their versions synchro
 Workspace builds consume sibling source projects. Package installation uses the synchronized family version.
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect.OpenAiApi --version 11.17.1-rc.1
+dotnet add package Darkspyre.Inference.Connect.OpenAiApi --version 11.17.2-rc.1
 ```
 
 ```bash
-dotnet add package Darkspyre.Inference.Tensor.Image.Supra --version 11.17.1-rc.1
+dotnet add package Darkspyre.Inference.Tensor.Image.Supra --version 11.17.2-rc.1
 ```
 
 Optional, for an Avalonia host:
 
 ```bash
-dotnet add package Darkspyre.Inference.UI.Settings.Avalonia --version 11.17.1-rc.1
+dotnet add package Darkspyre.Inference.UI.Settings.Avalonia --version 11.17.2-rc.1
 ```
 
 Optional, for a Blazor host:
 
 ```bash
-dotnet add package Darkspyre.Inference.UI.Settings.Blazor --version 11.17.1-rc.1
+dotnet add package Darkspyre.Inference.UI.Settings.Blazor --version 11.17.2-rc.1
 ```
 
 Common is brought in transitively. An application that only consumes the shared contracts can

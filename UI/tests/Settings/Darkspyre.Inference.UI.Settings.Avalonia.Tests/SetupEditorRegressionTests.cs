@@ -188,6 +188,12 @@ public sealed class SetupEditorRegressionTests
         EditorSession.Click(EditorSession.Button(editor, "Copy code"));
         await EditorSession.WaitForAsync(() => host.Copies.Count == 2);
         Assert.Equal(("ABCD-1234", "Sign-in code copied to clipboard."), host.Copies[1]);
+
+        // The sign-in address shows as text and copies, for a browser that did not open.
+        Assert.Equal("https://device.test/", EditorSession.All<SelectableTextBlock>(editor, "inference-settings-auth-link").Single().Text);
+        EditorSession.Click(EditorSession.Button(editor, "Copy link"));
+        await EditorSession.WaitForAsync(() => host.Copies.Count == 3);
+        Assert.Equal(("https://device.test/", "Sign-in link copied to clipboard."), host.Copies[2]);
     });
 
     /// <summary>A device code is copied through the host the first time it is shown, not again on a redraw, and a new

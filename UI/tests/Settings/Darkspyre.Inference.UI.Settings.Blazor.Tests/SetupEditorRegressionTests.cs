@@ -190,11 +190,16 @@ public sealed class SetupEditorRegressionTests : BunitContext
         Click(editor, "Copy code");
         editor.WaitForAssertion(() => Assert.Equal(2, JSInterop.Invocations["navigator.clipboard.writeText"].Count));
 
+        // The sign-in address shows as text and copies, for a browser that did not open.
+        Assert.Equal("https://device.test/", editor.Find(".inference-settings-editor__auth-link").TextContent);
+        Click(editor, "Copy link");
+        editor.WaitForAssertion(() => Assert.Contains("Sign-in link copied to clipboard.", editor.Markup, StringComparison.Ordinal));
+
         JSInterop.SetupVoid("navigator.clipboard.writeText", "WXYZ-9876").SetException(new Microsoft.JSInterop.JSException("denied"));
         settings.StartDevice("WXYZ-9876");
         editor.Render();
         editor.WaitForAssertion(() => Assert.Contains("The code could not be copied. Select it and copy it instead.", editor.Markup, StringComparison.Ordinal));
-        Assert.Equal(["ABCD-1234", "ABCD-1234", "WXYZ-9876"],
+        Assert.Equal(["ABCD-1234", "ABCD-1234", "https://device.test/", "WXYZ-9876"],
             JSInterop.Invocations["navigator.clipboard.writeText"].Select(call => (string)call.Arguments[0]!));
     }
 
