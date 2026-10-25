@@ -7,7 +7,7 @@
       Darkspyre.Inference.Common       Common/src/Darkspyre.Inference.Common
       Darkspyre.Inference.Connect      the retained Image, TTS and Audio projects
       Darkspyre.Inference.Tensor.*     the named Tensor library project
-      Darkspyre.Inference.UI.Settings  UI/src/Settings/Darkspyre.Inference.UI.Settings
+      Darkspyre.Inference.UI.Settings.*  the named UI.Settings project (Core, Avalonia or Blazor)
 
     The packaging projects reference their bundled projects with PrivateAssets="all", so a reference to a packaging
     project would hide the bundled assemblies from the consumer. The consumer references the bundled projects instead.
@@ -84,11 +84,23 @@
         PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Tensor.STT.Whisper')->'%(PrivateAssets)')" />
     <PackageReference Remove="Darkspyre.Inference.Tensor.STT.Whisper" />
   </ItemGroup>
-  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings'))' != ''">
-    <_InferenceSourceProject Include="$(_InferenceSourceRoot)UI/src/Settings/Darkspyre.Inference.UI.Settings/Darkspyre.Inference.UI.Settings.csproj"
-        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings')->'%(ExcludeAssets)')"
-        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings')->'%(PrivateAssets)')" />
-    <PackageReference Remove="Darkspyre.Inference.UI.Settings" />
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings.Core'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)UI/src/Settings/Darkspyre.Inference.UI.Settings.Core/Darkspyre.Inference.UI.Settings.Core.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings.Core')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings.Core')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.UI.Settings.Core" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings.Avalonia'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)UI/src/Settings/Darkspyre.Inference.UI.Settings.Avalonia/Darkspyre.Inference.UI.Settings.Avalonia.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings.Avalonia')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings.Avalonia')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.UI.Settings.Avalonia" />
+  </ItemGroup>
+  <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings.Blazor'))' != ''">
+    <_InferenceSourceProject Include="$(_InferenceSourceRoot)UI/src/Settings/Darkspyre.Inference.UI.Settings.Blazor/Darkspyre.Inference.UI.Settings.Blazor.csproj"
+        ExcludeAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings.Blazor')->'%(ExcludeAssets)')"
+        PrivateAssets="@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.UI.Settings.Blazor')->'%(PrivateAssets)')" />
+    <PackageReference Remove="Darkspyre.Inference.UI.Settings.Blazor" />
   </ItemGroup>
 
   <ItemGroup Condition="'@(PackageReference->WithMetadataValue('Identity', 'Darkspyre.Inference.Connect.Common'))' != ''">

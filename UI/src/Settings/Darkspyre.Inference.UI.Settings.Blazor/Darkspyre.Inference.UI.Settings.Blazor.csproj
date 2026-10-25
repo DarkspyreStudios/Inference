@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <PackageId>Darkspyre.Inference.UI.Settings.Blazor</PackageId>
+    <RootNamespace>Darkspyre.Inference.UI.Settings.Blazor</RootNamespace>
+    <Description>Host-placed Blazor (Lumeo) setup editor for Darkspyre inference providers.</Description>
+    <PackageTags>ai;inference;settings;blazor;lumeo</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\Common\src\Darkspyre.Inference.Common\Darkspyre.Inference.Common.csproj" />
+    <ProjectReference Include="..\Darkspyre.Inference.UI.Settings.Core\Darkspyre.Inference.UI.Settings.Core.csproj" />
+    <PackageReference Include="Lumeo" />
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\..\README.md" Pack="true" PackagePath="README.md" />
+    <None Include="..\..\..\THIRD-PARTY-NOTICES.md" Pack="true" PackagePath="THIRD-PARTY-NOTICES.md" />
+  </ItemGroup>
+</Project>

@@ -1,28 +1,53 @@
 # Darkspyre.Inference.UI.Settings
 
-Source package version **11.16.0-rc.1**, synchronized with Common, Connect and Tensor. Its exact Common NuGet
-dependency is `[11.16.0-rc.1]`; the package does not embed Common, Connect, Tensor or Avalonia DLLs.
+Three packages at the synchronized family version, each with an exact Common NuGet dependency. None embeds Common,
+Connect, Tensor or a UI framework's DLLs.
 
-This package provides one host-placed Avalonia editor control for a provider's `InferenceSettings` object and
-its `IInferenceSettingsManager`. It renders the settings' fields, validation, status, and setup actions
-with standard Avalonia controls. The host chooses where to show the editor and owns its connection list, persistence,
-credentials, consent, browser interaction, and long-running operation lifetime.
+| Package | Holds |
+| --- | --- |
+| `Darkspyre.Inference.UI.Settings.Core` | UI-neutral pieces both editors share: `IInferenceSettingsInteractionHost`, `IInferenceSettingsPathPicker`, `SetupEditorState`, `SetupNumberEdit<T>` and the editor's input state. Namespace `Darkspyre.Inference.UI.Settings`. |
+| `Darkspyre.Inference.UI.Settings.Avalonia` | The Avalonia editor: `InferenceSettingsEditor`, `ConnectionTabs`, `SetupInstallStatusCard` and `IAvaloniaSettingsInteractionHost`. Namespace `Darkspyre.Inference.UI.Settings.Avalonia`. |
+| `Darkspyre.Inference.UI.Settings.Blazor` | The Blazor editor, drawn with Lumeo: the `InferenceSettingsEditor` component and its field, number input, install chip and status card components. Namespace `Darkspyre.Inference.UI.Settings.Blazor`. |
 
-Among Inference products, the package references `Darkspyre.Inference.Common` only. The host composes Connect or Tensor
-settings managers and passes the Common types to `InferenceSettingsEditor`. No provider selection or
-connection listing is built into the library.
+A host references the editor for its UI framework, which brings Core with it.
+
+Each editor shows a provider's `InferenceSettings` object through its `IInferenceSettingsManager`: the settings'
+fields, validation, status and setup actions. The host chooses where to show the editor and owns its connection list,
+persistence, credentials, consent, browser interaction, and long-running operation lifetime.
+
+Among Inference products, the packages reference `Darkspyre.Inference.Common` only. The host composes Connect or
+Tensor settings managers and passes the Common types to `InferenceSettingsEditor`. No provider selection or
+connection listing is built into the libraries.
 
 Capability support uses Common's `InferenceSupport`: `Unknown`, `Supported`, or `Unsupported`.
 Unknown leaves an explicit attempt available; it does not claim qualification. Connect's capability
 override choices distinguish Default (inherit) from Unknown, Enabled (Supported), and Disabled
 (Unsupported). Ordinary binary settings remain checkboxes.
 
-The host supplies `IInferenceSettingsInteractionHost` to authorize declared side effects and
-run provider actions through `ExecuteAsync(manager, settings, action, progress, token)`. The component
-does not own the settings, the manager, or any engine behind it. The editor carries its own styles,
-`InferenceSettingsStyles`. They read the host theme's brushes, so the editor follows the host's light or
-dark theme.
+The host supplies `IInferenceSettingsInteractionHost` to authorize declared side effects, run provider actions through
+`ExecuteAsync(manager, settings, action, progress, token)`, open the browser and show a folder. The Avalonia editor
+takes `IAvaloniaSettingsInteractionHost`, which adds the window's clipboard. An editor does not own the settings, the
+manager, or any engine behind it.
 
+## Blazor editor
+
+The Blazor editor is the editor as it was before the Avalonia port, built on Lumeo, with the Not supported install
+state added. It takes `Settings`, `Manager` and `Host`, and reports `CommitCompleted` and `StateChanged`:
+
+```razor
+<InferenceSettingsEditor Settings="settings" Manager="manager" Host="interactionHost"
+                         CommitCompleted="OnCommitCompleted" StateChanged="OnStateChanged" />
+```
+
+`ShowSaveButton`, `ShowHeading`, `ShowActionEffects`, `IntroContent` and `SupplementaryContent` behave as in the
+Avalonia editor. The Blazor editor has no connection tabs, model pack cards, step-scoped actions, host-drawn step strip,
+device-code copy or folder button; the sections below that describe them apply to the Avalonia editor only.
+`SetupNumberInput.razor` adapts Lumeo's NumberInput; `THIRD-PARTY-NOTICES.md` carries its licence.
+
+## Avalonia editor
+
+The Avalonia editor carries its own styles, `InferenceSettingsStyles`. They read the host theme's brushes, so the
+editor follows the host's light or dark theme.
 ```csharp
 InferenceSettingsEditor editor = new(settings, manager, interactionHost);
 editor.CommitCompleted += (_, result) => OnCommitCompleted(result);
@@ -130,7 +155,7 @@ own step strip sets `ShowStepList = false`: the list is hidden, each step shows 
 Next stay. `CurrentStepIndex` is the shown step, and `StepChanged` reports each move to another step. A device
 authorization copies its user code to the clipboard the first time the code is shown, once per code, and shows a
 **Copy code** button that copies it again. Both go through
-`IInferenceSettingsInteractionHost.CopyToClipboardAsync(source, text, copied)`, which writes the clipboard and tells
+`IAvaloniaSettingsInteractionHost.CopyToClipboardAsync(source, text, copied)`, which writes the clipboard and tells
 the person the result with the host's transient notice; the editor passes `Sign-in code copied to clipboard.`. The
 code itself selects in one click. A searchable choice list shows its separate
 provider-search box only while the loaded list is incomplete or a search is active; otherwise the

@@ -1,6 +1,6 @@
 <Styles xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        x:Class="Darkspyre.Inference.UI.Settings.InferenceSettingsStyles">
+        x:Class="Darkspyre.Inference.UI.Settings.Avalonia.InferenceSettingsStyles">
   <!-- The setup editor reads the host theme's colour tokens; a host without them shows the platform defaults. -->
   <Style Selector="TextBlock.inference-settings-help, TextBlock.inference-settings-effects, TextBlock.inference-settings-status, TextBlock.inference-install-card-detail">
     <Setter Property="Foreground" Value="{DynamicResource color-muted-foreground.brush}" />

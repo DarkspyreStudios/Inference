@@ -1,14 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <PackageId>Darkspyre.Inference.UI.Settings</PackageId>
-    <RootNamespace>Darkspyre.Inference.UI.Settings</RootNamespace>
+    <PackageId>Darkspyre.Inference.UI.Settings.Avalonia</PackageId>
+    <RootNamespace>Darkspyre.Inference.UI.Settings.Avalonia</RootNamespace>
     <Description>Host-placed Avalonia setup editor for Darkspyre inference providers.</Description>
     <PackageTags>ai;inference;settings;avalonia</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\..\..\Common\src\Darkspyre.Inference.Common\Darkspyre.Inference.Common.csproj" />
+    <ProjectReference Include="..\Darkspyre.Inference.UI.Settings.Core\Darkspyre.Inference.UI.Settings.Core.csproj" />
     <PackageReference Include="Avalonia" />
-    <InternalsVisibleTo Include="Darkspyre.Inference.UI.Settings.Tests" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.UI.Settings.Avalonia.Tests" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\..\..\README.md" Pack="true" PackagePath="README.md" />

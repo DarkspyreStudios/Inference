@@ -5,7 +5,7 @@ using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.UI.Settings;
 using Xunit;
 
-namespace Darkspyre.Inference.UI.Settings.Tests;
+namespace Darkspyre.Inference.UI.Settings.Avalonia.Tests;
 
 public sealed class SetupEditorRegressionTests
 {
@@ -139,8 +139,8 @@ public sealed class SetupEditorRegressionTests
         Assert.Empty(EditorSession.All<AutoCompleteBox>(choice));
         Assert.Empty(EditorSession.All<DockPanel>(choice, "inference-settings-choice-search"));
         Assert.DoesNotContain(EditorSession.All<Button>(choice), button => button.Content as string == "Refresh choices");
-        Assert.Equal("Count", Avalonia.Automation.AutomationProperties.GetName(EditorSession.All<TextBox>(EditorSession.Field(editor, "count")).First()));
-        Assert.Equal("Amount", Avalonia.Automation.AutomationProperties.GetName(EditorSession.All<TextBox>(EditorSession.Field(editor, "amount")).First()));
+        Assert.Equal("Count", global::Avalonia.Automation.AutomationProperties.GetName(EditorSession.All<TextBox>(EditorSession.Field(editor, "count")).First()));
+        Assert.Equal("Amount", global::Avalonia.Automation.AutomationProperties.GetName(EditorSession.All<TextBox>(EditorSession.Field(editor, "amount")).First()));
         return Task.CompletedTask;
     });
 
@@ -379,7 +379,7 @@ public sealed class SetupEditorRegressionTests
         }
     }
 
-    private sealed class Host : IInferenceSettingsInteractionHost
+    private sealed class Host : IAvaloniaSettingsInteractionHost
     {
         public ValueTask<bool> AuthorizeAsync(string operation, SetupSideEffect sideEffects, CancellationToken cancellationToken = default) => ValueTask.FromResult(true);
         public Task<SetupActionResult> ExecuteAsync(IInferenceSettingsManager manager, InferenceSettings settings, SetupActionDescriptor action,
@@ -388,7 +388,7 @@ public sealed class SetupEditorRegressionTests
         public ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
         public Task RevealFolderAsync(string folder, CancellationToken cancellationToken) => Task.CompletedTask;
         public List<(string Text, string Copied)> Copies { get; } = [];
-        public Task CopyToClipboardAsync(Avalonia.Visual source, string text, string copied)
+        public Task CopyToClipboardAsync(global::Avalonia.Visual source, string text, string copied)
         {
             Copies.Add((text, copied));
             return Task.CompletedTask;

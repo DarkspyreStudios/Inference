@@ -4,7 +4,7 @@ using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 using Xunit;
 
-namespace Darkspyre.Inference.UI.Settings.Tests;
+namespace Darkspyre.Inference.UI.Settings.Avalonia.Tests;
 
 /// <summary>The actions each step shows, the installed-tool checklist and the test that follows a model choice.</summary>
 public sealed class StepActionTests
@@ -240,7 +240,7 @@ public sealed class StepActionTests
             Task.FromResult(new SetupCommitResult(SetupCommitState.Committed));
     }
 
-    private sealed class Host : IInferenceSettingsInteractionHost
+    private sealed class Host : IAvaloniaSettingsInteractionHost
     {
         /// <summary>The exception every action run throws, or null to run the action.</summary>
         public Exception? ExecuteFailure { get; init; }
@@ -252,6 +252,6 @@ public sealed class StepActionTests
             ExecuteFailure is { } failure ? Task.FromException<SetupActionResult>(failure) : manager.RunAsync(settings, action.Id, progress, cancellationToken);
         public ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
         public Task RevealFolderAsync(string folder, CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task CopyToClipboardAsync(Avalonia.Visual source, string text, string copied) => Task.CompletedTask;
+        public Task CopyToClipboardAsync(global::Avalonia.Visual source, string text, string copied) => Task.CompletedTask;
     }
 }

@@ -6,7 +6,7 @@ using Darkspyre.Inference.Connect.LLM;
 using Darkspyre.Inference.Setup.Examples;
 using Darkspyre.Inference.Tensor.Common;
 
-namespace Darkspyre.Inference.UI.Settings.Example;
+namespace Darkspyre.Inference.UI.Settings.Avalonia.Example;
 
 /// <summary>
 /// An example host: a list of configured provider editors and the editor of the one chosen. The host chooses how to
@@ -14,20 +14,20 @@ namespace Darkspyre.Inference.UI.Settings.Example;
 /// </summary>
 public sealed class HostPlacedSettingsExample : UserControl
 {
-    private readonly IInferenceSettingsInteractionHost interactions;
+    private readonly IAvaloniaSettingsInteractionHost interactions;
     private readonly ContentControl editor = new();
     private readonly StackPanel providers = new() { Orientation = Orientation.Horizontal, Spacing = 8 };
 
     /// <summary>Creates the example; <paramref name="committed"/> receives each save's result.</summary>
-    public HostPlacedSettingsExample(IInferenceSettingsInteractionHost interactions, Action<SetupCommitResult> committed)
+    public HostPlacedSettingsExample(IAvaloniaSettingsInteractionHost interactions, Action<SetupCommitResult> committed)
     {
         this.interactions = interactions;
         this.Committed = committed;
-        Avalonia.Automation.AutomationProperties.SetName(this.providers, "Configured provider editors");
+        global::Avalonia.Automation.AutomationProperties.SetName(this.providers, "Configured provider editors");
         StackPanel layout = new() { Spacing = 16 };
         layout.Children.Add(this.providers);
         layout.Children.Add(this.editor);
-        Avalonia.Automation.AutomationProperties.SetName(layout, "Example host provider settings");
+        global::Avalonia.Automation.AutomationProperties.SetName(layout, "Example host provider settings");
         this.Content = layout;
     }
 

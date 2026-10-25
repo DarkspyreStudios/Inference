@@ -24,7 +24,7 @@
     <Copyright>Copyright © 2026 Brandon Mathis. All rights reserved.</Copyright>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/DarkspyreStudios/Inference</RepositoryUrl>
-    <Version>11.16.14</Version>
+    <Version>11.17.0</Version>
     <!-- The runtimes the HostTools and Antigravity packages carry a host-tools service and MCP program for. -->
     <HostToolsRuntimeIdentifiers>osx-arm64;osx-x64;linux-x64;linux-arm64;win-x64;win-arm64</HostToolsRuntimeIdentifiers>
   </PropertyGroup>

@@ -31,7 +31,7 @@ main() {
     local release_token release_login visibility existing cache package_lower artifact
     local feed='https://nuget.pkg.github.com/DarkspyreStudios/index.json'
     local stage='preflight'
-    local -a packages=(Common Connect Connect.Common Connect.Codex Connect.Claude Connect.HostTools Connect.Antigravity Connect.Grok Connect.OpenAiApi Connect.SelfHost Tensor.Common Tensor.Decision.Laya Tensor.Embedding Tensor.Embedding.Gemma Tensor.Ggml Tensor.Image.Supra Tensor.LLM.Qwen Tensor.Registry Tensor.STT.Whisper UI.Settings)
+    local -a packages=(Common Connect Connect.Common Connect.Codex Connect.Claude Connect.HostTools Connect.Antigravity Connect.Grok Connect.OpenAiApi Connect.SelfHost Tensor.Common Tensor.Decision.Laya Tensor.Embedding Tensor.Embedding.Gemma Tensor.Ggml Tensor.Image.Supra Tensor.LLM.Qwen Tensor.Registry Tensor.STT.Whisper UI.Settings.Core UI.Settings.Avalonia UI.Settings.Blazor)
     local -a version_files=(Directory.Build.props README.md Common/README.md Connect/README.md Tensor/README.md UI/README.md)
     [[ "$mode" == major || "$mode" == minor ]] || fail 'Use deploy-major.sh or deploy-minor.sh.'
     if [[ "$option" == --help ]]; then
@@ -133,7 +133,9 @@ main() {
     dotnet pack ../Tensor/src/LLM/Darkspyre.Inference.Tensor.LLM.Qwen/Darkspyre.Inference.Tensor.LLM.Qwen.csproj -c Release --no-build --no-restore
     dotnet pack ../Tensor/src/Registry/Darkspyre.Inference.Tensor.Registry/Darkspyre.Inference.Tensor.Registry.csproj -c Release --no-build --no-restore
     dotnet pack ../Tensor/src/STT/Darkspyre.Inference.Tensor.STT.Whisper/Darkspyre.Inference.Tensor.STT.Whisper.csproj -c Release --no-build --no-restore
-    dotnet pack ../UI/src/Settings/Darkspyre.Inference.UI.Settings/Darkspyre.Inference.UI.Settings.csproj -c Release --no-build --no-restore
+    dotnet pack ../UI/src/Settings/Darkspyre.Inference.UI.Settings.Core/Darkspyre.Inference.UI.Settings.Core.csproj -c Release --no-build --no-restore
+    dotnet pack ../UI/src/Settings/Darkspyre.Inference.UI.Settings.Avalonia/Darkspyre.Inference.UI.Settings.Avalonia.csproj -c Release --no-build --no-restore
+    dotnet pack ../UI/src/Settings/Darkspyre.Inference.UI.Settings.Blazor/Darkspyre.Inference.UI.Settings.Blazor.csproj -c Release --no-build --no-restore
     dotnet restore ../eng/VerifyPackages
     dotnet run --project ../eng/VerifyPackages --no-restore -- ../artifacts/packages "$version" "$source_commit"
     dotnet restore ../eng/VerifyConsumer --configfile ../eng/VerifyConsumer/NuGet.Preflight.Config

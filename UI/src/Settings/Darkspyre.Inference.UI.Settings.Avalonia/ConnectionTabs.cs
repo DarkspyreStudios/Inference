@@ -2,7 +2,7 @@ using Darkspyre.Inference.Common.Setup;
 using Avalonia.Controls;
 using Avalonia.Controls.Primitives;
 
-namespace Darkspyre.Inference.UI.Settings;
+namespace Darkspyre.Inference.UI.Settings.Avalonia;
 
 /// <summary>
 /// Editing an existing connection: tabs labelled "Connection" and "Model", one per step; each step's own title stays as
@@ -14,14 +14,14 @@ public sealed class ConnectionTabs : UserControl
     private static readonly string[] Labels = ["Connection", "Model"];
     private readonly InferenceSettings settings;
     private readonly IInferenceSettingsManager manager;
-    private readonly IInferenceSettingsInteractionHost host;
+    private readonly IAvaloniaSettingsInteractionHost host;
     private InferenceSettingsEditor? editor;
 
     /// <summary>Creates the tabs for <paramref name="settings"/>, whose steps are the connection step and then the model step.</summary>
     /// <param name="settings">The settings of the connection being edited.</param>
     /// <param name="manager">The manager that runs the settings' actions and saves them.</param>
     /// <param name="host">The host that authorizes and runs actions, opens browser pages and shows folders.</param>
-    public ConnectionTabs(InferenceSettings settings, IInferenceSettingsManager manager, IInferenceSettingsInteractionHost host)
+    public ConnectionTabs(InferenceSettings settings, IInferenceSettingsManager manager, IAvaloniaSettingsInteractionHost host)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(manager);
@@ -48,7 +48,7 @@ public sealed class ConnectionTabs : UserControl
     public async Task SaveAsync() => await this.Editor().SaveAsync();
 
     /// <inheritdoc />
-    protected override void OnAttachedToVisualTree(Avalonia.VisualTreeAttachmentEventArgs e)
+    protected override void OnAttachedToVisualTree(global::Avalonia.VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
         if (this.Content is not null) return;

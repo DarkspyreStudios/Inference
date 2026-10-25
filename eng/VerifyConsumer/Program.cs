@@ -18,8 +18,10 @@ string expected = args[0] + "+" + args[1];
 Type[] surfaces = [typeof(IInferenceSettingsManager), typeof(SetupChoiceCapabilities), typeof(LlmProviderService),
     typeof(ImageProviderService), typeof(TtsProviderService), typeof(AudioProviderService),
     typeof(QwenSetup),
-    typeof(SupraSetup), typeof(LayaSetup), typeof(WhisperSetup), typeof(TensorEngineRegistry), typeof(InferenceSettingsEditor),
-    typeof(SetupEditorState), typeof(SetupNumberInput<long>), typeof(SetupNumberInput<decimal>)];
+    typeof(SupraSetup), typeof(LayaSetup), typeof(WhisperSetup), typeof(TensorEngineRegistry),
+    typeof(Darkspyre.Inference.UI.Settings.Avalonia.InferenceSettingsEditor), typeof(Darkspyre.Inference.UI.Settings.Blazor.InferenceSettingsEditor),
+    typeof(SetupEditorState), typeof(Darkspyre.Inference.UI.Settings.Avalonia.SetupNumberInput<long>),
+    typeof(Darkspyre.Inference.UI.Settings.Avalonia.SetupNumberInput<decimal>)];
 foreach (Type type in surfaces)
 {
     string? version = type.Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion;

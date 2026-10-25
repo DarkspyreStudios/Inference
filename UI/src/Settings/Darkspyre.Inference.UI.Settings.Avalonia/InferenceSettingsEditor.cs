@@ -5,7 +5,7 @@ using Avalonia.Interactivity;
 using Avalonia.Layout;
 using Avalonia.Threading;
 
-namespace Darkspyre.Inference.UI.Settings;
+namespace Darkspyre.Inference.UI.Settings.Avalonia;
 
 /// <summary>
 /// Walks a person through an inference provider's setup steps, fields, sign-in, actions and save, and shows its status
@@ -16,7 +16,7 @@ public sealed class InferenceSettingsEditor : UserControl
 {
     private readonly InferenceSettings settings;
     private readonly IInferenceSettingsManager manager;
-    private readonly IInferenceSettingsInteractionHost host;
+    private readonly IAvaloniaSettingsInteractionHost host;
     private readonly IInferenceSettingsStatusSource? statusSource;
     private readonly SetupEditorInputState inputs = new();
     private readonly Dictionary<string, SetupFieldInput> fields = new(StringComparer.Ordinal);
@@ -55,7 +55,7 @@ public sealed class InferenceSettingsEditor : UserControl
     /// <param name="settings">The provider settings being edited, with their steps, fields, status and actions.</param>
     /// <param name="manager">The manager that validates and saves the settings and refreshes a running engine's status.</param>
     /// <param name="host">The host that authorizes and runs provider actions and opens authorization pages in a browser.</param>
-    public InferenceSettingsEditor(InferenceSettings settings, IInferenceSettingsManager manager, IInferenceSettingsInteractionHost host)
+    public InferenceSettingsEditor(InferenceSettings settings, IInferenceSettingsManager manager, IAvaloniaSettingsInteractionHost host)
     {
         ArgumentNullException.ThrowIfNull(settings);
         ArgumentNullException.ThrowIfNull(manager);
@@ -66,7 +66,7 @@ public sealed class InferenceSettingsEditor : UserControl
         this.statusSource = manager as IInferenceSettingsStatusSource;
         this.Styles.Add(new InferenceSettingsStyles());
         this.Classes.Add("inference-settings-editor");
-        Avalonia.Automation.AutomationProperties.SetName(this, $"{settings.Definition.Implementation.DisplayName} settings");
+        global::Avalonia.Automation.AutomationProperties.SetName(this, $"{settings.Definition.Implementation.DisplayName} settings");
     }
 
     /// <summary>True shows a Save button on the last step; false leaves saving to the host through <see cref="SaveAsync"/>.</summary>
@@ -275,7 +275,7 @@ public sealed class InferenceSettingsEditor : UserControl
         {
             WrapPanel steps = new() { ItemSpacing = 12, LineSpacing = 6 };
             steps.Classes.Add("inference-settings-steps");
-            Avalonia.Automation.AutomationProperties.SetName(steps, "Setup steps");
+            global::Avalonia.Automation.AutomationProperties.SetName(steps, "Setup steps");
             for (int index = 0; index < this.Steps.Count; index++)
             {
                 TextBlock item = new() { Text = $"{index + 1}. {this.Steps[index].Title}" };
@@ -436,7 +436,7 @@ public sealed class InferenceSettingsEditor : UserControl
             {
                 StackPanel group = new() { Spacing = 12 };
                 group.Classes.Add("inference-settings-section");
-                Avalonia.Automation.AutomationProperties.SetName(group, section.Title);
+                global::Avalonia.Automation.AutomationProperties.SetName(group, section.Title);
                 group.Children.Add(SetupFieldInput.Text(section.Title, "h4"));
                 group.Children.Add(body);
                 view.Children.Add(group);
@@ -490,12 +490,12 @@ public sealed class InferenceSettingsEditor : UserControl
     {
         StackPanel view = new() { Spacing = 12 };
         view.Classes.Add("inference-settings-interaction");
-        Avalonia.Automation.AutomationProperties.SetName(view, "Connection instructions");
+        global::Avalonia.Automation.AutomationProperties.SetName(view, "Connection instructions");
         WrapPanel actions = new() { ItemSpacing = 12, LineSpacing = 8 };
         switch (interaction)
         {
             case SetupDeviceAuthorization device:
-                SelectableTextBlock code = new() { Text = device.UserCode, FontWeight = Avalonia.Media.FontWeight.Bold };
+                SelectableTextBlock code = new() { Text = device.UserCode, FontWeight = global::Avalonia.Media.FontWeight.Bold };
                 code.Classes.Add("inference-settings-user-code");
                 StackPanel line = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
                 line.Children.Add(new TextBlock { Text = "Use code" });
@@ -535,7 +535,7 @@ public sealed class InferenceSettingsEditor : UserControl
     {
         StackPanel view = new() { Spacing = 8 };
         view.Classes.Add("inference-settings-actions");
-        Avalonia.Automation.AutomationProperties.SetName(view, "Provider actions");
+        global::Avalonia.Automation.AutomationProperties.SetName(view, "Provider actions");
         foreach (SetupActionDescriptor action in actions)
         {
             WrapPanel row = new() { ItemSpacing = 12, LineSpacing = 6 };
@@ -564,7 +564,7 @@ public sealed class InferenceSettingsEditor : UserControl
     {
         StackPanel view = new() { Spacing = 8 };
         view.Classes.Add("inference-settings-checklist");
-        Avalonia.Automation.AutomationProperties.SetName(view, "Setup checklist");
+        global::Avalonia.Automation.AutomationProperties.SetName(view, "Setup checklist");
         SetupStatus status = this.settings.Status;
         SetupExecutableField? executable = step.Sections.SelectMany(section => section.Fields).SelectMany(SetupEditorInputState.Flatten)
             .OfType<SetupExecutableField>().FirstOrDefault();

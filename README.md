@@ -20,7 +20,7 @@ directly without an HTTP bridge. A web service can host the same libraries and t
 into their typed contracts. In either case, the application owns startup, configuration, credentials,
 persistence, user consent, and shutdown.
 
-Current source package version: **11.16.0-rc.1**, targeting **.NET 11**.
+Current source package version: **11.17.0**, targeting **.NET 11**.
 The library family is distributed through the private
 [DarkspyreStudios GitHub Packages feed](https://github.com/orgs/DarkspyreStudios/packages).
 The restore source is `https://nuget.pkg.github.com/DarkspyreStudios/index.json`.
@@ -59,10 +59,11 @@ solution, version and deployment outside the coordinated library release.
 | `Darkspyre.Inference.Connect` | Existing Image, TTS and Audio capability assemblies |
 | `Darkspyre.Inference.Tensor.Common` | Tensor capability contracts, model lifecycle and verified model packs |
 | `Darkspyre.Inference.Tensor.*` model libraries | Independently consumed in-process loaders and their runtime dependencies |
-| `Darkspyre.Inference.UI.Settings` | Optional host-placed Avalonia editor for the shared setup contracts |
+| `Darkspyre.Inference.UI.Settings.Avalonia`, `.Blazor` | Optional host-placed editors for the shared setup contracts, one per UI framework |
+| `Darkspyre.Inference.UI.Settings.Core` | The UI-neutral editor state and host contracts both editors share |
 
-Connect, Tensor, and UI.Settings reference the **exact same-version Common NuGet**; they do not
-embed its DLL. UI.Settings does not depend on Connect or Tensor. Connect provider and Tensor model libraries are independent packages at the synchronized family version.
+Connect, Tensor, and the UI.Settings packages reference the **exact same-version Common NuGet**; they do not
+embed its DLL. The UI.Settings packages do not depend on Connect or Tensor. Connect provider and Tensor model libraries are independent packages at the synchronized family version.
 The media Connect package retains its Image, TTS and Audio assemblies.
 Third-party runtimes are declared package dependencies rather than copied into these archives.
 
@@ -124,7 +125,7 @@ See the [Tensor guide](Tensor/README.md) for exact backend and artifact requirem
 
 Providers expose typed fields, validation, authentication interactions and unsaved-change state
 through an `InferenceSettings` object. Its `IInferenceSettingsManager` runs actions, lists choices and
-saves. Hosts can render those contracts themselves or use UI.Settings. The editor includes invalid-input Save protection, dependent choice loading,
+saves. Hosts can render those contracts themselves or use the Avalonia or Blazor editor. The editors include invalid-input Save protection, dependent choice loading,
 typed numeric inputs, and optional host-owned file/folder selection.
 
 The host supplies commit targets, protected credentials, consent, and interaction handling. The
@@ -141,17 +142,23 @@ Install only the products your application needs, keeping their versions synchro
 Workspace builds consume sibling source projects. Package installation uses the synchronized family version.
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect.OpenAiApi --version 11.16.0-rc.1
+dotnet add package Darkspyre.Inference.Connect.OpenAiApi --version 11.17.0
 ```
 
 ```bash
-dotnet add package Darkspyre.Inference.Tensor.Image.Supra --version 11.16.0-rc.1
+dotnet add package Darkspyre.Inference.Tensor.Image.Supra --version 11.17.0
 ```
 
 Optional, for an Avalonia host:
 
 ```bash
-dotnet add package Darkspyre.Inference.UI.Settings --version 11.16.0-rc.1
+dotnet add package Darkspyre.Inference.UI.Settings.Avalonia --version 11.17.0
+```
+
+Optional, for a Blazor host:
+
+```bash
+dotnet add package Darkspyre.Inference.UI.Settings.Blazor --version 11.17.0
 ```
 
 Common is brought in transitively. An application that only consumes the shared contracts can
@@ -323,15 +330,16 @@ The returned audio belongs to the host to store or play. For speech **recognitio
 Given provider settings, their manager, a host interaction handler, and a commit handler:
 
 ```csharp
-using Darkspyre.Inference.UI.Settings;
+using Darkspyre.Inference.UI.Settings.Avalonia;
 
 InferenceSettingsEditor editor = new(settings, manager, interactionHost);
 editor.CommitCompleted += (_, result) => OnCommitCompleted(result);
 dialog.Content = editor;
 ```
 
-The host supplies a typed commit target and owns the settings' lifetime. See the [UI.Settings guide](UI/README.md) and
-[compiled host example](UI/examples/Darkspyre.Inference.UI.Settings.Example/HostPlacedSettingsExample.cs).
+The host supplies a typed commit target and owns the settings' lifetime. See the [UI.Settings guide](UI/README.md) and the
+compiled host examples for [Avalonia](UI/examples/Darkspyre.Inference.UI.Settings.Avalonia.Example/HostPlacedSettingsExample.cs) and
+[Blazor](UI/examples/Darkspyre.Inference.UI.Settings.Blazor.Example/HostPlacedSettingsExample.razor).
 
 ## Repository and further examples
 
@@ -382,7 +390,7 @@ No `NuGet.Config` names a local feed.
 
 Consumers of these packages use [eng/SourceReferences.targets](eng/SourceReferences.targets) the same way. A consumer
 that sets `InferenceSourceRoot` imports it, and each `Darkspyre.Inference.*` PackageReference becomes ProjectReferences
-to the projects that package carries: Common and UI.Settings map to their one project, and Connect and Tensor to every
+to the projects that package carries: Common and each UI.Settings package map to their one project, and Connect and Tensor to every
 Connect library project except its packaging project. A Tensor reference selects its named library project.
 ExcludeAssets and PrivateAssets carry over. Connect.Common references `Microsoft.Bcl.Memory` directly, because the central
 transitive pin that patches it does not reach a project-reference consumer.

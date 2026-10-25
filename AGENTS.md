@@ -71,13 +71,13 @@ The host-tools client and service pick their LocalServices platform implementati
 | `Darkspyre.Inference.Common` | Contracts and models that Connect and Tensor genuinely share |
 | `Darkspyre.Inference.Connect.*` | One package per connector library: `Connect.Common`, the providers `Connect.Codex`, `Connect.Claude`, `Connect.Antigravity`, `Connect.Grok`, `Connect.OpenAiApi` and `Connect.SelfHost`, and `Connect.HostTools`. `Darkspyre.Inference.Connect` holds the Image, TTS and Audio assemblies |
 | `Darkspyre.Inference.Tensor.*` | One package per in-process engine library: `Tensor.Common`, `Tensor.Decision.Laya`, `Tensor.Embedding`, `Tensor.Embedding.Gemma`, `Tensor.Ggml`, `Tensor.Image.Supra`, `Tensor.LLM.Qwen`, `Tensor.Registry` and `Tensor.STT.Whisper` |
-| `Darkspyre.Inference.UI.Settings` | Host-placed Avalonia editor for provider settings and their managers |
+| `Darkspyre.Inference.UI.Settings.*` | Host-placed editors for provider settings and their managers: `UI.Settings.Avalonia` and `UI.Settings.Blazor`, and the UI-neutral `UI.Settings.Core` both share |
 
 - Each library is packed as its own package at the shared version; none is versioned on its own. There is no root `Darkspyre.Inference` package or facade assembly.
-- Connect, Tensor and UI.Settings reference the Common package at the exact release version and never embed the Common assembly. No project overrides the version from `/Directory.Build.props`.
+- Connect, Tensor and the UI.Settings packages reference the Common package at the exact release version and never embed the Common assembly. No project overrides the version from `/Directory.Build.props`.
 - Put a contract in Common only when Connect and Tensor share its semantics. Similar property names are not a shared contract. Connector-only contracts stay in their Connect capability assembly.
 - `Tensor.Common` holds only behaviour two Tensor capabilities share. `Tensor.Registry` owns `TensorEngineRegistry` and `AddTensorEngines`; `Tensor.Common` and the implementations never reference it.
-- UI.Settings references Common and Avalonia, never Connect, Tensor or an application assembly. Common, Connect and Tensor stay UI-framework-neutral. A host owns its connection list, editor placement, persistence, protected credentials, consent and manager composition. Field edits stay in the settings object; only Save reaches the host.
+- The UI.Settings packages reference Common, and each editor its own UI framework (Avalonia, or Lumeo and ASP.NET Core Components), never Connect, Tensor or an application assembly. `UI.Settings.Core` references no UI framework and holds only what both editors share. Common, Connect and Tensor stay UI-framework-neutral. A host owns its connection list, editor placement, persistence, protected credentials, consent and manager composition. Field edits stay in the settings object; only Save reaches the host.
 - An implementation that needs a provider SDK lives in its own provider assembly.
 - Shipping Connect libraries stay independent of application persistence and credential storage. Host tools use `Darkspyre.SecureStore` for secrets and `Darkspyre.Persistence` for durable non-secret state, and never copy either into this repository.
 - Provider protocol versions are independent of the package version. The direct Codex adapter uses one explicit Codex compatibility version for its `User-Agent`, `version` header and model-catalog `client_version`.
@@ -105,7 +105,7 @@ Package versions live only in `/Directory.Packages.props` (Central Package Manag
 | `Darkspyre.Inference.slnx` | Every library in the family |
 | `Connect/Darkspyre.Inference.Connect.slnx` | Common plus the Connect libraries and tests |
 | `Tensor/Darkspyre.Inference.Tensor.slnx` | The Tensor libraries and tests |
-| `UI/Darkspyre.Inference.UI.slnx` | Common, UI.Settings and its tests |
+| `UI/Darkspyre.Inference.UI.slnx` | Common, the UI.Settings libraries, their tests and examples |
 
 ## Commands
 
@@ -156,6 +156,6 @@ When a provider returns, its files rejoin the build and the matching line here i
 
 ### D6 — Per-model context lengths are repeatable rows
 
-An OpenAI API connection's `Context lengths` setting in the provider editor uses the existing repeatable group (`SetupRepeatableGroupField`, rendered by `SetupFieldInput.RenderGroup` in `UI/src/Settings/Darkspyre.Inference.UI.Settings/SetupFieldInput.cs`). Each row holds a model and its context length, edited inline, with `Add row` and `Remove row`. D6 asks for a list with an **Add** button that opens a layered editor.
+An OpenAI API connection's `Context lengths` setting in the provider editor uses the existing repeatable group (`SetupRepeatableGroupField`, rendered by `SetupFieldInput.RenderGroup` in `UI/src/Settings/Darkspyre.Inference.UI.Settings.Avalonia/SetupFieldInput.cs`). Each row holds a model and its context length, edited inline, with `Add row` and `Remove row`. D6 asks for a list with an **Add** button that opens a layered editor.
 
 The reason: the repeatable group is the provider editor's one collection control (D3), and it shows no row until `Add row` is pressed, so no empty entry form appears. A layered row editor inside the provider editor's sheet would be a second collection control for the same job. Brandon approved this on 2026-10-11.

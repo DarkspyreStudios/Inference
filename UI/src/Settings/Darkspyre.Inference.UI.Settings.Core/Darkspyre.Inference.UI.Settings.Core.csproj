@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <PackageId>Darkspyre.Inference.UI.Settings.Core</PackageId>
+    <RootNamespace>Darkspyre.Inference.UI.Settings</RootNamespace>
+    <Description>UI-neutral editor state and host contracts shared by the Darkspyre inference setup editors.</Description>
+    <PackageTags>ai;inference;settings</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\..\Common\src\Darkspyre.Inference.Common\Darkspyre.Inference.Common.csproj" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.UI.Settings.Avalonia" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.UI.Settings.Blazor" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.UI.Settings.Avalonia.Tests" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\..\..\README.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+</Project>

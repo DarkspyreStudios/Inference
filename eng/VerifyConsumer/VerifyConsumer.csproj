@@ -25,7 +25,8 @@
     <PackageReference Include="Darkspyre.Inference.Tensor.LLM.Qwen" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Tensor.Registry" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Tensor.STT.Whisper" Version="[$(Version)]" />
-    <PackageReference Include="Darkspyre.Inference.UI.Settings" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.UI.Settings.Avalonia" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.UI.Settings.Blazor" Version="[$(Version)]" />
   </ItemGroup>
   <Import Project="VerifyOutputPaths.targets" />
 </Project>

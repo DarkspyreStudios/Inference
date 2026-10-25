@@ -132,7 +132,9 @@ internal static class PackageVerification
         ["Darkspyre.Inference.Tensor.LLM.Qwen"] = ["Darkspyre.Inference.Tensor.LLM.Qwen"],
         ["Darkspyre.Inference.Tensor.Registry"] = ["Darkspyre.Inference.Tensor.Registry"],
         ["Darkspyre.Inference.Tensor.STT.Whisper"] = ["Darkspyre.Inference.Tensor.STT.Whisper"],
-        ["Darkspyre.Inference.UI.Settings"] = ["Darkspyre.Inference.UI.Settings"]
+        ["Darkspyre.Inference.UI.Settings.Core"] = ["Darkspyre.Inference.UI.Settings.Core"],
+        ["Darkspyre.Inference.UI.Settings.Avalonia"] = ["Darkspyre.Inference.UI.Settings.Avalonia"],
+        ["Darkspyre.Inference.UI.Settings.Blazor"] = ["Darkspyre.Inference.UI.Settings.Blazor"]
     };
 
     private static readonly Regex AcquisitionCommand = new(
@@ -160,6 +162,8 @@ internal static class PackageVerification
         Require(entries.Contains("README.md", StringComparer.Ordinal) && entries.Contains("LICENSE.md", StringComparer.Ordinal), $"{id}: missing README or license");
         if (id == "Darkspyre.Inference.Tensor.Image.Supra")
             Require(entries.Contains("THIRD-PARTY-NOTICES.md", StringComparer.Ordinal), $"{id}: missing third-party notice for ported TensorSharp code");
+        if (id == "Darkspyre.Inference.UI.Settings.Blazor")
+            Require(entries.Contains("THIRD-PARTY-NOTICES.md", StringComparer.Ordinal), $"{id}: missing third-party notice for adapted Lumeo code");
         ZipArchiveEntry manifest = archive.GetEntry(id + ".nuspec") ?? throw new InvalidDataException($"{id}: missing manifest");
         using Stream stream = manifest.Open();
         XElement root = XDocument.Load(stream).Root ?? throw new InvalidDataException($"{id}: empty manifest");

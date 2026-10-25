@@ -11,6 +11,6 @@
     <PackageReference Include="xunit.runner.visualstudio" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\src\Settings\Darkspyre.Inference.UI.Settings\Darkspyre.Inference.UI.Settings.csproj" />
+    <ProjectReference Include="..\..\..\src\Settings\Darkspyre.Inference.UI.Settings.Avalonia\Darkspyre.Inference.UI.Settings.Avalonia.csproj" />
   </ItemGroup>
 </Project>

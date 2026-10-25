@@ -4,7 +4,7 @@ using Avalonia.Controls.Shapes;
 using Avalonia.Layout;
 using Avalonia.Media;
 
-namespace Darkspyre.Inference.UI.Settings;
+namespace Darkspyre.Inference.UI.Settings.Avalonia;
 
 /// <summary>
 /// One install-state chip: Installed (success, check), Not downloaded (warning, download), or Files missing and Not supported
@@ -22,7 +22,7 @@ public sealed class SetupInstallChip : ContentControl
         StackPanel line = new() { Orientation = Orientation.Horizontal, Spacing = 4 };
         if (state is SetupInstallState.Installed or SetupInstallState.NotDownloaded)
         {
-            Avalonia.Controls.Shapes.Path icon = new()
+            global::Avalonia.Controls.Shapes.Path icon = new()
             {
                 Data = Geometry.Parse(state == SetupInstallState.Installed ? CheckPath : DownloadPath),
                 Width = 14,
@@ -85,7 +85,7 @@ public sealed class SetupInstallStatusCard : UserControl
                 WrapPanel detail = new() { ItemSpacing = 12, LineSpacing = 6 };
                 detail.Children.Add(Text($"Ready to load. {files}, {SetupByteSize.Format(status.Size)}, {status.License}.", "inference-install-card-detail"));
                 Button show = InferenceSettingsEditor.Button("Show", "ghost", () => reveal(status.Location));
-                Avalonia.Automation.AutomationProperties.SetName(show, "Show the model folder");
+                global::Avalonia.Automation.AutomationProperties.SetName(show, "Show the model folder");
                 detail.Children.Add(show);
                 body.Children.Add(detail);
                 break;
@@ -123,7 +123,7 @@ public sealed class SetupInstallStatusCard : UserControl
             SetupInstallState.NotDownloaded => "warning",
             _ => "destructive",
         });
-        Avalonia.Automation.AutomationProperties.SetName(card, label);
+        global::Avalonia.Automation.AutomationProperties.SetName(card, label);
         this.Content = card;
     }
 

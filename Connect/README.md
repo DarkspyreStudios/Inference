@@ -1011,7 +1011,7 @@ change.
 
 ## Packages
 
-The coordinated release contains Common, Connect, independently consumable Tensor libraries and UI.Settings. They always use the same version from the repository
+The coordinated release contains Common, Connect, independently consumable Tensor libraries and the UI.Settings libraries. They always use the same version from the repository
 `Directory.Build.props` and publish together. Version numbers use
 `<net>.<release>.<minor>`: .NET generation, breaking-contract release, and compatible tweak/fix.
 The direct Codex and host-owned managed-agent behavior from the former `Mathis.LlmConnect` 3.0.0 is
@@ -1391,10 +1391,10 @@ The cases match the Vertex probe; both commands run `GoogleProbe`. Calls are met
 | `Darkspyre.Inference.Common` | Typed LLM, image, and decision requests, results, capabilities, streaming events, provenance, and failures shared by Connect and Tensor |
 | `Darkspyre.Inference.Connect` | LLM, Bedrock/AgentCore, ComfyUI, PocketTTS and TangoFlux connections |
 | `Darkspyre.Inference.Tensor` | In-process LLM, image, typed-decision and Whisper speech transcription |
-| `Darkspyre.Inference.UI.Settings` | Host-placed Avalonia editor using only Common setup contracts |
+| `Darkspyre.Inference.UI.Settings.Avalonia`, `.Blazor`, `.Core` | Host-placed Avalonia and Blazor editors using only Common setup contracts, and the UI-neutral pieces they share |
 
-Connect, Tensor and UI.Settings depend on the exact synchronized Common NuGet; none carries
-another product's DLLs. UI.Settings does not depend on Connect or Tensor. The release-candidate
+Connect, Tensor and the UI.Settings packages depend on the exact synchronized Common NuGet; none carries
+another product's DLLs. The UI.Settings packages do not depend on Connect or Tensor. The release-candidate
 suffix reflects the .NET 11 RC ASP.NET dependency, including on the private package feed.
 
 There is no `Darkspyre.Inference.Connect.Common` package or assembly. Connector-only endpoint,
@@ -5873,6 +5873,6 @@ Formatting is optional reviewed cleanup, not a development or release gate:
 dotnet format Darkspyre.Inference.Connect.slnx --no-restore
 ```
 
-Releases are immutable tags such as `v11.3.1-rc.1`. `Common`, `Connect`, `Tensor`, and `UI.Settings` are built and
+Releases are immutable tags such as `v11.3.1-rc.1`. `Common`, `Connect`, `Tensor`, and the `UI.Settings` libraries are built and
 published in tandem from the approved local release environment to the private GitHub Packages feed;
 GitHub Actions is not the release pipeline.

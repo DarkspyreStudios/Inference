@@ -7,7 +7,7 @@ using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Xunit;
 
-namespace Darkspyre.Inference.UI.Settings.Tests;
+namespace Darkspyre.Inference.UI.Settings.Avalonia.Tests;
 
 /// <summary>The headless Avalonia session the editor tests run in. A test runs on its UI thread and shows the editor in a window.</summary>
 internal static class EditorSession
@@ -65,13 +65,13 @@ internal static class EditorSession
 
     /// <summary>The visible buttons under <paramref name="root"/> whose text is <paramref name="label"/>.</summary>
     public static Button Button(Visual root, string label) => Assert.Single(All<Button>(root),
-        button => button.IsEffectivelyVisible && (button.Content as string == label || Avalonia.Automation.AutomationProperties.GetName(button) == label));
+        button => button.IsEffectivelyVisible && (button.Content as string == label || global::Avalonia.Automation.AutomationProperties.GetName(button) == label));
 
     /// <summary>Clicks <paramref name="button"/> and lets the work it starts run.</summary>
     public static void Click(Button button)
     {
         Assert.True(button.IsEffectivelyEnabled, $"{button.Content} is disabled.");
-        button.RaiseEvent(new RoutedEventArgs(Avalonia.Controls.Button.ClickEvent));
+        button.RaiseEvent(new RoutedEventArgs(global::Avalonia.Controls.Button.ClickEvent));
         Settle();
     }
 

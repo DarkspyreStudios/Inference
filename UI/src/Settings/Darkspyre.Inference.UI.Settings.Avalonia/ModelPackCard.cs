@@ -3,7 +3,7 @@ using Avalonia.Controls;
 using Avalonia.Layout;
 using Avalonia.Media;
 
-namespace Darkspyre.Inference.UI.Settings;
+namespace Darkspyre.Inference.UI.Settings.Avalonia;
 
 /// <summary>A local model pack as a card: name, download size, install state; selected on click.</summary>
 internal sealed class ModelPackCard : UserControl
@@ -27,7 +27,7 @@ internal sealed class ModelPackCard : UserControl
         card.Classes.Add("inference-model-pack-card");
         card.Classes.Set("selected", selected);
         card.Click += (_, _) => choose();
-        Avalonia.Automation.AutomationProperties.SetName(card, choice.DisplayName);
+        global::Avalonia.Automation.AutomationProperties.SetName(card, choice.DisplayName);
         this.Content = card;
     }
 }

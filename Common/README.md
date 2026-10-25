@@ -372,10 +372,9 @@ uses one field/action driver for real Connect and Tensor settings, including spe
 operation lifetime, user consent, storage and rendering. A field edit changes only the settings object.
 Nothing reaches the host until `SaveAsync`. Unknown observations are nullable, separate from false,
 stale and not applicable.
-The source package version is synchronized at **11.16.0-rc.1**. Connect, Tensor and
-UI.Settings declare exact Common NuGet dependencies; none embeds the Common DLL. The package family
-targets .NET 11 RC; the shared version retains a prerelease suffix while the UI's ASP.NET dependency
-is a release candidate.
+The source package version is synchronized at **11.17.0**. Connect, Tensor and the
+UI.Settings packages declare exact Common NuGet dependencies; none embeds the Common DLL. The package family
+targets .NET 11 RC.
 
 ### Settings objects and managers
 

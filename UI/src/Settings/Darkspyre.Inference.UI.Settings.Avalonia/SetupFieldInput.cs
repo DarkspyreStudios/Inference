@@ -8,7 +8,7 @@ using Avalonia.Layout;
 using Avalonia.Threading;
 using Darkspyre.Inference.Common;
 
-namespace Darkspyre.Inference.UI.Settings;
+namespace Darkspyre.Inference.UI.Settings.Avalonia;
 
 /// <summary>
 /// One setup field with the input that fits its kind. Each edit is applied to the settings, and the field's first error
@@ -17,7 +17,7 @@ namespace Darkspyre.Inference.UI.Settings;
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1001", Justification = "A control is never disposed: the editor calls Release when the field leaves it or the editor closes, which cancels the field's work.")]
 public sealed class SetupFieldInput : UserControl
 {
-    private readonly IInferenceSettingsInteractionHost host;
+    private readonly IAvaloniaSettingsInteractionHost host;
     private readonly IInferenceSettingsManager manager;
     private readonly InferenceSettings settings;
     private readonly SetupEditorInputState inputs;
@@ -72,7 +72,7 @@ public sealed class SetupFieldInput : UserControl
     /// <param name="sensitiveInput">True masks a text field's input and keeps the typed text when the field is redrawn.</param>
     /// <param name="chosen">Receives the input after a choice is picked from the list, or typed and committed, and applied.
     /// Text typed into the manual box applies on each change and does not count as a choice.</param>
-    internal SetupFieldInput(SetupField field, InferenceSettings settings, IInferenceSettingsManager manager, IInferenceSettingsInteractionHost host,
+    internal SetupFieldInput(SetupField field, InferenceSettings settings, IInferenceSettingsManager manager, IAvaloniaSettingsInteractionHost host,
         SetupEditorInputState inputs, Func<SetupEditResult, Task> edited, bool sensitiveInput = false, Func<SetupFieldInput, Task>? chosen = null)
     {
         this.field = field;
@@ -156,7 +156,7 @@ public sealed class SetupFieldInput : UserControl
 
     internal static TextBlock Text(string value, string? kind = null)
     {
-        TextBlock block = new() { Text = value, TextWrapping = Avalonia.Media.TextWrapping.Wrap };
+        TextBlock block = new() { Text = value, TextWrapping = global::Avalonia.Media.TextWrapping.Wrap };
         if (kind is not null) block.Classes.Add(kind);
         return block;
     }
@@ -208,7 +208,7 @@ public sealed class SetupFieldInput : UserControl
     {
         this.text = new TextBox { PlaceholderText = placeholder, MaxLength = maximumLength ?? 0 };
         if (masked) this.text.PasswordChar = '•';
-        Avalonia.Automation.AutomationProperties.SetName(this.text, this.field.Description.DisplayName);
+        global::Avalonia.Automation.AutomationProperties.SetName(this.text, this.field.Description.DisplayName);
         this.text.TextChanged += (_, _) =>
         {
             string value = this.text.Text ?? string.Empty;
@@ -226,7 +226,7 @@ public sealed class SetupFieldInput : UserControl
         this.browse = InferenceSettingsEditor.Button("Browse…", "outline", this.PickPathAsync);
         DockPanel row = new();
         DockPanel.SetDock(this.browse, Dock.Right);
-        this.browse.Margin = new Avalonia.Thickness(8, 0, 0, 0);
+        this.browse.Margin = new global::Avalonia.Thickness(8, 0, 0, 0);
         row.Children.Add(this.browse);
         row.Children.Add(this.text);
         return row;
@@ -276,7 +276,7 @@ public sealed class SetupFieldInput : UserControl
         {
             this.fixedChoices = new ComboBox { ItemTemplate = template, HorizontalAlignment = HorizontalAlignment.Stretch };
             this.fixedChoices.SelectionBoxItemTemplate = new FuncDataTemplate<SetupChoice>((option, _) => new TextBlock { Text = option?.DisplayName });
-            Avalonia.Automation.AutomationProperties.SetName(this.fixedChoices, choice.Description.DisplayName);
+            global::Avalonia.Automation.AutomationProperties.SetName(this.fixedChoices, choice.Description.DisplayName);
             this.fixedChoices.SelectionChanged += (_, _) =>
             {
                 if (!this.syncing && this.fixedChoices.SelectedItem is SetupChoice picked && picked.Value != this.Value && this.field is SetupChoiceField current)
@@ -297,7 +297,7 @@ public sealed class SetupFieldInput : UserControl
                 ItemSelector = (_, item) => item is SetupChoice option ? option.Value : string.Empty,
                 PlaceholderText = "Choose or search",
             };
-            Avalonia.Automation.AutomationProperties.SetName(this.openChoices, choice.Description.DisplayName);
+            global::Avalonia.Automation.AutomationProperties.SetName(this.openChoices, choice.Description.DisplayName);
             this.openChoices.SelectionChanged += (_, _) =>
             {
                 if (!this.syncing && this.openChoices.SelectedItem is SetupChoice picked && picked.Value != this.Value && this.field is SetupChoiceField current)
@@ -319,7 +319,7 @@ public sealed class SetupFieldInput : UserControl
             if (choice.AllowsManualEntry)
             {
                 this.manualChoice = new TextBox();
-                Avalonia.Automation.AutomationProperties.SetName(this.manualChoice, choice.Description.DisplayName);
+                global::Avalonia.Automation.AutomationProperties.SetName(this.manualChoice, choice.Description.DisplayName);
                 this.manualChoice.TextChanged += (_, _) =>
                 {
                     if (!this.syncing && (this.manualChoice.Text ?? string.Empty) != this.Value && this.field is SetupChoiceField current)
@@ -331,7 +331,7 @@ public sealed class SetupFieldInput : UserControl
         // Model packs show as cards in place of the list once every loaded choice has local files.
         this.packCards = new WrapPanel { ItemSpacing = 12, LineSpacing = 12, IsVisible = false };
         this.packCards.Classes.Add("inference-model-pack-cards");
-        Avalonia.Automation.AutomationProperties.SetName(this.packCards, choice.Description.DisplayName);
+        global::Avalonia.Automation.AutomationProperties.SetName(this.packCards, choice.Description.DisplayName);
         layout.Children.Add(this.packCards);
         this.choiceActions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
         this.choiceActions.Classes.Add("inference-settings-choice-actions");
@@ -352,7 +352,7 @@ public sealed class SetupFieldInput : UserControl
         actions.Children.Add(InferenceSettingsEditor.Button("Clear", "ghost", () => this.SetSecretAsync(SetupSecretEdit.Clear)));
         layout.Children.Add(actions);
         this.secret = new TextBox { PasswordChar = '•', PlaceholderText = "New secret" };
-        Avalonia.Automation.AutomationProperties.SetName(this.secret, this.field.Description.DisplayName);
+        global::Avalonia.Automation.AutomationProperties.SetName(this.secret, this.field.Description.DisplayName);
         this.secret.TextChanged += (_, _) =>
         {
             if (this.syncing || (this.secret.Text ?? string.Empty) == this.Input.Secret) return;

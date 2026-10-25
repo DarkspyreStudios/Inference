@@ -42,7 +42,7 @@ TensorSharp's packages ship no GGML native library; the application supplies ver
    README files. Commit only those files. Historical design/release versions remain unchanged.
 3. Restore all three solutions; build and test Debug and Release; explicitly reject vulnerability
    findings from the transitive JSON audits.
-4. Pack Common, the media Connect package, every Connect provider/Common and Tensor library, and UI.Settings. `eng/VerifyPackages` checks owned assembly
+4. Pack Common, the media Connect package, every Connect provider/Common and Tensor library, and the UI.Settings Core, Avalonia and Blazor libraries. `eng/VerifyPackages` checks owned assembly
    boundaries, exact family dependencies and release-source identity.
 5. Restore/run `eng/VerifyConsumer` against the local archives. Its build rejects distinct package
    assets targeting the same copy-output path. Reject concurrent source changes.

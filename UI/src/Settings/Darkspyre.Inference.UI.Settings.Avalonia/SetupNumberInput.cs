@@ -5,7 +5,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Layout;
 
-namespace Darkspyre.Inference.UI.Settings;
+namespace Darkspyre.Inference.UI.Settings.Avalonia;
 
 /// <summary>
 /// A numeric text box with decrease and increase buttons that parses typed text exactly and reports each edit with its
@@ -36,9 +36,9 @@ public sealed class SetupNumberInput<T> : UserControl where T : struct, INumber<
         this.Maximum = maximum;
         this.Step = step;
         this.Required = required;
-        Avalonia.Automation.AutomationProperties.SetName(this.box, label);
-        Avalonia.Automation.AutomationProperties.SetName(this.decrease, $"Decrease {label}");
-        Avalonia.Automation.AutomationProperties.SetName(this.increase, $"Increase {label}");
+        global::Avalonia.Automation.AutomationProperties.SetName(this.box, label);
+        global::Avalonia.Automation.AutomationProperties.SetName(this.decrease, $"Decrease {label}");
+        global::Avalonia.Automation.AutomationProperties.SetName(this.increase, $"Increase {label}");
         this.decrease.Classes.Add("outline");
         this.increase.Classes.Add("outline");
         this.decrease.Click += (_, _) => this.StepBy(false);

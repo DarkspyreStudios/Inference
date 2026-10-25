@@ -4,12 +4,16 @@
     <Project Path="../Common/tests/Darkspyre.Inference.Common.Tests/Darkspyre.Inference.Common.Tests.csproj" />
   </Folder>
   <Folder Name="/src/Settings/">
-    <Project Path="src/Settings/Darkspyre.Inference.UI.Settings/Darkspyre.Inference.UI.Settings.csproj" />
+    <Project Path="src/Settings/Darkspyre.Inference.UI.Settings.Core/Darkspyre.Inference.UI.Settings.Core.csproj" />
+    <Project Path="src/Settings/Darkspyre.Inference.UI.Settings.Avalonia/Darkspyre.Inference.UI.Settings.Avalonia.csproj" />
+    <Project Path="src/Settings/Darkspyre.Inference.UI.Settings.Blazor/Darkspyre.Inference.UI.Settings.Blazor.csproj" />
   </Folder>
   <Folder Name="/examples/">
-    <Project Path="examples/Darkspyre.Inference.UI.Settings.Example/Darkspyre.Inference.UI.Settings.Example.csproj" />
+    <Project Path="examples/Darkspyre.Inference.UI.Settings.Avalonia.Example/Darkspyre.Inference.UI.Settings.Avalonia.Example.csproj" />
+    <Project Path="examples/Darkspyre.Inference.UI.Settings.Blazor.Example/Darkspyre.Inference.UI.Settings.Blazor.Example.csproj" />
   </Folder>
   <Folder Name="/tests/Settings/">
-    <Project Path="tests/Settings/Darkspyre.Inference.UI.Settings.Tests/Darkspyre.Inference.UI.Settings.Tests.csproj" />
+    <Project Path="tests/Settings/Darkspyre.Inference.UI.Settings.Avalonia.Tests/Darkspyre.Inference.UI.Settings.Avalonia.Tests.csproj" />
+    <Project Path="tests/Settings/Darkspyre.Inference.UI.Settings.Blazor.Tests/Darkspyre.Inference.UI.Settings.Blazor.Tests.csproj" />
   </Folder>
 </Solution>
