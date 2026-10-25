@@ -11,7 +11,9 @@ these commands.
 | `./deploy-minor.sh` | `11.5.1-rc.1` → `11.5.2-rc.1` |
 
 “Major” here is this repository's breaking-contract **release** component, not the .NET component.
-The prerelease suffix is preserved. `--dry-run` prints the next version without requiring credentials,
+The prerelease suffix is preserved. It must name the .NET prerelease the family builds on (AGENTS.md, "Releases"); when
+.NET moves to a new prerelease, change the suffix by hand in `Directory.Build.props` and the README files before
+running a script. `--dry-run` prints the next version without requiring credentials,
 changing files, compiling or committing. `--help` lists usage.
 
 ## Prerequisites and side effects

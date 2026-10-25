@@ -132,7 +132,9 @@ Testing rules for this repository:
 
 ## Releases
 
-The version is `<net>.<release>.<minor>`: the .NET generation, a breaking-contract release, and a compatible fix. All packages release together. A published version is never overwritten, and each release gets an immutable Git tag.
+The version is `<net>.<release>.<minor>`: the .NET generation, a breaking-contract release, and a compatible fix. All packages release together. A published version is never overwritten, and each release gets an immutable Git tag. While .NET `<net>` is in prerelease, the version carries the same prerelease suffix as the .NET release the family builds and depends on, such as `-rc.2` for .NET 11 RC 2. A new .NET prerelease changes the suffix in the next release's version commit, together with the `global.json` SDK versions.
+
+**Check.** The suffix in `Directory.Build.props` names an older .NET prerelease than a `Microsoft.*` package in `Directory.Packages.props` or the SDK in `global.json`.
 
 Before a release, each active solution is at zero warnings and passes restore, build, tests, pack and the dependency audit. `deploy-major.sh` and `deploy-minor.sh` prepare, verify and tag a release, and the Publish workflow (`.github/workflows/publish.yml`) publishes the tag to nuget.org, only on the user's word; `eng/README.md` documents their gates. When changing the release scripts, run `bash -n` on `deploy-major.sh`, `deploy-minor.sh`, `eng/deploy.sh` and `eng/pack.sh`, and run `bash eng/package-assets.tests.sh`, as `eng/README.md` "Offline verification" describes. Never test a script change by publishing a dummy version.
 
