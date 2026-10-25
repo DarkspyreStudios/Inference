@@ -2730,6 +2730,14 @@ Changed static headers, a different connection, or a different transport owner r
 logical content. The package does not own an image
 database, media library, workflow catalog, cache, or background worker.
 
+A host that stores a prepared request and uploads the reference later calls `PlanReference(connection, reference)`
+in place of an upload. ComfyUI names every reference upload `darkspyre-reference-<id><ext>` with `overwrite=true`, so
+the planned reference carries that name and the later `UploadReferenceAsync` of the same `ImageReference` writes the
+file it names. A planned reference is fenced to its endpoint, not to the connection object: the stored request
+submits after a restart through any connection to the same endpoint, and a connection to another endpoint refuses it.
+The host uploads before `SubmitAsync`; otherwise ComfyUI fails the job for the missing input. A transport that cannot
+name an upload in advance throws `UnsupportedFeature` from `PlanReference`.
+
 ComfyUI reference uploads borrow the input stream. Upload reads from its current position without
 rewinding, flushing, or disposing it, including cancellation and failed uploads. The caller owns
 the stream's eventual disposal.

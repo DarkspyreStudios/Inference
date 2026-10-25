@@ -50,6 +50,61 @@ public sealed partial class ComfyUiImageTransportTests
         }
     }
 
+    /// <summary>
+    /// A request prepared with a planned reference names the file the later upload writes, still submits after a restart
+    /// (a new transport and connection), and is refused by another endpoint.
+    /// </summary>
+    [Fact]
+    public async Task APlannedReferenceNamesTheLaterUploadAndSurvivesARestartOnItsEndpointOnly()
+    {
+        ImagePreparedReference planned = CreateTransport(new StubHandler(_ => NotFound())).PlanReference(Connection(), Reference());
+        PreparedImageTransportRequest stored = CreateTransport(new StubHandler(_ => NotFound())).Prepare(new()
+        {
+            Workflow = ReferenceWorkflow(),
+            PositivePrompt = "draw",
+            CacheKey = "job-1",
+            References = [planned]
+        });
+
+        string? uploadName = null, prompt = null;
+        var handler = new StubHandler(async request =>
+        {
+            if (request.RequestUri!.AbsolutePath.EndsWith("/upload/image", StringComparison.Ordinal))
+            {
+                uploadName = ((MultipartFormDataContent)request.Content!).Single(part => part.Headers.ContentDisposition?.Name?.Trim('"') == "image")
+                    .Headers.ContentDisposition!.FileName!.Trim('"');
+                return JsonResponse($"{{\"name\":\"{uploadName}\",\"subfolder\":\"\",\"type\":\"input\"}}");
+            }
+            prompt = await request.Content!.ReadAsStringAsync();
+            return JsonResponse("{\"prompt_id\":\"p-1\"}");
+        });
+        ComfyUiImageTransport restarted = CreateTransport(handler);
+        using var content = new MemoryStream([1, 2, 3]);
+        await restarted.UploadReferenceAsync(Connection(), Reference(), content);
+
+        Assert.Equal("p-1", await restarted.SubmitAsync(Connection(), stored));
+        const string expected = "darkspyre-reference-7ec55b60b1f54e71b2deaa8accfd2ef0.png";
+        Assert.Equal(expected, uploadName);
+        Assert.Contains($"\"image\":\"{expected}\"", prompt, StringComparison.Ordinal);
+
+        InferenceException refused = await Assert.ThrowsAsync<InferenceException>(() =>
+            restarted.SubmitAsync(Connection() with { Endpoint = "http://other.test:8188" }, stored));
+        Assert.Equal(InferenceFailureCode.UnsupportedFeature, refused.Code);
+    }
+
+    private static ImageWorkflow ReferenceWorkflow() => new()
+    {
+        Id = "edit",
+        Label = "Edit",
+        Transport = ImageTransport.ComfyUi,
+        RequiresReferenceImage = true,
+        TransportConfiguration = Json("""
+            {"outputNodeId":"9","filenamePrefixTemplate":"${cacheKey}","defaultParameters":{},
+             "workflow":{"1":{"class_type":"LoadImage","inputs":{"image":"${referenceImageName}"}},
+                         "2":{"class_type":"Prompt","inputs":{"text":"${positivePrompt}","width":"${width}","height":"${height}","seed":"${seed}"}}}}
+            """)
+    };
+
     private static ComfyUiImageTransport CreateTransport(HttpMessageHandler handler) =>
         new(new StubHttpClientFactory(handler), NullLogger<ComfyUiImageTransport>.Instance);
 

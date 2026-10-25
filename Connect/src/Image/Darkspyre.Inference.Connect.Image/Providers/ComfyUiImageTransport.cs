@@ -123,6 +123,9 @@ internal sealed class ComfyUiImageTransport(
         "${seed}"
     ];
 
+    // The scope identity of a planned reference. Admitted scopes use a GUID in "N" format, which never equals it.
+    private const string PlannedIdentity = "planned";
+
     private readonly string _clientId = Guid.NewGuid().ToString("N", CultureInfo.InvariantCulture);
     private readonly object _scopeGate = new();
     private readonly ConditionalWeakTable<ImageConnection, ScopeEntry> _scopes = new();
@@ -316,6 +319,18 @@ internal sealed class ComfyUiImageTransport(
             socket.Dispose();
             throw;
         }
+    }
+
+    // A planned reference names the upload UploadReferenceAsync makes: the same file name, overwritten in ComfyUI's input
+    // folder. Its scope names the endpoint and PlannedIdentity in place of a connection's in-process identity, so a request
+    // prepared with it survives a restart and SubmitAsync checks only the endpoint.
+    public ImagePreparedReference PlanReference(ImageConnection connection, ImageReference reference)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        ImageConnection snapshot = CaptureConnection(connection);
+        return new(reference with { FileName = BuildReferenceName(reference) }, new InferenceResourceScope(snapshot.Endpoint, PlannedIdentity),
+            JsonSerializer.SerializeToElement(new ComfyUploadImage(BuildReferenceName(reference), string.Empty, "input"),
+                ComfyOutputJsonContext.Default.ComfyUploadImage));
     }
 
     public async Task<ImagePreparedReference> UploadReferenceAsync(
@@ -517,7 +532,16 @@ internal sealed class ComfyUiImageTransport(
             ?? throw new InvalidOperationException("The prepared ComfyUI request is empty.");
         ArgumentNullException.ThrowIfNull(envelope.ReferenceScopes);
         foreach (InferenceResourceScope referenceScope in envelope.ReferenceScopes)
-            ValidateScope(referenceScope, scope);
+        {
+            if (referenceScope.Identity == PlannedIdentity)
+            {
+                if (referenceScope.Owner != scope.Owner)
+                    throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
+                        "The reference image was planned for a different ComfyUI endpoint. Prepare the request again for this connection.");
+            }
+            else
+                ValidateScope(referenceScope, scope);
+        }
         JsonObject workflow = JsonNode.Parse(envelope.Workflow.GetRawText())?.AsObject()
             ?? throw new InvalidOperationException("The prepared ComfyUI workflow is empty.");
         using var consumption = SdkHttpConsumption.Enter(httpClientFactory, cancellationToken); cancellationToken = consumption.Token;

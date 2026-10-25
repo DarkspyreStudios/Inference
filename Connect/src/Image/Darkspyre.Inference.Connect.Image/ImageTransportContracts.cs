@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Image;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Common.Resources;
@@ -238,6 +239,18 @@ public interface IImageTransport
         ImageReference reference,
         Stream content,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Names a reference image before it is uploaded, for a request that is prepared now and submitted later. The result
+    /// goes into <see cref="ImageTransportPreparationRequest.References"/>; the caller uploads the same reference through
+    /// <see cref="UploadReferenceAsync"/> before <see cref="SubmitAsync"/>. A request prepared with it stays valid across
+    /// process restarts and is refused by a connection to another endpoint. A transport that cannot name an upload in
+    /// advance throws an <see cref="InferenceException"/> with <see cref="InferenceFailureCode.UnsupportedFeature"/>.
+    /// </summary>
+    /// <gotcha>The reference is not uploaded. Submitting before the upload makes the provider fail the job for a missing input image.</gotcha>
+    ImagePreparedReference PlanReference(ImageConnection connection, ImageReference reference) =>
+        throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
+            $"{Descriptor.DisplayName} cannot name a reference image before it is uploaded.");
 
     /// <summary>Prepares a reference image from a media source, reading caller resources through <paramref name="resources"/> when given.</summary>
     Task<ImagePreparedReference> ResolveReferenceAsync(
