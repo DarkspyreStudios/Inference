@@ -7,7 +7,7 @@ Connect, Tensor or a UI framework's DLLs.
 | --- | --- |
 | `Darkspyre.Inference.UI.Settings.Core` | UI-neutral pieces both editors share: `IInferenceSettingsInteractionHost`, `IInferenceSettingsPathPicker`, `SetupEditorState`, `SetupNumberEdit<T>` and the editor's input state. Namespace `Darkspyre.Inference.UI.Settings`. |
 | `Darkspyre.Inference.UI.Settings.Avalonia` | The Avalonia editor: `InferenceSettingsEditor`, `ConnectionTabs`, `SetupInstallStatusCard` and `IAvaloniaSettingsInteractionHost`. Namespace `Darkspyre.Inference.UI.Settings.Avalonia`. |
-| `Darkspyre.Inference.UI.Settings.Blazor` | The Blazor editor, drawn with Lumeo: the `InferenceSettingsEditor` component and its field, number input, install chip and status card components. Namespace `Darkspyre.Inference.UI.Settings.Blazor`. |
+| `Darkspyre.Inference.UI.Settings.Blazor` | The Blazor editor, drawn with Lumeo: the `InferenceSettingsEditor` and `ConnectionTabs` components and their field, number input, model pack card, install chip and status card components. Namespace `Darkspyre.Inference.UI.Settings.Blazor`. |
 
 A host references the editor for its UI framework, which brings Core with it.
 
@@ -31,18 +31,23 @@ manager, or any engine behind it.
 
 ## Blazor editor
 
-The Blazor editor is the editor as it was before the Avalonia port, built on Lumeo, with the Not supported install
-state added. It takes `Settings`, `Manager` and `Host`, and reports `CommitCompleted` and `StateChanged`:
+The Blazor editor shows the same regions, wording, options and states as the Avalonia editor, drawn with Lumeo
+components and its own scoped CSS, which reads the Lumeo theme's colours. The sections below describe both editors. It
+takes `Settings`, `Manager` and `Host` as parameters and reports `CommitCompleted`, `StepChanged` and `StateChanged`
+as event callbacks:
 
 ```razor
 <InferenceSettingsEditor Settings="settings" Manager="manager" Host="interactionHost"
                          CommitCompleted="OnCommitCompleted" StateChanged="OnStateChanged" />
 ```
 
-`ShowSaveButton`, `ShowHeading`, `ShowActionEffects`, `IntroContent` and `SupplementaryContent` behave as in the
-Avalonia editor. The Blazor editor has no connection tabs, model pack cards, step-scoped actions, host-drawn step strip,
-device-code copy or folder button; the sections below that describe them apply to the Avalonia editor only.
-`SetupNumberInput.razor` adapts Lumeo's NumberInput; `THIRD-PARTY-NOTICES.md` carries its licence.
+`ShowSaveButton`, `ShowHeading`, `ShowActionEffects` and `ShowStepList` are parameters; `IntroContent`,
+`SupplementaryContent` and `MoreOptionsContent` are render fragments. `ConnectionTabs` takes the same `Settings`,
+`Manager`, `Host` and `MoreOptionsContent` and draws its tabs with Lumeo's `Tabs`. The Blazor editor copies a device code
+with the browser's `navigator.clipboard.writeText` and shows the result, `Sign-in code copied to clipboard.` or a
+request to select and copy the code, under the code. A browser can refuse the automatic copy that no click started;
+**Copy code** then copies it. `SetupNumberInput.razor` adapts Lumeo's NumberInput; `THIRD-PARTY-NOTICES.md` carries its
+licence.
 
 ## Avalonia editor
 
@@ -154,7 +159,7 @@ and the step's own title is not repeated; single-step settings keep their title.
 own step strip sets `ShowStepList = false`: the list is hidden, each step shows its title, and Back and
 Next stay. `CurrentStepIndex` is the shown step, and `StepChanged` reports each move to another step. A device
 authorization copies its user code to the clipboard the first time the code is shown, once per code, and shows a
-**Copy code** button that copies it again. Both go through
+**Copy code** button that copies it again. In the Avalonia editor both go through
 `IAvaloniaSettingsInteractionHost.CopyToClipboardAsync(source, text, copied)`, which writes the clipboard and tells
 the person the result with the host's transient notice; the editor passes `Sign-in code copied to clipboard.`. The
 code itself selects in one click. A searchable choice list shows its separate

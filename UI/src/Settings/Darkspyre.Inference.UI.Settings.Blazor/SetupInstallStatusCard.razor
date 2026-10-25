@@ -4,7 +4,14 @@
     {
         case SetupInstallState.Installed:
             <SetupInstallChip State="SetupInstallState.Installed" Text="@($"Installed in {Status.Location}")" />
-            <p class="inference-install-card__detail">Ready to load. @Files, @SetupByteSize.Format(Status.Size), @(Status.License).</p>
+            <div class="inference-install-card__detail-line">
+                <p class="inference-install-card__detail">Ready to load. @Files, @SetupByteSize.Format(Status.Size), @(Status.License).</p>
+                @if (Reveal.HasDelegate)
+                {
+                    <Button Variant="Button.ButtonVariant.Ghost" aria-label="Show the model folder"
+                            OnClick="() => Reveal.InvokeAsync(Status.Location)">Show</Button>
+                }
+            </div>
             break;
         case SetupInstallState.NotDownloaded:
             <SetupInstallChip State="SetupInstallState.NotDownloaded" Text="Not downloaded" />
@@ -26,6 +33,8 @@
             {
                 <Button Variant="Button.ButtonVariant.Outline" Disabled="@(Disabled || !action.IsEnabled)"
                         OnClick="() => Run.InvokeAsync(action)">@action.DisplayName</Button>
+                @if (!action.IsEnabled && !string.IsNullOrWhiteSpace(action.UnavailableReason))
+                { <span class="inference-install-card__detail">@action.UnavailableReason</span> }
             }
         </div>
     }
@@ -40,6 +49,8 @@
     [Parameter] public bool Disabled { get; set; }
     /// <summary>Raised with the action a button names; the editor runs it like any other action.</summary>
     [Parameter] public EventCallback<SetupActionDescriptor> Run { get; set; }
+    /// <summary>Raised with the store folder when the person asks to see an installed model's files.</summary>
+    [Parameter] public EventCallback<string> Reveal { get; set; }
 
     private string Files => Status.FileCount == 1 ? "1 file" : $"{Status.FileCount} files";
 

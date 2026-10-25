@@ -1,0 +1,21 @@
+@* A local model pack as a card: name, download size, install state; selected on click. *@
+<button type="button" class="inference-model-pack-card" aria-label="@Choice.DisplayName" aria-pressed="@(Selected ? "true" : "false")"
+        disabled="@Disabled" @onclick="() => Chosen.InvokeAsync()">
+    <span class="inference-model-pack-card__name">@Choice.DisplayName</span>
+    <span class="inference-model-pack-card__size">@SetupByteSize.Format(Install.Size) download</span>
+    <SetupInstallChip State="@Install.State" Text="@SetupInstallChip.ChoiceText(Install, "Not downloaded")" />
+</button>
+
+@code {
+    /// <summary>The model pack the card shows; a choice that carries <see cref="SetupChoice.Install"/>.</summary>
+    [Parameter, EditorRequired] public SetupChoice Choice { get; set; } = default!;
+    /// <summary>True marks the card as the chosen pack.</summary>
+    [Parameter] public bool Selected { get; set; }
+    /// <summary>True disables the card, as while the editor saves or runs an action.</summary>
+    [Parameter] public bool Disabled { get; set; }
+    /// <summary>Raised when the person clicks the card.</summary>
+    [Parameter] public EventCallback Chosen { get; set; }
+
+    private SetupChoiceInstall Install => Choice.Install
+        ?? throw new InvalidOperationException("A model pack card needs the choice's install facts.");
+}

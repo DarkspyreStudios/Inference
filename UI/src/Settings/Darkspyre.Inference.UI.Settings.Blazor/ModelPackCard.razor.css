@@ -1,0 +1,36 @@
+.inference-model-pack-card {
+    display: grid;
+    justify-items: start;
+    gap: .375rem;
+    min-width: 11rem;
+    padding: .75rem 1rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius, .5rem);
+    background: var(--color-card, transparent);
+    color: inherit;
+    text-align: start;
+    cursor: pointer;
+}
+
+.inference-model-pack-card:hover {
+    background: var(--color-accent, transparent);
+}
+
+.inference-model-pack-card[aria-pressed="true"] {
+    border-color: var(--color-primary);
+    box-shadow: 0 0 0 1px var(--color-primary);
+}
+
+.inference-model-pack-card:disabled {
+    cursor: not-allowed;
+    opacity: .5;
+}
+
+.inference-model-pack-card__name {
+    font-weight: 600;
+}
+
+.inference-model-pack-card__size {
+    color: var(--color-muted-foreground);
+    font-size: .75rem;
+}

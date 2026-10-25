@@ -7,6 +7,15 @@
     /// <summary>The chip's text. It carries the meaning; the icon is decoration.</summary>
     [Parameter, EditorRequired] public string Text { get; set; } = string.Empty;
 
+    /// <summary>A choice's chip text: "Installed", "Not supported", or <paramref name="notDownloaded"/> for a choice that is not
+    /// downloaded.</summary>
+    internal static string ChoiceText(SetupChoiceInstall install, string notDownloaded) => install.State switch
+    {
+        SetupInstallState.Installed => "Installed",
+        SetupInstallState.NotSupported => "Not supported",
+        _ => notDownloaded,
+    };
+
     private Badge.BadgeVariant Variant => State switch
     {
         SetupInstallState.Installed => Badge.BadgeVariant.Success,

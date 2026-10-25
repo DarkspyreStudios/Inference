@@ -68,7 +68,7 @@
                     break;
                 case SetupChoiceField choice:
                     @* The combobox filters loaded choices itself; provider search matters only while more remain. *@
-                    @if (choice.Capabilities.SupportsSearch != InferenceSupport.Unsupported && (_continuation is not null || _search.Length > 0))
+                    @if (!PackCards && choice.Capabilities.SupportsSearch != InferenceSupport.Unsupported && (_continuation is not null || _search.Length > 0))
                     {
                     <div class="inference-settings-editor__choice-actions">
                         <Input @bind-Value="_search" Placeholder="Search choices" Disabled="@Unavailable" />
@@ -76,43 +76,47 @@
                                 OnClick="SearchChoicesAsync">Search</Button>
                     </div>
                     }
-                    @if (choice.Capabilities.SupportsSearch == InferenceSupport.Unsupported && choice.Capabilities.SupportsPaging == InferenceSupport.Unsupported && !choice.AllowsManualEntry)
+                    @* Model packs show as cards in place of the list once every loaded choice has local files. *@
+                    @if (PackCards)
                     {
-                        <Select Value="@(choice.ShowValue ? _value : string.Empty)" ValueChanged="@(value => SetChoiceAsync(choice, value))" Disabled="@Unavailable" @bind-Open="_choiceOpen">
+                        <div class="inference-model-pack-cards" role="group" aria-label="@choice.Description.DisplayName">
+                            @foreach (var option in _choices)
+                            {
+                                <ModelPackCard @key="option.Value" Choice="option" Selected="@(option.Value == ShownChoice(choice))" Disabled="@Unavailable"
+                                               Chosen="@(() => option.Value == _value ? Task.CompletedTask : ChooseAsync(choice, option.Value))" />
+                            }
+                        </div>
+                    }
+                    else if (choice.Capabilities.SupportsSearch == InferenceSupport.Unsupported && choice.Capabilities.SupportsPaging == InferenceSupport.Unsupported && !choice.AllowsManualEntry)
+                    {
+                        <Select Value="@ShownChoice(choice)" ValueChanged="@(value => ChooseAsync(choice, value))" Disabled="@Unavailable" @bind-Open="_choiceOpen"
+                                aria-label="@choice.Description.DisplayName">
                             <SelectTrigger />
                             <SelectContent>
                                 @foreach (var option in _choices)
                                 {
-                                    <SelectItem Value="@option.Value">
-                                        @option.DisplayName
-                                        @if (option.Install is { } install) { <SetupInstallChip State="@ChipState(install)" Text="@ChipText(install)" /> }
-                                    </SelectItem>
+                                    <SelectItem Value="@option.Value">@ChoiceView(option)</SelectItem>
                                 }
                             </SelectContent>
                         </Select>
                     }
                     else if (_choices.Count > 0 || !choice.AllowsManualEntry)
                     {
-                        <Combobox Value="@(choice.ShowValue ? _value : string.Empty)" ValueChanged="@(value => SetChoiceAsync(choice, value))"
+                        <Combobox Value="@ShownChoice(choice)" ValueChanged="@(value => ChooseAsync(choice, value))"
                                   @bind-Open="_choiceOpen" Creatable="@choice.AllowsManualEntry" Disabled="@Unavailable">
-                            <ComboboxInput Placeholder="Choose or search" />
+                            <ComboboxInput Placeholder="Choose or search" aria-label="@choice.Description.DisplayName" />
                             <ComboboxContent>
                                 @foreach (var option in _choices)
                                 {
                                     @* Providers can give distinct values one display name, so the value names the choice. *@
-                                    <ComboboxItem Value="@option.Value" SearchValue="@ChoiceSearchText(option)">
-                                        @option.DisplayName
-                                        @if (option.DisplayName != option.Value)
-                                        { <span class="inference-settings-editor__choice-value">@option.Value</span> }
-                                        @if (option.Install is { } install) { <SetupInstallChip State="@ChipState(install)" Text="@ChipText(install)" /> }
-                                    </ComboboxItem>
+                                    <ComboboxItem Value="@option.Value" SearchValue="@ChoiceSearchText(option)">@ChoiceView(option)</ComboboxItem>
                                 }
                                 @if (choice.AllowsManualEntry) { <ComboboxCreate /> }
                             </ComboboxContent>
                         </Combobox>
                     }
                     @if (_choices.Count == 0 && choice.AllowsManualEntry)
-                    { <Input Value="@_value" ValueChanged="@(value => SetChoiceAsync(choice, value))" Disabled="@Unavailable" /> }
+                    { <Input Value="@_value" ValueChanged="@(value => SetChoiceAsync(choice, value))" Disabled="@Unavailable" aria-label="@choice.Description.DisplayName" /> }
                     <div class="inference-settings-editor__choice-actions">
                         @if (choice.Capabilities.SupportsRefresh != InferenceSupport.Unsupported)
                         { <Button Variant="Button.ButtonVariant.Ghost" Disabled="@(_loading || Unavailable)"
@@ -160,6 +164,8 @@
     [Parameter] public bool Disabled { get; set; }
     /// <summary>True masks a text field's input and keeps the typed text when parameters are set again.</summary>
     [Parameter] public bool SensitiveInput { get; set; }
+    /// <summary>Raised after a choice is picked from the list or a card, or typed and committed, and applied.</summary>
+    [Parameter] public EventCallback<SetupField> Chosen { get; set; }
     [CascadingParameter] private SetupEditorInputState? EditorInputs { get; set; }
 
     private readonly SetupEditorInputState _standaloneInputs = new();
@@ -197,20 +203,30 @@
             else if (field is SetupExecutableField executable) await SetExecutableAsync(executable, value);
         }
         catch (OperationCanceledException) { }
-        catch (Exception) when (!_disposed) { await InvalidAsync("The host could not select a path. Enter it manually or try again."); }
+        catch (Exception error) when (!_disposed)
+        { await InvalidAsync($"The host could not select a path ({error.GetType().Name}): {error.Message} Enter it manually or try again."); }
         finally { _picking = false; }
     }
     private string? FieldError => Input.Issues.FirstOrDefault(issue => issue.Severity == SetupIssueSeverity.Error)?.Message
         ?? Issues.FirstOrDefault(issue => issue.FieldId == Field.Description.Id && issue.Severity == SetupIssueSeverity.Error)?.Message;
 
-    // An option with local files shows whether they are installed or no longer supported and, otherwise, its download size.
-    private static SetupInstallState ChipState(SetupChoiceInstall install) => install.State;
-    private static string ChipText(SetupChoiceInstall install) => install.State switch
-    {
-        SetupInstallState.Installed => "Installed",
-        SetupInstallState.NotSupported => "Not supported",
-        _ => $"Not downloaded · {SetupByteSize.Format(install.Size)}",
-    };
+    private bool PackCards => _choices.Count > 0 && _choices.All(option => option.Install is not null);
+
+    private string ShownChoice(SetupChoiceField choice) => choice.ShowValue ? _value : string.Empty;
+
+    // An option with local files shows its install state and, when not downloaded, its download size. Its tags show as chips,
+    // its value as a second line when it differs from the name, and its description as a line under them.
+    private static RenderFragment ChoiceView(SetupChoice option) =>
+        @<span class="inference-settings-editor__choice">
+            <span class="inference-settings-editor__choice-head">
+                <span>@option.DisplayName</span>
+                @if (option.Install is { } install)
+                { <SetupInstallChip State="@install.State" Text="@SetupInstallChip.ChoiceText(install, $"Not downloaded · {SetupByteSize.Format(install.Size)}")" /> }
+                @foreach (string tag in option.Tags) { <Badge Variant="Badge.BadgeVariant.Secondary">@tag</Badge> }
+            </span>
+            @if (option.DisplayName != option.Value) { <span class="inference-settings-editor__choice-value">@option.Value</span> }
+            @if (!string.IsNullOrWhiteSpace(option.Description)) { <span class="inference-settings-editor__choice-help">@option.Description</span> }
+        </span>;
 
     private static string ChoiceSearchText(SetupChoice choice) =>
         choice.DisplayName == choice.Value ? choice.Value : choice.DisplayName + " " + choice.Value;
@@ -272,6 +288,13 @@
     {
         _value = value ?? string.Empty;
         return ApplyAsync(field.SetValue(_value));
+    }
+
+    // A choice picked from the list or a card, or typed and committed: applied, then reported as chosen.
+    private async Task ChooseAsync(SetupChoiceField field, string? value)
+    {
+        await SetChoiceAsync(field, value);
+        if (!_disposed && !Input.Pending) { await Chosen.InvokeAsync(field); }
     }
 
     private Task SetUriAsync(SetupUriField field, string? value)
@@ -354,7 +377,7 @@
             else { _choiceIssue = page.Issues?.FirstOrDefault()?.Message ?? page.State.ToString(); }
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
-        catch (Exception) { if (IsCurrent()) { _choiceIssue = "Choices could not be loaded."; } }
+        catch (Exception error) when (IsCurrent()) { _choiceIssue = $"Choices could not be loaded ({error.GetType().Name}): {error.Message}"; }
         finally
         {
             if (generation == _choiceGeneration) { _loading = false; }

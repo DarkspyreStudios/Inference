@@ -20,9 +20,29 @@
     gap: var(--inference-settings-action-gap, .75rem);
 }
 
-.inference-settings-editor__choice-value {
+.inference-settings-editor__choice {
+    display: grid;
+    gap: .125rem;
+    min-width: 0;
+}
+
+.inference-settings-editor__choice-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .5rem;
+}
+
+.inference-settings-editor__choice-value,
+.inference-settings-editor__choice-help {
     display: block;
     color: var(--color-muted-foreground);
     font-size: .75rem;
     overflow-wrap: anywhere;
+}
+
+.inference-model-pack-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .75rem;
 }

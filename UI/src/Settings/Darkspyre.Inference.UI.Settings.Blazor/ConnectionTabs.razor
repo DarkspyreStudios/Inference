@@ -1,0 +1,67 @@
+@* Editing an existing connection: tabs labelled "Connection" and "Model", one per step; each step's own title stays as its
+   heading. One editor shows the chosen tab's step, so typed input and sign-in progress carry across tabs. The host frames it
+   with the connection's name and owns Save through SaveAsync. *@
+<div class="inference-connection-tabs">
+    <Tabs ActiveValue="@_labels[_index]" ActiveValueChanged="ShowTabAsync" Class="inference-connection-tab-strip">
+        <TabsList>
+            @foreach (string label in _labels)
+            {
+                <TabsTrigger Value="@label">@label</TabsTrigger>
+            }
+        </TabsList>
+    </Tabs>
+    <CascadingValue Value="_context" IsFixed="true">
+        @* The host's click is consent for every effect, and the host's frame names the connection. *@
+        <InferenceSettingsEditor Settings="Settings" Manager="Manager" Host="Host" ShowSaveButton="false" ShowHeading="false"
+                                 ShowActionEffects="false" MoreOptionsContent="MoreOptionsContent"
+                                 CommitCompleted="OnCommittedAsync" StateChanged="StateChanged" />
+    </CascadingValue>
+</div>
+
+@code {
+    private static readonly string[] Labels = ["Connection", "Model"];
+    private readonly ConnectionTabsContext _context = new();
+    private string[] _labels = [Labels[0]];
+    private int _index;
+
+    /// <summary>The settings of the connection being edited, whose steps are the connection step and then the model step.</summary>
+    [Parameter, EditorRequired] public InferenceSettings Settings { get; set; } = default!;
+    /// <summary>The manager that runs the settings' actions and saves them.</summary>
+    [Parameter, EditorRequired] public IInferenceSettingsManager Manager { get; set; } = default!;
+    /// <summary>The host that authorizes and runs actions, opens browser pages and shows folders.</summary>
+    [Parameter, EditorRequired] public IInferenceSettingsInteractionHost Host { get; set; } = default!;
+    /// <summary>Passed to the Connection tab's editor as its MoreOptionsContent.</summary>
+    [Parameter] public RenderFragment? MoreOptionsContent { get; set; }
+    /// <summary>Raised after Save. A Committed result means the host closes its sheet.</summary>
+    [Parameter] public EventCallback<SetupCommitResult> CommitCompleted { get; set; }
+    /// <summary>Raised each time the editor's unsaved, pending, error or can-save state changes, as the editor's StateChanged.</summary>
+    [Parameter] public EventCallback<SetupEditorState> StateChanged { get; set; }
+
+    /// <summary>The editor's current unsaved, pending input, error, can-save and uncertain-save state; the host enables Save from CanSave.</summary>
+    public SetupEditorState? State => _context.Editor?.State;
+
+    /// <summary>Saves the settings through the manager; <see cref="CommitCompleted"/> reports the result.</summary>
+    public async Task SaveAsync()
+    {
+        if (_context.Editor is { } editor) { await editor.SaveAsync(); }
+    }
+
+    protected override void OnParametersSet()
+    {
+        _labels = [.. Labels.Take(Math.Max(1, Settings.Steps.Count))];
+        _index = Math.Min(_index, _labels.Length - 1);
+    }
+
+    private async Task ShowTabAsync(string label)
+    {
+        _index = Math.Max(0, Array.IndexOf(_labels, label));
+        if (_context.Editor is { } editor) { await editor.ShowStepAsync(_index); }
+    }
+
+    // A refused save shows the step with the problem; the tabs follow it.
+    private async Task OnCommittedAsync(SetupCommitResult result)
+    {
+        if (_context.Editor is { } editor) { _index = editor.CurrentStepIndex; }
+        await CommitCompleted.InvokeAsync(result);
+    }
+}

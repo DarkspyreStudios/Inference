@@ -6,6 +6,13 @@ p {
     color: var(--color-muted-foreground);
 }
 
+.inference-install-card__detail-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--inference-settings-action-gap, .75rem);
+}
+
 .inference-install-card__actions {
     display: flex;
     flex-wrap: wrap;

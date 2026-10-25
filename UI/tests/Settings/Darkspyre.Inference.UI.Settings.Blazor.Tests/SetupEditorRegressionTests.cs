@@ -167,31 +167,35 @@ public sealed class SetupEditorRegressionTests : BunitContext
         var (settings, manager) = New();
         IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
         Assert.Empty(editor.FindAll(".inference-settings-editor__step h3"));
-        Assert.Equal(["First step", "Second step"], editor.FindAll(".inference-settings-editor__steps li").Select(item => item.TextContent));
-        Assert.Equal("First step", editor.Find(".inference-settings-editor__steps li[aria-current=step]").TextContent);
+        Assert.Equal(["1. First step", "2. Second step"], editor.FindAll(".inference-settings-editor__steps li").Select(item => item.TextContent));
+        Assert.Equal("1. First step", editor.Find(".inference-settings-editor__steps li[aria-current=step]").TextContent);
         Click(editor, "Next");
-        Assert.Equal("Second step", editor.Find(".inference-settings-editor__steps li[aria-current=step]").TextContent);
+        Assert.Equal("2. Second step", editor.Find(".inference-settings-editor__steps li[aria-current=step]").TextContent);
         Assert.Empty(editor.FindAll(".inference-settings-editor__step h3"));
     }
 
+    /// <summary>A device code is copied the first time it is shown, not again on a redraw; Copy code copies it again, and a
+    /// clipboard that refuses says so.</summary>
     [Fact]
-    public void DeviceCodeCanBeCopiedAndReportsWhenTheClipboardRefuses()
+    public void DeviceCodeIsCopiedOnceWhenShownAndReportsWhenTheClipboardRefuses()
     {
         var (settings, manager) = New();
         IRenderedComponent<InferenceSettingsEditor> editor = Editor(settings, manager);
         settings.StartDevice("ABCD-1234");
         editor.Render();
-        editor.WaitForAssertion(() => Assert.Equal("ABCD-1234", editor.Find(".inference-settings-editor__user-code").TextContent));
+        editor.WaitForAssertion(() => Assert.Contains("Sign-in code copied to clipboard.", editor.Markup, StringComparison.Ordinal));
+        Assert.Equal("ABCD-1234", editor.Find(".inference-settings-editor__user-code").TextContent);
+        editor.Render();
+        Assert.Single(JSInterop.Invocations["navigator.clipboard.writeText"]);
         Click(editor, "Copy code");
-        editor.WaitForAssertion(() => Assert.Contains("Code copied.", editor.Markup, StringComparison.Ordinal));
-        Assert.Equal(["ABCD-1234"], JSInterop.VerifyInvoke("navigator.clipboard.writeText").Arguments);
+        editor.WaitForAssertion(() => Assert.Equal(2, JSInterop.Invocations["navigator.clipboard.writeText"].Count));
 
         JSInterop.SetupVoid("navigator.clipboard.writeText", "WXYZ-9876").SetException(new Microsoft.JSInterop.JSException("denied"));
         settings.StartDevice("WXYZ-9876");
         editor.Render();
-        editor.WaitForAssertion(() => Assert.DoesNotContain("Code copied.", editor.Markup, StringComparison.Ordinal));
-        Click(editor, "Copy code");
         editor.WaitForAssertion(() => Assert.Contains("The code could not be copied. Select it and copy it instead.", editor.Markup, StringComparison.Ordinal));
+        Assert.Equal(["ABCD-1234", "ABCD-1234", "WXYZ-9876"],
+            JSInterop.Invocations["navigator.clipboard.writeText"].Select(call => (string)call.Arguments[0]!));
     }
 
     [Fact]

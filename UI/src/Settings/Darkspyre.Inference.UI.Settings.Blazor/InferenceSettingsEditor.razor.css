@@ -7,7 +7,9 @@
 .inference-settings-editor__heading,
 .inference-settings-editor__step,
 .inference-settings-editor__section,
-.inference-settings-editor__interaction {
+.inference-settings-editor__interaction,
+.inference-settings-editor__checklist,
+.inference-settings-editor__result {
     display: grid;
     gap: var(--inference-settings-group-gap, .75rem);
     min-width: 0;
@@ -15,13 +17,16 @@
 
 .inference-settings-editor__heading > *,
 .inference-settings-editor__step > *,
-.inference-settings-editor__section > * {
+.inference-settings-editor__section > *,
+.inference-settings-editor__interaction > *,
+.inference-settings-editor__checklist > *,
+.inference-settings-editor__result > * {
     margin-block: 0;
 }
 
 .inference-settings-editor__status,
 .inference-settings-editor__steps,
-.inference-settings-editor__actions,
+.inference-settings-editor__buttons,
 .inference-settings-editor__navigation {
     display: flex;
     flex-wrap: wrap;
@@ -29,8 +34,9 @@
     gap: var(--inference-settings-action-gap, .75rem);
 }
 
-.inference-settings-editor__status-item {
-    white-space: nowrap;
+.inference-settings-editor__actions {
+    display: grid;
+    gap: .5rem;
 }
 
 .inference-settings-editor__steps ol {
@@ -38,7 +44,31 @@
     flex-wrap: wrap;
     gap: var(--inference-settings-action-gap, .75rem);
     margin: 0;
-    padding-inline-start: 1.25rem;
+    padding: 0;
+    list-style: none;
+}
+
+.inference-settings-editor__steps li {
+    color: var(--color-muted-foreground);
+}
+
+.inference-settings-editor__steps li[aria-current="step"] {
+    color: inherit;
+}
+
+.inference-settings-editor__section > summary {
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.inference-settings-editor__checklist-item,
+.inference-settings-editor__result-title {
+    font-weight: 600;
+}
+
+.inference-settings-editor__progress,
+.inference-settings-editor__action small {
+    color: var(--color-muted-foreground);
 }
 
 .inference-settings-editor__fields {

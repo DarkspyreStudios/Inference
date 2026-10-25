@@ -14,23 +14,24 @@
     }
     @IntroContent
 
-    @if (StatusItems().Any())
+    @if (StatusChips().ToArray() is { Length: > 0 } chips)
     {
         <div class="inference-settings-editor__status" aria-live="polite">
-            @foreach (var item in StatusItems())
+            @foreach (var chip in chips)
             {
-                <span class="inference-settings-editor__status-item">@item.Label: @Describe(item.Observation)</span>
+                <Badge Variant="@(chip.Value switch { true => Badge.BadgeVariant.Success, false => Badge.BadgeVariant.Warning, _ => Badge.BadgeVariant.Secondary })"
+                       Class="inference-settings-editor__chip">@chip.Text</Badge>
             }
         </div>
     }
 
-    @if (Steps.Count > 1)
+    @if (ShowsStepList)
     {
         <nav class="inference-settings-editor__steps" aria-label="Setup steps">
             <ol>
                 @for (var index = 0; index < Steps.Count; index++)
                 {
-                    <li aria-current="@(index == _stepIndex ? "step" : null)">@Steps[index].Title</li>
+                    <li aria-current="@(index == _stepIndex ? "step" : null)">@(index + 1). @Steps[index].Title</li>
                 }
             </ol>
         </nav>
@@ -38,20 +39,30 @@
 
     @if (CurrentStep is { } step)
     {
+        @* The first of several steps is the connection step: its instructions say what the connection is. *@
+        bool connection = _stepIndex == 0 && Steps.Count > 1;
+        RenderFragment? moreOptions = _stepIndex == 0 ? MoreOptionsContent : null;
+        bool moreOptionsPlaced = moreOptions is not null && step.Sections.Any(section => section.IsAdvanced && section.Title == MoreOptionsTitle);
         <div class="inference-settings-editor__step">
-            @* The step list above names and marks the current step; a single step has no list. *@
-            @if (Steps.Count <= 1) { <h3>@step.Title</h3> }
-            @if (!string.IsNullOrWhiteSpace(step.Instructions)) { <p>@step.Instructions</p> }
+            @* The step list above names and marks the current step; a single step, a step shown as a tab, or a step under the
+               host's own strip has no list. *@
+            @if (!ShowsStepList) { <h3>@step.Title</h3> }
+            @if (!string.IsNullOrWhiteSpace(step.Instructions))
+            {
+                @if (connection) { <h4>About this connection</h4> }
+                <p>@step.Instructions</p>
+            }
             @if (step.HasPlatformInstructions) { <p>@step.PlatformInstructions</p> }
             @foreach (var section in step.Sections)
             {
                 @if (section.IsAdvanced)
                 {
-                    <details class="inference-settings-editor__section" open="@HasErrors(section)">
+                    <details class="inference-settings-editor__section" open="@IsOpen(step.Id + "/" + section.Title, HasErrors(section))">
                         <summary>@section.Title</summary>
                         <div class="inference-settings-editor__fields">
                             @foreach (var field in section.Fields.Where(value => value.Description.IsVisible))
                             { @FieldView(field) }
+                            @if (moreOptions is not null && section.Title == MoreOptionsTitle) { @moreOptions }
                         </div>
                     </details>
                 }
@@ -66,8 +77,26 @@
                     </section>
                 }
             }
+            @if (moreOptions is not null && !moreOptionsPlaced)
+            {
+                <details class="inference-settings-editor__section" open="@IsOpen(step.Id + "/" + MoreOptionsTitle, false)">
+                    <summary>@MoreOptionsTitle</summary>
+                    <div class="inference-settings-editor__fields">@moreOptions</div>
+                </details>
+            }
             @if (step.HasCompletionRequirement) { <p>@step.CompletionRequirement</p> }
-            @if (step.HasTroubleshooting) { <p>@step.Troubleshooting</p> }
+            @if (step.HasTroubleshooting)
+            {
+                @* The connection step's troubleshooting shows only when asked. *@
+                @if (connection)
+                {
+                    <details class="inference-settings-editor__section" open="@IsOpen(step.Id + "/troubleshooting", false)">
+                        <summary>Trouble signing in?</summary>
+                        <p>@step.Troubleshooting</p>
+                    </details>
+                }
+                else { <p>@step.Troubleshooting</p> }
+            }
         </div>
     }
     @SupplementaryContent
@@ -79,38 +108,75 @@
         </div>
     }
 
-    @if (Settings.Interaction is { } interaction)
+    @{
+        SetupStep? current = CurrentStep;
+        bool checklist = ShowsChecklist(current);
+        SetupActionDescriptor[] stepActions = [.. StepActions(current)];
+        SetupActionDescriptor? signIn = stepActions.FirstOrDefault(action => action.Purpose == SetupActionPurpose.Authenticate);
+        // The checklist draws the prerequisite itself when the step has no sign-in action of its own.
+        bool prerequisiteInChecklist = checklist && signIn is null && Settings.Interaction is SetupExternalPrerequisite;
+        // The checklist draws its sign-in action, and for a step without one its check; a test with a shown result offers "Test again".
+        SetupActionDescriptor[] tailActions = [.. stepActions.Where(action => !(checklist && (action.Purpose == SetupActionPurpose.Authenticate
+            || signIn is null && action.Purpose == SetupActionPurpose.CheckPrerequisites))
+            && !(_actionResult is not null && _resultAction?.Id == action.Id && action.Purpose == SetupActionPurpose.Test))];
+    }
+
+    @if (Settings.Interaction is { } interaction && !prerequisiteInChecklist)
     {
         <section class="inference-settings-editor__interaction" aria-label="Connection instructions">
             @switch (interaction)
             {
                 case SetupDeviceAuthorization device:
                     <p>Use code <strong class="inference-settings-editor__user-code">@device.UserCode</strong> to finish connecting.</p>
-                    <Button Variant="Button.ButtonVariant.Outline" OnClick="() => CopyCodeAsync(device.UserCode)">Copy code</Button>
-                    <Button OnClick="() => OpenBrowserAsync(device.VerificationUri)">Open authorization page</Button>
-                    <Button Disabled="@Busy" OnClick="() => RunActionAsync(device.Continue)">Continue</Button>
-                    <Button Disabled="@Busy" Variant="Button.ButtonVariant.Outline" OnClick="() => RunActionAsync(device.Cancel)">Cancel connection</Button>
+                    <div class="inference-settings-editor__buttons">
+                        <Button Variant="Button.ButtonVariant.Outline" OnClick="() => CopyCodeAsync(device.UserCode)">Copy code</Button>
+                        <Button OnClick="() => OpenBrowserAsync(device.VerificationUri)">Open authorization page</Button>
+                        <Button Disabled="@Busy" OnClick="() => RunActionAsync(device.Continue)">Continue</Button>
+                        <Button Disabled="@Busy" Variant="Button.ButtonVariant.Outline" OnClick="() => RunActionAsync(device.Cancel)">Cancel connection</Button>
+                    </div>
                     @if (_copiedCode == device.UserCode && _copyStatus is not null) { <p role="status">@_copyStatus</p> }
                     break;
                 case SetupBrowserAuthorization browser:
-                    <Button OnClick="() => OpenBrowserAsync(browser.AuthorizationUri)">Open authorization page</Button>
+                    <div><Button OnClick="() => OpenBrowserAsync(browser.AuthorizationUri)">Open authorization page</Button></div>
                     <SetupFieldInput @key="(Settings, browser.Callback.Description.Id)" Field="browser.Callback" Settings="Settings" Manager="Manager"
                                      EditVersion="_editVersion" Host="Host" Issues="AllIssues" Edited="OnFieldEditedAsync" SensitiveInput="true" Disabled="@Busy" />
-                    <Button Disabled="@Busy" OnClick="() => RunActionAsync(browser.Continue)">Continue</Button>
-                    <Button Disabled="@Busy" Variant="Button.ButtonVariant.Outline" OnClick="() => RunActionAsync(browser.Cancel)">Cancel connection</Button>
+                    <div class="inference-settings-editor__buttons">
+                        <Button Disabled="@Busy" OnClick="() => RunActionAsync(browser.Continue)">Continue</Button>
+                        <Button Disabled="@Busy" Variant="Button.ButtonVariant.Outline" OnClick="() => RunActionAsync(browser.Cancel)">Cancel connection</Button>
+                    </div>
                     break;
                 case SetupExternalPrerequisite prerequisite:
                     <p>@prerequisite.Instructions</p>
-                    <Button Disabled="@Busy" OnClick="() => RunActionAsync(prerequisite.Recheck)">Check again</Button>
+                    <div><Button Disabled="@Busy" OnClick="() => RunActionAsync(prerequisite.Recheck)">Check again</Button></div>
                     break;
             }
         </section>
     }
 
-    @if (Settings.Actions.Count > 0)
+    @if (checklist)
+    {
+        <section class="inference-settings-editor__checklist" aria-label="Setup checklist">
+            <p class="inference-settings-editor__checklist-item">@InstalledLine(current!)</p>
+            @if (Known(Settings.Status.Authenticated) == true) { <p class="inference-settings-editor__checklist-item">✓ Signed in</p> }
+            else if (signIn is not null)
+            { <div><Button Disabled="@(Busy || !signIn.IsEnabled)" OnClick="() => RunActionAsync(signIn)">@signIn.DisplayName</Button></div> }
+            else if (Settings.Interaction is SetupExternalPrerequisite prerequisite)
+            {
+                <p>@prerequisite.Instructions</p>
+                <div><Button Disabled="@Busy" OnClick="() => RunActionAsync(prerequisite.Recheck)">Check again</Button></div>
+            }
+            else if (stepActions.FirstOrDefault(action => action.Purpose == SetupActionPurpose.CheckPrerequisites) is { } check)
+            {
+                <div><Button Variant="Button.ButtonVariant.Outline" Disabled="@(Busy || !check.IsEnabled)"
+                             OnClick="() => RunActionAsync(check)">@check.DisplayName</Button></div>
+            }
+        </section>
+    }
+
+    @if (tailActions.Length > 0)
     {
         <section class="inference-settings-editor__actions" aria-label="Provider actions">
-            @foreach (var action in Settings.Actions)
+            @foreach (var action in tailActions)
             {
                 <div class="inference-settings-editor__action">
                     <Button Variant="Button.ButtonVariant.Outline" Disabled="@(Busy || !action.IsEnabled)"
@@ -118,7 +184,7 @@
                     @if (!action.IsEnabled && !string.IsNullOrWhiteSpace(action.UnavailableReason))
                     { <span>@action.UnavailableReason</span> }
                     @if (ShowActionEffects && action.SideEffects != SetupSideEffect.None)
-                    { <small>@DescribeEffects(action.SideEffects)</small> }
+                    { <small>@action.SideEffects.ToString()</small> }
                 </div>
             }
         </section>
@@ -126,34 +192,42 @@
 
     @if (_progress is not null)
     {
-        <p class="inference-settings-editor__progress" role="status">@_progress.Stage: @_progress.Message
-            @if (_progress.Total is > 0) { <span>(@_progress.Completed / @_progress.Total)</span> }
-        </p>
+        <p class="inference-settings-editor__progress" role="status">@_progress.Stage: @_progress.Message@(_progress.Total is > 0 ? $" ({_progress.Completed} / {_progress.Total})" : string.Empty)</p>
     }
     @if (_actionCancellation is not null)
-    { <Button Variant="Button.ButtonVariant.Ghost" OnClick="CancelAction">Cancel operation</Button> }
+    { <div><Button Variant="Button.ButtonVariant.Ghost" OnClick="CancelAction">Cancel operation</Button></div> }
     @if (_actionResult is { } result)
-    { <p role="status">@ActionMessage(result)</p> }
+    {
+        bool test = _resultAction?.Purpose == SetupActionPurpose.Test;
+        <div class="inference-settings-editor__result" role="status">
+            @if (result.Issues is { Count: > 0 } failed) { <p>@failed[0].Message</p> }
+            else if (test && result.State == SetupActionState.Completed && result.Elapsed is { } elapsed)
+            { <p class="inference-settings-editor__result-title">@string.Create(System.Globalization.CultureInfo.InvariantCulture, $"Test reply received in {elapsed.TotalSeconds:0.0} s")</p> }
+            else if (result.Message is null) { <p>@Describe(result.State)</p> }
+            @if (result.Message is { } message) { <p>@message</p> }
+            @if (test && _resultAction is { } again && Settings.Actions.FirstOrDefault(action => action.Id == again.Id) is { } retry)
+            { <div><Button Variant="Button.ButtonVariant.Outline" Disabled="@(Busy || !retry.IsEnabled)" OnClick="() => RunActionAsync(retry)">Test again</Button></div> }
+        </div>
+    }
     @if (_commitResult is { } commit)
-    { <p role="status">@CommitMessage(commit)</p> }
+    { <p role="status">@(commit.Issues is { Count: > 0 } refused ? refused[0].Message : Describe(commit.State))</p> }
 
     <div class="inference-settings-editor__navigation">
-        @if (_stepIndex > 0)
-        { <Button Variant="Button.ButtonVariant.Ghost" Disabled="@Busy" OnClick="PreviousStep">Back</Button> }
-        @if (_stepIndex < Steps.Count - 1)
+        @if (StepNavigation && _stepIndex > 0)
+        { <Button Variant="Button.ButtonVariant.Ghost" Disabled="@Busy" OnClick="PreviousStepAsync">Back</Button> }
+        @if (StepNavigation && _stepIndex < Steps.Count - 1)
         { <Button Disabled="@Busy" OnClick="NextStepAsync">Next</Button> }
         @if (ShowSaveButton && _stepIndex >= Steps.Count - 1)
         { <Button Disabled="@(!State.CanSave)" OnClick="SaveFromButtonAsync">Save settings</Button> }
     </div>
 </section>
 </CascadingValue>
-
 @code {
     /// <summary>The provider settings being edited, with their steps, fields, status and actions.</summary>
     [Parameter, EditorRequired] public InferenceSettings Settings { get; set; } = default!;
     /// <summary>The manager that validates and saves the settings and refreshes a running engine's status.</summary>
     [Parameter, EditorRequired] public IInferenceSettingsManager Manager { get; set; } = default!;
-    /// <summary>The host that authorizes and runs provider actions and opens authorization pages in a browser.</summary>
+    /// <summary>The host that authorizes and runs provider actions, opens authorization pages in a browser and shows folders.</summary>
     [Parameter, EditorRequired] public IInferenceSettingsInteractionHost Host { get; set; } = default!;
     /// <summary>True shows a Save button on the last step; false leaves saving to the host through <see cref="SaveAsync"/>.</summary>
     [Parameter] public bool ShowSaveButton { get; set; } = true;
@@ -165,15 +239,34 @@
     [Parameter] public RenderFragment? IntroContent { get; set; }
     /// <summary>Host content shown below the current step and above the issue list.</summary>
     [Parameter] public RenderFragment? SupplementaryContent { get; set; }
+    /// <summary>
+    /// Host content drawn on the first step: at the end of its advanced section titled "More options", or in a
+    /// "More options" section of its own when the step has none.
+    /// </summary>
+    [Parameter] public RenderFragment? MoreOptionsContent { get; set; }
+    /// <summary>
+    /// False hides the numbered step list and shows the current step's title as its heading, while Back and Next stay.
+    /// A host that draws its own step strip from <see cref="CurrentStepIndex"/> and <see cref="StepChanged"/> sets it.
+    /// </summary>
+    [Parameter] public bool ShowStepList { get; set; } = true;
     /// <summary>Raised after Save. A Committed result means the host closes the dialog.</summary>
     [Parameter] public EventCallback<SetupCommitResult> CommitCompleted { get; set; }
+    /// <summary>Raised with the new step index each time the editor shows another step: Back, Next, a tab, or a refused save.</summary>
+    [Parameter] public EventCallback<int> StepChanged { get; set; }
     /// <summary>Raised each time the editor's unsaved, pending, error or can-save state changes.</summary>
     [Parameter] public EventCallback<SetupEditorState> StateChanged { get; set; }
+    // Set when the editor shows one step of ConnectionTabs, which chooses the step.
+    [CascadingParameter] private ConnectionTabsContext? Tabs { get; set; }
 
+    private const string MoreOptionsTitle = "More options";
     private InferenceSettings? _shown;
     private IInferenceSettingsStatusSource? _statusSource;
     private readonly SetupEditorInputState _inputs = new();
+    private readonly HashSet<string> _openSections = new(StringComparer.Ordinal);
+    // Steps whose checklist has run its automatic check.
+    private readonly HashSet<string> _checkedSteps = new(StringComparer.Ordinal);
     private SetupEditorState? _lastPublishedState;
+    private int _lastPublishedStep;
     private bool _saving;
     private bool _running;
     private long _editVersion;
@@ -181,14 +274,19 @@
     private SetupStep? CurrentStep => Steps is var steps && _stepIndex < steps.Count ? steps[_stepIndex] : null;
     private int _stepIndex;
     private SetupProgress? _progress;
+    // The device code already copied to the clipboard when it was shown, so each code is copied once.
     private string? _copiedCode;
     private string? _copyStatus;
     private SetupActionResult? _actionResult;
+    // The action whose result the tail shows, or null for a result no action produced.
+    private SetupActionDescriptor? _resultAction;
     private SetupCommitResult? _commitResult;
     private CancellationTokenSource? _actionCancellation;
     private SetupValidation _validation = SetupValidation.Valid;
     private bool _disposed;
     private bool Busy => _running || _saving || Settings.IsSaved;
+    private bool StepNavigation => Tabs is null;
+    private bool ShowsStepList => StepNavigation && ShowStepList && Steps.Count > 1;
 
     /// <summary>The editor's current unsaved, pending input, error, can-save and uncertain-save state.</summary>
     public SetupEditorState State => new(Settings.HasUnsavedChanges || _inputs.HasPendingInput || Settings.SaveOutcomeUncertain,
@@ -196,8 +294,16 @@
         !Busy && !_inputs.HasPendingInput && Settings.CanSave
             && !AllIssues.Any(issue => issue.Severity == SetupIssueSeverity.Error), Settings.SaveOutcomeUncertain);
 
+    /// <summary>The index in <see cref="InferenceSettings.Steps"/> of the step the editor shows.</summary>
+    public int CurrentStepIndex => _stepIndex;
+
     private IReadOnlyList<SetupIssue> AllIssues => _validation.Issues.Concat(_inputs.Issues).Distinct().ToArray();
     private IReadOnlyList<SetupIssue> VisibleIssues => AllIssues.Where(issue => issue.StepId is null || issue.StepId == CurrentStep?.Id).ToArray();
+
+    protected override void OnInitialized()
+    {
+        if (Tabs is not null) { Tabs.Editor = this; }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
@@ -207,17 +313,43 @@
         _statusSource = Manager as IInferenceSettingsStatusSource;
         if (_statusSource is not null) { _statusSource.StatusChanged += OnStatusChanged; }
         _stepIndex = 0;
+        _lastPublishedStep = 0;
         _progress = null;
         _actionResult = null;
+        _resultAction = null;
         _commitResult = null;
         _actionCancellation = null;
         _validation = SetupValidation.Valid;
         _inputs.Clear();
+        _checkedSteps.Clear();
         _saving = false;
         _running = false;
         _lastPublishedState = null;
         _editVersion++;
         await PublishStateAsync();
+    }
+
+    // A device code is copied the first time it is shown, and a checklist step runs its check the first time it is shown.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_disposed) { return; }
+        if (Settings.Interaction is SetupDeviceAuthorization device && device.UserCode != _copiedCode)
+        {
+            await CopyCodeAsync(device.UserCode);
+            StateHasChanged();
+        }
+        if (CurrentStep is { } step && ShowsChecklist(step) && !Busy && _checkedSteps.Add(step.Id))
+        {
+            await RunCheckAsync(StepActions(step));
+        }
+    }
+
+    /// <summary>Shows the step at <paramref name="index"/>, as a tab does.</summary>
+    internal async Task ShowStepAsync(int index)
+    {
+        _stepIndex = Math.Clamp(index, 0, Math.Max(0, Steps.Count - 1));
+        StateHasChanged();
+        await PublishAsync();
     }
 
     // The provider reported a change, such as a running engine or its model list; the editor reads the new state and renders it.
@@ -236,17 +368,24 @@
             _editVersion++;
             _inputs.Reconcile(Settings);
             StateHasChanged();
-            await PublishStateAsync();
+            await PublishAsync();
         });
     }
 
     // An install status field shows as its card; every other field shows its input.
     private RenderFragment FieldView(SetupField field) => field is SetupInstallStatusField install
         ? @<SetupInstallStatusCard @key="(Settings, field.Description.Id)" Status="@install.Status" Label="@install.Description.DisplayName"
-                                   Disabled="@Busy" Run="RunActionAsync" />
+                                   Disabled="@Busy" Run="RunActionAsync" Reveal="RevealAsync" />
         : @<SetupFieldInput @key="(Settings, field.Description.Id)" Field="field" Settings="Settings" Manager="Manager"
                             EditVersion="_editVersion" Host="Host" Issues="AllIssues" Disabled="@Busy"
-                            Edited="OnFieldEditedAsync" />;
+                            Edited="OnFieldEditedAsync" Chosen="OnChoiceChosenAsync" />;
+
+    // A collapsed section that stays open across redraws once it opened for an error.
+    private bool IsOpen(string key, bool hasErrors)
+    {
+        if (hasErrors) { _openSections.Add(key); }
+        return _openSections.Contains(key);
+    }
 
     private async Task OnFieldEditedAsync(SetupEditResult result)
     {
@@ -254,13 +393,32 @@
         _editVersion++;
         _inputs.Reconcile(Settings);
         RefreshValidation();
-        await PublishStateAsync();
+        await PublishAsync();
+    }
+
+    // Choosing a model on a step that tests runs the test, so the person sees a reply without another click.
+    private async Task OnChoiceChosenAsync(SetupField field)
+    {
+        if (_disposed || Busy || field.Description.Id != "model" || CurrentStep is not { } step || !step.ActionIds.Contains("test")) { return; }
+        if (Settings.Actions.FirstOrDefault(action => action.Id == "test") is { IsEnabled: true } test) { await RunActionAsync(test); }
     }
 
     // Shown validation follows the current values; an edit or action can resolve or raise an issue.
     private void RefreshValidation()
     {
         if (_validation.Issues.Count > 0) { _validation = Settings.Validate(); }
+    }
+
+    // Tells the host when the step or the editor's state changed.
+    private async Task PublishAsync()
+    {
+        if (_disposed) { return; }
+        if (_stepIndex != _lastPublishedStep)
+        {
+            _lastPublishedStep = _stepIndex;
+            await StepChanged.InvokeAsync(_stepIndex);
+        }
+        await PublishStateAsync();
     }
 
     private async Task PublishStateAsync()
@@ -275,20 +433,59 @@
         issue.Severity == SetupIssueSeverity.Error && section.Fields.SelectMany(SetupEditorInputState.Flatten)
             .Any(field => field.Description.Id == issue.FieldId));
 
-    private void SelectStep(int index) => _stepIndex = index;
-    private void PreviousStep() => SelectStep(_stepIndex - 1);
+    private async Task PreviousStepAsync()
+    {
+        _stepIndex--;
+        await PublishAsync();
+    }
 
-    private void NextStepAsync()
+    private async Task NextStepAsync()
     {
         if (_inputs.Issues.Any(IsCurrentStepError)) { return; }
         _validation = Settings.Validate();
-        if (_validation.Issues.Any(IsCurrentStepError)) { return; }
-        SelectStep(_stepIndex + 1);
+        if (!_validation.Issues.Any(IsCurrentStepError)) { _stepIndex++; }
+        await PublishAsync();
     }
 
     private bool IsCurrentStepError(SetupIssue issue) => issue.Severity == SetupIssueSeverity.Error
         && ((issue.StepId is null && issue.FieldId is null) || issue.StepId == CurrentStep?.Id || CurrentStep?.Sections.Any(section =>
             section.Fields.SelectMany(SetupEditorInputState.Flatten).Any(field => field.Description.Id == issue.FieldId)) == true);
+
+    // The actions the step names, in order; when no step names any action, every action shows on every step.
+    private IEnumerable<SetupActionDescriptor> StepActions(SetupStep? step)
+    {
+        IReadOnlyList<SetupActionDescriptor> actions = Settings.Actions;
+        if (!Steps.Any(item => item.ActionIds.Count > 0)) { return actions; }
+        return step is null ? [] : step.ActionIds.Select(id => actions.FirstOrDefault(action => action.Id == id)).OfType<SetupActionDescriptor>();
+    }
+
+    // A step that checks an installed tool shows whether the tool is installed and signed in.
+    private bool ShowsChecklist(SetupStep? step) => Settings.Status.Installed.IsApplicable
+        && StepActions(step).Any(action => action.Purpose == SetupActionPurpose.CheckPrerequisites);
+
+    private string InstalledLine(SetupStep step)
+    {
+        SetupExecutableField? executable = step.Sections.SelectMany(section => section.Fields).SelectMany(SetupEditorInputState.Flatten)
+            .OfType<SetupExecutableField>().FirstOrDefault();
+        string tool = executable is null ? string.Empty
+            : string.IsNullOrWhiteSpace(executable.Value.Value) ? executable.DefaultValue.Value : executable.Value.Value;
+        return Known(Settings.Status.Installed) switch
+        {
+            true => $"✓ Installed: {tool}",
+            false => "Not installed",
+            null => "Not checked yet",
+        };
+    }
+
+    // A fresh observed value, or null while it is unknown or stale.
+    private static bool? Known(SetupObservation observation) => observation.IsStale ? null : observation.Value;
+
+    // Runs the step's check, as when a checklist step is first shown or a sign-in completes.
+    private async Task RunCheckAsync(IEnumerable<SetupActionDescriptor> stepActions)
+    {
+        if (stepActions.FirstOrDefault(action => action.Purpose == SetupActionPurpose.CheckPrerequisites) is not { IsEnabled: true } check) { return; }
+        if (!_disposed && !Busy) { await RunActionAsync(check); }
+    }
 
     /// <summary>Saves the settings through the manager. Nothing reaches the app without this call.</summary>
     public async Task<SetupCommitResult> SaveAsync()
@@ -319,7 +516,7 @@
                         .Any(field => field.Description.Id == issue.FieldId)));
                 if (step >= 0) { _stepIndex = step; }
             }
-            await PublishStateAsync();
+            await PublishAsync();
             await CommitCompleted.InvokeAsync(result);
             StateHasChanged();
         }
@@ -333,44 +530,52 @@
         InferenceSettings settings = Settings;
         bool authorized;
         try { authorized = await Host.AuthorizeAsync(action.DisplayName, action.SideEffects); }
-        catch (Exception) { _actionResult = new(SetupActionState.Failed); return; }
+        catch (Exception error)
+        {
+            _resultAction = null;
+            _actionResult = Failed("authorization-failed", "The host could not authorize the action", error);
+            StateHasChanged();
+            return;
+        }
         if (!authorized || _disposed || !ReferenceEquals(settings, Settings)) { return; }
         using var cancellation = new CancellationTokenSource();
         _actionCancellation = cancellation;
         _progress = null;
         _actionResult = null;
+        _resultAction = action;
         _running = true;
+        StateHasChanged();
         await PublishStateAsync();
         var progress = new Progress<SetupProgress>(value =>
         {
             if (!_disposed && ReferenceEquals(settings, Settings))
             { _ = InvokeAsync(() => { if (!_disposed && ReferenceEquals(settings, Settings)) { _progress = value; StateHasChanged(); } }); }
         });
-        try
-        {
-            SetupActionResult result = await Host.ExecuteAsync(Manager, settings, action, progress, cancellation.Token);
-            if (!_disposed && ReferenceEquals(settings, Settings)) { _actionResult = result; }
-        }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-        { if (!_disposed && ReferenceEquals(settings, Settings)) { _actionResult = new(SetupActionState.Cancelled); } }
-        catch (Exception) { if (!_disposed && ReferenceEquals(settings, Settings)) { _actionResult = new(SetupActionState.Failed); } }
+        SetupActionResult outcome;
+        try { outcome = await Host.ExecuteAsync(Manager, settings, action, progress, cancellation.Token); }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { outcome = new(SetupActionState.Cancelled); }
+        catch (Exception error) { outcome = Failed("action-failed", "The host could not run the action", error); }
         finally
         {
             if (ReferenceEquals(_actionCancellation, cancellation)) { _actionCancellation = null; }
             if (ReferenceEquals(settings, Settings)) { _running = false; }
         }
-        if (!_disposed)
-        {
-            // An action can change values, such as a sign-in credential or a resolved pack.
-            _editVersion++;
-            _inputs.Reconcile(Settings);
-            RefreshValidation();
-            StateHasChanged();
-            await PublishStateAsync();
-        }
+        if (_disposed || !ReferenceEquals(settings, Settings)) { return; }
+        _actionResult = outcome;
+        // An action can change values, such as a sign-in credential or a resolved pack.
+        _editVersion++;
+        _inputs.Reconcile(Settings);
+        RefreshValidation();
+        StateHasChanged();
+        await PublishAsync();
+        // A completed sign-in is checked again, so the checklist shows the signed-in tool.
+        if (action.Purpose is SetupActionPurpose.Authenticate or SetupActionPurpose.ContinueAuthentication
+            && outcome.State == SetupActionState.Completed && ShowsChecklist(CurrentStep))
+        { await RunCheckAsync(StepActions(CurrentStep)); }
     }
 
     private void CancelAction() => _actionCancellation?.Cancel();
+
     private async Task OpenBrowserAsync(Uri uri)
     {
         InferenceSettings settings = Settings;
@@ -380,12 +585,26 @@
                 && !_disposed && ReferenceEquals(settings, Settings))
             { await Host.OpenBrowserAsync(uri); }
         }
-        catch (Exception)
+        catch (Exception error) when (!_disposed && ReferenceEquals(settings, Settings))
         {
-            if (!_disposed && ReferenceEquals(settings, Settings))
-            { _actionResult = new(SetupActionState.Failed); }
+            _resultAction = null;
+            _actionResult = Failed("browser-failed", "The authorization page could not be opened", error);
         }
     }
+
+    private async Task RevealAsync(string folder)
+    {
+        try { await Host.RevealFolderAsync(folder, CancellationToken.None); }
+        catch (Exception error) when (!_disposed)
+        {
+            _resultAction = null;
+            _actionResult = new(SetupActionState.Failed, [new("reveal-failed", error.Message)]);
+        }
+    }
+
+    // A failed action whose issue names what failed, then the exception's type and message.
+    private static SetupActionResult Failed(string code, string what, Exception error) =>
+        new(SetupActionState.Failed, [new(code, $"{what} ({error.GetType().Name}): {error.Message}")]);
 
     // The clipboard write needs no provider effect or host consent; the code is shown on screen already.
     private async Task CopyCodeAsync(string code)
@@ -394,7 +613,7 @@
         try
         {
             await JS.InvokeVoidAsync("navigator.clipboard.writeText", code);
-            _copyStatus = "Code copied.";
+            _copyStatus = "Sign-in code copied to clipboard.";
         }
         catch (Exception error) when (error is JSException or InvalidOperationException or TaskCanceledException)
         {
@@ -402,31 +621,52 @@
         }
     }
 
-    private IEnumerable<(string Label, SetupObservation Observation)> StatusItems()
+    // Each applicable status fact as a chip: what is true, what is not, or that it is not checked.
+    private IEnumerable<(string Text, bool? Value)> StatusChips()
     {
         SetupStatus status = Settings.Status;
-        return new[]
+        (SetupObservation Observation, string Yes, string No, string Unknown)[] facts =
+        [
+            (status.Configured, "Configured", "Not configured", "Configuration not checked"),
+            (status.Authenticated, "Signed in", "Not signed in", "Sign-in not checked"),
+            (status.Installed, "Installed", "Not installed", "Install not checked"),
+            (status.Verified, "Verified", "Not verified", "Not verified yet"),
+            (status.Loaded, "Loaded", "Not loaded", "Load state not checked"),
+            (status.Ready, "Ready", "Not ready", "Readiness not checked"),
+        ];
+        return facts.Where(fact => fact.Observation.IsApplicable).Select(fact => Known(fact.Observation) switch
         {
-            ("Configured", status.Configured), ("Authentication checked", status.Authenticated),
-            ("Installed", status.Installed), ("Verified", status.Verified),
-            ("Loaded", status.Loaded), ("Ready", status.Ready)
-        }.Where(item => item.Item2.IsApplicable)
-            .Select(item => (Label: item.Item1, Observation: item.Item2));
+            true => (fact.Yes, (bool?)true),
+            false => (fact.No, (bool?)false),
+            null => (fact.Unknown, (bool?)null),
+        });
     }
 
-    private static string Describe(SetupObservation value) => value.IsStale ? "Stale"
-        : value.Value is null ? "Unknown" : value.Value.Value ? "Yes" : "No";
-    private static string DescribeEffects(SetupSideEffect effects) => effects.ToString();
-    private static string ActionMessage(SetupActionResult result) => result.Issues?.FirstOrDefault()?.Message
-        ?? result.State.ToString();
-    private static string CommitMessage(SetupCommitResult result) => result.Issues?.FirstOrDefault()?.Message
-        ?? result.State.ToString();
+    private static string Describe(SetupActionState state) => state switch
+    {
+        SetupActionState.Completed => "Done.",
+        SetupActionState.NeedsInteraction => "Finish the step above to continue.",
+        SetupActionState.Failed => "That did not work. Try again.",
+        SetupActionState.Cancelled => "Cancelled.",
+        _ => "This is not available right now.",
+    };
+
+    private static string Describe(SetupCommitState state) => state switch
+    {
+        SetupCommitState.Committed => "Saved.",
+        SetupCommitState.Conflict => "These settings changed elsewhere. Close them and open them again.",
+        SetupCommitState.Invalid => "Fix the problems above, then save.",
+        SetupCommitState.Cancelled => "Not saved.",
+        SetupCommitState.Failed => "The settings could not be saved.",
+        _ => "It is not known whether the settings were saved. Open them again to check.",
+    };
 
     public void Dispose()
     {
         _disposed = true;
         _inputs.Clear();
         if (_statusSource is not null) { _statusSource.StatusChanged -= OnStatusChanged; }
+        if (Tabs is not null && ReferenceEquals(Tabs.Editor, this)) { Tabs.Editor = null; }
         GC.SuppressFinalize(this);
     }
 }
