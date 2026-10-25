@@ -21,7 +21,7 @@
     <NoWarn>$(NoWarn);CS1591</NoWarn>
     <Authors>Darkspyre Studios</Authors>
     <Company>Darkspyre Studios</Company>
-    <Copyright>Copyright © 2026 Brandon Mathis. All rights reserved.</Copyright>
+    <Copyright>Copyright (c) 2026 Darkspyre Studios, LLC</Copyright>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/DarkspyreStudios/Inference</RepositoryUrl>
     <Version>11.17.2-rc.1</Version>
@@ -30,8 +30,8 @@
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(IsPackable)' != 'false'">
-    <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
-    <PackageRequireLicenseAcceptance>true</PackageRequireLicenseAcceptance>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <PackageOutputPath>$(MSBuildThisFileDirectory)artifacts/packages</PackageOutputPath>
   </PropertyGroup>

@@ -943,9 +943,7 @@ original results/exceptions. Adapters, handed-off clients/inference and settings
 independent caller ownership; facade disposal never disposes them. Concurrent retirement callers share
 the same completion. Use asynchronous disposal while another thread is inside a facade callback.
 
-> **Proprietary software.** Copyright © 2026 Brandon Mathis. All rights reserved.
-> No permission is granted to use, copy, modify, or distribute this software
-> without prior written authorization. See [LICENSE.md](LICENSE.md).
+Licensed under the [MIT License](../LICENSE.md). Copyright (c) 2026 Darkspyre Studios, LLC.
 
 `Darkspyre.Inference.Connect` is the out-of-process inference NuGet used by Darkspyre applications.
 It references `Darkspyre.Inference.Common`, which supplies the typed portable LLM and image inference

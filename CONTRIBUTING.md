@@ -1,8 +1,9 @@
 # Contributing
 
-This repository is proprietary. See [LICENSE.md](LICENSE.md).
+This repository is licensed under the [MIT License](LICENSE.md).
+Copyright (c) 2026 Darkspyre Studios, LLC.
 
-Anything you submit to this repository is assigned to the repository's owner, named in LICENSE.md, under its "Contributions" section. This includes code, patches, pull requests, code reviews, issues, designs, ideas, and feedback.
+Contributions are subject to the Contributor Assignment Agreement below.
 
 ## Contributor Assignment Agreement
 

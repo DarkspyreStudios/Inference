@@ -411,10 +411,8 @@ to the private feed, verifies fresh downloads, and pushes the release source and
 ## License
 
 <!-- ownership-notice:start -->
-> **Proprietary software.** Copyright © 2026 Brandon Mathis. All rights reserved.
-> No permission is granted to use, copy, modify, or distribute this software
-> without prior written authorization.
-> Any contribution, including code, reviews, patches, issues and designs, is
-> assigned to Brandon Mathis on submission. See [LICENSE.md](LICENSE.md) and
-> [CONTRIBUTING.md](CONTRIBUTING.md).
+Licensed under the [MIT License](LICENSE.md). Copyright (c) 2026 Darkspyre Studios, LLC.
+Contributions are subject to the Contributor Assignment Agreement in [CONTRIBUTING.md](CONTRIBUTING.md).
+Third-party code carries its own notices, such as `Tensor/src/Image/Darkspyre.Inference.Tensor.Image.Supra/THIRD-PARTY-NOTICES.md`
+and `UI/THIRD-PARTY-NOTICES.md`.
 <!-- ownership-notice:end -->
