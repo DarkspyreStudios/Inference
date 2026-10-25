@@ -31,7 +31,7 @@ main() {
     local release_token release_login visibility existing cache package_lower artifact
     local feed='https://nuget.pkg.github.com/DarkspyreStudios/index.json'
     local stage='preflight'
-    local -a packages=(Common Connect Connect.Common Connect.Codex Connect.Claude Connect.Antigravity Connect.Grok Connect.OpenAiApi Connect.SelfHost Tensor.Common Tensor.Decision.Laya Tensor.Embedding Tensor.Embedding.Gemma Tensor.Ggml Tensor.Image.Supra Tensor.LLM.Qwen Tensor.Registry Tensor.STT.Whisper UI.Settings)
+    local -a packages=(Common Connect Connect.Common Connect.Codex Connect.Claude Connect.HostTools Connect.Antigravity Connect.Grok Connect.OpenAiApi Connect.SelfHost Tensor.Common Tensor.Decision.Laya Tensor.Embedding Tensor.Embedding.Gemma Tensor.Ggml Tensor.Image.Supra Tensor.LLM.Qwen Tensor.Registry Tensor.STT.Whisper UI.Settings)
     local -a version_files=(Directory.Build.props README.md Common/README.md Connect/README.md Tensor/README.md UI/README.md)
     [[ "$mode" == major || "$mode" == minor ]] || fail 'Use deploy-major.sh or deploy-minor.sh.'
     if [[ "$option" == --help ]]; then
@@ -119,6 +119,7 @@ main() {
     dotnet pack src/Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj -c Release --no-build --no-restore
     dotnet pack src/Codex/Darkspyre.Inference.Connect.Codex/Darkspyre.Inference.Connect.Codex.csproj -c Release --no-build --no-restore
     dotnet pack src/Claude/Darkspyre.Inference.Connect.Claude/Darkspyre.Inference.Connect.Claude.csproj -c Release --no-build --no-restore
+    dotnet pack src/HostTools/Darkspyre.Inference.Connect.HostTools/Darkspyre.Inference.Connect.HostTools.csproj -c Release --no-build --no-restore
     dotnet pack src/Antigravity/Darkspyre.Inference.Connect.Antigravity/Darkspyre.Inference.Connect.Antigravity.csproj -c Release --no-build --no-restore
     dotnet pack src/Grok/Darkspyre.Inference.Connect.Grok/Darkspyre.Inference.Connect.Grok.csproj -c Release --no-build --no-restore
     dotnet pack src/OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi.csproj -c Release --no-build --no-restore

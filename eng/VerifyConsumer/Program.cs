@@ -34,3 +34,11 @@ await using ServiceProvider services = new ServiceCollection().AddTensorEngines(
 if (services.GetRequiredService<TensorEngineRegistry>().Definitions.Count != 6) { throw new InvalidOperationException("Tensor engine registrations missing."); }
 Console.WriteLine("Library consumer loaded the release contracts, six Tensor engines and twelve Whisper variants.");
 Console.WriteLine("Whisper native runtime: " + Whisper.net.WhisperFactory.GetRuntimeInfo());
+// The packages copy this runtime's host-tools service and MCP program beside the output. Connecting installs the service
+// from that payload, which verifies its manifest, digests and executable flags, and starts it.
+string hostTools = Path.Combine(AppContext.BaseDirectory, Darkspyre.Inference.Connect.HostTools.HostToolsRuntime.PackageFolder);
+await using (await Darkspyre.Inference.Connect.HostTools.HostToolsRuntime.ConnectAsync(hostTools)) { }
+string mcp = Path.Combine(AppContext.BaseDirectory, "hosttools", "mcp",
+    Darkspyre.Inference.Connect.HostTools.HostToolsProtocol.McpExecutableName + (OperatingSystem.IsWindows() ? ".exe" : ""));
+if (!File.Exists(mcp)) { throw new InvalidOperationException("The host-tools MCP program is missing: " + mcp); }
+Console.WriteLine("Host-tools service installed and connected from the package payload; MCP program present.");

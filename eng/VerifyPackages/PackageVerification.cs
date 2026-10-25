@@ -101,6 +101,8 @@ internal sealed class DependencyPolicy
 internal static class PackageVerification
 {
     internal const string Common = "Darkspyre.Inference.Common";
+    // HostTools carries Darkspyre.Common's unpublished LocalServices libraries and depends on no other Inference package.
+    internal const string HostTools = "Darkspyre.Inference.Connect.HostTools";
     private static readonly string[] NativeOrGpuExtensions = [".dylib", ".a", ".metallib", ".metal", ".ptx", ".cubin"];
     internal static readonly IReadOnlyDictionary<string, string[]> Owned = new Dictionary<string, string[]>(StringComparer.Ordinal)
     {
@@ -113,6 +115,11 @@ internal static class PackageVerification
         ["Darkspyre.Inference.Connect.Codex"] = ["Darkspyre.Inference.Connect.Codex"],
         ["Darkspyre.Inference.Connect.Claude"] = ["Darkspyre.Inference.Connect.Claude"],
         ["Darkspyre.Inference.Connect.Antigravity"] = ["Darkspyre.Inference.Connect.Antigravity"],
+        [HostTools] =
+        [
+            HostTools, "Darkspyre.Inference.Connect.HostTools.Contracts", "Darkspyre.LocalServices.Contracts", "Darkspyre.LocalServices",
+            "Darkspyre.LocalServices.Platform.MacOS", "Darkspyre.LocalServices.Platform.Linux", "Darkspyre.LocalServices.Platform.Windows"
+        ],
         ["Darkspyre.Inference.Connect.Grok"] = ["Darkspyre.Inference.Connect.Grok"],
         ["Darkspyre.Inference.Connect.OpenAiApi"] = ["Darkspyre.Inference.Connect.OpenAiApi"],
         ["Darkspyre.Inference.Connect.SelfHost"] = ["Darkspyre.Inference.Connect.SelfHost"],
@@ -142,11 +149,13 @@ internal static class PackageVerification
     {
         string[] assemblies = Owned[id];
         string[] entries = archive.Entries.Select(entry => entry.FullName).ToArray();
-        string[] dlls = entries.Where(path => path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)).Order(StringComparer.Ordinal).ToArray();
+        // The host-tools payloads under hosttools/<rid>/ are programs a consumer copies beside its output, never references.
+        string[] dlls = entries.Where(path => path.StartsWith("lib/", StringComparison.Ordinal) && path.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+            .Order(StringComparer.Ordinal).ToArray();
         string[] expected = assemblies.Select(name => $"lib/net11.0/{name}.dll").Order(StringComparer.Ordinal).ToArray();
         Require(dlls.SequenceEqual(expected, StringComparer.Ordinal), $"{id}: unexpected, missing, or embedded foreign DLLs: {string.Join(", ", dlls)}");
         Require(!entries.Any(IsNativeOrGpu), $"{id}: third-party native binaries and shaders must come from dependency packages");
-        foreach (string assembly in assemblies)
+        foreach (string assembly in assemblies.Where(name => name.StartsWith("Darkspyre.Inference.", StringComparison.Ordinal)))
             Require(entries.Contains($"lib/net11.0/{assembly}.xml", StringComparer.Ordinal), $"{id}: missing XML documentation for {assembly}");
         Require(entries.Contains("README.md", StringComparer.Ordinal) && entries.Contains("LICENSE.md", StringComparer.Ordinal), $"{id}: missing README or license");
         if (id == "Darkspyre.Inference.Tensor.Image.Supra")
@@ -161,7 +170,7 @@ internal static class PackageVerification
             Require((string?)metadata.Element(ns + "repository")?.Attribute("commit") == sourceCommit, $"{id}: source commit differs from release source");
         XElement[] declarations = metadata.Descendants(ns + "dependency").ToArray();
         XElement[] family = declarations.Where(dependency => ((string?)dependency.Attribute("id"))?.StartsWith("Darkspyre.Inference.", StringComparison.OrdinalIgnoreCase) == true).ToArray();
-        Require(id == Common ? family.Length == 0 : family.Length > 0
+        Require(id is Common or HostTools ? family.Length == 0 : family.Length > 0
             && family.All(dependency => Owned.ContainsKey((string)dependency.Attribute("id")!)
                 && (string?)dependency.Attribute("version") == $"[{version}]"),
             $"{id}: expected exact synchronized library dependencies");

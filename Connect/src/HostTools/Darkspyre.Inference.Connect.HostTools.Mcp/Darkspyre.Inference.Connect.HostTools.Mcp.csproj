@@ -4,9 +4,13 @@
     <OutputType>Exe</OutputType>
     <IsPackable>false</IsPackable>
     <AssemblyName>darkspyre-host-tools-mcp</AssemblyName>
+    <!-- Restores every runtime the Antigravity package carries the program for, so packing builds each without a restore. -->
+    <RuntimeIdentifiers>$(HostToolsRuntimeIdentifiers)</RuntimeIdentifiers>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Darkspyre.Inference.Connect.HostTools/Darkspyre.Inference.Connect.HostTools.csproj" />
+    <!-- HostTools carries Contracts privately in its package, so its references do not flow here. -->
+    <ProjectReference Include="../Darkspyre.Inference.Connect.HostTools.Contracts/Darkspyre.Inference.Connect.HostTools.Contracts.csproj" />
     <PackageReference Include="ModelContextProtocol" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
   </ItemGroup>

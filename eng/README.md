@@ -62,6 +62,10 @@ Every package includes a readable package README and the repository license. Pac
 confirms that the Common assembly appears only in the Common package, that internal library dependencies use the exact synchronized version, and that each Tensor library
 contains only its own assembly plus XML documentation. Connect.Common and each provider own one assembly.
 The media Connect package keeps Image, TTS and Audio together and depends on Connect.Common.
+HostTools owns its own assembly, HostTools.Contracts and Darkspyre.Common's five LocalServices assemblies, which are
+not published, and depends on no other Inference package. Only `lib/` DLLs count as a package's assemblies: HostTools
+and Antigravity also carry the host-tools service and MCP program for each runtime under `hosttools/<rid>/`, which a
+consumer copies beside its output and never references (`Connect/README.md`).
 
 Source builds use project references. `Directory.Build.targets` pins internal library dependencies to `[$(Version)]` when generating each library's NuGet manifest. `eng/VerifyPackages`
 rejects foreign DLLs, native binaries and shader sources, local-only dependencies, missing owned
@@ -74,7 +78,8 @@ The shared build target marks assets imported from `Whisper.net.Runtime`, `Whisp
 
 `eng/VerifyConsumer` is a non-packable release smoke test with explicit library PackageReferences and no source
 project references. It checks loaded assembly source identities, the Settings contracts and Whisper's
-public native runtime. Before publication it restores against `eng/VerifyConsumer/NuGet.Preflight.Config`
+public native runtime. It installs and connects to the host-tools service from the payload the packages copied beside
+its output, and checks that the MCP program is there. Before publication it restores against `eng/VerifyConsumer/NuGet.Preflight.Config`
 (local Inference archives plus normal dependency feeds). After publication it restores against the
 root `NuGet.Config` with a new empty package cache and `--no-http-cache`. It does not load weights or
 call providers. `eng/package-assets.tests.sh` verifies pack inputs and collision checks without

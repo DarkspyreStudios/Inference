@@ -11,7 +11,7 @@ The conversation libraries are independently consumable:
 | `Darkspyre.Inference.Connect.Claude` | Official Claude CLI conversations and authentication |
 | `Darkspyre.Inference.Connect.Antigravity` | Official Antigravity CLI conversations, native resume, host tools and account usage |
 | `Darkspyre.Inference.Connect.Grok` | Grok (xAI) Responses conversations on xAI's subscription proxy, with a Grok subscription's device sign-in, hosted search and account usage |
-| `Darkspyre.Inference.Connect.HostTools` | The host-tools local service, bundled under `hosttools/service`, its client, and the `darkspyre-host-tools-mcp` program; source-only, built with Darkspyre.Common's local-service libraries |
+| `Darkspyre.Inference.Connect.HostTools` | The host-tools local service, bundled under `hosttools/service`, and its client, with Darkspyre.Common's local-service libraries in its own `lib/` |
 | `Darkspyre.Inference.Connect.OpenAiApi` | OpenAI Responses conversations and text embeddings |
 | `Darkspyre.Inference.Connect.SelfHost` | Conversations and text/image embeddings through caller-owned engines |
 
@@ -20,6 +20,16 @@ Inference.Common. Providers reference neither another provider nor a Tensor impl
 The public `Darkspyre.Inference.Connect.LLM` namespace remains the universal contract.
 The `Darkspyre.Inference.Connect` package contains the existing Image, TTS and Audio assemblies
 and depends on Common; it includes no conversation provider.
+
+Antigravity depends on HostTools. Both carry an executable built per runtime: HostTools the host-tools service and
+Antigravity the `darkspyre-host-tools-mcp` program. Their packages hold one build for each of `osx-arm64`, `osx-x64`,
+`linux-x64`, `linux-arm64`, `win-x64` and `win-arm64` under `hosttools/<rid>/service/` and `hosttools/<rid>/mcp/`
+(`HostToolsRuntimeIdentifiers` in `/Directory.Build.props`). Each package's buildTransitive targets copy the build for
+the consumer's `RuntimeIdentifier`, or for the build machine's runtime when the consumer names none, to
+`hosttools/service/` and `hosttools/mcp/` beside the library, the layout a source build produces. On macOS and Linux
+the targets then set the execute bit on the two executables and clear it on every other service payload file, because
+NuGet does not keep file modes and the service installer checks each file's execute bit against the manifest. The
+libraries and the service select their LocalServices platform implementation from the running operating system.
 
 Applications reference the provider libraries they use, then call `services.AddLlmConnect()` once
 per service collection. Common inspects `Darkspyre.Inference.Connect.*.dll` beside its own assembly

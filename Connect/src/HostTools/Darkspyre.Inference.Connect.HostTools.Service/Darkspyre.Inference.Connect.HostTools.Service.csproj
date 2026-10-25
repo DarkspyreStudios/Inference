@@ -7,12 +7,14 @@
     <AssemblyName>darkspyre-host-tools-service</AssemblyName>
     <!-- Project references can remove the caller's RID. The executable still targets the selected service runtime. -->
     <RuntimeIdentifier>$(ServiceRuntimeIdentifier)</RuntimeIdentifier>
+    <!-- Restores every runtime the HostTools package carries a service for, so packing builds each without a restore. -->
+    <RuntimeIdentifiers>$(HostToolsRuntimeIdentifiers)</RuntimeIdentifiers>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Remove="Composition/HostToolsBackend.*.cs" />
-    <Compile Include="Composition/HostToolsBackend.$(ServicePlatform).cs" />
     <ProjectReference Include="../Darkspyre.Inference.Connect.HostTools.Contracts/Darkspyre.Inference.Connect.HostTools.Contracts.csproj" />
     <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices/Darkspyre.LocalServices.csproj" />
-    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Platform.$(ServicePlatform)/Darkspyre.LocalServices.Platform.$(ServicePlatform).csproj" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Platform.MacOS/Darkspyre.LocalServices.Platform.MacOS.csproj" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Platform.Linux/Darkspyre.LocalServices.Platform.Linux.csproj" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Platform.Windows/Darkspyre.LocalServices.Platform.Windows.csproj" />
   </ItemGroup>
 </Project>

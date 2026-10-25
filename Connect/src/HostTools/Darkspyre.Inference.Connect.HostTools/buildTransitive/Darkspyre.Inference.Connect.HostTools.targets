@@ -1,0 +1,32 @@
+<Project>
+  <!--
+    The package carries the host-tools service for each supported runtime under hosttools/<rid>/service/. A consumer
+    copies the one for its runtime, or for the build machine's runtime when it names none, to hosttools/service/ beside
+    the library, where HostToolsRuntime.PackageFolder finds it.
+  -->
+  <PropertyGroup>
+    <_DarkspyreHostToolsRuntime>$(RuntimeIdentifier)</_DarkspyreHostToolsRuntime>
+    <_DarkspyreHostToolsRuntime Condition="'$(_DarkspyreHostToolsRuntime)' == ''">$(NETCoreSdkRuntimeIdentifier)</_DarkspyreHostToolsRuntime>
+    <_DarkspyreHostToolsService>$(MSBuildThisFileDirectory)../hosttools/$(_DarkspyreHostToolsRuntime)/service/</_DarkspyreHostToolsService>
+  </PropertyGroup>
+  <ItemGroup>
+    <ContentWithTargetPath Include="$(_DarkspyreHostToolsService)**/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"
+                           TargetPath="hosttools/service/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!--
+    NuGet does not keep the payload's file modes: it extracts every file with its owner execute bit on, or none. The
+    service installer requires each file's execute bit to match the manifest, which marks only the service executable.
+  -->
+  <PropertyGroup>
+    <_DarkspyreHostToolsSetModes Condition="'$(OS)' != 'Windows_NT' and !$(_DarkspyreHostToolsRuntime.StartsWith('win-')) and Exists('$(_DarkspyreHostToolsService)')">true</_DarkspyreHostToolsSetModes>
+  </PropertyGroup>
+  <Target Name="DarkspyreHostToolsServiceModes" AfterTargets="CopyFilesToOutputDirectory" Condition="'$(_DarkspyreHostToolsSetModes)' == 'true'">
+    <Exec Command="find &quot;$(OutDir)hosttools/service/payload&quot; -type f -exec chmod a-x {} +" />
+    <Exec Command="chmod +x &quot;$(OutDir)hosttools/service/payload/darkspyre-host-tools-service&quot;" />
+  </Target>
+  <Target Name="DarkspyreHostToolsPublishedServiceModes" AfterTargets="CopyFilesToPublishDirectory" Condition="'$(_DarkspyreHostToolsSetModes)' == 'true'">
+    <Exec Command="find &quot;$(PublishDir)hosttools/service/payload&quot; -type f -exec chmod a-x {} +" />
+    <Exec Command="chmod +x &quot;$(PublishDir)hosttools/service/payload/darkspyre-host-tools-service&quot;" />
+  </Target>
+</Project>

@@ -3,4 +3,28 @@
   <ItemGroup>
     <TrimmerRootAssembly Include="Darkspyre.Inference.Connect.Antigravity" />
   </ItemGroup>
+
+  <!--
+    The package carries the host-tools MCP program for each supported runtime under hosttools/<rid>/mcp/. A consumer
+    copies the one for its runtime, or for the build machine's runtime when it names none, to hosttools/mcp/ beside the
+    library, where Antigravity starts it. The program uses the service in the sibling hosttools/service/, which the
+    HostTools package supplies.
+  -->
+  <PropertyGroup>
+    <_DarkspyreAntigravityRuntime>$(RuntimeIdentifier)</_DarkspyreAntigravityRuntime>
+    <_DarkspyreAntigravityRuntime Condition="'$(_DarkspyreAntigravityRuntime)' == ''">$(NETCoreSdkRuntimeIdentifier)</_DarkspyreAntigravityRuntime>
+    <_DarkspyreAntigravityMcp>$(MSBuildThisFileDirectory)../hosttools/$(_DarkspyreAntigravityRuntime)/mcp/</_DarkspyreAntigravityMcp>
+    <!-- NuGet does not keep a file's execute permission, and Antigravity starts the program's executable. -->
+    <_DarkspyreAntigravityMarkExecutable Condition="'$(OS)' != 'Windows_NT' and !$(_DarkspyreAntigravityRuntime.StartsWith('win-')) and Exists('$(_DarkspyreAntigravityMcp)')">true</_DarkspyreAntigravityMarkExecutable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ContentWithTargetPath Include="$(_DarkspyreAntigravityMcp)*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest"
+                           TargetPath="hosttools/mcp/%(Filename)%(Extension)" />
+  </ItemGroup>
+  <Target Name="DarkspyreAntigravityMcpExecutable" AfterTargets="CopyFilesToOutputDirectory" Condition="'$(_DarkspyreAntigravityMarkExecutable)' == 'true'">
+    <Exec Command="chmod +x &quot;$(OutDir)hosttools/mcp/darkspyre-host-tools-mcp&quot;" />
+  </Target>
+  <Target Name="DarkspyreAntigravityPublishedMcpExecutable" AfterTargets="CopyFilesToPublishDirectory" Condition="'$(_DarkspyreAntigravityMarkExecutable)' == 'true'">
+    <Exec Command="chmod +x &quot;$(PublishDir)hosttools/mcp/darkspyre-host-tools-mcp&quot;" />
+  </Target>
 </Project>

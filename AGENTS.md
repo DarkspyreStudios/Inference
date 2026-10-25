@@ -1,12 +1,12 @@
 # Darkspyre.Inference
 
-This repository builds the `Darkspyre.Inference.*` library family: four NuGet packages released together on the private DarkspyreStudios feed. The Darkspyre Harness rules, including the current restrictions, are in agent-ds `AGENTS.md`. This file holds only what is specific to Inference.
+This repository builds the `Darkspyre.Inference.*` library family: one NuGet package per library, released together on the private DarkspyreStudios feed. The Darkspyre Harness rules, including the current restrictions, are in agent-ds `AGENTS.md`. This file holds only what is specific to Inference.
 
 | Item | Value |
 | --- | --- |
 | Target framework | `net11.0` |
 | Assembly and namespace prefix | `Darkspyre.Inference` |
-| Version | One version for all four packages, declared in `/Directory.Build.props` |
+| Version | One version for every package, declared in `/Directory.Build.props` |
 | Branches | `master` is primary; finished work merges into `dev` first |
 
 ## Design record (L8)
@@ -62,16 +62,18 @@ agent-ds `AGENTS.md` "Operating-system boundaries" states the rule.
 
 Connect keeps its platform handling for macOS, Linux and Windows inside its own libraries, and picks the right OS commands at runtime. This includes the CLI process launch and termination (`Connect/src/LLM/Darkspyre.Inference.Connect.LLM/Providers/CliProcessLauncher.cs`, `CliProcessTermination.cs`), `AppleProcessRunner.cs`, the CLI clients and `LlmAgentRuntimeProfile.cs`. It is not split behind a separate OS capability contract. The reason: this code is battle-tested and works on all three platforms today. Brandon approved this exception on 2026-10-12.
 
+The host-tools client and service pick their LocalServices platform implementation from the running operating system (`Connect/src/HostTools/Darkspyre.Inference.Connect.HostTools/Composition/HostToolsRuntime.Platform.cs` and `Connect/src/HostTools/Darkspyre.Inference.Connect.HostTools.Service/Composition/HostToolsBackend.Platform.cs`). The reason: one HostTools package and one Antigravity package must work on every operating system they are restored on. Brandon approved this on 2026-10-24.
+
 ## Packages
 
 | Package | Holds |
 | --- | --- |
 | `Darkspyre.Inference.Common` | Contracts and models that Connect and Tensor genuinely share |
-| `Darkspyre.Inference.Connect` | Every out-of-process connector, as capability assemblies such as `.Connect.LLM`, `.Connect.LLM.Bedrock` and `.Connect.Image` |
-| `Darkspyre.Inference.Tensor` | Every in-process engine: `.Tensor.Common`, the `.Tensor.LLM`, `.Tensor.Image`, `.Tensor.STT` and `.Tensor.Decision` contracts, their `.Qwen`, `.Supra`, `.Whisper` and `.Laya` implementations, and `.Tensor.Registry` |
+| `Darkspyre.Inference.Connect.*` | One package per connector library: `Connect.Common`, the providers `Connect.Codex`, `Connect.Claude`, `Connect.Antigravity`, `Connect.Grok`, `Connect.OpenAiApi` and `Connect.SelfHost`, and `Connect.HostTools`. `Darkspyre.Inference.Connect` holds the Image, TTS and Audio assemblies |
+| `Darkspyre.Inference.Tensor.*` | One package per in-process engine library: `Tensor.Common`, `Tensor.Decision.Laya`, `Tensor.Embedding`, `Tensor.Embedding.Gemma`, `Tensor.Ggml`, `Tensor.Image.Supra`, `Tensor.LLM.Qwen`, `Tensor.Registry` and `Tensor.STT.Whisper` |
 | `Darkspyre.Inference.UI.Settings` | Host-placed Avalonia editor for provider settings and their managers |
 
-- Capability names are assembly and namespace boundaries inside their product package. They are never packed or versioned on their own. There is no root `Darkspyre.Inference` package or facade assembly.
+- Each library is packed as its own package at the shared version; none is versioned on its own. There is no root `Darkspyre.Inference` package or facade assembly.
 - Connect, Tensor and UI.Settings reference the Common package at the exact release version and never embed the Common assembly. No project overrides the version from `/Directory.Build.props`.
 - Put a contract in Common only when Connect and Tensor share its semantics. Similar property names are not a shared contract. Connector-only contracts stay in their Connect capability assembly.
 - `Tensor.Common` holds only behaviour two Tensor capabilities share. `Tensor.Registry` owns `TensorEngineRegistry` and `AddTensorEngines`; `Tensor.Common` and the implementations never reference it.
@@ -130,7 +132,7 @@ Testing rules for this repository:
 
 ## Releases
 
-The version is `<net>.<release>.<minor>`: the .NET generation, a breaking-contract release, and a compatible fix. All four packages release together. A published version is never overwritten, and each release gets an immutable Git tag.
+The version is `<net>.<release>.<minor>`: the .NET generation, a breaking-contract release, and a compatible fix. All packages release together. A published version is never overwritten, and each release gets an immutable Git tag.
 
 Before a release, each active solution is at zero warnings and passes restore, build, tests, pack and the dependency audit. `deploy-major.sh` and `deploy-minor.sh` are the release entry points; `eng/README.md` documents their gates. When changing the release scripts, run `bash -n` on `deploy-major.sh`, `deploy-minor.sh` and `eng/deploy.sh`, and run `bash eng/package-assets.tests.sh`, as `eng/README.md` "Offline verification" describes. Never test a script change by publishing a dummy version.
 

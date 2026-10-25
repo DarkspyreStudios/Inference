@@ -1,10 +1,16 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <Description>Universal conversations through the Antigravity CLI provider.</Description>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddHostToolsMcpProgramsToPackage</TargetsForTfmSpecificContentInPackage>
+    <!-- NU5100: the programs under hosttools/<rid>/mcp/ hold the program's own assemblies, which a consumer copies beside
+         its output and never references. -->
+    <NoWarn>$(NoWarn);NU5100</NoWarn>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
     <ProjectReference Include="../../HostTools/Darkspyre.Inference.Connect.HostTools/Darkspyre.Inference.Connect.HostTools.csproj" />
+    <!-- The HostTools package carries Contracts in its lib/, so this package declares no dependency of its own on it. -->
+    <ProjectReference Include="../../HostTools/Darkspyre.Inference.Connect.HostTools.Contracts/Darkspyre.Inference.Connect.HostTools.Contracts.csproj" PrivateAssets="all" />
     <ProjectReference Include="../../HostTools/Darkspyre.Inference.Connect.HostTools.Mcp/Darkspyre.Inference.Connect.HostTools.Mcp.csproj"
                       ReferenceOutputAssembly="false" Private="false" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
@@ -33,6 +39,38 @@
       <ContentWithTargetPath Include="@(_HostToolsMcpFile)" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest">
         <TargetPath>hosttools/mcp/%(_HostToolsMcpFile.Filename)%(_HostToolsMcpFile.Extension)</TargetPath>
       </ContentWithTargetPath>
+    </ItemGroup>
+  </Target>
+
+  <!--
+    A package consumer copies hosttools/<rid>/mcp/ for its runtime to hosttools/mcp/ beside this library, through
+    buildTransitive/Darkspyre.Inference.Connect.Antigravity.targets. Each runtime's program is built here, flat as above.
+  -->
+  <Target Name="AddHostToolsMcpProgramsToPackage">
+    <ItemGroup>
+      <_HostToolsMcpPackRuntime Include="$(HostToolsRuntimeIdentifiers)" />
+    </ItemGroup>
+    <MSBuild Projects="$(MSBuildProjectFullPath)" Targets="HostToolsMcpPackageFiles"
+             Properties="Configuration=$(Configuration);HostToolsPackRuntime=%(_HostToolsMcpPackRuntime.Identity)"
+             RemoveProperties="TargetFramework;RuntimeIdentifier">
+      <Output TaskParameter="TargetOutputs" ItemName="TfmSpecificPackageFile" />
+    </MSBuild>
+  </Target>
+
+  <Target Name="HostToolsMcpPackageFiles" Returns="@(_HostToolsMcpPackageFile)">
+    <PropertyGroup>
+      <_HostToolsMcpProject>../../HostTools/Darkspyre.Inference.Connect.HostTools.Mcp/Darkspyre.Inference.Connect.HostTools.Mcp.csproj</_HostToolsMcpProject>
+    </PropertyGroup>
+    <MSBuild Projects="$(_HostToolsMcpProject)" Targets="Build" Properties="Configuration=$(Configuration);RuntimeIdentifier=$(HostToolsPackRuntime);NoBuild=false" />
+    <MSBuild Projects="$(_HostToolsMcpProject)" Targets="GetTargetPath" Properties="Configuration=$(Configuration);RuntimeIdentifier=$(HostToolsPackRuntime);NoBuild=false">
+      <Output TaskParameter="TargetOutputs" ItemName="_HostToolsMcpPackAssembly" />
+    </MSBuild>
+    <PropertyGroup>
+      <_HostToolsMcpPackOutput>@(_HostToolsMcpPackAssembly->'%(RootDir)%(Directory)')</_HostToolsMcpPackOutput>
+    </PropertyGroup>
+    <ItemGroup>
+      <_HostToolsMcpPackFile Include="$(_HostToolsMcpPackOutput)*" />
+      <_HostToolsMcpPackageFile Include="@(_HostToolsMcpPackFile)" PackagePath="hosttools/$(HostToolsPackRuntime)/mcp/" />
     </ItemGroup>
   </Target>
 </Project>

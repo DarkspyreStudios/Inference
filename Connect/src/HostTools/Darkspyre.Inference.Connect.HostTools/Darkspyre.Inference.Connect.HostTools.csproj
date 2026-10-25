@@ -2,20 +2,81 @@
   <Import Project="$(DarkspyreCommonSourceRoot)/build/LocalServices/ServicePlatform.props" />
   <PropertyGroup>
     <Description>Connects hosts and MCP programs to the host-tools local service, which it bundles.</Description>
-    <IsPackable>false</IsPackable>
     <LocalServiceProject>$(MSBuildThisFileDirectory)../Darkspyre.Inference.Connect.HostTools.Service/Darkspyre.Inference.Connect.HostTools.Service.csproj</LocalServiceProject>
     <LocalServiceEntryPoint>darkspyre-host-tools-service</LocalServiceEntryPoint>
     <LocalServiceMetadataPrefix>HostTools</LocalServiceMetadataPrefix>
     <LocalServiceLayoutId>host-tools</LocalServiceLayoutId>
     <LocalServicePackageFolder>hosttools/service</LocalServicePackageFolder>
+    <TargetsForTfmSpecificBuildOutput>$(TargetsForTfmSpecificBuildOutput);AddHostToolsLibrariesToPackage</TargetsForTfmSpecificBuildOutput>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddHostToolsServicesToPackage</TargetsForTfmSpecificContentInPackage>
+    <!-- NU5100: the service payloads under hosttools/<rid>/service/ hold the service's own assemblies, which a consumer
+         copies beside its output and never references. -->
+    <NoWarn>$(NoWarn);NU5100</NoWarn>
   </PropertyGroup>
   <Import Project="$(DarkspyreCommonSourceRoot)/build/LocalServices/SubscriberPackage.targets" />
+  <!-- The package carries these libraries in lib/: Darkspyre.Common's LocalServices libraries are not published. -->
   <ItemGroup>
-    <Compile Remove="Composition/HostToolsRuntime.*.cs" />
-    <Compile Include="Composition/HostToolsRuntime.$(ServicePlatform).cs" />
-    <ProjectReference Include="../Darkspyre.Inference.Connect.HostTools.Contracts/Darkspyre.Inference.Connect.HostTools.Contracts.csproj" />
-    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Contracts/Darkspyre.LocalServices.Contracts.csproj" />
-    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices/Darkspyre.LocalServices.csproj" />
-    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Platform.$(ServicePlatform)/Darkspyre.LocalServices.Platform.$(ServicePlatform).csproj" />
+    <ProjectReference Include="../Darkspyre.Inference.Connect.HostTools.Contracts/Darkspyre.Inference.Connect.HostTools.Contracts.csproj" PrivateAssets="all" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Contracts/Darkspyre.LocalServices.Contracts.csproj" PrivateAssets="all" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices/Darkspyre.LocalServices.csproj" PrivateAssets="all" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Platform.MacOS/Darkspyre.LocalServices.Platform.MacOS.csproj" PrivateAssets="all" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Platform.Linux/Darkspyre.LocalServices.Platform.Linux.csproj" PrivateAssets="all" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Platform.Windows/Darkspyre.LocalServices.Platform.Windows.csproj" PrivateAssets="all" />
+    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
+    <None Include="buildTransitive/Darkspyre.Inference.Connect.HostTools.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
+
+  <Target Name="AddHostToolsLibrariesToPackage" DependsOnTargets="ResolveReferences">
+    <ItemGroup>
+      <_HostToolsPackLibrary Include="@(ReferenceCopyLocalPaths)"
+                             Condition="'%(ReferenceCopyLocalPaths.ReferenceSourceTarget)' == 'ProjectReference' and '%(ReferenceCopyLocalPaths.Extension)' == '.dll'" />
+      <BuildOutputInPackage Include="@(_HostToolsPackLibrary)" />
+      <BuildOutputInPackage Include="@(_HostToolsPackLibrary->'%(RootDir)%(Directory)%(Filename).xml')"
+                            Condition="Exists('%(RootDir)%(Directory)%(Filename).xml')" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    A package consumer copies hosttools/<rid>/service/ for its runtime to hosttools/service/ beside this library, through
+    buildTransitive/Darkspyre.Inference.Connect.HostTools.targets. Each runtime's service is built and captured here; the
+    service's managed files are the same for every runtime, and its executable is that runtime's.
+  -->
+  <Target Name="AddHostToolsServicesToPackage">
+    <ItemGroup>
+      <_HostToolsPackRuntime Include="$(HostToolsRuntimeIdentifiers)" />
+    </ItemGroup>
+    <MSBuild Projects="$(MSBuildProjectFullPath)" Targets="HostToolsServicePackageFiles"
+             Properties="Configuration=$(Configuration);HostToolsPackRuntime=%(_HostToolsPackRuntime.Identity)"
+             RemoveProperties="TargetFramework;RuntimeIdentifier">
+      <Output TaskParameter="TargetOutputs" ItemName="TfmSpecificPackageFile" />
+    </MSBuild>
+  </Target>
+
+  <Target Name="HostToolsServicePackageFiles" Returns="@(_HostToolsServicePackageFile)">
+    <MSBuild Projects="$(LocalServiceProject)" Targets="Build" Properties="Configuration=$(Configuration);RuntimeIdentifier=$(HostToolsPackRuntime);NoBuild=false" />
+    <MSBuild Projects="$(LocalServiceProject)" Targets="GetTargetPath" Properties="Configuration=$(Configuration);RuntimeIdentifier=$(HostToolsPackRuntime);NoBuild=false">
+      <Output TaskParameter="TargetOutputs" ItemName="_HostToolsPackService" />
+    </MSBuild>
+    <MSBuild Projects="$(_LocalServicePackagingProject)" Targets="Build" Properties="Configuration=$(Configuration)"
+             RemoveProperties="RuntimeIdentifier;SelfContained;ServiceRuntimeIdentifier;ServicePlatform;HostToolsPackRuntime;NoBuild" />
+    <MSBuild Projects="$(_LocalServicePackagingProject)" Targets="GetTargetPath" Properties="Configuration=$(Configuration)"
+             RemoveProperties="RuntimeIdentifier;SelfContained;ServiceRuntimeIdentifier;ServicePlatform;HostToolsPackRuntime;NoBuild">
+      <Output TaskParameter="TargetOutputs" ItemName="_HostToolsPackTool" />
+    </MSBuild>
+    <PropertyGroup>
+      <_HostToolsPackServiceOutput>@(_HostToolsPackService->'%(RootDir)%(Directory)')</_HostToolsPackServiceOutput>
+      <_HostToolsPackCapture>$(BaseIntermediateOutputPath)hosttools-pack/$(Configuration)/$(HostToolsPackRuntime)/</_HostToolsPackCapture>
+      <_HostToolsPackEntry>$(LocalServiceEntryPoint)</_HostToolsPackEntry>
+      <_HostToolsPackEntry Condition="$(HostToolsPackRuntime.StartsWith('win-'))">$(LocalServiceEntryPoint).exe</_HostToolsPackEntry>
+    </PropertyGroup>
+    <MakeDir Directories="$(_HostToolsPackCapture)" />
+    <WriteLinesToFile File="$(_HostToolsPackCapture)inputs.txt" Lines="" Overwrite="true" />
+    <Exec Command="dotnet &quot;@(_HostToolsPackTool)&quot; capture &quot;$(_HostToolsPackServiceOutput).&quot; &quot;$(_HostToolsPackEntry)&quot; &quot;$(_HostToolsPackCapture)&quot; &quot;$(LocalServiceMetadataPrefix)&quot; &quot;$(LocalServiceLayoutId)&quot;" />
+    <ItemGroup>
+      <_HostToolsPackPayload Include="$(_HostToolsPackServiceOutput)**/*" />
+      <_HostToolsServicePackageFile Include="@(_HostToolsPackPayload)"
+                                    PackagePath="hosttools/$(HostToolsPackRuntime)/service/payload/%(_HostToolsPackPayload.RecursiveDir)" />
+      <_HostToolsServicePackageFile Include="$(_HostToolsPackCapture)manifest.json" PackagePath="hosttools/$(HostToolsPackRuntime)/service/" />
+    </ItemGroup>
+  </Target>
 </Project>
