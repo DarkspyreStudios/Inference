@@ -21,9 +21,7 @@ into their typed contracts. In either case, the application owns startup, config
 persistence, user consent, and shutdown.
 
 Current source package version: **11.17.2-rc.1**, targeting **.NET 11**.
-The library family is distributed through the private
-[DarkspyreStudios GitHub Packages feed](https://github.com/orgs/DarkspyreStudios/packages).
-The restore source is `https://nuget.pkg.github.com/DarkspyreStudios/index.json`.
+The library family is published on [nuget.org](https://www.nuget.org/profiles/darkspyre).
 Unimplemented provider capabilities remain unavailable; publishing their contracts does not enable them.
 Tensor uses the upstream TensorSharp packages from nuget.org at the version `TensorSharpVersion` in
 `Directory.Packages.props` names (**2026.10.11**). They ship no GGML native library: GGML and MLX
@@ -133,10 +131,7 @@ editor does not own the connection list, dialogs, routing, or any engine behind 
 
 ## Install
 
-Use an authorized account with access to the private GitHub Packages feed. The repository's
-[NuGet.Config](NuGet.Config) declares the public/private sources and package-source mapping.
-Provide credentials through your approved local credential mechanism; never commit tokens.
-The projects currently use the .NET 11 RC SDK pinned in each product's `global.json`.
+Every package and its dependencies restore from nuget.org; no credentials are needed. The projects currently use the .NET 11 RC SDK pinned in each product's `global.json`.
 
 Install only the products your application needs, keeping their versions synchronized:
 Workspace builds consume sibling source projects. Package installation uses the synchronized family version.
@@ -358,8 +353,8 @@ sharing its file format.
 
 ## Build and versioning
 
-Build from a product directory so its `global.json` selects the pinned SDK. For example, after
-configuring private-feed authentication:
+Build from a product directory so its `global.json` selects the pinned SDK. A Darkspyre.Common checkout must sit
+beside this repository, as `../Darkspyre.Common`: HostTools builds its LocalServices libraries from it. For example:
 
 ```bash
 cd Connect
@@ -404,9 +399,10 @@ To deploy from a clean `master` checkout:
 ./deploy-minor.sh           # 11.5.1 -> 11.5.2; retain the prerelease suffix.
 ```
 
-Each deployment commits the version change, runs the release checks, publishes all library packages
-to the private feed, verifies fresh downloads, and pushes the release source and tag. See
-[deployment prerequisites and failure handling](eng/README.md) before running either command.
+Each deployment commits the version change, runs the release checks, and pushes the release source and
+its `v<version>` tag. The **Publish Darkspyre.Inference** workflow, run on that tag, builds it and publishes
+all library packages to nuget.org. See [deployment prerequisites and failure handling](eng/README.md)
+before running either command.
 
 ## License
 

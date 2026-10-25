@@ -14,7 +14,7 @@
     <PackageVersion Include="AWSSDK.BedrockRuntime" Version="4.0.100.5" />
     <PackageVersion Include="AWSSDK.Core" Version="4.0.102.6" />
     <PackageVersion Include="AWSSDK.SecurityToken" Version="4.0.5" />
-    <PackageVersion Include="Darkspyre.SecureStore" Version="1.0.0" />
+    <PackageVersion Include="Darkspyre.SecureStore" Version="10.1.0" />
     <PackageVersion Include="Darkspyre.ML.Tokenizers" Version="2.0.1.1" />
     <PackageVersion Include="TensorSharp.Backends.Cuda" Version="$(TensorSharpVersion)" />
     <PackageVersion Include="TensorSharp.Backends.GGML" Version="$(TensorSharpVersion)" />

@@ -1738,21 +1738,9 @@ protected headers nor raw provider bodies. Registration disables automatic redir
 their own `HttpClient` to `TangoFluxHttpProvider` must also disable redirects so protected custom
 headers cannot follow them across origins; the host owns that client's lifetime.
 
-## Restore from GitHub Packages
+## Restore
 
-Add the private source to the consuming repository's `NuGet.Config`:
-
-```xml
-<add key="DarkspyrePrivate" value="https://nuget.pkg.github.com/DarkspyreStudios/index.json" />
-```
-
-Keep credentials outside source control. NuGet recognizes this environment variable:
-
-```bash
-export NuGetPackageSourceCredentials_DarkspyrePrivate='Username=brandonm4;Password=YOUR_GITHUB_TOKEN'
-```
-
-The token needs `read:packages`; publishing also requires `write:packages`.
+The packages restore from nuget.org with no extra source or credential.
 
 ## Host integration
 
@@ -5880,5 +5868,5 @@ dotnet format Darkspyre.Inference.Connect.slnx --no-restore
 ```
 
 Releases are immutable tags such as `v11.3.1-rc.1`. `Common`, `Connect`, `Tensor`, and the `UI.Settings` libraries are built and
-published in tandem from the approved local release environment to the private GitHub Packages feed;
-GitHub Actions is not the release pipeline.
+published in tandem: the local release script verifies and tags the release, and the Publish workflow
+publishes that tag to nuget.org through Trusted Publishing.

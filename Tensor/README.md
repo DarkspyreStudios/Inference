@@ -937,14 +937,13 @@ and `TorchStateDictionaryFile` in Supra read through `MetadataReadStream`, which
 `TensorSharp.Backends.GGML` ships no native library. Consumers supply verified drivers through an
 explicit runtime candidate plan before an admitted backend check or model load. An empty candidate
 plan never falls through to ambient probing. Package presence does not establish backend
-availability or successful model allocation. Local archives are not a claim of private-feed
+availability or successful model allocation. Local archives are not a claim of nuget.org
 publication, native execution or full-model qualification.
 
-Use the root `NuGet.Config` and process-scoped private-feed credentials for normal restores when the
-required package version is available on the feed. A local archive source for verification is an
+Use the root `NuGet.Config`, which restores from nuget.org, for normal restores. A local archive source for verification is an
 explicit separate restore configuration, not a permanent shipping-source redirect.
-Darkspyre dependencies come from the private feed; TensorSharp, StbImageSharp, Microsoft.ML.OnnxRuntime,
-Whisper.net, its runtime and NAudio.Core come from public NuGet. Their own packages own their assemblies/native runtime assets. Tensor contains
+Darkspyre dependencies, TensorSharp, StbImageSharp, Microsoft.ML.OnnxRuntime, Whisper.net, its runtime and
+NAudio.Core come from nuget.org. Their own packages own their assemblies/native runtime assets. Tensor contains
 only its capability, engine and registry assemblies and their XML documentation, README and license.
 The registry's dependency-injection abstractions come from the .NET shared framework.
 

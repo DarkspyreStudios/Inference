@@ -27,18 +27,17 @@ next_version() {
 fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 main() {
-    local mode="${1:-}" option="${2:-}" root current version source_commit package family configuration
-    local release_token release_login visibility existing cache package_lower artifact
-    local feed='https://nuget.pkg.github.com/DarkspyreStudios/index.json'
+    local mode="${1:-}" option="${2:-}" root current version source_commit family configuration
+    local release_token id code package artifact
     local stage='preflight'
     local -a packages=(Common Connect Connect.Common Connect.Codex Connect.Claude Connect.HostTools Connect.Antigravity Connect.Grok Connect.OpenAiApi Connect.SelfHost Tensor.Common Tensor.Decision.Laya Tensor.Embedding Tensor.Embedding.Gemma Tensor.Ggml Tensor.Image.Supra Tensor.LLM.Qwen Tensor.Registry Tensor.STT.Whisper UI.Settings.Core UI.Settings.Avalonia UI.Settings.Blazor)
     local -a version_files=(Directory.Build.props README.md Common/README.md Connect/README.md Tensor/README.md UI/README.md)
     [[ "$mode" == major || "$mode" == minor ]] || fail 'Use deploy-major.sh or deploy-minor.sh.'
     if [[ "$option" == --help ]]; then
         printf 'Usage: deploy-%s.sh [--dry-run]\n' "$mode"
-        printf 'Bumps <net>.<release>.<minor>, preserving the suffix; validates and publishes the private library packages.\n'
-        printf 'Requires a clean master checkout, origin, the pinned .NET SDK, and an authorized gh login.\n'
-        printf 'Commits the version update and pushes master plus the release tag after verification.\n'
+        printf 'Bumps <net>.<release>.<minor>, preserving the suffix; validates and packs the library packages.\n'
+        printf 'Requires a clean master checkout, origin, a Darkspyre.Common checkout beside it, the pinned .NET SDK, and a gh login.\n'
+        printf 'Commits the version update and pushes master plus the release tag; the Publish workflow then publishes the tag to nuget.org.\n'
         printf 'INFERENCE_GITHUB_USER optionally selects an existing gh account without switching the active login.\n'
         return
     fi
@@ -47,12 +46,12 @@ main() {
     cd "$root"
     current="$(sed -n 's/^[[:space:]]*<Version>\([^<]*\)<\/Version>[[:space:]]*$/\1/p' Directory.Build.props)"
     version="$(next_version "$current" "$mode")"
-    printf 'Family release: %s -> %s\nPrivate feed: %s\n' "$current" "$version" "$feed"
+    printf 'Family release: %s -> %s\nPublished by the Publish workflow to nuget.org from tag v%s.\n' "$current" "$version" "$version"
     [[ "$option" != --dry-run ]] || return 0
 
     # Do not hide failures with retries, overwrite switches, automatic rollback, or a new version.
-    trap 'printf "Deployment stopped during %s. No rollback was attempted. Inspect Git and the feed before retrying; rerunning bumps again.\n" "$stage" >&2' ERR
-    for tool in git gh dotnet sed awk cmp jq; do command -v "$tool" >/dev/null || fail "Install $tool before deploying."; done
+    trap 'printf "Deployment stopped during %s. No rollback was attempted. Inspect Git before retrying; rerunning bumps again.\n" "$stage" >&2' ERR
+    for tool in git gh dotnet sed awk jq curl; do command -v "$tool" >/dev/null || fail "Install $tool before deploying."; done
     [[ -z "$(git status --porcelain --untracked-files=normal)" ]] || fail 'Commit or remove pending changes first; deployment will not stage unrelated work.'
     [[ "$(git branch --show-current)" == master ]] || fail 'Deploy from master.'
     [[ "$(git remote get-url origin)" == 'https://github.com/DarkspyreStudios/Inference.git' ||
@@ -69,17 +68,13 @@ main() {
         release_token="$(gh auth token --hostname github.com)"
     fi
     export GH_TOKEN="$release_token"
-    release_login="$(gh api user --jq .login)"
-    export NuGetPackageSourceCredentials_DarkspyrePrivate="Username=${release_login};Password=${release_token};ValidAuthenticationTypes=Basic"
-    [[ "$(gh repo view DarkspyreStudios/Inference --json visibility --jq .visibility)" == PRIVATE ]] || fail 'Expected a private source repository.'
     git -c credential.helper= -c 'credential.helper=!gh auth git-credential' fetch origin master --tags
     git merge-base --is-ancestor origin/master HEAD || fail 'Local master is behind or diverged from origin/master; reconcile before deploying.'
     ! git show-ref --verify --quiet "refs/tags/v$version" || fail "Remote tag v$version already exists."
     for package in "${packages[@]}"; do
-        visibility="$(gh api "/orgs/DarkspyreStudios/packages/nuget/Darkspyre.Inference.$package" --jq .visibility)"
-        [[ "$visibility" == private ]] || fail "Expected private package $package."
-        existing="$(gh api --paginate "/orgs/DarkspyreStudios/packages/nuget/Darkspyre.Inference.$package/versions?per_page=100" --jq ".[] | select(.name == \"$version\") | .name")"
-        [[ -z "$existing" ]] || fail "$package $version is already published; versions are immutable."
+        id="$(printf '%s' "darkspyre.inference.$package" | tr '[:upper:]' '[:lower:]')"
+        code="$(curl -s -o /dev/null -w '%{http_code}' "https://api.nuget.org/v3-flatcontainer/$id/$version/$id.nuspec")"
+        [[ "$code" == 404 ]] || fail "$package $version is already on nuget.org (HTTP $code); versions are immutable."
     done
 
     stage='version update'
@@ -112,57 +107,17 @@ main() {
             ([.. | objects | select(.level? == "error" or .level? == "warning")] | length == 0)' \
             "$root/artifacts/deploy/$family-audit.json" >/dev/null || fail "Dependency audit failed; inspect artifacts/deploy/$family-audit.json."
     done
-    cd "$root/Connect"
     stage='pack and local consumer verification'
-    dotnet pack ../Common/src/Darkspyre.Inference.Common/Darkspyre.Inference.Common.csproj -c Release --no-build --no-restore
-    dotnet pack src/Darkspyre.Inference.Connect/Darkspyre.Inference.Connect.csproj -c Release --no-build --no-restore
-    dotnet pack src/Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj -c Release --no-build --no-restore
-    dotnet pack src/Codex/Darkspyre.Inference.Connect.Codex/Darkspyre.Inference.Connect.Codex.csproj -c Release --no-build --no-restore
-    dotnet pack src/Claude/Darkspyre.Inference.Connect.Claude/Darkspyre.Inference.Connect.Claude.csproj -c Release --no-build --no-restore
-    dotnet pack src/HostTools/Darkspyre.Inference.Connect.HostTools/Darkspyre.Inference.Connect.HostTools.csproj -c Release --no-build --no-restore
-    dotnet pack src/Antigravity/Darkspyre.Inference.Connect.Antigravity/Darkspyre.Inference.Connect.Antigravity.csproj -c Release --no-build --no-restore
-    dotnet pack src/Grok/Darkspyre.Inference.Connect.Grok/Darkspyre.Inference.Connect.Grok.csproj -c Release --no-build --no-restore
-    dotnet pack src/OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi.csproj -c Release --no-build --no-restore
-    dotnet pack src/SelfHost/Darkspyre.Inference.Connect.SelfHost/Darkspyre.Inference.Connect.SelfHost.csproj -c Release --no-build --no-restore
-    dotnet pack ../Tensor/src/Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj -c Release --no-build --no-restore
-    dotnet pack ../Tensor/src/Decision/Darkspyre.Inference.Tensor.Decision.Laya/Darkspyre.Inference.Tensor.Decision.Laya.csproj -c Release --no-build --no-restore
-    dotnet pack ../Tensor/src/Embedding/Darkspyre.Inference.Tensor.Embedding/Darkspyre.Inference.Tensor.Embedding.csproj -c Release --no-build --no-restore
-    dotnet pack ../Tensor/src/Embedding/Darkspyre.Inference.Tensor.Embedding.Gemma/Darkspyre.Inference.Tensor.Embedding.Gemma.csproj -c Release --no-build --no-restore
-    dotnet pack ../Tensor/src/Ggml/Darkspyre.Inference.Tensor.Ggml/Darkspyre.Inference.Tensor.Ggml.csproj -c Release --no-build --no-restore
-    dotnet pack ../Tensor/src/Image/Darkspyre.Inference.Tensor.Image.Supra/Darkspyre.Inference.Tensor.Image.Supra.csproj -c Release --no-build --no-restore
-    dotnet pack ../Tensor/src/LLM/Darkspyre.Inference.Tensor.LLM.Qwen/Darkspyre.Inference.Tensor.LLM.Qwen.csproj -c Release --no-build --no-restore
-    dotnet pack ../Tensor/src/Registry/Darkspyre.Inference.Tensor.Registry/Darkspyre.Inference.Tensor.Registry.csproj -c Release --no-build --no-restore
-    dotnet pack ../Tensor/src/STT/Darkspyre.Inference.Tensor.STT.Whisper/Darkspyre.Inference.Tensor.STT.Whisper.csproj -c Release --no-build --no-restore
-    dotnet pack ../UI/src/Settings/Darkspyre.Inference.UI.Settings.Core/Darkspyre.Inference.UI.Settings.Core.csproj -c Release --no-build --no-restore
-    dotnet pack ../UI/src/Settings/Darkspyre.Inference.UI.Settings.Avalonia/Darkspyre.Inference.UI.Settings.Avalonia.csproj -c Release --no-build --no-restore
-    dotnet pack ../UI/src/Settings/Darkspyre.Inference.UI.Settings.Blazor/Darkspyre.Inference.UI.Settings.Blazor.csproj -c Release --no-build --no-restore
-    dotnet restore ../eng/VerifyPackages
-    dotnet run --project ../eng/VerifyPackages --no-restore -- ../artifacts/packages "$version" "$source_commit"
+    bash "$root/eng/pack.sh" "$version" "$source_commit"
+    cd "$root/Connect"
     dotnet restore ../eng/VerifyConsumer --configfile ../eng/VerifyConsumer/NuGet.Preflight.Config
     dotnet run --project ../eng/VerifyConsumer -c Release --no-restore -- "$version" "$source_commit"
-    [[ -z "$(git status --porcelain --untracked-files=normal)" && "$(git rev-parse HEAD)" == "$source_commit" ]] || fail 'Source changed during verification; nothing will be published.'
+    [[ -z "$(git status --porcelain --untracked-files=normal)" && "$(git rev-parse HEAD)" == "$source_commit" ]] || fail 'Source changed during verification; nothing will be tagged.'
 
-    stage='NuGet publication'
-    for package in "${packages[@]}"; do
-        dotnet nuget push "../artifacts/packages/Darkspyre.Inference.$package.$version.nupkg" --source "$feed" --api-key "$release_token"
-    done
-    stage='fresh-feed consumer verification'
-    cache="$(mktemp -d "${TMPDIR:-/tmp}/inference-deploy.XXXXXX")"
-    export NUGET_PACKAGES="$cache"
-    dotnet restore ../eng/VerifyConsumer --configfile ../NuGet.Config --no-http-cache --force
-    dotnet run --project ../eng/VerifyConsumer -c Release --no-restore -- "$version" "$source_commit"
-    for package in "${packages[@]}"; do
-        package_lower="$(printf '%s' "Darkspyre.Inference.$package" | tr '[:upper:]' '[:lower:]')"
-        cmp "../artifacts/packages/Darkspyre.Inference.$package.$version.nupkg" "$cache/$package_lower/$version/$package_lower.$version.nupkg"
-        existing="$(gh api --paginate "/orgs/DarkspyreStudios/packages/nuget/Darkspyre.Inference.$package/versions?per_page=100" --jq ".[] | select(.name == \"$version\") | .name")"
-        [[ "$existing" == "$version" ]] || fail "Published version missing for $package."
-        [[ "$(gh api "/orgs/DarkspyreStudios/packages/nuget/Darkspyre.Inference.$package" --jq .visibility)" == private ]] || fail "Published $package is not private."
-    done
     stage='tag and source push'
-    [[ -z "$(git status --porcelain --untracked-files=normal)" && "$(git rev-parse HEAD)" == "$source_commit" ]] || fail 'Source changed during publication; inspect before tagging/pushing.'
-    git tag -a "v$version" "$source_commit" -m "Verified private library $version release"
+    git tag -a "v$version" "$source_commit" -m "Verified library $version release"
     git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push origin HEAD:refs/heads/master "refs/tags/v$version"
-    printf 'Published all library packages at %s; source %s. Verification cache retained at %s.\n' "$version" "$source_commit" "$cache"
+    printf 'Tagged v%s at %s. Run the Publish workflow on tag v%s to publish it to nuget.org.\n' "$version" "$source_commit" "$version"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then main "$@"; fi

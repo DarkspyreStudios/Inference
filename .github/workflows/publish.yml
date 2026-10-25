@@ -1,0 +1,61 @@
+name: Publish Darkspyre.Inference
+
+# Run on a release tag (v<version>) that deploy-major.sh or deploy-minor.sh pushed. It builds the tag, packs and
+# verifies all library packages, and publishes them to nuget.org through Trusted Publishing.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: macos-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DarkspyreDependencyMode: Packages
+    steps:
+      - name: Require a release tag
+        run: |
+          [[ "$GITHUB_REF" == refs/tags/v* ]] || { echo "Run this workflow on a v<version> tag." >&2; exit 1; }
+      - uses: actions/checkout@v5
+        with:
+          path: Inference
+      # HostTools and Antigravity build Darkspyre.Common's LocalServices libraries from the sibling checkout.
+      - uses: actions/checkout@v5
+        with:
+          repository: DarkspyreStudios/Darkspyre.Common
+          ref: main
+          path: Darkspyre.Common
+      - uses: actions/setup-dotnet@v5
+        with:
+          global-json-file: Inference/Connect/global.json
+      - name: Build
+        working-directory: Inference
+        run: |
+          for family in Connect Tensor UI; do
+            (cd "$family" && dotnet restore "Darkspyre.Inference.$family.slnx" &&
+              dotnet build "Darkspyre.Inference.$family.slnx" -c Release --no-restore -p:ContinuousIntegrationBuild=true)
+          done
+      - name: Pack and verify
+        working-directory: Inference
+        run: |
+          version="$(sed -n 's/^[[:space:]]*<Version>\([^<]*\)<\/Version>[[:space:]]*$/\1/p' Directory.Build.props)"
+          [[ "$GITHUB_REF_NAME" == "v$version" ]] || { echo "Tag $GITHUB_REF_NAME does not match version $version." >&2; exit 1; }
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          bash eng/pack.sh "$version" "$GITHUB_SHA"
+      - name: NuGet login
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: darkspyre
+      - name: Publish
+        working-directory: Inference
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
+        run: |
+          for package in artifacts/packages/Darkspyre.Inference.*."$VERSION".nupkg; do
+            dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json
+          done

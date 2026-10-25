@@ -1,6 +1,6 @@
 # Darkspyre.Inference
 
-This repository builds the `Darkspyre.Inference.*` library family: one NuGet package per library, released together on the private DarkspyreStudios feed. The Darkspyre Harness rules, including the current restrictions, are in agent-ds `AGENTS.md`. This file holds only what is specific to Inference.
+This repository builds the `Darkspyre.Inference.*` library family: one NuGet package per library, released together on nuget.org. The Darkspyre Harness rules, including the current restrictions, are in agent-ds `AGENTS.md`. This file holds only what is specific to Inference.
 
 | Item | Value |
 | --- | --- |
@@ -134,7 +134,7 @@ Testing rules for this repository:
 
 The version is `<net>.<release>.<minor>`: the .NET generation, a breaking-contract release, and a compatible fix. All packages release together. A published version is never overwritten, and each release gets an immutable Git tag.
 
-Before a release, each active solution is at zero warnings and passes restore, build, tests, pack and the dependency audit. `deploy-major.sh` and `deploy-minor.sh` are the release entry points; `eng/README.md` documents their gates. When changing the release scripts, run `bash -n` on `deploy-major.sh`, `deploy-minor.sh` and `eng/deploy.sh`, and run `bash eng/package-assets.tests.sh`, as `eng/README.md` "Offline verification" describes. Never test a script change by publishing a dummy version.
+Before a release, each active solution is at zero warnings and passes restore, build, tests, pack and the dependency audit. `deploy-major.sh` and `deploy-minor.sh` prepare, verify and tag a release, and the Publish workflow (`.github/workflows/publish.yml`) publishes the tag to nuget.org, only on the user's word; `eng/README.md` documents their gates. When changing the release scripts, run `bash -n` on `deploy-major.sh`, `deploy-minor.sh`, `eng/deploy.sh` and `eng/pack.sh`, and run `bash eng/package-assets.tests.sh`, as `eng/README.md` "Offline verification" describes. Never test a script change by publishing a dummy version.
 
 Every package carries a readable README and the repository license. `eng/VerifyPackages` and `eng/VerifyConsumer` check package boundaries, the exact Common dependency and the release source; `eng/README.md` says how to run them.
 

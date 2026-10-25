@@ -1,7 +1,9 @@
-# Coordinated private NuGet deployment
+# Coordinated NuGet deployment
 
-Run either root script from any directory. They invoke the same Bash implementation in
-`eng/deploy.sh`; the .NET generation is never changed by these commands.
+A release has two parts. A root script prepares, verifies and tags it; the **Publish Darkspyre.Inference**
+workflow (`.github/workflows/publish.yml`) publishes the tag to nuget.org. Run either root script from any
+directory. Both invoke the same Bash implementation in `eng/deploy.sh`; the .NET generation is never changed by
+these commands.
 
 | Command | Example version change |
 |---|---|
@@ -9,52 +11,54 @@ Run either root script from any directory. They invoke the same Bash implementat
 | `./deploy-minor.sh` | `11.5.1-rc.1` → `11.5.2-rc.1` |
 
 “Major” here is this repository's breaking-contract **release** component, not the .NET component.
-The prerelease suffix is preserved. `--dry-run` prints the next version and destination without
-requiring credentials, changing files, compiling, committing or publishing. `--help` lists usage.
+The prerelease suffix is preserved. `--dry-run` prints the next version without requiring credentials,
+changing files, compiling or committing. `--help` lists usage.
 
 ## Prerequisites and side effects
 
 - A clean `master` checkout (including no untracked files), with all intended implementation work
   already committed. The scripts never stage application changes or stash them.
-- `origin` must be `DarkspyreStudios/Inference`; the repository and library packages must be
-  private. Local master must contain the fetched remote master. Existing target tags/versions abort.
-- Bash, Git, GitHub CLI, jq, the pinned .NET SDK, and standard shell utilities must be installed.
-- The selected GitHub identity needs private dependency access, package publication permission,
-  and repository push permission. The default is `GH_TOKEN` if supplied, otherwise the active
-  `gh` login. To select another already-authenticated account without switching the active login:
+- A Darkspyre.Common checkout beside it, at `../Darkspyre.Common`. HostTools and Antigravity carry its
+  LocalServices libraries.
+- `origin` must be `DarkspyreStudios/Inference`. Local master must contain the fetched remote master. An existing
+  target tag, or the target version of any library already on nuget.org, aborts.
+- Bash, Git, GitHub CLI, jq, curl, the pinned .NET SDK, and standard shell utilities must be installed.
+- The selected GitHub identity needs repository push permission. The default is `GH_TOKEN` if supplied, otherwise
+  the active `gh` login. To select another already-authenticated account without switching the active login:
 
   ```bash
   INFERENCE_GITHUB_USER=brandonm4 ./deploy-minor.sh
   ```
 
-Credentials are process-scoped and are never written into NuGet.Config or Git. The destination is
-fixed to `https://nuget.pkg.github.com/DarkspyreStudios/index.json`, not nuget.org. Native runtime
+Credentials are process-scoped and are never written into NuGet.Config or Git. Native runtime
 requirements for the existing consumer smoke test still apply to the deployment machine.
 
 `VerifyConsumer` restores the declared Inference library references and checks their release
 contracts. It loads no native GGML driver and no model weights, and it does not qualify inference.
-TensorSharp's packages ship no GGML native library; the application supplies verified drivers.
+TensorSharp's packages ship no GGML native library: the application supplies verified drivers.
 
 ## Release sequence
 
-1. Check tooling, checkout, credentials, remote and all target library package versions.
+1. Check tooling, checkout, credentials, remote, the tag and every target library version on nuget.org.
 2. Update the shared `Directory.Build.props` version and matching references in the five product/root
    README files. Commit only those files. Historical design/release versions remain unchanged.
 3. Restore all three solutions; build and test Debug and Release; explicitly reject vulnerability
    findings from the transitive JSON audits.
-4. Pack Common, the media Connect package, every Connect provider/Common and Tensor library, and the UI.Settings Core, Avalonia and Blazor libraries. `eng/VerifyPackages` checks owned assembly
-   boundaries, exact family dependencies and release-source identity.
+4. `eng/pack.sh` packs Common, the media Connect package, every Connect provider/Common and Tensor library, and the
+   UI.Settings Core, Avalonia and Blazor libraries. `eng/VerifyPackages` checks owned assembly boundaries, exact
+   family dependencies and release-source identity.
 5. Restore/run `eng/VerifyConsumer` against the local archives. Its build rejects distinct package
    assets targeting the same copy-output path. Reject concurrent source changes.
-6. Push all library packages without overwrite/skip-duplicate switches.
-7. Use a new empty package cache and no HTTP cache to restore/run the consumer from normal feeds.
-   Compare all downloaded library archives byte-for-byte and check feed versions/private visibility.
-8. Tag the release-source commit and push master plus that one release tag to origin. The annotated
-   `v<version>` tag is the publication record. No other tag or branch is pushed.
+6. Tag the release-source commit and push master plus that one release tag to origin. The annotated
+   `v<version>` tag is the release record. No other tag or branch is pushed.
+7. Run the Publish workflow on the tag, from the repository's Actions page. It checks out the tag and
+   Darkspyre.Common's `main` branch side by side, builds the three solutions in Release in Packages mode, runs
+   `eng/pack.sh` against the tag's commit, signs in to nuget.org through Trusted Publishing (`NuGet/login`, user
+   `darkspyre`) and pushes every library package without overwrite or skip-duplicate switches. It refuses a ref
+   that is not a `v<version>` tag matching the version in `Directory.Build.props`.
 
 No live provider calls, model downloads or consumer-application migrations run. Audit reports and
-packages are ignored outputs under `artifacts/`; the fresh verification cache is retained in the
-system temporary directory and its exact path is printed on success.
+packages are ignored outputs under `artifacts/`.
 
 ## Package contents
 
@@ -62,8 +66,8 @@ Every package includes a readable package README and the repository license. Pac
 confirms that the Common assembly appears only in the Common package, that internal library dependencies use the exact synchronized version, and that each Tensor library
 contains only its own assembly plus XML documentation. Connect.Common and each provider own one assembly.
 The media Connect package keeps Image, TTS and Audio together and depends on Connect.Common.
-HostTools owns its own assembly, HostTools.Contracts and Darkspyre.Common's five LocalServices assemblies, which are
-not published, and depends on no other Inference package. Only `lib/` DLLs count as a package's assemblies: HostTools
+HostTools owns its own assembly, HostTools.Contracts and Darkspyre.Common's five LocalServices assemblies, which have
+no package of their own, and depends on no other Inference package. Only `lib/` DLLs count as a package's assemblies: HostTools
 and Antigravity also carry the host-tools service and MCP program for each runtime under `hosttools/<rid>/`, which a
 consumer copies beside its output and never references (`Connect/README.md`).
 
@@ -79,18 +83,17 @@ The shared build target marks assets imported from `Whisper.net.Runtime`, `Whisp
 `eng/VerifyConsumer` is a non-packable release smoke test with explicit library PackageReferences and no source
 project references. It checks loaded assembly source identities, the Settings contracts and Whisper's
 public native runtime. It installs and connects to the host-tools service from the payload the packages copied beside
-its output, and checks that the MCP program is there. Before publication it restores against `eng/VerifyConsumer/NuGet.Preflight.Config`
-(local Inference archives plus normal dependency feeds). After publication it restores against the
-root `NuGet.Config` with a new empty package cache and `--no-http-cache`. It does not load weights or
+its output, and checks that the MCP program is there. It restores against `eng/VerifyConsumer/NuGet.Preflight.Config`
+(local Inference archives plus nuget.org). It does not load weights or
 call providers. `eng/package-assets.tests.sh` verifies pack inputs and collision checks without
 creating archives.
 
 ## Failure behavior
 
-The first failing step stops deployment. Version commits, generated archives, and any successfully
-published packages remain in place; the script never resets source or deletes remote packages.
-Publication across the library NuGets is not atomic. If a push, readback or Git push fails, inspect the
-reported stage and complete that same release manually using its existing archives/source commit.
+The first failing step stops deployment. Version commits and generated archives remain in place; the script
+never resets source. Publication across the library NuGets is not atomic. If the workflow fails after some
+packages are pushed, fix the cause and publish the remaining packages of the same tag; nuget.org refuses the ones
+already there, and a package can only be unlisted, never deleted.
 **Do not blindly rerun a bump script:** another invocation chooses the next version. Do not overwrite
 an existing package. A failed preflight leaves version files unchanged; a later failure can leave a
 local version commit that has not been pushed.
@@ -98,7 +101,7 @@ local version commit that has not been pushed.
 ## Offline verification
 
 ```bash
-bash -n deploy-major.sh deploy-minor.sh eng/deploy.sh
+bash -n deploy-major.sh deploy-minor.sh eng/deploy.sh eng/pack.sh
 bash eng/package-assets.tests.sh # Requires restored Tensor dependency assets; no archives created.
 ```
 
