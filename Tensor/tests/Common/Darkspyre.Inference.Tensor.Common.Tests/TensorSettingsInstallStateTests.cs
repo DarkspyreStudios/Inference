@@ -207,7 +207,7 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
     public async Task ExpertPlacementShowsOnlyWhenTheInstanceReportsIt()
     {
         using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, Store));
-        var manager = new TensorSettingsManager(Setup, new NoSave(), new TestList(new("/models", [], null)), packs);
+        var manager = new TensorSettingsManager(Setup, new NoSave(), new TestList(new TensorModelListing("/models", [], null)), packs);
         TensorSettings settings = await manager.OpenAsync(NewEntry());
         Assert.DoesNotContain(Fields(settings), field => field.Description.Id == "expert-placement");
         settings.InstanceObservation = new(new("test/model", "test"), TensorBackendKind.GgmlCuda,

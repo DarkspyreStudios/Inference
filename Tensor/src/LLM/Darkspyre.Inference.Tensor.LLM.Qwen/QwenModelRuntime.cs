@@ -2,7 +2,7 @@ using Darkspyre.Inference.Tensor.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using TensorSharp.Runtime;
 using TensorSharp.Runtime.Grammar;
-using TensorSharp.Models;
+using TensorSharp.Models.Architecture;
 using TensorSharp.Runtime.Scheduling;
 using TensorSharp.Runtime.Speculative;
 using TensorSharp.Server;
@@ -67,7 +67,8 @@ internal sealed class QwenModelRuntime : IQwenModelRuntime
                 foreach (GgufFile companion in companions.Values) companion.Dispose();
             }
             cancellationToken.ThrowIfCancellationRequested();
-            _service.SchedulerConfigOverride = draftPath is null ? null
+            // TensorSharp 2026.10.11 declares this non-null, but InferenceEngineHost treats null as environment defaults.
+            _service.SchedulerConfigOverride = draftPath is null ? null!
                 : SchedulerConfig.FromEnvironment().WithSpeculation(new SpeculationOptions { Enabled = true });
             // TensorSharp reads the draft only during load, before planning expert placement.
             lock (DraftEnvironment)
@@ -151,7 +152,7 @@ internal static class QwenModelCompatibility
 
     public static void ValidateCheckpoint(GgufFile file, IReadOnlyDictionary<string, GgufFile> companions, TensorModelPackDefinition definition)
         => ValidateCheckpoint(new CheckpointMetadata(file.Version, file.Metadata, file.Tensors, file.FilePaths),
-            companions.ToDictionary(pair => pair.Key, pair => pair.Value.Metadata, StringComparer.Ordinal), definition);
+            companions.ToDictionary(pair => pair.Key, pair => (IReadOnlyDictionary<string, object>)pair.Value.Metadata, StringComparer.Ordinal), definition);
 
     internal static void ValidateHeaders(IReadOnlyList<(TensorSourceArtifact Artifact, GgufHeader Header)> files,
         IReadOnlyDictionary<string, GgufHeader> companions, TensorModelPackDefinition definition)
@@ -183,7 +184,7 @@ internal static class QwenModelCompatibility
         header.GetValueOrDefault("general.architecture") is string architecture && Architectures.Contains(architecture)
             ? architecture : throw new InvalidDataException("This adapter requires a Qwen 3.5 family or Qwen 3.8 Flash Next GGUF.");
 
-    private static void ValidateCheckpoint(CheckpointMetadata file, IReadOnlyDictionary<string, IReadOnlyDictionary<string, object>> companions,
+    private static void ValidateCheckpoint(CheckpointMetadata file, Dictionary<string, IReadOnlyDictionary<string, object>> companions,
         TensorModelPackDefinition definition)
     {
         if (file.Version is not (2 or 3)) { throw new InvalidDataException("This adapter requires GGUF version 2 or 3."); }
@@ -227,8 +228,8 @@ internal static class QwenModelCompatibility
             throw new InvalidDataException("The vision projector must be a CLIP projector GGUF.");
         if (companions.TryGetValue(TensorLlmModels.MtpDraftRole, out var draft)
             && (draft.GetValueOrDefault("general.architecture") is not "qwen4exp"
-                || !draft.TryGetValue("qwen4exp.nextn_predict_layers", out object? nextn) || Convert.ToUInt32(nextn) != 1
-                || draft.TryGetValue("split.count", out object? count) && Convert.ToUInt32(count) != 1))
+                || !draft.TryGetValue("qwen4exp.nextn_predict_layers", out object? nextn) || Convert.ToUInt32(nextn, System.Globalization.CultureInfo.InvariantCulture) != 1
+                || draft.TryGetValue("split.count", out object? count) && Convert.ToUInt32(count, System.Globalization.CultureInfo.InvariantCulture) != 1))
             throw new InvalidDataException("The MTP draft must be a single qwen4exp GGUF with one NextN layer.");
     }
 
@@ -250,11 +251,24 @@ internal static class QwenModelCompatibility
     /// </summary>
     internal static int FullAttentionLayers(IReadOnlyDictionary<string, object> header, string arch, int layers)
     {
+        if (arch == "qwen4exp")
+            return Enumerable.Range(0, layers).Count(layer => IsQwen4ExpFullAttentionLayer(header, layers, layer));
         if (header.GetValueOrDefault($"{arch}.layer_types") is string[] types && types.Length == layers)
         { return types.Count(type => !string.Equals(type, "linear_attention", StringComparison.OrdinalIgnoreCase)); }
         uint interval = header.GetValueOrDefault($"{arch}.full_attention_interval") is { } value
             ? Convert.ToUInt32(value, System.Globalization.CultureInfo.InvariantCulture) : 4;
         return interval is > 0 and <= int.MaxValue ? layers / (int)interval : throw new InvalidDataException("Invalid Qwen full-attention interval.");
+    }
+
+    /// <summary>Matches TensorSharp's qwen4exp recurrent-layer map, including its interval default.</summary>
+    internal static bool IsQwen4ExpFullAttentionLayer(IReadOnlyDictionary<string, object> header, int layers, int layer)
+    {
+        if (header.GetValueOrDefault("qwen4exp.attention.recurrent_layers") is Array recurrent && recurrent.Length >= layers)
+            return Convert.ToUInt32(recurrent.GetValue(layer), System.Globalization.CultureInfo.InvariantCulture) == 0;
+        uint interval = header.GetValueOrDefault("qwen4exp.full_attention_interval") is { } value
+            ? Convert.ToUInt32(value, System.Globalization.CultureInfo.InvariantCulture) : 4;
+        if (interval == 0) interval = 4;
+        return (layer + 1L) % interval == 0;
     }
 
     private static long TensorBytes(GgufTensorInfo tensor)

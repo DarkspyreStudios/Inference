@@ -161,9 +161,79 @@ public sealed class QwenPackSelectionTests : IDisposable
         }
     }
 
-    private async Task<(QwenLlmInference Engine, TensorModelPackManager Packs, string Model)> LoadedAsync(Runtime runtime, string id)
+    [Fact]
+    public async Task LoadedVisionTowerAcceptsPngUnderTheHostScratchDirectoryUntilUnload()
+    {
+        var runtime = new Runtime { Architecture = "qwen4exp", VisionEncoderLoaded = true };
+        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/vision", projector: true);
+        await using (engine)
+        using (packs)
+        {
+            Assert.Equal(InferenceSupport.Supported, (await engine.GetCapabilitiesAsync(model)).SupportsPromptImages);
+            Assert.Equal(InferenceSupport.Supported, Assert.IsType<LlmCapabilities>((await engine.ListModelsAsync()).Single().Capabilities).SupportsPromptImages);
+            byte[] png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aH1sAAAAASUVORK5CYII=");
+            await Collect(engine, ImageRequest(model, png));
+            string path = Assert.Single(Assert.Single(runtime.LastMessages).ImagePaths!);
+            Assert.StartsWith(Path.GetFullPath(_root) + Path.DirectorySeparatorChar, path, StringComparison.Ordinal);
+            Assert.Equal(png, await File.ReadAllBytesAsync(path));
+            string folder = Path.GetDirectoryName(path)!;
+            runtime.VisionEncoderLoaded = false;
+            Assert.Equal(InferenceSupport.Unsupported, (await engine.GetCapabilitiesAsync(model)).SupportsPromptImages);
+            await engine.UnloadAndWaitAsync();
+            Assert.False(Directory.Exists(folder));
+        }
+    }
+
+    [Fact]
+    public async Task GifIsRefusedBeforeTheRuntimeStreams()
+    {
+        var runtime = new Runtime { Architecture = "qwen4exp", VisionEncoderLoaded = true };
+        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/gif", projector: true);
+        await using (engine)
+        using (packs)
+        {
+            InferenceException refused = await Assert.ThrowsAsync<InferenceException>(() => Collect(engine, ImageRequest(model, "GIF89a"u8.ToArray())));
+            Assert.Equal(InferenceFailureCode.UnsupportedFeature, refused.Code);
+            Assert.Equal("Qwen reads PNG and JPEG images only.", refused.Message);
+            Assert.Empty(runtime.LastMessages);
+        }
+    }
+
+    [Fact]
+    public async Task LoadedStatusAndObservationCarryPlacementAndUnloadClearsIt()
+    {
+        var placement = new TensorExpertPlacement(11, 48);
+        var runtime = new Runtime { ExpertPlacement = placement };
+        TensorModelPackDefinition pack = Pack("host/placement");
+        using var http = new HttpClient(new Handler());
+        using var packs = Manager(http, pack);
+        await packs.InstallAsync(pack.Key);
+        await using var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu, _root);
+        var statuses = new List<TensorEngineStatus>();
+        engine.EngineStatusChanged += (_, status) => statuses.Add(status);
+        await engine.LoadAndWaitAsync(pack.Key);
+        Assert.Equal(placement, Assert.Single(statuses, status => status.State == TensorEngineState.Loaded).ExpertPlacement);
+        Assert.Equal(placement, (await engine.GetObservationAsync()).ExpertPlacement);
+        await engine.UnloadAndWaitAsync();
+        Assert.Null((await engine.GetObservationAsync()).ExpertPlacement);
+        Assert.Null(Assert.Single(statuses, status => status.State == TensorEngineState.Unloaded).ExpertPlacement);
+    }
+
+    private static LlmInferenceRequest ImageRequest(string model, byte[] data) => new()
+    {
+        ModelId = model,
+        Messages = [new("user", "Describe this.") { Attachments = [new LlmAttachment
+            { Kind = LlmBinaryKind.Image, FileName = "../../untrusted.gif", MediaType = "image/gif", Data = data }] }]
+    };
+
+    private async Task<(QwenLlmInference Engine, TensorModelPackManager Packs, string Model)> LoadedAsync(Runtime runtime, string id, bool projector = false)
     {
         TensorModelPackDefinition pack = Pack(id);
+        if (projector) pack = pack with
+        {
+            SupportedBackends = QwenModelCompatibility.BackendsFor([TensorLlmModels.VisionProjectorRole]),
+            Artifacts = [.. pack.Artifacts, pack.Artifacts[0] with { Role = TensorLlmModels.VisionProjectorRole, RelativePath = "mmproj.gguf" }]
+        };
         var http = new HttpClient(new Handler());
         TensorModelPackManager packs = Manager(http, pack);
         await packs.InstallAsync(pack.Key);
@@ -195,7 +265,7 @@ public sealed class QwenPackSelectionTests : IDisposable
     {
         public List<TensorModelKey> Keys { get; } = [];
         public string? Architecture { get; init; } = "qwen35";
-        public bool VisionEncoderLoaded { get; init; }
+        public bool VisionEncoderLoaded { get; set; }
         public TensorExpertPlacement? ExpertPlacement { get; init; }
         public IReadOnlyList<string> Pieces { get; init; } = ["hello"];
         public Task? BeforeCompletionWait { get; init; }

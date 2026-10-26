@@ -620,7 +620,10 @@ GPU. Unload clears that observation. CPU and other architectures report no place
 folder under the host's scratch directory. Attachment names never enter paths. Repeated image bytes
 reuse a path for TensorSharp's embedding cache. Unload and failed-load cleanup delete the folder.
 Other image encodings fail before streaming. The prompt estimate uses the GGUF template when the
-architecture has no protocol renderer; qwen4exp context fit includes QSA indexer cache bytes.
+architecture has no protocol renderer. qwen4exp context fit counts full-attention layers from the
+recurrent-layer map when it covers every layer, or the full-attention interval otherwise. A layer
+adds QSA indexer cache bytes only with positive indexer dimensions and a positive compression ratio,
+matching TensorSharp's `UsesQsa`.
 
 Qwen's hosted-tool capability set is empty. Supplied `HostedTools` or `MaxHostedTurns` fails as
 `UnsupportedFeature` before model/runtime materialization; client functions remain a separate lane.

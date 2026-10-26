@@ -683,7 +683,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
 
         foreach (LlmMessage message in request.Messages)
         {
-            if (message.ToolResults.Count == 0 || !string.IsNullOrEmpty(message.Content))
+            if (message.ToolResults.Count == 0 || !string.IsNullOrEmpty(message.Content) || message.Attachments.Count > 0)
             {
                 messages.Add(new ChatMessage
                 {

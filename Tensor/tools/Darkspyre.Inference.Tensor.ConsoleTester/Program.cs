@@ -124,18 +124,18 @@ internal static class Program
         var engine = new QwenLlmInference(packs, options.Backend, scratch, runtimeOwner: runtime);
         try
         {
-        return await RunOwnedEngineAsync(async () =>
-        {
-            await AwaitStateAsync(engine, () => engine.StartAsync(cancellationToken), TensorEngineState.Started);
-            Stopwatch load = Stopwatch.StartNew();
-            await AwaitStateAsync(engine, () => engine.LoadAsync(definition.Key, cancellationToken), TensorEngineState.Loaded);
-            TensorModelObservation observation = await engine.GetObservationAsync(cancellationToken);
-            LlmModelInfo model = (await engine.ListModelsAsync(cancellationToken)).Single(item => item.Id == definition.Key.ModelId);
-            Console.WriteLine($"loaded  : {observation.Backend} in {load.Elapsed.TotalSeconds:F1}s; usable context {model.MaxContextTokens:N0} tokens");
+            return await RunOwnedEngineAsync(async () =>
+            {
+                await AwaitStateAsync(engine, () => engine.StartAsync(cancellationToken), TensorEngineState.Started);
+                Stopwatch load = Stopwatch.StartNew();
+                await AwaitStateAsync(engine, () => engine.LoadAsync(definition.Key, cancellationToken), TensorEngineState.Loaded);
+                TensorModelObservation observation = await engine.GetObservationAsync(cancellationToken);
+                LlmModelInfo model = (await engine.ListModelsAsync(cancellationToken)).Single(item => item.Id == definition.Key.ModelId);
+                Console.WriteLine($"loaded  : {observation.Backend} in {load.Elapsed.TotalSeconds:F1}s; usable context {model.MaxContextTokens:N0} tokens");
 
-            var suite = new QwenSuite(engine, model.Id);
-            return await suite.RunAsync(options, cancellationToken) ? 0 : 1;
-        }, engine, runtime);
+                var suite = new QwenSuite(engine, model.Id);
+                return await suite.RunAsync(options, cancellationToken) ? 0 : 1;
+            }, engine, runtime);
         }
         finally { Directory.Delete(scratch, recursive: true); }
     }
