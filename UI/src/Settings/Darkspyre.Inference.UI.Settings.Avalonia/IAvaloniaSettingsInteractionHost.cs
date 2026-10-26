@@ -6,7 +6,6 @@ namespace Darkspyre.Inference.UI.Settings.Avalonia;
 public interface IAvaloniaSettingsInteractionHost : IInferenceSettingsInteractionHost
 {
     /// <summary>Writes <paramref name="text"/> to the clipboard of the window that shows <paramref name="source"/> and
-    /// tells the person the result with the host's transient notice; <paramref name="copied"/> is the notice text on success.
-    /// A clipboard failure is reported to the person, not thrown.</summary>
-    Task CopyToClipboardAsync(Visual source, string text, string copied);
+    /// tells the person the result with the host's transient notice. A clipboard failure is reported to the person, not thrown.</summary>
+    Task CopyToClipboardAsync(Visual source, string text);
 }

@@ -160,11 +160,11 @@ own step strip sets `ShowStepList = false`: the list is hidden, each step shows 
 Next stay. `CurrentStepIndex` is the shown step, and `StepChanged` reports each move to another step. A device
 authorization copies its user code to the clipboard the first time the code is shown, once per code, and shows a
 **Copy code** button that copies it again. In the Avalonia editor both go through
-`IAvaloniaSettingsInteractionHost.CopyToClipboardAsync(source, text, copied)`, which writes the clipboard and tells
-the person the result with the host's transient notice; the editor passes `Sign-in code copied to clipboard.`. The
-code itself selects in one click. Device and browser sign-in panels also show the sign-in page's address as selectable
+`IAvaloniaSettingsInteractionHost.CopyToClipboardAsync(source, text)`, which writes the clipboard and tells
+the person the result with the host's transient notice; each button passes itself as `source` and the automatic copy
+passes the editor. The code itself selects in one click. Device and browser sign-in panels also show the sign-in page's address as selectable
 text with a **Copy link** button, so a person can finish in any browser when the host's browser does not open; the
-Avalonia editor copies through `CopyToClipboardAsync` with `Sign-in link copied to clipboard.`, and the Blazor editor
+Avalonia editor copies the address through `CopyToClipboardAsync`, and the Blazor editor
 shows the same text under the panel. A searchable choice list shows its separate
 provider-search box only while the loaded list is incomplete or a search is active; otherwise the
 auto-complete box filters the loaded choices. A choice whose value differs from its display name shows the

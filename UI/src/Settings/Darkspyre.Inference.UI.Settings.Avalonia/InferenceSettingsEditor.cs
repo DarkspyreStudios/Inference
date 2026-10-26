@@ -386,7 +386,7 @@ public sealed class InferenceSettingsEditor : UserControl
         {
             this.copiedCode = device.UserCode;
             string code = device.UserCode;
-            Dispatcher.UIThread.Post(async () => await this.CopyCodeAsync(code));
+            Dispatcher.UIThread.Post(async () => await this.CopyCodeAsync(this, code));
         }
         else if (interaction is SetupBrowserAuthorization browser) this.callback?.Update(browser.Callback, this.editVersion, this.AllIssues, this.Busy);
     }
@@ -503,8 +503,12 @@ public sealed class InferenceSettingsEditor : UserControl
                 line.Children.Add(new TextBlock { Text = "to finish connecting." });
                 view.Children.Add(line);
                 view.Children.Add(AddressLine(device.VerificationUri));
-                actions.Children.Add(Button("Copy code", "outline", () => this.CopyCodeAsync(device.UserCode)));
-                actions.Children.Add(Button("Copy link", "outline", () => this.CopyLinkAsync(device.VerificationUri)));
+                Button copyCode = null!;
+                copyCode = Button("Copy code", "outline", () => this.CopyCodeAsync(copyCode, device.UserCode));
+                actions.Children.Add(copyCode);
+                Button copyDeviceLink = null!;
+                copyDeviceLink = Button("Copy link", "outline", () => this.CopyLinkAsync(copyDeviceLink, device.VerificationUri));
+                actions.Children.Add(copyDeviceLink);
                 actions.Children.Add(Button("Open authorization page", "primary", () => this.OpenBrowserAsync(device.VerificationUri)));
                 actions.Children.Add(Enabled(Button("Continue", "primary", () => this.RunActionAsync(device.Continue)), !this.Busy));
                 actions.Children.Add(Enabled(Button("Cancel connection", "outline", () => this.RunActionAsync(device.Cancel)), !this.Busy));
@@ -513,7 +517,9 @@ public sealed class InferenceSettingsEditor : UserControl
             case SetupBrowserAuthorization browser:
                 WrapPanel opening = new() { ItemSpacing = 12, LineSpacing = 8 };
                 opening.Children.Add(Button("Open authorization page", "primary", () => this.OpenBrowserAsync(browser.AuthorizationUri)));
-                opening.Children.Add(Button("Copy link", "outline", () => this.CopyLinkAsync(browser.AuthorizationUri)));
+                Button copyBrowserLink = null!;
+                copyBrowserLink = Button("Copy link", "outline", () => this.CopyLinkAsync(copyBrowserLink, browser.AuthorizationUri));
+                opening.Children.Add(copyBrowserLink);
                 view.Children.Add(opening);
                 view.Children.Add(AddressLine(browser.AuthorizationUri));
                 this.callback ??= new SetupFieldInput(browser.Callback, this.settings, this.manager, this.host, this.inputs, this.OnFieldEditedAsync,
@@ -754,9 +760,9 @@ public sealed class InferenceSettingsEditor : UserControl
         new(SetupActionState.Failed, [new(code, $"{what} ({error.GetType().Name}): {error.Message}")]);
 
     // The clipboard write needs no provider effect or host consent; the code is shown on screen already.
-    private Task CopyCodeAsync(string code) => this.closed ? Task.CompletedTask : this.host.CopyToClipboardAsync(this, code, "Sign-in code copied to clipboard.");
+    private Task CopyCodeAsync(Visual source, string code) => this.closed ? Task.CompletedTask : this.host.CopyToClipboardAsync(source, code);
 
-    private Task CopyLinkAsync(Uri address) => this.closed ? Task.CompletedTask : this.host.CopyToClipboardAsync(this, address.AbsoluteUri, "Sign-in link copied to clipboard.");
+    private Task CopyLinkAsync(Visual source, Uri address) => this.closed ? Task.CompletedTask : this.host.CopyToClipboardAsync(source, address.AbsoluteUri);
 
     // The sign-in page's address as selectable text, for a person whose browser did not open or who signs in on another device.
     private static StackPanel AddressLine(Uri address)

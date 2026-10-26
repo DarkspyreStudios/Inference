@@ -252,6 +252,6 @@ public sealed class StepActionTests
             ExecuteFailure is { } failure ? Task.FromException<SetupActionResult>(failure) : manager.RunAsync(settings, action.Id, progress, cancellationToken);
         public ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
         public Task RevealFolderAsync(string folder, CancellationToken cancellationToken) => Task.CompletedTask;
-        public Task CopyToClipboardAsync(global::Avalonia.Visual source, string text, string copied) => Task.CompletedTask;
+        public Task CopyToClipboardAsync(global::Avalonia.Visual source, string text) => Task.CompletedTask;
     }
 }

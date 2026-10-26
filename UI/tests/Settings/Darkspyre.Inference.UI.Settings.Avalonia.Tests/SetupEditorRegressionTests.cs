@@ -187,13 +187,15 @@ public sealed class SetupEditorRegressionTests
         Assert.Equal("ABCD-1234", EditorSession.All<SelectableTextBlock>(editor, "inference-settings-user-code").Single().Text);
         EditorSession.Click(EditorSession.Button(editor, "Copy code"));
         await EditorSession.WaitForAsync(() => host.Copies.Count == 2);
-        Assert.Equal(("ABCD-1234", "Sign-in code copied to clipboard."), host.Copies[1]);
+        Assert.Equal("ABCD-1234", host.Copies[1].Text);
+        Assert.IsType<global::Avalonia.Controls.Button>(host.Copies[1].Source);
 
         // The sign-in address shows as text and copies, for a browser that did not open.
         Assert.Equal("https://device.test/", EditorSession.All<SelectableTextBlock>(editor, "inference-settings-auth-link").Single().Text);
         EditorSession.Click(EditorSession.Button(editor, "Copy link"));
         await EditorSession.WaitForAsync(() => host.Copies.Count == 3);
-        Assert.Equal(("https://device.test/", "Sign-in link copied to clipboard."), host.Copies[2]);
+        Assert.Equal("https://device.test/", host.Copies[2].Text);
+        Assert.IsType<global::Avalonia.Controls.Button>(host.Copies[2].Source);
     });
 
     /// <summary>A device code is copied through the host the first time it is shown, not again on a redraw, and a new
@@ -216,7 +218,7 @@ public sealed class SetupEditorRegressionTests
 
         Assert.Equal("WXYZ-5678", EditorSession.All<SelectableTextBlock>(editor, "inference-settings-user-code").Single().Text);
         Assert.Equal(["ABCD-1234", "WXYZ-5678"], host.Copies.Select(copy => copy.Text));
-        Assert.All(host.Copies, copy => Assert.Equal("Sign-in code copied to clipboard.", copy.Copied));
+        Assert.All(host.Copies, copy => Assert.IsNotType<global::Avalonia.Controls.Button>(copy.Source));
     });
 
     [Fact]
@@ -393,10 +395,10 @@ public sealed class SetupEditorRegressionTests
             manager.RunAsync(settings, action.Id, progress, cancellationToken);
         public ValueTask OpenBrowserAsync(Uri uri, CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
         public Task RevealFolderAsync(string folder, CancellationToken cancellationToken) => Task.CompletedTask;
-        public List<(string Text, string Copied)> Copies { get; } = [];
-        public Task CopyToClipboardAsync(global::Avalonia.Visual source, string text, string copied)
+        public List<(string Text, global::Avalonia.Visual Source)> Copies { get; } = [];
+        public Task CopyToClipboardAsync(global::Avalonia.Visual source, string text)
         {
-            Copies.Add((text, copied));
+            Copies.Add((text, source));
             return Task.CompletedTask;
         }
     }

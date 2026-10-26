@@ -349,6 +349,6 @@ public sealed class InferenceSettingsEditorTests
             Revealed.Add(folder);
             return Task.CompletedTask;
         }
-        public Task CopyToClipboardAsync(global::Avalonia.Visual source, string text, string copied) => Task.CompletedTask;
+        public Task CopyToClipboardAsync(global::Avalonia.Visual source, string text) => Task.CompletedTask;
     }
 }
