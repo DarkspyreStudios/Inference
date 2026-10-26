@@ -5,7 +5,7 @@ using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen;
 
-/// <summary>Resolves complete Qwen 3.5 family GGUF packs through bounded metadata inspection, never weight loading. A Qwen3
+/// <summary>Resolves complete Qwen 3.5 family and Qwen 3.8 Flash Next GGUF packs through bounded metadata inspection, never weight loading. A Qwen3
 /// GGUF is reported Unsupported with the issue code <see cref="TensorInstalledPacks.RetiredArchitectureCode"/>.</summary>
 public sealed partial class QwenModelResolver : TensorModelResolver
 {
@@ -14,7 +14,12 @@ public sealed partial class QwenModelResolver : TensorModelResolver
     public QwenModelResolver(ITensorModelSource? source = null, ITensorArtifactReader? reader = null,
         GgmlRuntimeOwner? runtimeOwner = null) : base(source, reader) => _runtimeOwner = runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate();
     /// <inheritdoc />
-    public override IReadOnlyList<TensorArtifactRequirement> Requirements => [new("model", "*.gguf")];
+    public override IReadOnlyList<TensorArtifactRequirement> Requirements =>
+    [
+        new("model", "*.gguf"),
+        new(TensorLlmModels.VisionProjectorRole, string.Empty, IsOptional: true),
+        new(TensorLlmModels.MtpDraftRole, string.Empty, IsOptional: true)
+    ];
     /// <inheritdoc />
     public override string? AdditionalArtifactRolePrefix => "model-shard-";
     /// <inheritdoc />
@@ -22,7 +27,9 @@ public sealed partial class QwenModelResolver : TensorModelResolver
         primary[..(primary.LastIndexOf('/') + 1)] + Path.GetFileName(path);
     /// <inheritdoc />
     protected override IReadOnlyList<TensorSourceArtifact> SelectArtifacts(TensorModelCandidate candidate) =>
-        CompleteSet(candidate, candidate.Artifacts.Single(artifact => artifact.Path == candidate.Selection.Variant));
+        CompleteSet(candidate, candidate.Artifacts.Single(artifact => artifact.Path == candidate.Selection.Variant))
+            .Concat(QwenModelCompatibility.CompanionRoles.Where(candidate.ArtifactRoles.ContainsKey)
+                .Select(role => candidate.Artifacts.Single(artifact => artifact.Path == candidate.ArtifactRoles[role]))).ToArray();
 
     /// <inheritdoc />
     public override async Task<TensorModelResolution> ResolveCandidateAsync(TensorModelCandidate candidate, TensorBackendKind backend,
@@ -44,7 +51,8 @@ public sealed partial class QwenModelResolver : TensorModelResolver
         try
         {
             TensorSourceArtifact[] artifacts = CompleteSet(candidate, selected);
-            if (string.IsNullOrWhiteSpace(candidate.License) || artifacts.Any(artifact => artifact.Length is not > 0
+            TensorSourceArtifact[] allArtifacts = SelectArtifacts(candidate).ToArray();
+            if (string.IsNullOrWhiteSpace(candidate.License) || allArtifacts.Any(artifact => artifact.Length is not > 0
                 || string.IsNullOrWhiteSpace(artifact.Provenance.License) || artifact.Sha256 is not { Length: 64 } hash || !hash.All(Uri.IsHexDigit)))
             { return Failure(TensorCompatibilityState.Unverified, "pack-metadata-incomplete", "Every artifact needs a pinned source, length, SHA-256 and license before resolution."); }
             var metadataReader = new TensorMetadataReader(reader);
@@ -57,12 +65,28 @@ public sealed partial class QwenModelResolver : TensorModelResolver
                 if (headers.Count == 1 && header.Values.GetValueOrDefault("general.architecture") is "qwen3")
                 { return Failure(TensorCompatibilityState.Unsupported, TensorInstalledPacks.RetiredArchitectureCode, TensorLlmModels.Qwen3RetiredReason); }
             }
-            TensorModelArtifactDefinition[] manifest = artifacts.Select((artifact, index) => TensorResolvedPack.Artifact(artifact,
-                index == 0 ? "model" : $"model-shard-{index + 1}", artifact.Path)).ToArray();
+            var companionHeaders = new Dictionary<string, GgufHeader>(StringComparer.Ordinal);
+            var manifest = artifacts.Select((artifact, index) => TensorResolvedPack.Artifact(artifact,
+                index == 0 ? "model" : $"model-shard-{index + 1}", artifact.Path)).ToList();
+            foreach (string role in QwenModelCompatibility.CompanionRoles.Where(candidate.ArtifactRoles.ContainsKey))
+            {
+                TensorSourceArtifact artifact = allArtifacts.Single(item => item.Path == candidate.ArtifactRoles[role]);
+                GgufHeader header = await metadataReader.ReadAsync(artifact, stream => GgufHeader.Read(stream), cancellationToken).ConfigureAwait(false);
+                companionHeaders.Add(role, header);
+                evidence.Add(new(artifact.Path, "gguf-header", $"GGUF {header.Version}; {header.Tensors.Count} tensors; {header.DataOffset} header/alignment bytes."));
+                manifest.Add(TensorResolvedPack.Artifact(artifact, role, artifact.Path));
+            }
+            IReadOnlySet<TensorBackendKind> backends = QwenModelCompatibility.BackendsFor(manifest.Select(artifact => artifact.Role));
+            if (!compatible.Any(backends.Contains))
+                return Failure(TensorCompatibilityState.Unsupported, "backend-unsupported",
+                    "This backend cannot run the pack's companion files. A vision projector needs a GGML backend or the managed CPU; an MTP draft needs a GGML backend.");
             TensorModelPackDefinition definition = TensorResolvedPack.Create(candidate with { Selection = candidate.Selection with { Variant = artifacts[0].Path } }, TensorCapability.Llm,
-                TensorLlmModels.QwenRuntimeArchitecture, TensorLlmModels.Backends, manifest);
+                TensorLlmModels.QwenRuntimeArchitecture, backends, manifest.ToArray());
             QwenModelCompatibility.Validate(definition);
-            QwenModelCompatibility.ValidateHeaders(headers, definition);
+            QwenModelCompatibility.ValidateHeaders(headers, companionHeaders, definition);
+            foreach (string role in companionHeaders.Keys)
+                evidence.Add(new(candidate.ArtifactRoles[role], "qwen-companion", role == TensorLlmModels.VisionProjectorRole
+                    ? "vision-projector: CLIP projector accepted" : "mtp-draft: one-layer NextN draft accepted"));
             string architecture = QwenModelCompatibility.ArchitectureOf(headers[0].Header.Values);
             evidence.Add(new(artifacts[0].Path, "qwen-schema", $"Complete {architecture} tensor, tokenizer, chat-template, dimension, quantization and shard schema accepted by the loading policy."));
             evidence.Add(new(artifacts[0].Path, "context-length", Convert.ToString(headers[0].Header.Values[$"{architecture}.context_length"], CultureInfo.InvariantCulture)!));

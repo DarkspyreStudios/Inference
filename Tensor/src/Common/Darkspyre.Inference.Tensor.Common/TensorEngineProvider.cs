@@ -82,7 +82,11 @@ public interface ITensorEngineProvider
     /// Creates an instance over the host's pack manager. The instance implements the engine's typed
     /// capability interface. Creation does not Start, Load, download or run inference.
     /// </summary>
-    ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend);
+    /// <param name="packs">The host's pack manager.</param>
+    /// <param name="backend">The requested execution backend.</param>
+    /// <param name="scratchDirectory">An absolute folder the host owns and empties before the instance runs, where the instance
+    /// may write temporary files while a model is loaded. An engine that writes none ignores it.</param>
+    ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend, string scratchDirectory);
 
     /// <summary>
     /// Creates the engine's settings manager through its existing setup factory. The live instance is

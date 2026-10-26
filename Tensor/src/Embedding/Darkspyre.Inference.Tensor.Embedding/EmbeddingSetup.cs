@@ -122,7 +122,7 @@ public sealed class EmbeddingEngineProvider(GgmlRuntimeOwner runtimeOwner) : ITe
     }
 
     /// <inheritdoc />
-    public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend) =>
+    public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend, string scratchDirectory) =>
         new TensorEmbeddingInference(packs, backend, runtimeOwner);
 
     /// <inheritdoc />

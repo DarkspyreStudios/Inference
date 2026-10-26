@@ -308,11 +308,13 @@ A provider exposes four operations:
   Qwen3-Embedding GGUF. `TensorInstalledPacks.ListAsync` lists those packs after the offered models
   as `NotSupported` with `TensorListedModel.UnsupportedReason`; their status card offers only
   Delete download.
-- `CreateInstance(packs, backend)` constructs the engine with its own execution coordinator. The
+- `CreateInstance(packs, backend, scratchDirectory)` constructs the engine with its own execution coordinator. The
   returned `ITensorModelInstance` also implements the engine's capability interface:
   `ITensorLlmInference`, `ITensorImageInference`, `ITensorDecisionInference` or
   `ITensorSpeechToTextInference`. Creation does not Start, Load or download anything. The engines'
-  public constructors remain available for compositions that supply their own coordinator.
+  public constructors remain available for compositions that supply their own coordinator. The host owns
+  an absolute scratch directory and empties it before the instance runs. Qwen writes request images
+  beneath it; engines that write no temporary files ignore it.
 - `CreateSettingsManager(target, packs, models, instance, source, reader, backendProbe)` delegates to the
   engine's `*Setup.CreateSettingsManager`. `models` is the host's live `ITensorModelList` of this family's
   models in the model store; the editor follows it. The instance is optional. A supplied instance must
@@ -366,7 +368,7 @@ if (registry.TryGetProvider(savedConfiguration.ImplementationId, out ITensorEngi
             installed, savedDefinition);
     }
     var packs = new TensorModelPackManager(new TensorModelCatalog(listing.Models.Select(model => model.Definition)), folder);
-    ITensorModelInstance instance = provider.CreateInstance(packs, savedConfiguration.Backend);
+    ITensorModelInstance instance = provider.CreateInstance(packs, savedConfiguration.Backend, hostScratchDirectory);
     // A host with a live model store implements ITensorModelList and raises Changed after each new report.
     TensorSettingsManager manager = provider.CreateSettingsManager(commitTarget, packs, TensorModelList.Fixed(listing), instance);
 }
@@ -571,8 +573,8 @@ and provenance use the resident pack's actual key. The host can Unload and then 
 compatible pack on the same instance; Stop remains terminal.
 
 Qwen targets `TensorLlmModels.QwenRuntimeArchitecture`: the Qwen 3.5 family GGUF architectures
-`qwen35`, `qwen35moe` and `qwen3next`, which mixes full-attention layers with GatedDeltaNet
-recurrent layers. Other TensorSharp architectures, including `qwen4exp`, are not loaded. A `qwen3`
+`qwen35`, `qwen35moe` and `qwen3next`, and Qwen 3.8 Flash Next (`qwen4exp`). They mix full-attention
+layers with GatedDeltaNet recurrent layers. A `qwen3`
 GGUF is reported Unsupported with `TensorLlmModels.Qwen3RetiredReason`. A request with stop
 sequences is rejected as UnsupportedFeature, and `MaxStopSequences` is zero. Its loader
 checks the installed GGUF architecture/version, tokenizer and chat metadata, dimensions, storage
@@ -595,7 +597,30 @@ events. `SupportsToolUse` is `Supported`: request tools pass to TensorSharp, and
 their tool calls and text tool results. `ToolChoice` and `AllowParallelToolCalls` fail as unsupported
 features, and a binary tool-result part fails as well. `ReasoningLevels` is `None` (thinking off) and
 `High` (thinking on). With structured output and thinking on, the schema's grammar starts after the
-thinking block. Image input is off.
+thinking block. Image input is supported only for the loaded model when its vision tower loaded.
+
+Qwen packs have one `model`, any numbered `model-shard-N` artifacts, and optional `vision-projector`
+and `mtp-draft` GGUF artifacts. Companions are accepted only on a `qwen4exp` trunk. The projector
+must name the `clip` architecture. The draft must be a single `qwen4exp` GGUF with one NextN layer.
+A projector pack offers managed CPU and the four GGML backends. A draft pack, with or without a
+projector, offers only GGML CPU, Metal, CUDA and Vulkan. A pack without companions keeps the usual
+backend set. Undefined tensor types are refused with the tensor's name and GGML type number.
+
+A draft enables TensorSharp speculation through the scheduler. Its path is set in `TS_SPEC_DRAFT_MODEL`
+only during load, under a process-wide lock, and cleared afterwards. TensorSharp's cost governor
+parks drafting while it loses. Prefix-cached turns decode plainly. Greedy parity with plain decoding
+holds on GGML CPU and CUDA; Metal can choose another token near a tie.
+
+TensorSharp plans expert placement automatically; the GPU expert cache stays off. Qwen reads the
+pinned runtime's `_expertOnHost` plan through `QwenExpertPlacement`. Loaded status and observation
+carry `TensorExpertPlacement`, and the settings show the number of layers whose experts stay on the
+GPU. Unload clears that observation. CPU and other architectures report no placement.
+
+`QwenImageFiles` stores PNG and JPEG attachments by their byte hash in a per-load `qwen-images-<guid>`
+folder under the host's scratch directory. Attachment names never enter paths. Repeated image bytes
+reuse a path for TensorSharp's embedding cache. Unload and failed-load cleanup delete the folder.
+Other image encodings fail before streaming. The prompt estimate uses the GGUF template when the
+architecture has no protocol renderer; qwen4exp context fit includes QSA indexer cache bytes.
 
 Qwen's hosted-tool capability set is empty. Supplied `HostedTools` or `MaxHostedTurns` fails as
 `UnsupportedFeature` before model/runtime materialization; client functions remain a separate lane.
@@ -739,6 +764,10 @@ from visible pinned defaults or explicit compatible locations. The encoder/VAE h
 schema. The tokenizer must match the known supported vocabulary's pinned length and SHA-256;
 installation verifies its bytes. Same-schema DiT fine-tunes resolve under their own keys; arbitrary
 encoder/tokenizer/VAE substitutions are not advertised as supported.
+
+`TensorArtifactRequirement.IsOptional` leaves a companion out when it has no explicit location,
+folder match or default. Optional companion location fields say so in their help text. Qwen's two
+optional companions have no conventional folder filename and require an explicit location.
 
 `TensorMetadataReader` bridges the existing format parsers to cached 64 KiB source ranges on a
 worker thread. Each format inspection has a 16 MiB parser-read bound and a complete resolution has

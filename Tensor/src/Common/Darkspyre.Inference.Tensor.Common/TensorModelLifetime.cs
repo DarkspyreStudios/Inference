@@ -18,6 +18,7 @@ public sealed class TensorModelLifetime : IDisposable
     private int _unloading;
     private TensorModelKey? _model;
     private TensorBackendKind? _backend;
+    private TensorExpertPlacement? _expertPlacement;
     private TensorModelObservation _observation = new(null, null, TensorEngineState.Unloaded, DateTimeOffset.UtcNow);
 
     /// <summary>Creates a lifetime with no resident model, in the Unloaded state.</summary>
@@ -96,8 +97,8 @@ public sealed class TensorModelLifetime : IDisposable
         return new GateLease(this, reopenRequests: false);
     }
 
-    /// <summary>Records <paramref name="model"/> on <paramref name="backend"/> as resident and opens it to requests. Throws when a model is already loaded.</summary>
-    public void MarkLoaded(TensorModelKey model, TensorBackendKind backend)
+    /// <summary>Records <paramref name="model"/> on <paramref name="backend"/> as resident, with its expert placement when the engine reports one, and opens it to requests. Throws when a model is already loaded.</summary>
+    public void MarkLoaded(TensorModelKey model, TensorBackendKind backend, TensorExpertPlacement? expertPlacement = null)
     {
         ArgumentNullException.ThrowIfNull(model);
         if (_requestAbort is not null)
@@ -108,6 +109,7 @@ public sealed class TensorModelLifetime : IDisposable
         Volatile.Write(ref _requestAbort, new CancellationTokenSource());
         _model = model;
         _backend = backend;
+        _expertPlacement = expertPlacement;
         Observe(Observation.State);
     }
 
@@ -181,6 +183,7 @@ public sealed class TensorModelLifetime : IDisposable
         Volatile.Write(ref _requestAbort, null);
         _model = null;
         _backend = null;
+        _expertPlacement = null;
         Observe(Observation.State);
     }
 
@@ -241,7 +244,7 @@ public sealed class TensorModelLifetime : IDisposable
     }
 
     private void Observe(TensorEngineState state) =>
-        Volatile.Write(ref _observation, new(_model, _backend, state, DateTimeOffset.UtcNow));
+        Volatile.Write(ref _observation, new(_model, _backend, state, DateTimeOffset.UtcNow, _expertPlacement));
 
     private static InferenceException ModelUnavailable() =>
         new(InferenceFailureCode.ModelUnavailable, "No tensor model is available for this request.");

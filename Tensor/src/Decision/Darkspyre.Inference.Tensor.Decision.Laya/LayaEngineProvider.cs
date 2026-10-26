@@ -29,7 +29,7 @@ public sealed class LayaEngineProvider : ITensorEngineProvider
     }
 
     /// <inheritdoc />
-    public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend) =>
+    public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend, string scratchDirectory) =>
         new LayaDecisionInference(packs, backend);
 
     /// <inheritdoc />

@@ -48,7 +48,7 @@ public sealed class GemmaEmbeddingEngineProvider : ITensorEngineProvider
     }
 
     /// <inheritdoc />
-    public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend) =>
+    public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend, string scratchDirectory) =>
         new GemmaEmbeddingInference(packs, backend);
 
     /// <inheritdoc />

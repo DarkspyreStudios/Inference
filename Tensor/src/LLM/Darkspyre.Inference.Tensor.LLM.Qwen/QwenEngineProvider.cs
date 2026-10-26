@@ -28,8 +28,8 @@ public sealed class QwenEngineProvider(GgmlRuntimeOwner? runtimeOwner = null) : 
     }
 
     /// <inheritdoc />
-    public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend) =>
-        new QwenLlmInference(packs, backend, runtimeOwner: _runtimeOwner);
+    public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend, string scratchDirectory) =>
+        new QwenLlmInference(packs, backend, scratchDirectory, runtimeOwner: _runtimeOwner);
 
     /// <inheritdoc />
     public TensorSettingsManager CreateSettingsManager(ISetupCommitTarget<TensorSetupChanges> target, ITensorModelPackManager packs,

@@ -128,7 +128,7 @@ public sealed class QwenPackSelectionTests : IDisposable
         await packs.InstallAsync(pack.Key);
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var runtime = new Runtime { BeforeCompletionWait = completion.Task };
-        await using var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu);
+        await using var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu, _root);
         await engine.LoadAndWaitAsync(pack.Key);
 
         await using (IAsyncEnumerator<LlmStreamEvent> stream = engine.StreamAsync(Request(pack.Key.ModelId)).GetAsyncEnumerator())
@@ -167,7 +167,7 @@ public sealed class QwenPackSelectionTests : IDisposable
         var http = new HttpClient(new Handler());
         TensorModelPackManager packs = Manager(http, pack);
         await packs.InstallAsync(pack.Key);
-        var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu);
+        var engine = new QwenLlmInference(packs, runtime, TensorBackendKind.Cpu, _root);
         await engine.LoadAndWaitAsync(pack.Key);
         return (engine, packs, pack.Key.ModelId);
     }
@@ -195,6 +195,8 @@ public sealed class QwenPackSelectionTests : IDisposable
     {
         public List<TensorModelKey> Keys { get; } = [];
         public string? Architecture { get; init; } = "qwen35";
+        public bool VisionEncoderLoaded { get; init; }
+        public TensorExpertPlacement? ExpertPlacement { get; init; }
         public IReadOnlyList<string> Pieces { get; init; } = ["hello"];
         public Task? BeforeCompletionWait { get; init; }
         public bool IgnoreCompletionCancellation { get; init; }

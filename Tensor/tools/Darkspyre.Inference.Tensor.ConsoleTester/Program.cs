@@ -119,7 +119,11 @@ internal static class Program
         }
 
         GgmlRuntimeOwner runtime = GgmlRuntimeOwner.GetOrCreate();
-        var engine = new QwenLlmInference(packs, options.Backend, runtimeOwner: runtime);
+        string scratch = Path.Combine(Path.GetTempPath(), "darkspyre-qwen-console-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(scratch);
+        var engine = new QwenLlmInference(packs, options.Backend, scratch, runtimeOwner: runtime);
+        try
+        {
         return await RunOwnedEngineAsync(async () =>
         {
             await AwaitStateAsync(engine, () => engine.StartAsync(cancellationToken), TensorEngineState.Started);
@@ -132,6 +136,8 @@ internal static class Program
             var suite = new QwenSuite(engine, model.Id);
             return await suite.RunAsync(options, cancellationToken) ? 0 : 1;
         }, engine, runtime);
+        }
+        finally { Directory.Delete(scratch, recursive: true); }
     }
 
     internal static async Task<int> RunOwnedEngineAsync(Func<Task<int>> run, IAsyncDisposable engine,

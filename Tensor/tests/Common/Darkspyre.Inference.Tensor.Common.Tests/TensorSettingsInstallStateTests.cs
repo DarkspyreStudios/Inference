@@ -203,6 +203,21 @@ public sealed class TensorSettingsInstallStateTests : IDisposable
         Assert.Contains("13 B;", contents, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task ExpertPlacementShowsOnlyWhenTheInstanceReportsIt()
+    {
+        using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, Store));
+        var manager = new TensorSettingsManager(Setup, new NoSave(), new TestList(new("/models", [], null)), packs);
+        TensorSettings settings = await manager.OpenAsync(NewEntry());
+        Assert.DoesNotContain(Fields(settings), field => field.Description.Id == "expert-placement");
+        settings.InstanceObservation = new(new("test/model", "test"), TensorBackendKind.GgmlCuda,
+            TensorEngineState.Loaded, DateTimeOffset.UtcNow, new(11, 48));
+        SetupTextField placement = Assert.IsType<SetupTextField>(Fields(settings).Single(field => field.Description.Id == "expert-placement"));
+        Assert.Equal("Routed experts of 11 of 48 layers are on the GPU; the other 37 run on the CPU from the model file.", placement.Value);
+        settings.InstanceObservation = new(null, null, TensorEngineState.Unloaded, DateTimeOffset.UtcNow);
+        Assert.DoesNotContain(Fields(settings), field => field.Description.Id == "expert-placement");
+    }
+
     private static SetupConfigurationIdentity NewEntry() => new(SetupChangeIntent.Create, Guid.NewGuid().ToString("N"), null);
 
     private static void Select(TensorSettings settings, TensorModelPackDefinition model) =>

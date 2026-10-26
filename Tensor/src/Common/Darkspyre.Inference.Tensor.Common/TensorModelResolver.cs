@@ -82,6 +82,7 @@ public abstract class TensorModelResolver : ITensorModelResolver
                     artifact = artifact with { Path = CompanionPath(requirement.Role, artifact.Path, candidate.Selection.Variant) };
                     artifacts.Add(artifact);
                 }
+                if (artifact is null && requirement.IsOptional) { continue; }
                 if (artifact is null)
                     throw new TensorSourceException(TensorSourceState.Unverified, "companion-missing", $"Select a location for the required '{requirement.Role}' artifact.");
                 roles.Add(requirement.Role, artifact.Path);

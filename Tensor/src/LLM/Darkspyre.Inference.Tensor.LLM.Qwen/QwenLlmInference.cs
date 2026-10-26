@@ -29,6 +29,8 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
     private readonly TensorModelLifetime _lifetime;
     private readonly IQwenModelRuntime _runtime;
     private readonly GgmlRuntimeOwner _runtimeOwner;
+    private readonly string _scratchDirectory;
+    private QwenImageFiles? _images;
     private TensorModelPackLease? _modelLease;
     private TensorBackendKind? _loadedBackend;
     private readonly object _stopGate = new();
@@ -38,19 +40,21 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
     private Task? _stopAttempt;
     private Task? _disposal;
 
-    /// <summary>Creates an instance that loads packs from <paramref name="packs"/> on the requested backend. Without a coordinator it creates and owns its own; without a runtime owner it uses the shared one.</summary>
+    /// <summary>Creates an instance that loads packs on the requested backend and writes request images under
+    /// <paramref name="scratchDirectory"/>. Without a coordinator it creates and owns its own; without a runtime owner it uses the shared one.</summary>
     public QwenLlmInference(
         ITensorModelPackManager packs,
-        TensorBackendKind backend = TensorBackendKind.Auto,
+        TensorBackendKind backend, string scratchDirectory,
         TensorExecutionCoordinator? coordinator = null, GgmlRuntimeOwner? runtimeOwner = null)
-        : this(packs, new QwenModelRuntime(), backend, coordinator, runtimeOwner) { }
+        : this(packs, new QwenModelRuntime(), backend, scratchDirectory, coordinator, runtimeOwner) { }
 
     internal QwenLlmInference(ITensorModelPackManager packs, IQwenModelRuntime runtime,
-        TensorBackendKind backend = TensorBackendKind.Auto, TensorExecutionCoordinator? coordinator = null,
+        TensorBackendKind backend, string scratchDirectory, TensorExecutionCoordinator? coordinator = null,
         GgmlRuntimeOwner? runtimeOwner = null)
     {
         ArgumentNullException.ThrowIfNull(packs);
         ArgumentNullException.ThrowIfNull(runtime);
+        _scratchDirectory = scratchDirectory;
         _packs = packs;
         _runtime = runtime;
         _runtimeOwner = runtimeOwner ?? GgmlRuntimeOwner.GetOrCreate();
@@ -72,7 +76,10 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         ThrowIfDisposed();
         cancellationToken.ThrowIfCancellationRequested();
         await ValidateModelIdAsync(modelId, cancellationToken).ConfigureAwait(false);
-        return new LlmCapabilities
+        return CapabilitiesFor(modelId);
+    }
+
+    private LlmCapabilities CapabilitiesFor(string? modelId) => new()
         {
             OutputLimitEnforcement = LlmOutputLimitEnforcement.EngineEnforced,
             SupportsStreaming = InferenceSupport.Supported,
@@ -90,10 +97,10 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             SupportsFrequencyPenalty = InferenceSupport.Supported,
             SupportsToolUse = InferenceSupport.Supported,
             Tools = new() { SupportsParallelCalls = InferenceSupport.Supported },
-            SupportsPromptImages = InferenceSupport.Unsupported,
+            SupportsPromptImages = _definition is not null && (modelId is null || modelId == _definition.Key.ModelId)
+                && _runtime.VisionEncoderLoaded ? InferenceSupport.Supported : InferenceSupport.Unsupported,
             SupportsPromptDocuments = InferenceSupport.Unsupported
         };
-    }
 
     /// <summary>Qwen reads its local model packs on every call and keeps no list.</summary>
     public Task<IReadOnlyList<LlmModelInfo>> RefreshModelsAsync(CancellationToken cancellationToken = default) =>
@@ -104,15 +111,18 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
-        LlmCapabilities capabilities = await GetCapabilitiesAsync(cancellationToken: cancellationToken)
-            .ConfigureAwait(false);
-        return (await _packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false)).Where(definition => definition.Capability == TensorCapability.Llm
-            && definition.RuntimeArchitecture == TensorLlmModels.QwenRuntimeArchitecture).Select(definition =>
-            new LlmModelInfo(definition.Key.ModelId, definition.Key.ModelId, "Qwen", capabilities)
+        var models = new List<LlmModelInfo>();
+        foreach (TensorModelPackDefinition definition in await _packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false))
+        {
+            if (definition.Capability != TensorCapability.Llm || definition.RuntimeArchitecture != TensorLlmModels.QwenRuntimeArchitecture) continue;
+            models.Add(new LlmModelInfo(definition.Key.ModelId, definition.Key.ModelId, "Qwen",
+                CapabilitiesFor(definition.Key.ModelId))
             {
                 // Qwen declares no separate output limit: a reply can use whatever context is left.
                 MaxContextTokens = definition.Key == _definition?.Key ? _runtime.ContextLength : null
-            }).ToArray();
+            });
+        }
+        return models;
     }
 
     /// <inheritdoc />
@@ -145,6 +155,8 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
         await using TensorModelLifetime.ExecutionLease modelUse = await _lifetime.EnterExecutionAsync(urgent: false, cancellationToken)
             .ConfigureAwait(false);
         await ValidateModelIdAsync(request.ModelId, cancellationToken).ConfigureAwait(false);
+        if (request.Messages.Any(message => message.Attachments.Count > 0) && !_runtime.VisionEncoderLoaded)
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "This Qwen model has no vision projector, so it accepts text and no images.");
         TensorModelPackDefinition definition = _definition!;
         CancellationToken executionToken = modelUse.CancellationToken;
         TensorBackendKind backend = _loadedBackend
@@ -154,7 +166,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             backend,
             executionToken).ConfigureAwait(false);
         using var session = new ChatSession();
-        List<ChatMessage> messages = BuildMessages(request);
+        List<ChatMessage> messages = BuildMessages(request, _images!);
         List<ToolFunction>? tools = BuildTools(request.Tools);
         bool thinking = request.ReasoningLevel == LlmReasoningLevel.High;
         StructuredOutputFormat? format = CreateStructuredFormat(request.StructuredOutput);
@@ -445,11 +457,12 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             _modelLease = lease;
             await _runtime.LoadAsync(definition, lease, BackendName(backend), cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            _lifetime.MarkLoaded(definition.Key, backend);
+            _images = QwenImageFiles.Create(_scratchDirectory);
+            _lifetime.MarkLoaded(definition.Key, backend, _runtime.ExpertPlacement);
             _modelLease = lease;
             _loadedBackend = backend;
             _definition = definition;
-            return new TensorEngineStatus(definition.Key, backend, TensorEngineState.Loaded, DateTimeOffset.UtcNow);
+            return new TensorEngineStatus(definition.Key, backend, TensorEngineState.Loaded, DateTimeOffset.UtcNow, ExpertPlacement: _runtime.ExpertPlacement);
         }
         catch (OperationCanceledException error)
         {
@@ -466,7 +479,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
                     InvalidDataException or IOException or OverflowException or FormatException => InferenceFailureCode.ModelCorrupt,
                     _ => InferenceFailureCode.BackendUnavailable
                 },
-                $"TensorSharp could not load Qwen on backend '{backend}'.",
+                $"TensorSharp could not load Qwen on backend '{backend}': {(exception is AggregateException aggregate ? aggregate.InnerExceptions[0].Message : exception.Message)}",
                 exception);
         }
     }
@@ -480,6 +493,8 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             _runtime.Unload();
             await lease.DisposeAsync().ConfigureAwait(false);
             _modelLease = null;
+            _images?.Dispose();
+            _images = null;
             _releaseRequired = false;
         }
         catch (Exception cleanup)
@@ -586,6 +601,8 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             _runtime.Unload();
             await _modelLease.DisposeAsync().ConfigureAwait(false);
             _modelLease = null;
+            _images?.Dispose();
+            _images = null;
             _loadedBackend = null;
             _definition = null;
             _releaseRequired = false;
@@ -656,7 +673,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
                 request.Schema.GetRawText(),
                 description: request.Description);
 
-    private static List<ChatMessage> BuildMessages(LlmInferenceRequest request)
+    private static List<ChatMessage> BuildMessages(LlmInferenceRequest request, QwenImageFiles images)
     {
         var messages = new List<ChatMessage>(request.Messages.Count + (request.Instructions is null ? 0 : 1));
         if (!string.IsNullOrWhiteSpace(request.Instructions))
@@ -672,6 +689,7 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
                 {
                     Role = message.Role,
                     Content = message.Content,
+                    ImagePaths = message.Attachments.Count == 0 ? null : message.Attachments.Cast<LlmAttachment>().Select(images.Write).ToList(),
                     ToolCalls = message.ToolCalls.Count == 0 ? null : message.ToolCalls.Cast<LlmToolCall>().Select((call, index) => new ToolCall
                     {
                         Id = call.Id,
@@ -802,8 +820,9 @@ public sealed partial class QwenLlmInference : ITensorLlmInference
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen does not support a tool choice or parallel-call control.");
         }
 
-        if (request.Messages.Any(static message => message.Attachments.Count > 0
-            || message.ToolResults.Any(static result => result is LlmToolResult function
+        if (request.Messages.Any(static message => message.Attachments.Any(attachment => attachment is not LlmAttachment { Kind: LlmBinaryKind.Image })))
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen accepts image attachments only.");
+        if (request.Messages.Any(static message => message.ToolResults.Any(static result => result is LlmToolResult function
                 && function.Output.Parts.Any(static part => part is LlmToolOutputSessionResource))))
         {
             throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "Qwen accepts text messages only.");

@@ -130,7 +130,11 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
             HelpText = "Supported backend names are not a hardware availability guarantee. Load confirms actual runtime availability." },
             _backend.ToString(), TensorBackendKind.Auto.ToString(), SelectBackend, false),
         Observation("backend-availability", "Backend availability",
-            BackendAvailability?.Reason ?? "Unknown. Run Check backend prerequisites explicitly.")
+            BackendAvailability?.Reason ?? "Unknown. Run Check backend prerequisites explicitly."),
+        .. InstanceObservation?.ExpertPlacement is not { } placement ? Array.Empty<SetupField>()
+            : [Observation("expert-placement", "Experts on the GPU", placement.AcceleratorLayers == placement.Layers
+                ? $"Routed experts of all {placement.Layers} layers are on the GPU."
+                : $"Routed experts of {placement.AcceleratorLayers} of {placement.Layers} layers are on the GPU; the other {placement.Layers - placement.AcceleratorLayers} run on the CPU from the model file.")]
         ]),
         new("model-definition", "Model definition (what the pack contains, not whether it is downloaded)", [
         Observation("pack-details", "Contents", selection is null ? "No resolved pack selected."
@@ -169,7 +173,9 @@ public sealed class TensorSettings : InferenceSettings<TensorSetupChanges>
                 elsewhere.AddRange(_requirements.Skip(1).Select(requirement => (SetupField)
                     new SetupTextField(new("companion-" + requirement.Role, requirement.Role + " location")
                     {
-                        HelpText = "Optional absolute file path or HTTPS URL override. Folder filename: " + requirement.FileName
+                        HelpText = requirement.IsOptional
+                            ? "Optional. Absolute file path or HTTPS URL." + (requirement.FileName.Length == 0 ? string.Empty : $" Folder filename: {requirement.FileName}.")
+                            : "Optional absolute file path or HTTPS URL override. Folder filename: " + requirement.FileName
                             + (requirement.Default is null ? ". Otherwise provide this artifact explicitly." : ". Default: " + requirement.Default.Location)
                     }, _companions.GetValueOrDefault(requirement.Role, string.Empty), string.Empty,
                         value => EditSource("companion-" + requirement.Role, value), pathSelection: SetupPathSelectionKind.File)));

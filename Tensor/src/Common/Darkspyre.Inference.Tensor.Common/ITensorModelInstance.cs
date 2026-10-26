@@ -23,6 +23,11 @@ public enum TensorEngineState
     Failed
 }
 
+/// <summary>Where a mixture-of-experts model's routed experts run, counted in whole layers.</summary>
+/// <param name="AcceleratorLayers">Layers whose routed experts stay on the GPU.</param>
+/// <param name="Layers">All layers with routed experts.</param>
+public sealed record TensorExpertPlacement(int AcceleratorLayers, int Layers);
+
 /// <summary>
 /// One lifecycle transition. <see cref="Model"/> and <see cref="Backend"/> name the model and backend
 /// the transition concerns; <see cref="Error"/> is set only for <see cref="TensorEngineState.Failed"/>.
@@ -32,16 +37,20 @@ public enum TensorEngineState
 /// <param name="State">The lifecycle state after the transition.</param>
 /// <param name="At">When the transition happened.</param>
 /// <param name="Error">The failure, set only for a failed state.</param>
+/// <param name="ExpertPlacement">Where the loaded model's experts run; set only on Loaded by an engine that plans it.</param>
 public sealed record TensorEngineStatus(
-    TensorModelKey? Model, TensorBackendKind? Backend, TensorEngineState State, DateTimeOffset At, Exception? Error = null);
+    TensorModelKey? Model, TensorBackendKind? Backend, TensorEngineState State, DateTimeOffset At, Exception? Error = null,
+    TensorExpertPlacement? ExpertPlacement = null);
 
 /// <summary>The instance's resident model, its backend and its latest lifecycle state.</summary>
 /// <param name="Model">The resident model, or null when none is loaded.</param>
 /// <param name="Backend">The backend of the resident model, or null when none is loaded.</param>
 /// <param name="State">The latest lifecycle state.</param>
 /// <param name="ObservedAt">When the state was observed.</param>
+/// <param name="ExpertPlacement">Where the resident model's experts run, or null when the engine does not report it.</param>
 public sealed record TensorModelObservation(
-    TensorModelKey? Model, TensorBackendKind? Backend, TensorEngineState State, DateTimeOffset ObservedAt);
+    TensorModelKey? Model, TensorBackendKind? Backend, TensorEngineState State, DateTimeOffset ObservedAt,
+    TensorExpertPlacement? ExpertPlacement = null);
 
 /// <summary>An in-process tensor engine whose model lifetime is controlled by its host.</summary>
 /// <remarks>

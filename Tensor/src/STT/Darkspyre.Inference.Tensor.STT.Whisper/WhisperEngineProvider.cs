@@ -28,7 +28,7 @@ public sealed class WhisperEngineProvider : ITensorEngineProvider
     }
 
     /// <inheritdoc />
-    public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend) =>
+    public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend, string scratchDirectory) =>
         new WhisperSpeechToTextInference(packs, backend);
 
     /// <inheritdoc />

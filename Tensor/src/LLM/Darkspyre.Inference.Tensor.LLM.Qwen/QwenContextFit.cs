@@ -33,7 +33,22 @@ internal static class QwenContextFit
         int keyLength = Number(header, $"{arch}.attention.key_length", hidden / heads);
         int valueLength = Number(header, $"{arch}.attention.value_length", keyLength);
         long fullLayers = QwenModelCompatibility.FullAttentionLayers(header, arch, layers);
-        return checked(fullLayers * kvHeads * (keyLength + valueLength) * 2L);
+        long bytes = checked(fullLayers * kvHeads * (keyLength + valueLength) * 2L);
+        if (arch != "qwen4exp") return bytes;
+        int indexerLength = Number(header, $"{arch}.attention.indexer.key_length", 0);
+        if (Number(header, $"{arch}.attention.indexer.head_count", 0) <= 0 || indexerLength <= 0) return bytes;
+        Array? recurrent = header.GetValueOrDefault($"{arch}.attention.recurrent_layers") as Array;
+        Array? ratios = header.GetValueOrDefault($"{arch}.attention.compress_ratios") as Array;
+        int interval = Number(header, $"{arch}.full_attention_interval", 4);
+        int qsaLayers = 0;
+        for (int layer = 0; layer < layers; layer++)
+        {
+            bool full = recurrent?.Length == layers ? Convert.ToUInt32(recurrent.GetValue(layer), CultureInfo.InvariantCulture) == 0
+                : (layer + 1) % interval == 0;
+            if (full && ratios is not null && layer < ratios.Length && Convert.ToUInt32(ratios.GetValue(layer), CultureInfo.InvariantCulture) > 0)
+                qsaLayers++;
+        }
+        return checked(bytes + qsaLayers * indexerLength * 2L);
     }
 
     /// <summary>

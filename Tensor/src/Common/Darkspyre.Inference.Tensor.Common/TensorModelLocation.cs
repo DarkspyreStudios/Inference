@@ -30,9 +30,10 @@ public sealed record TensorArtifactLocation(string Role, TensorModelLocation Loc
 
 /// <summary>Family-owned role and conventional folder filename. Defaults remain visible acquisition inputs.</summary>
 /// <param name="Role">The role the family assigns to the artifact.</param>
-/// <param name="FileName">The conventional file name of the artifact in a model folder.</param>
+/// <param name="FileName">The conventional file name in a model folder; empty when a folder never supplies it.</param>
 /// <param name="Default">The default location to acquire the artifact from, or null when there is none.</param>
-public sealed record TensorArtifactRequirement(string Role, string FileName, TensorArtifactLocation? Default = null);
+/// <param name="IsOptional">True when a pack is complete without this artifact; no location, folder match or default leaves it out.</param>
+public sealed record TensorArtifactRequirement(string Role, string FileName, TensorArtifactLocation? Default = null, bool IsOptional = false);
 
 /// <summary>A request to import a model selection through a resolver.</summary>
 /// <param name="Selection">The model to import.</param>

@@ -10,8 +10,14 @@ public static class TensorLlmModels
     /// installed packs record it.</summary>
     public const string QwenRuntimeArchitecture = "qwen3-gguf";
 
+    /// <summary>The pack role of a Qwen 3.8 Flash Next vision projector GGUF (a CLIP mmproj file).</summary>
+    public const string VisionProjectorRole = "vision-projector";
+
+    /// <summary>The pack role of a Qwen 3.8 Flash Next MTP draft GGUF (one shared-target NextN layer).</summary>
+    public const string MtpDraftRole = "mtp-draft";
+
     /// <summary>The reason an installed Qwen3 GGUF is not supported.</summary>
-    public const string Qwen3RetiredReason = "Qwen3 models are no longer supported. Qwen 3.5, Qwen 3.5 MoE and Qwen3-Next models are.";
+    public const string Qwen3RetiredReason = "Qwen3 models are no longer supported. Qwen 3.5, Qwen 3.5 MoE, Qwen3-Next and Qwen 3.8 Flash Next models are.";
 
     /// <summary>The backends the Qwen engine runs a pack on.</summary>
     public static IReadOnlySet<TensorBackendKind> Backends { get; } = new[]

@@ -25,7 +25,7 @@ public sealed class SupraEngineProvider : ITensorEngineProvider
     }
 
     /// <inheritdoc />
-    public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend) =>
+    public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend, string scratchDirectory) =>
         new SupraImageInference(packs, backend);
 
     /// <inheritdoc />
