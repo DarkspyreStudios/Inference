@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Tests that start a real host-tools service, which the app's session sandbox refuses. A person runs them from a
+       terminal; automated runs only build them (Connect/README.md, "Antigravity native agent sessions"). -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="../Darkspyre.Inference.Connect.LLM.Tests/TestDataFolder.cs" Link="TestDataFolder.cs" />
+    <ProjectReference Include="../../../src/Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
+    <ProjectReference Include="../../../src/Antigravity/Darkspyre.Inference.Connect.Antigravity/Darkspyre.Inference.Connect.Antigravity.csproj" />
+    <!-- HostTools and Antigravity reference these privately; the tests join the service directly. -->
+    <ProjectReference Include="../../../src/HostTools/Darkspyre.Inference.Connect.HostTools.Contracts/Darkspyre.Inference.Connect.HostTools.Contracts.csproj" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Contracts/Darkspyre.LocalServices.Contracts.csproj" />
+  </ItemGroup>
+</Project>

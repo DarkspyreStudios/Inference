@@ -16,6 +16,7 @@
     <ProjectReference Include="../../HostTools/Darkspyre.Inference.Connect.HostTools.Mcp/Darkspyre.Inference.Connect.HostTools.Mcp.csproj"
                       ReferenceOutputAssembly="false" Private="false" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.SandboxTests" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.ConsoleTester" />
     <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
     <None Include="buildTransitive/Darkspyre.Inference.Connect.Antigravity.targets" Pack="true" PackagePath="buildTransitive/" />

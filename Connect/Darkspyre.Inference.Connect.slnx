@@ -23,6 +23,7 @@
   </Folder>
   <Folder Name="/tests/LLM/">
     <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.Tests/Darkspyre.Inference.Connect.LLM.Tests.csproj" />
+    <Project Path="tests/LLM/Darkspyre.Inference.Connect.LLM.SandboxTests/Darkspyre.Inference.Connect.LLM.SandboxTests.csproj" />
   </Folder>
   <Folder Name="/tests/Image/">
     <Project Path="tests/Image/Darkspyre.Inference.Connect.Image.Tests/Darkspyre.Inference.Connect.Image.Tests.csproj" />

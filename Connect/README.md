@@ -5347,6 +5347,17 @@ per open session, with an open standard input and one output reader.
   with the service in the folder `ILlmDataFolder` names then, and restarts AGY on its conversation with that folder.
   This happens after every release, whether the folder moved or stayed. A schema turn's schema file is scratch in the
   same data folder.
+- `tests/LLM/Darkspyre.Inference.Connect.LLM.SandboxTests` checks these host-tools paths against the real service: AGY
+  starts with the data folder, and the next turn after a release registers the tools again and restarts AGY. The app's
+  session sandbox refuses the service's folders, so automated runs only build the project and a person runs it from a
+  terminal, from `Connect/`, on the signed test host that agent-ds `scripts/signed-test-host.sh` prints:
+
+  ```bash
+  bash ../../agent-ds/scripts/workspace-env.sh dotnet test tests/LLM/Darkspyre.Inference.Connect.LLM.SandboxTests/Darkspyre.Inference.Connect.LLM.SandboxTests.csproj -- RunConfiguration.DotNetHostPath=<signed test host>
+  ```
+
+  Like the app, the tests add `mcp(darkspyre-host-tools/*)` to `permissions.allow` in
+  `~/.gemini/antigravity-cli/settings.json` when it is missing.
   The service passes the call back to the registering host, which runs it through the session's tool handler as the
   Claude CLI bridge does. The first session with host tools in a process runs `agy mcp add darkspyre-host-tools
   <program>` and adds `mcp(darkspyre-host-tools/*)` to `permissions.allow` in `~/.gemini/antigravity-cli/settings.json`;
