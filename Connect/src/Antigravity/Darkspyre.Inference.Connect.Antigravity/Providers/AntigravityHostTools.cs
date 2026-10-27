@@ -5,12 +5,14 @@ using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.HostTools;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Darkspyre.LocalServices;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>
 /// One AGY session's host tools. The session's MCP tool list is registered with the host-tools service under a fresh
-/// session ID, which the AGY process receives in <see cref="HostToolsProtocol.SessionVariable"/>. Each call AGY makes
+/// session ID, which the AGY process receives in <see cref="HostToolsProtocol.SessionVariable"/>, beside the data folder
+/// the service runs in, in <see cref="HostToolsProtocol.FolderVariable"/>. Each call AGY makes
 /// through the host-tools server runs on the shared <see cref="McpToolBridge"/>, and its tool event is kept for the
 /// turn's mapping of AGY's call_mcp_tool step.
 /// </summary>
@@ -27,10 +29,12 @@ internal sealed class AntigravityHostTools : IAsyncDisposable
             ?? throw new InvalidDataException("The host-tools client has no physical location."),
         HostToolsRuntime.PackageFolder);
 
-    private static HostToolsClient? s_client;
+    // The process's one connection to the host-tools service, with the data folder the service runs in.
+    private static (string Folder, HostToolsClient Client)? s_client;
 
     private readonly McpToolBridge _bridge;
     private readonly ConcurrentDictionary<int, LlmAgentToolEvent> _completed = new();
+    private HostToolsClient? _client;
     private IAsyncDisposable? _registration;
     private Turn? _turn;
 
@@ -40,12 +44,18 @@ internal sealed class AntigravityHostTools : IAsyncDisposable
     public string SessionId { get; } = Guid.NewGuid().ToString("N");
 
     /// <summary>
+    /// True once the host-tools client this session's tools are registered with has closed, as the stop request in every
+    /// data folder move's release makes it.
+    /// </summary>
+    internal bool Closed => _client is not { } client || client.Closed.IsCompleted;
+
+    /// <summary>
     /// Registers <paramref name="tools"/> for a new AGY session, after pointing AGY's global configuration at the
     /// host-tools MCP program. Returns null when the session has no host tools.
     /// </summary>
     public static async Task<AntigravityHostTools?> OpenAsync(LlmConnection connection, string? modelId,
         IReadOnlyList<LlmAgentClientToolDefinition> tools, LlmAgentToolHandler? handler, IInferenceResourceAccess? resources,
-        IAntigravityCliRunner runner, string executable, string workingDirectory, CancellationToken cancellationToken)
+        IAntigravityCliRunner runner, string executable, string workingDirectory, string dataFolder, CancellationToken cancellationToken)
     {
         if (tools.Count == 0) return null;
         // The first definition of a duplicated name is the one used.
@@ -66,15 +76,40 @@ internal sealed class AntigravityHostTools : IAsyncDisposable
         try
         {
             await AntigravityHostToolsSetup.EnsureAsync(runner, executable, workingDirectory, cancellationToken).ConfigureAwait(false);
-            HostToolsClient client = await ClientAsync(cancellationToken).ConfigureAwait(false);
-            hostTools._registration = await client.RegisterAsync(hostTools.SessionId,
-                JsonSerializer.SerializeToElement(bridge.ListResult()), hostTools.CallAsync, cancellationToken).ConfigureAwait(false);
+            await hostTools.RegisterAsync(dataFolder, cancellationToken).ConfigureAwait(false);
             return hostTools;
         }
         catch
         {
             await hostTools.DisposeAsync().ConfigureAwait(false);
             throw;
+        }
+    }
+
+    /// <summary>Registers this session's tool list again, under the same session ID, with the client of <paramref name="dataFolder"/>.</summary>
+    internal async Task ReopenAsync(string dataFolder, CancellationToken cancellationToken)
+    {
+        await DisposeRegistrationAsync().ConfigureAwait(false);
+        await RegisterAsync(dataFolder, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Stops the host-tools service of this process's client, closing every connection to it, the AGY MCP programs' too, and
+    /// drops the client. The next session or reopen connects again with the data folder it reads.
+    /// </summary>
+    internal static async Task ReleaseAsync(CancellationToken cancellationToken)
+    {
+        await Connecting.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (s_client is not { } current) return;
+            await HostToolsRuntime.StopServiceAsync(ServicePackage, current.Folder, cancellationToken).ConfigureAwait(false);
+            await current.Client.DisposeAsync().ConfigureAwait(false);
+            s_client = null;
+        }
+        finally
+        {
+            Connecting.Release();
         }
     }
 
@@ -110,15 +145,34 @@ internal sealed class AntigravityHostTools : IAsyncDisposable
     {
         try
         {
-            if (_registration is { } registration) await registration.DisposeAsync().ConfigureAwait(false);
-        }
-        catch (IOException)
-        {
-            // The service connection is gone, and the session's registration with it.
+            await DisposeRegistrationAsync().ConfigureAwait(false);
         }
         finally
         {
             _bridge.Dispose();
+        }
+    }
+
+    private async Task RegisterAsync(string dataFolder, CancellationToken cancellationToken)
+    {
+        HostToolsClient client = await ClientAsync(dataFolder, cancellationToken).ConfigureAwait(false);
+        _registration = await client.RegisterAsync(SessionId, JsonSerializer.SerializeToElement(_bridge.ListResult()), CallAsync,
+            cancellationToken).ConfigureAwait(false);
+        _client = client;
+    }
+
+    private async Task DisposeRegistrationAsync()
+    {
+        IAsyncDisposable? registration = _registration;
+        _registration = null;
+        _client = null;
+        try
+        {
+            if (registration is not null) await registration.DisposeAsync().ConfigureAwait(false);
+        }
+        catch (IOException)
+        {
+            // The service connection is gone, and the session's registration with it.
         }
     }
 
@@ -158,16 +212,22 @@ internal sealed class AntigravityHostTools : IAsyncDisposable
         && int.TryParse(text.AsSpan(colon + 1), NumberStyles.None, CultureInfo.InvariantCulture, out int index)
             ? index : null;
 
-    /// <summary>The process's one connection to the host-tools service, reopened when the service closed it.</summary>
-    private static async Task<HostToolsClient> ClientAsync(CancellationToken cancellationToken)
+    /// <summary>
+    /// The process's one connection to the host-tools service in <paramref name="dataFolder"/>, reopened when the service
+    /// closed it or the folder changed. The app owns the service, so the connection creates the folder's service files.
+    /// </summary>
+    private static async Task<HostToolsClient> ClientAsync(string dataFolder, CancellationToken cancellationToken)
     {
         await Connecting.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
-            if (s_client is { } open && !open.Closed.IsCompleted) return open;
-            if (s_client is { } closed) await closed.DisposeAsync().ConfigureAwait(false);
-            s_client = await HostToolsRuntime.ConnectAsync(ServicePackage, cancellationToken).ConfigureAwait(false);
-            return s_client;
+            if (s_client is { } open && string.Equals(open.Folder, dataFolder, StringComparison.Ordinal)
+                && !open.Client.Closed.IsCompleted) return open.Client;
+            if (s_client is { } previous) await previous.Client.DisposeAsync().ConfigureAwait(false);
+            HostToolsClient client = await HostToolsRuntime.ConnectAsync(ServicePackage,
+                new ServiceFolders(dataFolder, null, CreateIfMissing: true), cancellationToken).ConfigureAwait(false);
+            s_client = (dataFolder, client);
+            return client;
         }
         finally
         {

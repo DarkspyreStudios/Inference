@@ -10,7 +10,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// history and a resume reopens one by its conversation ID.
 /// </summary>
 internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactory processFactory, IAntigravityCliRunner runner,
-    AntigravityCliLlmClient chat, LearnedModelContext learned) : ILlmAgentResumeClient
+    AntigravityCliLlmClient chat, LearnedModelContext learned, ILlmDataFolder dataFolder) : ILlmAgentResumeClient
 {
     public LlmTransport Transport => LlmTransport.GoogleAntigravityCli;
 
@@ -74,8 +74,8 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
                     : AgentOpeningContext.For(new LlmAgentSessionOptions { ModelId = modelId, Context = opening }, carriesAttachments: false);
                 // Each AGY process generation registers the tools under its own session ID; the session owns the registration.
                 AntigravityHostTools? tools = await AntigravityHostTools.OpenAsync(connection, modelId, hostTools.Tools, hostTools.Handler,
-                    callerServices?.Resources, runner, executable, workingDirectory, token);
-                return await AntigravityAgentSession.OpenAsync(processFactory, executable, workingDirectory,
+                    callerServices?.Resources, runner, executable, workingDirectory, await dataFolder.ReadAsync(token), token);
+                return await AntigravityAgentSession.OpenAsync(processFactory, executable, workingDirectory, dataFolder,
                     new AntigravityLaunch(modelId, null, null), conversationId, connection, tools, Introduction(instructions, text?.Text),
                     text?.Notice, token);
             });

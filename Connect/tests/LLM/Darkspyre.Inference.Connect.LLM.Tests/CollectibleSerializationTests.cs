@@ -107,6 +107,10 @@ public sealed class CollectibleSerializationTests
             object host = Activator.CreateInstance(fixtures.GetType(
                 typeof(CollectibleSerializationTests).FullName + "+UnusedSelfHost", throwOnError: true)!, nonPublic: true)!;
             services.Add(ServiceDescriptor.Singleton(hostContract, host));
+            Type folderContract = assembly.GetType(typeof(ILlmDataFolder).FullName!, throwOnError: true)!;
+            object folder = Activator.CreateInstance(fixtures.GetType(
+                typeof(CollectibleSerializationTests).FullName + "+UnusedDataFolder", throwOnError: true)!, nonPublic: true)!;
+            services.Add(ServiceDescriptor.Singleton(folderContract, folder));
             register.Invoke(null, [services]);
             container = services.BuildServiceProvider();
             Type clientType = assembly.GetType(typeof(ILlmClient).FullName!, throwOnError: true)!;
@@ -224,6 +228,11 @@ public sealed class CollectibleSerializationTests
         public Task<Common.Embedding.IEmbeddingInference> GetEmbeddingInferenceAsync(string engineId, CancellationToken cancellationToken = default) =>
             throw new NotSupportedException();
         public LlmCapabilities? GetCapabilities(string engineId, string? modelId) => throw new NotSupportedException();
+    }
+
+    private sealed class UnusedDataFolder : ILlmDataFolder
+    {
+        public ValueTask<string> ReadAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
     }
 
     private sealed class SerializationGeneration(string directory) : AssemblyLoadContext("ConnectJsonGeneration", isCollectible: true)

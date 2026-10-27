@@ -799,7 +799,7 @@ internal sealed class ClaudeCliLlmClient(
         string? accountToken,
         CancellationToken cancellationToken)
     {
-        string workingDirectory = CliInfrastructure.CreateWorkingDirectory("claude");
+        string workingDirectory = CliInfrastructure.CreateWorkingDirectory(Path.GetTempPath(), "claude");
         try
         {
             return await runner.RunAsync(
@@ -822,7 +822,7 @@ internal sealed class ClaudeCliLlmClient(
         string? accountToken,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        string workingDirectory = CliInfrastructure.CreateWorkingDirectory("claude");
+        string workingDirectory = CliInfrastructure.CreateWorkingDirectory(Path.GetTempPath(), "claude");
         try
         {
             arguments = [.. arguments, "--thinking-display", requestReasoningText ? "summarized" : "omitted"];

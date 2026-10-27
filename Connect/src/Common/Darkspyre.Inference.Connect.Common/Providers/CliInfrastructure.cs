@@ -29,10 +29,11 @@ internal static class CliInfrastructure
         throw new ArgumentException(errorMessage, nameof(endpoint));
     }
 
-    public static string CreateWorkingDirectory(string provider)
+    /// <summary>Creates a new call folder for <paramref name="provider"/> under <paramref name="root"/>, creating the root when missing.</summary>
+    public static string CreateWorkingDirectory(string root, string provider)
     {
         string path = Path.Combine(
-            Path.GetTempPath(),
+            root,
             $"darkspyre-inference-connect-{provider}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(path);
         return path;

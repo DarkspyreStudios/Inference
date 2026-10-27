@@ -14,7 +14,7 @@ internal static class ClaudeCliModelCatalog
         string executable, string? accountToken, Action fence, CancellationToken token)
     {
         fence();
-        string directory = CliInfrastructure.CreateWorkingDirectory("claude");
+        string directory = CliInfrastructure.CreateWorkingDirectory(Path.GetTempPath(), "claude");
         IClaudeCliSessionProcess? process = null;
         IReadOnlyList<LlmModel>? models = null;
         Exception? failure = null;

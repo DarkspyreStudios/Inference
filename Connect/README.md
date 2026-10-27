@@ -39,7 +39,11 @@ no process-global assembly registry, so a collectible plugin generation can reti
 Common alone registers no provider. The catalog lists only the discovered provider definitions.
 
 Discovery registers services without reading credentials, calling providers or loading engines.
-The caller supplies `ILlmConnectionSource`. Including SelfHost also requires caller-owned
+The caller supplies `ILlmConnectionSource` and `ILlmDataFolder`. `ILlmDataFolder.ReadAsync` returns the absolute folder
+where providers keep files, read each time it is called: Antigravity keeps its host-tools service and its CLI call
+scratch there. Antigravity also registers an `ILlmDataFolderUser`. A host that moves the folder first awaits
+`ReleaseAsync` on every registered `ILlmDataFolderUser`, which stops the provider's service in the folder, closing
+every connection to it, and returns once it has exited. Including SelfHost also requires caller-owned
 `ILlmSelfHost` when resolving its clients. Connect borrows those engines through Common contracts;
 the caller owns their loading and disposal. Codex, OpenAiApi, Grok and SelfHost use the shared managed
 conversation implementation. Claude and Antigravity use their native universal conversation implementations.
@@ -1749,6 +1753,7 @@ Register the connector and provide the host-owned connection source:
 ```csharp
 services.AddLlmConnect();
 services.AddScoped<ILlmConnectionSource, MyProtectedConnectionSource>();
+services.AddSingleton<ILlmDataFolder, MyProviderFilesFolder>();
 
 services.AddLlmConnectBedrock();
 ```
@@ -5253,7 +5258,8 @@ event; that check does not establish the behavior of Connect's pipe-backed launc
 Native controls and resume for this model remain unqualified. The adapter does not disable the model,
 retry a turn or fabricate a conversation identity in response to that failure.
 
-Each request runs in an empty temporary workspace with terminal sandboxing and slash-command expansion disabled. A streamed request sends its prompt as BOM-free UTF-8 through standard input. A request with `SupportsStreaming = InferenceSupport.Unsupported` is the exception: the CLI's only non-streaming form, `agy -p "<prompt>" --output-format json`, takes the prompt as a process argument, because stream-json input requires stream-json output. That prompt is visible in the local process list. It must fit in one argument: at most 131,071 UTF-8 bytes on macOS and Linux, and at most 30,000 characters on Windows, where a `.cmd` or `.bat` launcher cannot carry it at all because the prompt contains line breaks. A prompt that does not fit fails with `NotSupportedException` before the CLI starts. Native JSON Schema and the `Low`, `Medium` and `High` reasoning levels are supported. Only `agent_response` step deltas stream as answer text. A schema-backed request streams no provisional text: it returns the terminal event's canonical `structured_output` value, validated locally. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
+Each request runs in an empty call folder, `scratch/darkspyre-inference-connect-antigravity-<id>` in the host's
+`ILlmDataFolder`, deleted when the call ends, with terminal sandboxing and slash-command expansion disabled. A streamed request sends its prompt as BOM-free UTF-8 through standard input. A request with `SupportsStreaming = InferenceSupport.Unsupported` is the exception: the CLI's only non-streaming form, `agy -p "<prompt>" --output-format json`, takes the prompt as a process argument, because stream-json input requires stream-json output. That prompt is visible in the local process list. It must fit in one argument: at most 131,071 UTF-8 bytes on macOS and Linux, and at most 30,000 characters on Windows, where a `.cmd` or `.bat` launcher cannot carry it at all because the prompt contains line breaks. A prompt that does not fit fails with `NotSupportedException` before the CLI starts. Native JSON Schema and the `Low`, `Medium` and `High` reasoning levels are supported. Only `agent_response` step deltas stream as answer text. A schema-backed request streams no provisional text: it returns the terminal event's canonical `structured_output` value, validated locally. The free-text `response` remains a compatibility fallback for older CLI versions. Temperature, maximum output tokens, headers, and provider options are rejected rather than silently ignored.
 
 Two public ConsoleTester nonstreaming calls at source `cec838c`, installed CLI 1.3.1 and selected
 `gemini-3.8-flash-low` with Low effort complete through the CLI's JSON-response path. The plain call
@@ -5323,12 +5329,24 @@ per open session, with an open standard input and one output reader.
 - `ResumeSessionAsync` passes that exact ID with `--conversation` and fails if the handshake reports
   another. Resume without `Runtime` fails, so the host must supply its stored working directory and
   provider policy. `--continue` is never used.
-- Host tools reach AGY through the host-tools local service (Darkspyre.Inference.Connect.HostTools). Each AGY
-  process registers its session's MCP tool list with the service under a fresh session ID and starts AGY with that ID
-  in `DARKSPYRE_HOST_TOOLS_SESSION`. AGY's global MCP entry `darkspyre-host-tools` starts the stdio MCP program
-  `darkspyre-host-tools-mcp`, which reads the ID, lists the session's tools and forwards each call to the service.
-  The program ships as the flat `hosttools/mcp/` folder beside the Antigravity library, and it installs and connects
-  to the service from the sibling `hosttools/service/` package; it carries no service package of its own.
+- Host tools reach AGY through the host-tools local service (Darkspyre.Inference.Connect.HostTools). The host owns
+  the service: it runs in the host's `ILlmDataFolder`, which holds its registration, program copies, connection point
+  and scratch in `service/`, and each process keeps one connection to it. Each AGY session registers its MCP tool
+  list with the service under a fresh session ID and starts AGY with that ID in `DARKSPYRE_HOST_TOOLS_SESSION` and
+  the data folder in `DARKSPYRE_HOST_TOOLS_FOLDER`. AGY's global MCP entry `darkspyre-host-tools` starts the stdio
+  MCP program `darkspyre-host-tools-mcp`, which reads both, lists the session's tools and forwards each call to the
+  service. The program joins the service the host set up in that folder and creates nothing there: without either
+  variable it serves no tools, and a call that finds no service set up in the folder fails with "Host tools are
+  unavailable: no host-tools service is set up in <folder>." Each app copy's AGY processes therefore reach that
+  copy's service. The program ships as the flat `hosttools/mcp/` folder beside the Antigravity library, and it
+  installs and connects to the service from the sibling `hosttools/service/` package; it carries no service package
+  of its own.
+- `ILlmDataFolderUser.ReleaseAsync` stops the host-tools service of the process's connection, which closes every
+  connection to it, the MCP programs' too, and drops the connection. An open session with host tools sees its
+  connection closed on its next turn: before the turn it registers its tool list again, under the same session ID,
+  with the service in the folder `ILlmDataFolder` names then, and restarts AGY on its conversation with that folder.
+  This happens after every release, whether the folder moved or stayed. A schema turn's schema file is scratch in the
+  same data folder.
   The service passes the call back to the registering host, which runs it through the session's tool handler as the
   Claude CLI bridge does. The first session with host tools in a process runs `agy mcp add darkspyre-host-tools
   <program>` and adds `mcp(darkspyre-host-tools/*)` to `permissions.allow` in `~/.gemini/antigravity-cli/settings.json`;

@@ -11,9 +11,13 @@ using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
-public sealed class AntigravityCliLlmClientTests
+public sealed class AntigravityCliLlmClientTests : IDisposable
 {
     private const string ErrorDetail = """{"access_token":"diagnostic-secret","detail":"The selected model is unavailable in this region."}""";
+
+    private readonly TestDataFolder _folder = new();
+
+    public void Dispose() => _folder.Dispose();
 
     [Fact]
     public async Task AccountUsageFailureKeepsTheSafeTerminalDetailWithoutExposingNestedSecrets()
@@ -21,7 +25,7 @@ public sealed class AntigravityCliLlmClientTests
         const string detail = """{"access_token":"usage-secret","detail":"Quota report is unavailable for this account."}""";
         var runner = new RecordingRunner(new(0,
             new JsonObject { ["status"] = "ERROR", ["response"] = string.Empty, ["error"] = detail }.ToJsonString(), string.Empty));
-        var client = new AntigravityCliLlmClient(runner);
+        var client = new AntigravityCliLlmClient(runner, _folder);
 
         LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => client.GetAccountUsageAsync(Connection()));
 
@@ -38,7 +42,7 @@ public sealed class AntigravityCliLlmClientTests
             + "Claude and GPT models\tWeekly Limit Remaining\t71%\t2026-10-14T11:03:44Z";
         var runner = new RecordingRunner(new(0,
             new JsonObject { ["status"] = "SUCCESS", ["response"] = summary }.ToJsonString(), string.Empty));
-        var client = new AntigravityCliLlmClient(runner);
+        var client = new AntigravityCliLlmClient(runner, _folder);
 
         LlmAccountUsageSnapshot result = await client.GetAccountUsageAsync(Connection());
 
@@ -63,7 +67,7 @@ public sealed class AntigravityCliLlmClientTests
     {
         var payload = new JsonObject { ["status"] = "ERROR", ["response"] = string.Empty, ["error"] = ErrorDetail };
         string output = new JsonObject { ["event"] = "result", ["result"] = payload }.ToJsonString();
-        var client = new AntigravityCliLlmClient(new RecordingRunner(new(0, output, string.Empty)));
+        var client = new AntigravityCliLlmClient(new RecordingRunner(new(0, output, string.Empty)), _folder);
 
         LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => ReadAllAsync(
             client.StreamAsync(Connection(), new() { ModelId = "auto", Messages = [new("user", "test")] })));
@@ -78,7 +82,7 @@ public sealed class AntigravityCliLlmClientTests
     {
         var process = new TerminalProcess();
         await using AntigravityAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
-            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, null, CancellationToken.None);
+            Environment.CurrentDirectory, _folder, new("auto", null, null), null, Connection(), null, null, null, CancellationToken.None);
 
         IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(
             new() { Input = [new LlmAgentTextContent("test")] }));
@@ -101,7 +105,7 @@ public sealed class AntigravityCliLlmClientTests
             }
         };
 
-        Assert.Empty(new AntigravityCliLlmClient(new RecordingRunner(new(0, string.Empty, string.Empty)))
+        Assert.Empty(new AntigravityCliLlmClient(new RecordingRunner(new(0, string.Empty, string.Empty)), _folder)
             .GetCapabilities(connection, "claude-sonnet-4-6").ReasoningLevels);
     }
 
@@ -114,7 +118,7 @@ public sealed class AntigravityCliLlmClientTests
             {"event":"result","result":{"status":"SUCCESS","response":"OK","usage":{"input_tokens":12,"output_tokens":2,"total_tokens":14}}}
             """;
         var request = new LlmChatRequest { ModelId = "auto", Messages = [new("user", "Reply with OK.")] };
-        var client = new AntigravityCliLlmClient(new RecordingRunner(new(0, output, string.Empty)));
+        var client = new AntigravityCliLlmClient(new RecordingRunner(new(0, output, string.Empty)), _folder);
 
         IReadOnlyList<LlmStreamEvent> events = await ReadAllAsync(client.StreamAsync(Connection(), request));
         LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
@@ -129,7 +133,7 @@ public sealed class AntigravityCliLlmClientTests
     {
         var process = new TerminalProcess();
         await using AntigravityAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
-            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, null, CancellationToken.None);
+            Environment.CurrentDirectory, _folder, new("auto", null, null), null, Connection(), null, null, null, CancellationToken.None);
         var request = new LlmAgentTurnRequest { ModelId = model, ReasoningLevel = effort, Input = [new LlmAgentTextContent("answer")] };
 
         await ReadAllAsync(session.RunTurnAsync(request));
@@ -220,11 +224,42 @@ public sealed class AntigravityCliLlmClientTests
     {
         var process = new TerminalProcess();
         await using AntigravityAgentSession session = await AntigravityAgentSession.OpenAsync(process, "agy",
-            Environment.CurrentDirectory, new("auto", null, null), null, Connection(), null, null, null, CancellationToken.None);
+            Environment.CurrentDirectory, _folder, new("auto", null, null), null, Connection(), null, null, null, CancellationToken.None);
 
         await ReadAllAsync(session.RunTurnAsync(new() { Instructions = "Be brief.", Input = [new LlmAgentTextContent("Look")] }));
 
         Assert.Contains("Instructions for this turn:", Assert.Single(process.Writes), StringComparison.Ordinal);
+    }
+
+    /// <summary>A structured call's schema file is scratch in the host data folder, and it is gone once the call ends.</summary>
+    [Fact]
+    public async Task StructuredCallWritesItsSchemaUnderTheDataFolderScratchAndRemovesIt()
+    {
+        string? schemaPath = null;
+        bool written = false;
+        var runner = new RecordingRunner(
+            new(0, """{"event":"result","result":{"status":"SUCCESS","response":"","structured_output":{"answer":"OK"}}}""", string.Empty),
+            invocation =>
+            {
+                schemaPath = invocation.Arguments[invocation.Arguments.ToList().IndexOf("--json-schema") + 1];
+                written = File.Exists(schemaPath);
+            });
+        var client = new AntigravityCliLlmClient(runner, _folder);
+
+        await ReadAllAsync(client.StreamAsync(Connection(), new()
+        {
+            ModelId = "auto",
+            Messages = [new("user", "Answer.")],
+            StructuredOutput = new()
+            {
+                Name = "answer",
+                Schema = JsonElement.Parse("""{"type":"object","properties":{"answer":{"type":"string"}},"required":["answer"]}""")
+            }
+        }));
+
+        Assert.True(written);
+        Assert.StartsWith(Path.Combine(_folder.Path, "scratch") + Path.DirectorySeparatorChar, schemaPath, StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.GetDirectoryName(schemaPath)));
     }
 
     private static LlmAgentNativeRuntimeOptions ProviderRuntime() => new()
@@ -233,10 +268,10 @@ public sealed class AntigravityCliLlmClientTests
         Policy = new LlmAgentProviderRuntimePolicy()
     };
 
-    private static AntigravityAgentClient Agents(TerminalProcess process)
+    private AntigravityAgentClient Agents(TerminalProcess process)
     {
         var runner = new RecordingRunner(new(1, string.Empty, "no side request is expected"));
-        return new(process, runner, new AntigravityCliLlmClient(runner), new LearnedModelContext());
+        return new(process, runner, new AntigravityCliLlmClient(runner, _folder), new LearnedModelContext(), _folder);
     }
 
     private static LlmConnection Connection() => new()
@@ -256,11 +291,16 @@ public sealed class AntigravityCliLlmClientTests
         return results;
     }
 
-    private sealed class RecordingRunner(AntigravityCliProcessResult result) : IAntigravityCliRunner
+    private sealed class RecordingRunner(AntigravityCliProcessResult result, Action<AntigravityCliInvocation>? inspect = null)
+        : IAntigravityCliRunner
     {
         public Task<AntigravityCliProcessResult> RunAsync(
             AntigravityCliInvocation invocation,
-            CancellationToken cancellationToken = default) => Task.FromResult(result);
+            CancellationToken cancellationToken = default)
+        {
+            inspect?.Invoke(invocation);
+            return Task.FromResult(result);
+        }
     }
 
     private sealed class TerminalProcess : IAntigravityCliSessionProcessFactory, IAntigravityCliSessionProcess

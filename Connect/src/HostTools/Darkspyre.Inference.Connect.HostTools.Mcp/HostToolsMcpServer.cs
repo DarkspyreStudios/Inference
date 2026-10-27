@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Darkspyre.LocalServices;
+using Darkspyre.LocalServices.Contracts;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using ModelContextProtocol.Server;
@@ -6,14 +8,17 @@ using ModelContextProtocol.Server;
 namespace Darkspyre.Inference.Connect.HostTools;
 
 /// <summary>
-/// Serves one agent session's host tools over MCP. The session ID comes from the environment the agent CLI was started
-/// with; a process started without one serves no tools and never connects to the service.
+/// Serves one agent session's host tools over MCP. The session ID and the app's Plugin data folder for host tools come
+/// from the environment the agent CLI was started with; a process started without either serves no tools and never
+/// connects to the service. It joins the service the app set up in that folder and creates nothing there.
 /// </summary>
 internal static class HostToolsMcpServer
 {
-    internal static async Task RunAsync(ITransport transport, string? session, Func<CancellationToken, Task<HostToolsClient>> connect,
-        CancellationToken token)
+    internal static async Task RunAsync(ITransport transport, string? session, string? folder,
+        Func<CancellationToken, Task<HostToolsClient>> connect, CancellationToken token)
     {
+        // Without the folder there is no service to join, as without a session.
+        if (folder is null) session = null;
         using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(token);
         var client = new Lazy<Task<HostToolsClient>>(() => connect(lifetime.Token));
         var options = new McpServerOptions
@@ -33,6 +38,10 @@ internal static class HostToolsMcpServer
                         HostToolsClient connected = await client.Value.WaitAsync(cancellationToken).ConfigureAwait(false);
                         JsonElement parameters = JsonSerializer.SerializeToElement(request.Params, McpJsonUtilities.DefaultOptions);
                         return Read<CallToolResult>(await connected.CallAsync(session, parameters, cancellationToken).ConfigureAwait(false));
+                    }
+                    catch (ServiceProtocolException error) when (error.Code == ServiceErrorCode.NotInstalled)
+                    {
+                        return Failure($"Host tools are unavailable: no host-tools service is set up in {folder}.");
                     }
                     catch (IOException error)
                     {

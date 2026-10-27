@@ -17,5 +17,6 @@ internal sealed class AntigravityConnectProviderAttribute : LlmConnectProviderAt
         services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<AntigravityCliLlmClient>());
         services.AddTransient<AntigravityAgentClient>();
         services.AddTransient<ILlmAgentClient>(provider => provider.GetRequiredService<AntigravityAgentClient>());
+        services.AddSingleton<ILlmDataFolderUser, AntigravityDataFolderUser>();
     }
 }

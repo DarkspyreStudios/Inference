@@ -32,6 +32,8 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     private readonly IAntigravityCliSessionProcessFactory _factory;
     private readonly string _executable;
     private readonly string _workingDirectory;
+    // The host folder that holds schema scratch and the host-tools service; AGY's environment names it to the MCP program.
+    private readonly ILlmDataFolder _dataFolder;
     private readonly AntigravityLaunch _defaults;
     private readonly LlmConnection _connection;
     // The session's host tools, when it offers any; their session ID reaches AGY's MCP program through the environment.
@@ -69,6 +71,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         IAntigravityCliSessionProcessFactory factory,
         string executable,
         string workingDirectory,
+        ILlmDataFolder dataFolder,
         AntigravityLaunch defaults,
         LlmConnection connection,
         AntigravityHostTools? hostTools,
@@ -79,6 +82,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         _hostTools = hostTools;
         _executable = executable;
         _workingDirectory = workingDirectory;
+        _dataFolder = dataFolder;
         _defaults = defaults;
         _connection = connection;
         _launch = defaults;
@@ -119,6 +123,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         IAntigravityCliSessionProcessFactory factory,
         string executable,
         string workingDirectory,
+        ILlmDataFolder dataFolder,
         AntigravityLaunch launch,
         string? conversationId,
         LlmConnection connection,
@@ -128,7 +133,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         CancellationToken cancellationToken)
     {
         AntigravityCliLlmClient.ResolveCapabilities(connection, launch.ModelId);
-        var session = new AntigravityAgentSession(factory, executable, workingDirectory, launch, connection, hostTools,
+        var session = new AntigravityAgentSession(factory, executable, workingDirectory, dataFolder, launch, connection, hostTools,
             introduction, openingNotice);
         try
         {
@@ -252,7 +257,15 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         bool settled = false;
         try
         {
-            if (launch != _launch)
+            if (_hostTools is { Closed: true } hostTools)
+            {
+                // A data folder move stopped the host-tools service, which closed the client the tools were registered
+                // with. The tools register again with the folder's service and AGY restarts with that folder.
+                await hostTools.ReopenAsync(await _dataFolder.ReadAsync(cancellationToken).ConfigureAwait(false), cancellationToken)
+                    .ConfigureAwait(false);
+                await ReopenAsync(launch, cancellationToken).ConfigureAwait(false);
+            }
+            else if (launch != _launch)
             {
                 // Applying new launch flags before a request is configuration, not a retry of a sent request.
                 await ReopenAsync(launch, cancellationToken).ConfigureAwait(false);
@@ -506,6 +519,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     {
         using LlmOperationLifetime.Lease readerOwner = _retirement.Enter(CancellationToken.None);
         cancellationToken.ThrowIfCancellationRequested();
+        string dataFolder = await _dataFolder.ReadAsync(cancellationToken).ConfigureAwait(false);
         var arguments = new List<string>
         {
             "--input-format", "stream-json",
@@ -523,7 +537,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         }
         if (launch.SchemaJson is { } schemaJson)
         {
-            _schemaDirectory = CliInfrastructure.CreateWorkingDirectory("antigravity");
+            _schemaDirectory = AntigravityCliLlmClient.CreateWorkingDirectory(dataFolder);
             string schemaPath = Path.Combine(_schemaDirectory, "output-schema.json");
             await File.WriteAllTextAsync(schemaPath, schemaJson, cancellationToken).ConfigureAwait(false);
             arguments.AddRange(["--json-schema", schemaPath]);
@@ -545,7 +559,11 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
                 ThrowIfUnavailable();
                 process = _factory.Start(_executable, arguments, _workingDirectory, _hostTools is null
                     ? new Dictionary<string, string>()
-                    : new Dictionary<string, string> { [HostToolsProtocol.SessionVariable] = _hostTools.SessionId });
+                    : new Dictionary<string, string>
+                    {
+                        [HostToolsProtocol.SessionVariable] = _hostTools.SessionId,
+                        [HostToolsProtocol.FolderVariable] = dataFolder
+                    });
                 _process = process;
                 _lines = lines;
                 generation = ++_generation;

@@ -50,6 +50,7 @@ internal static class Program
         services.AddSingleton<ILlmConnectionSource>(provider =>
             provider.GetRequiredService<SecureConnectionSource>());
         services.AddLlmConnect();
+        services.AddSingleton<ILlmDataFolder, ConsoleDataFolder>();
         services.AddTtsConnect();
         if (args[0] == "claude-probe")
         {

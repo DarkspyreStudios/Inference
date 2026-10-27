@@ -44,8 +44,10 @@ public sealed class ProviderStreamFailureTests
     [Fact]
     public void OpenAiApiClientHasNoClientTimeout()
     {
+        using var folder = new TestDataFolder();
         var services = new ServiceCollection();
         services.AddLlmConnect();
+        services.AddSingleton<ILlmDataFolder>(folder);
         using ServiceProvider container = services.BuildServiceProvider();
 
         using HttpClient client = container.GetRequiredService<SdkHttpGenerationPool>().CreateClient(nameof(OpenAiResponsesLlmClient));

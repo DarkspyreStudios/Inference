@@ -9,8 +9,9 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Darkspyre.Inference.Connect.HostTools/Darkspyre.Inference.Connect.HostTools.csproj" />
-    <!-- HostTools carries Contracts privately in its package, so its references do not flow here. -->
+    <!-- HostTools carries Contracts and the LocalServices contracts privately in its package, so its references do not flow here. -->
     <ProjectReference Include="../Darkspyre.Inference.Connect.HostTools.Contracts/Darkspyre.Inference.Connect.HostTools.Contracts.csproj" />
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Contracts/Darkspyre.LocalServices.Contracts.csproj" />
     <PackageReference Include="ModelContextProtocol" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
   </ItemGroup>

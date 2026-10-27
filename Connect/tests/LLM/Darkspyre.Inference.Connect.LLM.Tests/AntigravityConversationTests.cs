@@ -8,10 +8,14 @@ using Darkspyre.Inference.Connect.LLM.Providers;
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
 /// <summary>Context counting and compaction of the Antigravity conversation, against a scripted AGY process.</summary>
-public sealed class AntigravityConversationTests
+public sealed class AntigravityConversationTests : IDisposable
 {
     private const string Model = "gemini-3.8-flash-low";
     private const string Summary = "SUMMARY-OF-EARLIER-TURNS";
+
+    private readonly TestDataFolder _folder = new();
+
+    public void Dispose() => _folder.Dispose();
 
     [Fact]
     public async Task StatusIsEstimatedBeforeTheFirstReportAndMixedAfterIt()
@@ -93,11 +97,11 @@ public sealed class AntigravityConversationTests
         Assert.Single(agy.Invocations);
     }
 
-    private static Task<ILlmAgentSession> StartAsync(ScriptedAgy agy, LlmAgentContext context, bool capped = true)
+    private Task<ILlmAgentSession> StartAsync(ScriptedAgy agy, LlmAgentContext context, bool capped = true)
     {
         // A 20,000-token cap with a 1,000-token reserve puts the trigger at 16,150 tokens; uncapped, the model's window applies.
         var runner = new SummaryRunner();
-        return new AntigravityAgentClient(agy, runner, new AntigravityCliLlmClient(runner), new LearnedModelContext()).StartSessionAsync("connection", Connection(), new()
+        return new AntigravityAgentClient(agy, runner, new AntigravityCliLlmClient(runner, _folder), new LearnedModelContext(), _folder).StartSessionAsync("connection", Connection(), new()
         {
             ModelId = Model,
             Runtime = new() { WorkingDirectory = Environment.CurrentDirectory, Policy = new LlmAgentProviderRuntimePolicy() },

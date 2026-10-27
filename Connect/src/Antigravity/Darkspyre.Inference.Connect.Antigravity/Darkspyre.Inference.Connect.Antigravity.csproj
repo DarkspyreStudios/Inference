@@ -11,6 +11,8 @@
     <ProjectReference Include="../../HostTools/Darkspyre.Inference.Connect.HostTools/Darkspyre.Inference.Connect.HostTools.csproj" />
     <!-- The HostTools package carries Contracts in its lib/, so this package declares no dependency of its own on it. -->
     <ProjectReference Include="../../HostTools/Darkspyre.Inference.Connect.HostTools.Contracts/Darkspyre.Inference.Connect.HostTools.Contracts.csproj" PrivateAssets="all" />
+    <!-- The HostTools package also carries the LocalServices contracts in its lib/, for ServiceFolders. -->
+    <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Contracts/Darkspyre.LocalServices.Contracts.csproj" PrivateAssets="all" />
     <ProjectReference Include="../../HostTools/Darkspyre.Inference.Connect.HostTools.Mcp/Darkspyre.Inference.Connect.HostTools.Mcp.csproj"
                       ReferenceOutputAssembly="false" Private="false" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />

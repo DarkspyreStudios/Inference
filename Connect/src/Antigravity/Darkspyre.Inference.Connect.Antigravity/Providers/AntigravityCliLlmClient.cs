@@ -10,7 +10,7 @@ using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
+internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner, ILlmDataFolder dataFolder)
     : ILlmClient, ILlmAccountUsageClient, IExternalLlmAuthenticationProbe, ILlmContextEstimator
 {
     /// <summary>The longest process argument Linux accepts (MAX_ARG_STRLEN less its terminator), in UTF-8 bytes.</summary>
@@ -472,7 +472,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         JsonElement? schema,
         CancellationToken cancellationToken)
     {
-        string workingDirectory = CliInfrastructure.CreateWorkingDirectory("antigravity");
+        string workingDirectory = CreateWorkingDirectory(await dataFolder.ReadAsync(cancellationToken));
         try
         {
             List<string> effectiveArguments = await WithSchemaAsync(arguments, schema, workingDirectory, cancellationToken);
@@ -509,7 +509,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
         JsonElement? schema,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        string workingDirectory = CliInfrastructure.CreateWorkingDirectory("antigravity");
+        string workingDirectory = CreateWorkingDirectory(await dataFolder.ReadAsync(cancellationToken));
         try
         {
             List<string> effectiveArguments = await WithSchemaAsync(arguments, schema, workingDirectory, cancellationToken);
@@ -560,6 +560,13 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner)
             CliInfrastructure.DeleteWorkingDirectory(workingDirectory);
         }
     }
+
+    /// <summary>
+    /// A new call or schema folder under <c>scratch</c> in the host data folder <paramref name="dataFolder"/>, which the
+    /// caller deletes when its call or process ends.
+    /// </summary>
+    internal static string CreateWorkingDirectory(string dataFolder) =>
+        CliInfrastructure.CreateWorkingDirectory(Path.Combine(dataFolder, "scratch"), "antigravity");
 
     /// <summary>
     /// The arguments with <c>--json-schema</c> appended when a schema is given. The schema file is written to the

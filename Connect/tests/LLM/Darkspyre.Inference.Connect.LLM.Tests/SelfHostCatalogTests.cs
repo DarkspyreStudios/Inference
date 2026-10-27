@@ -6,8 +6,12 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
-public sealed class SelfHostCatalogTests
+public sealed class SelfHostCatalogTests : IDisposable
 {
+    private readonly TestDataFolder _folder = new();
+
+    public void Dispose() => _folder.Dispose();
+
     [Fact]
     public async Task UniversalConversationExecutesToolsAndKeepsContextAcrossTurns()
     {
@@ -94,11 +98,12 @@ public sealed class SelfHostCatalogTests
         Assert.Equal(2, calls);
     }
 
-    private static ServiceProvider Services(Engine engine)
+    private ServiceProvider Services(Engine engine)
     {
         var services = new ServiceCollection();
         services.AddSingleton<ILlmConnectionSource>(new Source());
         services.AddSingleton<ILlmSelfHost>(new Host(engine));
+        services.AddSingleton<ILlmDataFolder>(_folder);
         services.AddLlmConnect();
 
         return services.BuildServiceProvider();

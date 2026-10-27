@@ -4,13 +4,16 @@ namespace Darkspyre.Inference.Connect.HostTools;
 
 /// <summary>
 /// The host-tools service's names and messages. A host registers each agent session's MCP tool list under a session ID;
-/// the MCP program an agent CLI starts reads that ID from its environment, lists the session's tools and forwards each
-/// call, which the service passes back to the registering host as a callback.
+/// the MCP program an agent CLI starts reads that ID and the host's data folder from its environment, lists the session's
+/// tools and forwards each call, which the service passes back to the registering host as a callback.
 /// </summary>
 public static class HostToolsProtocol
 {
     /// <summary>The environment variable that carries the session ID into the agent CLI and the MCP program it starts.</summary>
     public const string SessionVariable = "DARKSPYRE_HOST_TOOLS_SESSION";
+
+    /// <summary>The environment variable that carries the app's Plugin data folder for host tools into the agent CLI and its MCP program.</summary>
+    public const string FolderVariable = "DARKSPYRE_HOST_TOOLS_FOLDER";
 
     /// <summary>The MCP server name the agent CLI's global configuration registers.</summary>
     public const string ServerName = "darkspyre-host-tools";
