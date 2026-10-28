@@ -35,10 +35,10 @@ public sealed class LlmSettingsTests
     [Fact]
     public async Task BlankCliExecutableUsesProviderDefaultForChecksAndSave()
     {
-        LlmProviderDefinition definition = ClaudeDefinition.Value;
+        LlmProviderDefinition definition = AntigravityDefinition.Value;
         using var provider = new LlmProviderService(new UnusedSource(), [new Client(definition)]);
         var target = new Target();
-        var (manager, settings) = await OpenAsync(provider, LlmTransport.AnthropicClaudeCli,
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.GoogleAntigravityCli,
             new(SetupChangeIntent.Create, "id", null), target, modelId: "model");
         using (manager)
         {
@@ -250,11 +250,13 @@ public sealed class LlmSettingsTests
         Assert.Equal((false, false), (settings.Status.Installed.Value, settings.Status.Authenticated.Value));
         Assert.IsType<SetupExternalPrerequisite>(settings.Interaction);
 
+        // The CLI's own login does not sign a Claude connection in; only its own account token does.
         claude.State = ExternalAuthenticationState.SignedIn;
         result = await manager.RunAsync(settings, "check");
         Assert.Equal(SetupActionState.Completed, result.State);
-        Assert.Equal((true, true), (settings.Status.Installed.Value, settings.Status.Authenticated.Value));
+        Assert.Equal((true, false), (settings.Status.Installed.Value, settings.Status.Authenticated.Value));
         Assert.Null(settings.Interaction);
+        Assert.Contains(settings.Actions, action => action.Id == "sign-in-claude");
 
         Assert.Equal(SetupEditState.Applied, Assert.IsType<SetupExecutableField>(Fields(settings)
             .Single(field => field.Description.Id == "executable")).SetValue(new("/opt/claude")).State);
@@ -418,11 +420,19 @@ public sealed class LlmSettingsTests
         SetupActionDescriptor signIn = Action(settings, SetupActionPurpose.Authenticate);
         Assert.Equal(("sign-in-claude", "Sign in to a Claude account"), (signIn.Id, signIn.DisplayName));
 
+        // With the CLI logged in but no account token, the connection is not signed in, lists no models and cannot be saved.
+        await manager.RunAsync(settings, "check");
+        Assert.Equal(false, settings.Status.Authenticated.Value);
+        Assert.False(settings.CanSave);
+        SetupChoicePage page = await manager.QueryChoicesAsync(settings, "model", new(string.Empty, null, 50));
+        Assert.Equal("claude-sign-in-required", Assert.Single(page.Issues!).Code);
+
         await manager.RunAsync(settings, signIn.Id);
         Assert.IsType<SetupBrowserAuthorization>(settings.Interaction).Callback.SetValue("code#state");
         await manager.RunAsync(settings, Action(settings, SetupActionPurpose.ContinueAuthentication).Id);
 
         Assert.Equal(true, settings.Status.Authenticated.Value);
+        Assert.Contains((await manager.QueryChoicesAsync(settings, "model", new(string.Empty, null, 50))).Choices, choice => choice.Value == "model");
         Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
         Assert.Equal("account-token", LlmCredential.Parse(created.Changes!.Credential.Value)!.OAuth!.AccessToken);
     }

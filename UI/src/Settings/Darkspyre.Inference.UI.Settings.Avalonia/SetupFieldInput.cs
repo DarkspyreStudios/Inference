@@ -655,12 +655,13 @@ public sealed class SetupFieldInput : UserControl
         string? after = this.continuation;
         using CancellationTokenSource cancellation = CancellationTokenSource.CreateLinkedTokenSource(this.lifetime.Token);
         this.choiceCancellation = cancellation;
-        this.loading = true;
-        this.choiceIssue = null;
-        this.Render();
         bool IsCurrent() => !this.disposed && !cancellation.IsCancellationRequested && generation == this.choiceGeneration && version == this.editVersion;
         try
         {
+            // Inside the try, so the finally always clears choiceCancellation before the using disposes it.
+            this.loading = true;
+            this.choiceIssue = null;
+            this.Render();
             if (choice.ChoiceSideEffects != SetupSideEffect.None
                 && !await this.host.AuthorizeAsync("Load " + choice.Description.DisplayName, choice.ChoiceSideEffects, cancellation.Token))
             {

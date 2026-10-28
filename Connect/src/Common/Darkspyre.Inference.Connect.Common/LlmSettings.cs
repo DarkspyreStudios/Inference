@@ -174,10 +174,15 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             || (UsesAws ? NormalizeAws(Credential.Aws) != NormalizeAws(LlmCredential.Parse(_baseline.Credential)?.Aws)
                 : UsesAzure ? _azure!.HasCredentialEdits : _credentialChange != SetupSecretEditKind.Keep);
 
-    /// <summary>Subscription API connections require sign-in or a retained saved credential.</summary>
-    protected override bool IsSignInSatisfied =>
+    /// <summary>Subscription API connections require sign-in or a retained saved credential. A Claude subscription
+    /// connection requires its own account token from the app's sign-in; the Claude CLI's own login does not count.</summary>
+    protected override bool IsSignInSatisfied => _draft.Transport == LlmTransport.AnthropicClaudeCli ? HasClaudeAccountToken :
         _draft.Transport is not (LlmTransport.OpenAiCodex or LlmTransport.XaiResponses) || Status.Authenticated.Value == true
             || _credentialChange == SetupSecretEditKind.Keep && !string.IsNullOrEmpty(LlmCredential.Parse(_original?.Credential)?.Serialize());
+
+    /// <summary>The draft holds a Claude account token: a new one from "Sign in to a Claude account", or the saved one it keeps.</summary>
+    internal bool HasClaudeAccountToken => !string.IsNullOrWhiteSpace(Credential.OAuth?.AccessToken)
+        || _credentialChange == SetupSecretEditKind.Keep && !string.IsNullOrWhiteSpace(LlmCredential.Parse(_original?.Credential)?.OAuth?.AccessToken);
 
     private static LlmAwsCredentials NormalizeAws(LlmAwsCredentials? value) => (value ?? new()) with
     { Profile = value?.Profile ?? string.Empty, Region = value?.Region ?? string.Empty };
@@ -897,6 +902,12 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
                 return InferenceSettings.Page(query, regions);
             case var modelField when modelField == "model" || modelField.StartsWith("context-model-", StringComparison.Ordinal):
                 {
+                    // A Claude connection lists its account's models with its own token, never through the CLI's login.
+                    if (settings.Transport == LlmTransport.AnthropicClaudeCli && !settings.HasClaudeAccountToken)
+                    {
+                        return new([], State: SetupChoiceState.Unavailable,
+                            Issues: [new("claude-sign-in-required", "Sign in to a Claude account in the previous step to list its models.", "model")]);
+                    }
                     await using LlmProviderService service = Service(settings, cancellationToken);
                     Fence(cancellationToken);
                     LlmProviderCapabilities capabilities = await service.GetCapabilitiesAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
@@ -1003,7 +1014,9 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         ExternalAuthenticationState state = await service.CheckAuthenticationAsync(settings.Identity.Id, token).ConfigureAwait(false);
         Fence(token);
         bool installed = state != ExternalAuthenticationState.NotInstalled;
-        bool signedIn = state == ExternalAuthenticationState.SignedIn;
+        // A Claude connection is signed in only through its own account token; the CLI's own login is not used.
+        bool signedIn = state == ExternalAuthenticationState.SignedIn
+            && (settings.Transport != LlmTransport.AnthropicClaudeCli || settings.HasClaudeAccountToken);
         settings.Status = settings.Status with
         {
             Installed = SetupObservation.Known(installed),

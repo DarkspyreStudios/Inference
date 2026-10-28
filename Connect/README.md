@@ -4877,6 +4877,13 @@ claude
   changed, so connections on different accounts run at the same time. The token is never refreshed;
   signing in again replaces it.
 
+The settings editor creates and saves only the second kind. A Claude subscription connection's
+settings count as signed in only when they hold an account token from "Sign in to a Claude account"
+(or keep the one already saved), so the machine's CLI login never marks them signed in and the sign-in
+action stays offered. Without that token the `check` action reports not signed in, the model field
+reports `claude-sign-in-required` instead of listing models through the CLI, and Save is unavailable.
+A connection saved earlier without a credential still runs as the machine's login.
+
 Subscription prompts run in an empty temporary workspace with safe mode, tools, slash commands,
 permission prompts, and session persistence disabled. Darkspyre.Inference.Connect.LLM sends the complete prompt as BOM-free
 UTF-8 stream JSON over standard input rather than exposing it in process arguments. It consumes output
