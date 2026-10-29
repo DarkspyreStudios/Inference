@@ -152,7 +152,11 @@ public sealed class QwenInstalledModelsTests : IDisposable
             };
             foreach (string key in new[] { "ssm.inner_size", "ssm.state_size", "ssm.group_count", "ssm.time_step_rank", "ssm.conv_kernel" })
                 values.Add(($"{architecture}.{key}", () => UInt32(writer, 1)));
-            if (draft) values.Add(("qwen4exp.nextn_predict_layers", () => UInt32(writer, 1)));
+            if (draft)
+            {
+                values.Add(("qwen4exp.nextn_predict_layers", () => UInt32(writer, 1)));
+                values.Add(("qwen4exp.nextn_shared_target_tensors", () => Bool(writer, true)));
+            }
             writer.Write("GGUF"u8);
             writer.Write(3u);
             writer.Write((ulong)tensors.Length);
@@ -203,6 +207,12 @@ public sealed class QwenInstalledModelsTests : IDisposable
     private static void UInt32(BinaryWriter writer, uint value)
     {
         writer.Write(4u);
+        writer.Write(value);
+    }
+
+    private static void Bool(BinaryWriter writer, bool value)
+    {
+        writer.Write(7u);
         writer.Write(value);
     }
 }

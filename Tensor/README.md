@@ -603,7 +603,9 @@ thinking block. Image input is supported only for the loaded model when its visi
 
 Qwen packs have one `model`, any numbered `model-shard-N` artifacts, and optional `vision-projector`
 and `mtp-draft` GGUF artifacts. Companions are accepted only on a `qwen4exp` trunk. The projector
-must name the `clip` architecture. The draft must be a single `qwen4exp` GGUF with one NextN layer.
+must name the `clip` architecture. The draft must be a single `qwen4exp` GGUF with one NextN layer
+that declares `qwen4exp.nextn_shared_target_tensors` true, the only draft TensorSharp loads; a draft
+without it is refused at resolution, before install.
 A projector pack offers managed CPU and the four GGML backends. A draft pack, with or without a
 projector, offers only GGML CPU, Metal, CUDA and Vulkan. A pack without companions keeps the usual
 backend set. Undefined tensor types are refused with the tensor's name and GGML type number.

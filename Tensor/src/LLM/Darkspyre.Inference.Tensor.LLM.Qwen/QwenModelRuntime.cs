@@ -231,8 +231,10 @@ internal static class QwenModelCompatibility
         if (companions.TryGetValue(TensorLlmModels.MtpDraftRole, out var draft)
             && (draft.GetValueOrDefault("general.architecture") is not "qwen4exp"
                 || !draft.TryGetValue("qwen4exp.nextn_predict_layers", out object? nextn) || Convert.ToUInt32(nextn, System.Globalization.CultureInfo.InvariantCulture) != 1
+                // TensorSharp loads only a draft block that borrows the target's tensors (Qwen4ExpModel.ValidateMtpHead).
+                || draft.GetValueOrDefault("qwen4exp.nextn_shared_target_tensors") is not true
                 || draft.TryGetValue("split.count", out object? count) && Convert.ToUInt32(count, System.Globalization.CultureInfo.InvariantCulture) != 1))
-            throw new InvalidDataException("The MTP draft must be a single qwen4exp GGUF with one NextN layer.");
+            throw new InvalidDataException("The MTP draft must be a single qwen4exp GGUF with one NextN layer that shares the target model's tensors.");
     }
 
     // The Qwen 3.5 family mixes full-attention layers with GatedDeltaNet recurrent layers. TensorSharp's
