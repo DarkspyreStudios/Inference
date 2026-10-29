@@ -164,7 +164,9 @@ internal static class QwenModelCompatibility
             var view = new CheckpointMetadata(header.Version, header.Values, header.Tensors, [files[index].Artifact.Path]);
             if (header.Version != files[0].Header.Version || view.GetUint32("split.count", 1) != files.Count
                 || view.GetUint32("split.no", (uint)index) != index
-                || view.GetString("general.architecture") != files[0].Header.Values.GetValueOrDefault("general.architecture") as string)
+                // llama.cpp's gguf-split writes the architecture into the first shard only; a later shard may omit it.
+                || view.GetString("general.architecture") is { } architecture
+                    && architecture != files[0].Header.Values.GetValueOrDefault("general.architecture") as string)
             { throw new InvalidDataException("Inconsistent GGUF shard metadata."); }
             foreach (GgufTensorInfo tensor in header.Tensors.Values)
             {

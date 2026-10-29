@@ -584,7 +584,9 @@ TensorSharp's own load validates each layer. Listed context/output limits remain
 metadata is available. A split GGUF pack
 installs every declared shard beside the primary file under its numbered name, and Qwen passes
 TensorSharp the primary path; TensorSharp opens the sibling shards from the same directory. Shard
-count/names/numbering and duplicate tensors are checked before native allocation.
+count/names/numbering and duplicate tensors are checked before native allocation. Only the first
+shard must name `general.architecture`, as llama.cpp's `gguf-split` writes it; a later shard that
+names one must match the first.
 
 **Capability addition (11.14.0-rc.1):** Qwen's Common `LlmCapabilities.OutputLimitEnforcement` is
 `EngineEnforced`, describing its existing `MaxOutputTokens` runtime limit. This is separate from
