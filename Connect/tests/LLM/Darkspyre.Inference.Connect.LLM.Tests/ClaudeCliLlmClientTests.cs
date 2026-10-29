@@ -211,7 +211,38 @@ public sealed class ClaudeCliLlmClientTests
 
         (LogLevel level, string message) = Assert.Single(logger.Entries);
         Assert.Equal(LogLevel.Information, level);
-        Assert.Equal($"Claude rate_limit_event on connection (five_hour): {info}", message);
+        Assert.Equal($"Claude rate_limit_event on connection (five_hour): fields status, rateLimitType, resetsAt, isUsingOverage, "
+            + $"{info.Length} characters", message);
+    }
+
+    /// <summary>
+    /// The object's shape belongs to the CLI, so the log holds its field names and its length and no field's value. A
+    /// field the CLI gains later could name an account or an organization (DSA-844).
+    /// </summary>
+    [Fact]
+    public async Task ARateLimitEventLogsItsFieldNamesAndLengthAndNoValue()
+    {
+        const string info = """{"status":"allowed","rateLimitType":"five_hour","resetsAt":1900000000,"organizationName":"harbor lighthouse"}""";
+        var runner = new RecordingRunner(new(0,
+            $$"""{"type":"rate_limit_event","rate_limit_info":{{info}},"session_id":"private-session"}"""
+            + "\n"
+            + """{"type":"result","subtype":"success","is_error":false,"result":"OK","stop_reason":"end_turn"}""",
+            string.Empty));
+        using var http = new HttpClient(new UnexpectedHttpHandler());
+        var logger = new RecordingLogger();
+        var client = new ClaudeCliLlmClient(http, runner, new CatalogProcess(), new ClaudeRateLimitLog(logger));
+        await using var service = new LlmProviderService(new ResourcePreparationTests.Source(CliConnection()), [client]);
+
+        await ReadAllAsync(service.StreamAsync("connection",
+            new() { ModelId = "cli-returned-alias", Messages = [new("user", "test")] }));
+
+        (LogLevel level, string message) = Assert.Single(logger.Entries);
+        Assert.Equal(LogLevel.Information, level);
+        Assert.Equal($"Claude rate_limit_event on connection (five_hour): fields status, rateLimitType, resetsAt, organizationName, "
+            + $"{info.Length} characters", message);
+        Assert.DoesNotContain("harbor lighthouse", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("1900000000", message, StringComparison.Ordinal);
+        Assert.DoesNotContain("allowed", message, StringComparison.Ordinal);
     }
 
     private sealed class RecordingLogger : ILogger<ClaudeRateLimitLog>
