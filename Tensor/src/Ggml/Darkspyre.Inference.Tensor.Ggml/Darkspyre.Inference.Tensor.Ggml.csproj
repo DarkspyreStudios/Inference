@@ -18,7 +18,4 @@
     <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.Registry" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.LLM.Qwen.Tests" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
-  </ItemGroup>
 </Project>

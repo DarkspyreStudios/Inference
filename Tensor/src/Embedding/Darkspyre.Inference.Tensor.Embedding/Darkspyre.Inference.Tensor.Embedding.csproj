@@ -12,7 +12,4 @@
     <ProjectReference Include="..\..\Ggml\Darkspyre.Inference.Tensor.Ggml\Darkspyre.Inference.Tensor.Ggml.csproj" />
     <PackageReference Include="TensorSharp.Models" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
-  </ItemGroup>
 </Project>

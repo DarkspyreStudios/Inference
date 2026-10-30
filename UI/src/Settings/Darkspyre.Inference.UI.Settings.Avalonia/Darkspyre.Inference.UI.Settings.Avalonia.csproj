@@ -11,7 +11,4 @@
     <PackageReference Include="Avalonia" />
     <InternalsVisibleTo Include="Darkspyre.Inference.UI.Settings.Avalonia.Tests" />
   </ItemGroup>
-  <ItemGroup>
-    <None Include="..\..\..\README.md" Pack="true" PackagePath="README.md" />
-  </ItemGroup>
 </Project>

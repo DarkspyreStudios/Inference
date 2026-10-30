@@ -1,13 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <Description>Universal conversations and embeddings through the SelfHost provider.</Description>
+    <Description>Conversations and embeddings on engines the application runs in its own process.</Description>
+    <PackageTags>llm;ai;inference;in-process;embeddings;agents</PackageTags>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.ConsoleTester" />
-    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
     <None Include="buildTransitive/Darkspyre.Inference.Connect.SelfHost.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
 </Project>

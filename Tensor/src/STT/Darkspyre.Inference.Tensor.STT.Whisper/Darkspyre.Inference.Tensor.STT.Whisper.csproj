@@ -2,6 +2,7 @@
   <PropertyGroup>
     <IsPackable>true</IsPackable>
     <Description>Resident CPU/CUDA Whisper speech transcription with host-owned model storage and lifetime.</Description>
+    <PackageTags>ai;inference;speech-to-text;whisper</PackageTags>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj" />
@@ -12,8 +13,5 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Darkspyre.Inference.Tensor.Common.Tests" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
   </ItemGroup>
 </Project>

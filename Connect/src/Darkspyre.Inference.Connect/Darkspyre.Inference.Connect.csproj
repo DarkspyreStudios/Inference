@@ -23,7 +23,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="README.md" />
     <None Include="..\Audio\Darkspyre.Inference.Connect.Audio\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Audio.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\Audio\Darkspyre.Inference.Connect.Audio\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.Audio.xml" Pack="true" PackagePath="lib\$(TargetFramework)" />
     <None Include="..\TTS\Darkspyre.Inference.Connect.TTS\bin\$(Configuration)\$(TargetFramework)\Darkspyre.Inference.Connect.TTS.dll" Pack="true" PackagePath="lib\$(TargetFramework)" />

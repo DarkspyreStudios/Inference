@@ -5,7 +5,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>Darkspyre.Inference.Connect.Common</AssemblyName>
     <Description>Universal conversation and embedding contracts, shared provider infrastructure and automatic Connect discovery.</Description>
-    <PackageTags>llm;ai;openai;anthropic;claude;codex;gemini;antigravity;grok;tool-use;structured-output</PackageTags>
+    <PackageTags>llm;ai;inference;conversations;agents;embeddings;tool-use;structured-output</PackageTags>
   </PropertyGroup>
 
   <ItemGroup>
@@ -45,7 +45,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Codex" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Claude" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.Antigravity" />

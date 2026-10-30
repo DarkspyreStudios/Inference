@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <Description>Universal conversations through the Antigravity CLI provider.</Description>
+    <Description>Conversations and native agent sessions on a Google subscription through the official Antigravity CLI.</Description>
+    <PackageTags>llm;ai;antigravity;antigravity-cli;subscription;agents</PackageTags>
     <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddHostToolsMcpProgramsToPackage</TargetsForTfmSpecificContentInPackage>
     <!-- NU5100: the programs under hosttools/<rid>/mcp/ hold the program's own assemblies, which a consumer copies beside
          its output and never references. -->
@@ -18,7 +19,6 @@
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.SandboxTests" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.ConsoleTester" />
-    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
     <None Include="buildTransitive/Darkspyre.Inference.Connect.Antigravity.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
 

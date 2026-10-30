@@ -30,5 +30,58 @@
       <None Update="@(None)" Condition="'%(None.DefiningProjectName)' == 'Whisper.net.Runtime' Or '%(None.DefiningProjectName)' == 'Whisper.net.Runtime.Metal' Or '%(None.DefiningProjectName)' == 'Whisper.net.Runtime.Cuda12.Linux'" Pack="false" />
     </ItemGroup>
   </Target>
+  <!-- Each package's nuget.org page is its own PACKAGE.md followed by the family section in eng/PackageFamily.md. The
+       repository READMEs are the design record and are not packed. The composition task is C#, not MSBuild property
+       functions, because page text holds characters MSBuild expands or splits. eng/VerifyPackages checks each archive's README.md
+       against the same composition. -->
+  <UsingTask TaskName="ComposePackageReadme" TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)/Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <PackageId ParameterType="System.String" Required="true" />
+      <Page ParameterType="System.String" Required="true" />
+      <Family ParameterType="System.String" Required="true" />
+      <Output ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Linq" />
+      <Using Namespace="System.Text" />
+      <Using Namespace="System.Text.RegularExpressions" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        if (!File.Exists(Page))
+        {
+            Log.LogError(PackageId + ": add PACKAGE.md, the package's nuget.org page, beside the project.");
+            return false;
+        }
+        string page = File.ReadAllText(Page, Encoding.UTF8);
+        string family = File.ReadAllText(Family, Encoding.UTF8);
+        if (page.Split('\n')[0].TrimEnd('\r') != "# " + PackageId)
+        {
+            Log.LogError(PackageId + ": PACKAGE.md must start with '# " + PackageId + "'.");
+            return false;
+        }
+        Match note = Regex.Match(page + "\n" + family, @"\bDSA-\d+\b|(?i:\bphase[- ]1\b)|Brandon");
+        if (note.Success)
+        {
+            Log.LogError(PackageId + ": the package page contains a work note ('" + note.Value
+                + "'); package pages hold consumer documentation only.");
+            return false;
+        }
+        byte[] composed = new UTF8Encoding(false).GetBytes(page.TrimEnd() + "\n\n" + family.TrimEnd() + "\n");
+        string output = Path.GetFullPath(Output);
+        Directory.CreateDirectory(Path.GetDirectoryName(output));
+        if (!File.Exists(output) || !File.ReadAllBytes(output).SequenceEqual(composed))
+            File.WriteAllBytes(output, composed);
+      ]]></Code>
+    </Task>
+  </UsingTask>
+  <Target Name="ComposePackageReadme" BeforeTargets="_GetPackageFiles" Condition="'$(IsPackable)' == 'true'">
+    <ComposePackageReadme PackageId="$(PackageId)" Page="$(MSBuildProjectDirectory)/PACKAGE.md"
+                          Family="$(MSBuildThisFileDirectory)eng/PackageFamily.md"
+                          Output="$(IntermediateOutputPath)package/README.md" />
+    <ItemGroup>
+      <None Include="$(IntermediateOutputPath)package/README.md" Pack="true" PackagePath="README.md" />
+    </ItemGroup>
+  </Target>
   <Import Project="$(MSBuildThisFileDirectory)eng/ConnectDiscovery.targets" />
 </Project>

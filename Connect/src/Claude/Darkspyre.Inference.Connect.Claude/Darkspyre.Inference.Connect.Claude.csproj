@@ -1,13 +1,13 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <Description>Universal conversations through the Claude provider.</Description>
+    <Description>Conversations and agent sessions on a Claude subscription through the official Claude CLI.</Description>
+    <PackageTags>llm;ai;claude;claude-cli;subscription;agents</PackageTags>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
     <InternalsVisibleTo Include="Darkspyre.Inference.Connect.ConsoleTester" />
-    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
     <None Include="buildTransitive/Darkspyre.Inference.Connect.Claude.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
   <ItemGroup>

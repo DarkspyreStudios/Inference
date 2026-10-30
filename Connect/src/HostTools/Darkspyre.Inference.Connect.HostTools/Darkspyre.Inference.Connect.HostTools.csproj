@@ -2,6 +2,7 @@
   <Import Project="$(DarkspyreCommonSourceRoot)/build/LocalServices/ServicePlatform.props" />
   <PropertyGroup>
     <Description>Connects hosts and MCP programs to the host-tools local service, which it bundles.</Description>
+    <PackageTags>ai;agents;mcp;host-tools;local-service</PackageTags>
     <LocalServiceProject>$(MSBuildThisFileDirectory)../Darkspyre.Inference.Connect.HostTools.Service/Darkspyre.Inference.Connect.HostTools.Service.csproj</LocalServiceProject>
     <LocalServiceEntryPoint>darkspyre-host-tools-service</LocalServiceEntryPoint>
     <LocalServiceMetadataPrefix>HostTools</LocalServiceMetadataPrefix>
@@ -22,7 +23,6 @@
     <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Platform.MacOS/Darkspyre.LocalServices.Platform.MacOS.csproj" PrivateAssets="all" />
     <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Platform.Linux/Darkspyre.LocalServices.Platform.Linux.csproj" PrivateAssets="all" />
     <ProjectReference Include="$(DarkspyreCommonSourceRoot)/src/Darkspyre.LocalServices.Platform.Windows/Darkspyre.LocalServices.Platform.Windows.csproj" PrivateAssets="all" />
-    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
     <None Include="buildTransitive/Darkspyre.Inference.Connect.HostTools.targets" Pack="true" PackagePath="buildTransitive/" />
   </ItemGroup>
 

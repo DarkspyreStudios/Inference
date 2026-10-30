@@ -14,9 +14,6 @@
     <ProjectReference Include="..\..\Embedding\Darkspyre.Inference.Tensor.Embedding\Darkspyre.Inference.Tensor.Embedding.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <None Include="../../../README.md" Pack="true" PackagePath="README.md" />
-  </ItemGroup>
-  <ItemGroup>
     <ProjectReference Include="../../Embedding/Darkspyre.Inference.Tensor.Embedding.Gemma/Darkspyre.Inference.Tensor.Embedding.Gemma.csproj" />
   </ItemGroup>
 </Project>
