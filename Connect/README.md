@@ -1032,6 +1032,10 @@ the code several providers share, including `ILlmDeviceLogin` and `ILlmBrowserLo
 compiles for a provider outside the build carries a comment that names the provider and where it lives.
 `ILlmSelfHost` and `LlmSelfHostEngine` are in the SelfHost package.
 
+Each package packs its own NuGet page: the `PACKAGE.md` beside its project, followed by the shared family section in
+`eng/PackageFamily.md`, composed by the `ComposePackageReadme` target. A page describes only its package, and
+`eng/README.md` says how the composition is checked.
+
 The Apple on-device adapter is registered by `AddLlmConnect`. Its separately built Swift
 helper and release gates are described in the [connector design](docs/apple-foundation-models-design.md).
 This source implementation has not been published as a signed helper release.
