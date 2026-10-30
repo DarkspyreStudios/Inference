@@ -3,6 +3,9 @@ using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
+// Anthropic Messages uses this; Anthropic Messages is out of the build (Providers/AnthropicMessagesLlmClient.cs and
+// ManagedAnthropicAgentClient.cs, under Compile Remove). It moves into that provider's own library when the provider
+// returns to the build.
 /// <summary>Allowlisted Messages continuation metadata. Container IDs stay opaque and account-bound with content.</summary>
 internal static class AnthropicContinuation
 {

@@ -157,7 +157,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         return new ConnectLlmInference(this, connectionId);
     }
 
-    /// <summary>Validates an explicit connection without refreshing credentials or invoking a provider. No phase-1 provider implements this; it is a forward seam kept under an L2 exception until a provider that implements it returns to the build.</summary>
+    /// <summary>Validates an explicit connection without refreshing credentials or invoking a provider. No provider in the build implements this; it is a forward seam until a provider that implements it returns to the build.</summary>
     public async Task<ILlmContextCacheClient> BindContextCacheAsync(
         string connectionId, CancellationToken cancellationToken = default)
     {
@@ -552,7 +552,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         }
     }
 
-    /// <summary>Tokenizes only the supplied plain text. No request projection, catalog, usage or estimate is substituted. No phase-1 provider implements this; it is a forward seam kept under an L2 exception until a provider that implements it returns to the build.</summary>
+    /// <summary>Tokenizes only the supplied plain text. No request projection, catalog, usage or estimate is substituted. No provider in the build implements this; it is a forward seam until a provider that implements it returns to the build.</summary>
     public async Task<LlmTokenization> TokenizeAsync(string connectionId, string modelId, string text,
         CancellationToken cancellationToken = default)
     {

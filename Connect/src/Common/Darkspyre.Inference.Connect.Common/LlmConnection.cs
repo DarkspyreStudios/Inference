@@ -9,6 +9,10 @@ namespace Darkspyre.Inference.Connect.LLM;
 public sealed record LlmConnection
 {
     // Resolved by the selected adapter for one operation. Never serialized or supplied by a host.
+    // The Gemini API, OpenAI-compatible Chat and Google Vertex AI use this; they are out of the build
+    // (Providers/GeminiApiLlmClient*.cs and ChatCompletionsLlmClientBase.cs, under Compile Remove;
+    // Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex, outside the solution). It moves into their own libraries
+    // when they return to the build.
     internal Internal.ILlmContinuationCodec? ContinuationCodec { get; init; }
     internal string? ResolvedContinuationScope { get; init; }
     internal LlmAccountUsageObservations.Binding? AccountUsageObservationBinding { get; init; }
@@ -43,24 +47,36 @@ public sealed record LlmConnection
     /// <summary>Serialized <see cref="LlmCredential"/>.</summary>
     public string? Credential { get; init; }
 
+    // Saved with each connection. It stays in Connect.Common because LlmConnection, which hosts store, holds
+    // it; moving it would change saved connections.
     /// <summary>Google Vertex AI settings, when the connection uses Vertex.</summary>
     public LlmVertexConfiguration? Vertex { get; init; }
 
+    // Saved with each connection. It stays in Connect.Common because LlmConnection, which hosts store, holds
+    // it; moving it would change saved connections.
     /// <summary>Azure settings, when the connection uses Azure.</summary>
     public LlmAzureConfiguration? Azure { get; init; }
 
+    // Saved with each connection. It stays in Connect.Common because LlmConnection, which hosts store, holds
+    // it; moving it would change saved connections.
     /// <summary>Agent Client Protocol settings, when the connection uses an ACP agent.</summary>
     public LlmAcpConfiguration? Acp { get; init; }
 
+    // Saved with each connection. It stays in Connect.Common because LlmConnection, which hosts store, holds
+    // it; moving it would change saved connections.
     /// <summary>GitHub Copilot settings, when the connection uses Copilot.</summary>
     public LlmCopilotConfiguration? Copilot { get; init; }
 
     /// <summary>Transient explicit launch values; non-null values cannot be serialized as configuration.</summary>
     public LlmAgentRuntimeLaunchInputs? RuntimeLaunchInputs { get; init; }
 
+    // Saved with each connection. It stays in Connect.Common because LlmConnection, which hosts store, holds
+    // it; moving it would change saved connections.
     /// <summary>Chat Completions protocol choices; null selects endpoint-aware defaults.</summary>
     public LlmChatCompletionsConfiguration? ChatCompletions { get; init; }
 
+    // Saved with each connection. It stays in Connect.Common because LlmConnection, which hosts store, holds
+    // it; moving it would change saved connections.
     /// <summary>xAI settings, when the connection uses xAI.</summary>
     public XaiConnectionOptions? Xai { get; init; }
 

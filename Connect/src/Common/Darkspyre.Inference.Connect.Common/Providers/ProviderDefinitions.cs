@@ -4,6 +4,9 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal static class ProviderDefinitions
 {
+    // Apple Foundation Models uses this; Apple Foundation Models is out of the build (Providers/Apple*.cs and
+    // Providers/ManagedAppleAgentClient.cs, under Compile Remove). It moves into that provider's own library when the
+    // provider returns to the build.
     public static LlmProviderDefinition AppleFoundationModels { get; } = new()
     {
         Id = "apple-foundation-models",
@@ -43,6 +46,9 @@ internal static class ProviderDefinitions
 
 
 
+    // OpenAI-compatible Chat uses this; OpenAI-compatible Chat is out of the build (Providers/ChatCompletionsLlmClientBase.cs,
+    // OpenAiCompatibleChatLlmClient.cs and ManagedOpenAiCompatibleAgentClient.cs, under Compile Remove). It moves into
+    // that provider's own library when the provider returns to the build.
     public static LlmProviderDefinition OpenAiCompatible { get; } = new()
     {
         Id = "openai-compatible-api",
@@ -66,6 +72,9 @@ internal static class ProviderDefinitions
         ]
     };
 
+    // Anthropic Messages uses this; Anthropic Messages is out of the build (Providers/AnthropicMessagesLlmClient.cs and
+    // ManagedAnthropicAgentClient.cs, under Compile Remove). It moves into that provider's own library when the provider
+    // returns to the build.
     public static LlmProviderDefinition AnthropicApiKey { get; } = new()
     {
         Id = "anthropic-api-key",
@@ -90,6 +99,8 @@ internal static class ProviderDefinitions
 
 
 
+    // The Gemini API uses this; the Gemini API is out of the build (Providers/GeminiApiLlmClient*.cs and Internal/Gemini/,
+    // under Compile Remove). It moves into that provider's own library when the provider returns to the build.
     public static LlmProviderDefinition GeminiApi { get; } = new()
     {
         Id = "gemini-api",

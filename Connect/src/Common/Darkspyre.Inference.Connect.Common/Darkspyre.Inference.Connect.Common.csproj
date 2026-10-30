@@ -30,9 +30,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- L2 exception: phase 1 of the conversation contract builds only the native Codex client and the Claude CLI, so
-         the inactive providers' files stay in the repository, unchanged and out of the build. Each rejoins the build,
-         and its line here is deleted, when its provider returns. Active providers live in their own library projects. -->
+    <!-- Anthropic Messages, Apple Foundation Models, OpenAI-compatible Chat, the Gemini API and OpenRouter use these
+         files; those providers are out of the build. Their files stay in the repository, unchanged. Each moves into its
+         provider's own library, and its line here is deleted, when the provider returns to the build. The providers in
+         the build live in their own library projects. -->
     <Compile Remove="Providers/Anthropic*.cs;Providers/ManagedAnthropicAgentClient.cs" />
     <Compile Remove="Providers/Apple*.cs;Providers/ManagedAppleAgentClient.cs" />
     <Compile Remove="Providers/ChatCompletionsLlmClientBase.cs;Providers/OpenAiCompatibleChatLlmClient.cs;Providers/ManagedOpenAiCompatibleAgentClient.cs" />

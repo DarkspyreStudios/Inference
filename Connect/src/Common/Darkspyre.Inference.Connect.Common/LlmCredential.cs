@@ -14,18 +14,28 @@ public sealed record LlmCredential
     /// <summary>OAuth tokens for a subscription sign-in, or null.</summary>
     public LlmOAuthTokens? OAuth { get; init; }
 
+    // Saved with each connection. It stays in Connect.Common because LlmCredential, which hosts store, holds
+    // it; moving it would change saved connections.
     /// <summary>AWS credentials for Bedrock, or null.</summary>
     public LlmAwsCredentials? Aws { get; init; }
 
+    // Saved with each connection. It stays in Connect.Common because LlmCredential, which hosts store, holds
+    // it; moving it would change saved connections.
     /// <summary>Google credentials, or null.</summary>
     public LlmGoogleCredentials? Google { get; init; }
 
+    // Saved with each connection. It stays in Connect.Common because LlmCredential, which hosts store, holds
+    // it; moving it would change saved connections.
     /// <summary>The Azure secret, or null.</summary>
     public LlmAzureSecret? Azure { get; init; }
 
+    // Saved with each connection. It stays in Connect.Common because LlmCredential, which hosts store, holds
+    // it; moving it would change saved connections.
     /// <summary>GitHub Copilot credentials, or null.</summary>
     public LlmCopilotCredentials? Copilot { get; init; }
 
+    // Saved with each connection. It stays in Connect.Common because LlmCredential, which hosts store, holds
+    // it; moving it would change saved connections.
     /// <summary>The credential for a Copilot runtime connection, or null.</summary>
     public LlmCopilotRuntimeConnectionCredential? CopilotRuntime { get; init; }
 

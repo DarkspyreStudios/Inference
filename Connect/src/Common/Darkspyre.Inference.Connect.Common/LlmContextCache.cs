@@ -114,7 +114,7 @@ public sealed record LlmContextCachePage(IReadOnlyList<LlmContextCache> Items, s
 /// <param name="AlreadyAbsent">True when the cache did not exist at delete time.</param>
 public sealed record LlmContextCacheDeleteResult([property: JsonRequired] bool AlreadyAbsent);
 
-/// <summary>Explicit provider cache operations. This contract alone does not enable a provider route. No phase-1 provider implements this; it is a forward seam kept under an L2 exception, and refuses with its documented message until a provider that implements it returns to the build.</summary>
+/// <summary>Explicit provider cache operations. This contract alone does not enable a provider route. No provider in the build implements this; it is a forward seam, and refuses with its documented message until a provider that implements it returns to the build.</summary>
 public interface ILlmContextCacheClient
 {
     /// <summary>Creates an explicit cache and returns its observed facts.</summary>

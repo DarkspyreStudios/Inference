@@ -60,8 +60,9 @@ Anthropic API, Apple, OpenAI-compatible chat and Gemini API files with
 `Compile Remove`. The Image project excludes the xAI image transport and the TTS project
 excludes the xAI speech transport. The Bedrock, Vertex, Azure, STT, Realtime, Video, Resources and examples
 projects are out of the solution, the `Darkspyre.Inference.Connect` package and the source references in
-`eng/SourceReferences.targets`. The excluded source stays in the repository under the L2 exception in
-`Inference/AGENTS.md`. Sections of this page that describe an excluded provider, transport or project
+`eng/SourceReferences.targets`. The excluded source stays in the repository. Each excluded project file, each
+`Compile Remove` line and each Connect.Common member kept for an excluded provider carries a comment naming the
+provider and saying it returns with that provider. Sections of this page that describe an excluded provider, transport or project
 describe that kept source, which this build does not compile.
 
 Stored data keeps its shape. `LlmConnection.Xai`, `LlmTransport.XaiResponses`, `XaiConnectionOptions`,

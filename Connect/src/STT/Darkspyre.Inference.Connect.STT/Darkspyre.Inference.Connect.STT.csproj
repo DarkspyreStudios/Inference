@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <!-- L2 exception: phase 1 of the conversation contract leaves this project out of the solution, the package and the
-       source references. Its source stays unchanged and rejoins the build when its capability returns. -->
+  <!-- Hosted speech transcription uses this project; it is out of the build (this project is outside the solution, the
+       package and the source references). Its source stays unchanged and rejoins the build when the capability returns. -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <AssemblyName>Darkspyre.Inference.Connect.STT</AssemblyName>

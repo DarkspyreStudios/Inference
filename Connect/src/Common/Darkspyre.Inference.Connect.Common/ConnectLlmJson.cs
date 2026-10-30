@@ -14,6 +14,8 @@ public static class ConnectLlmJson
 {
     /// <summary>JSON serializer metadata for the <c>LlmVertexCacheStaging</c> contract.</summary>
     public static JsonTypeInfo<LlmVertexCacheStaging> LlmVertexCacheStaging => Metadata<LlmVertexCacheStaging>();
+    // xAI batch and deferred chat use this; they are out of the build (Connect/src/Resources/Darkspyre.Inference.Connect.Resources,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     /// <summary>JSON serializer metadata for the <c>XaiMultiAgentControls</c> contract.</summary>
     public static JsonTypeInfo<XaiMultiAgentControls> XaiMultiAgentControls => Metadata<XaiMultiAgentControls>();
     /// <summary>JSON serializer metadata for the <c>LlmAgentCapabilities</c> contract.</summary>
@@ -244,6 +246,9 @@ public static class ConnectLlmJson
             if (LlmAgentCallerJson.RuntimeMetadata(type, options) is { } runtime) return runtime;
             if (LlmRuntimeAuthenticationJson.RuntimeMetadata(type, options) is { } authentication) return authentication;
             var metadata = ((IJsonTypeInfoResolver)ConnectLlmJsonContext.Default).GetTypeInfo(type, options);
+            // xAI batch and deferred chat use this; they are out of the build
+            // (Connect/src/Resources/Darkspyre.Inference.Connect.Resources, outside the solution). It moves into that
+            // provider's own library when the provider returns to the build.
             if (type == typeof(LlmProviderControls) && metadata is not null)
                 metadata.PolymorphismOptions = new JsonPolymorphismOptions
                 {
@@ -396,6 +401,8 @@ public static class ConnectLlmJson
 [JsonSerializable(typeof(LlmAgentStagedStateSnapshot))]
 [JsonSerializable(typeof(LlmAgentStagedStateCommitResult))]
 [JsonSerializable(typeof(LlmConnection))]
+// xAI batch and deferred chat use this; they are out of the build (Connect/src/Resources/Darkspyre.Inference.Connect.Resources,
+// outside the solution). It moves into that provider's own library when the provider returns to the build.
 [JsonSerializable(typeof(XaiMultiAgentControls))]
 [JsonSerializable(typeof(LlmAgentTurnRequest))]
 [JsonSerializable(typeof(LlmFileCapabilities))]

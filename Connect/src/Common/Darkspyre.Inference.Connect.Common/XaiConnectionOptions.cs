@@ -1,5 +1,7 @@
 namespace Darkspyre.Inference.Connect.LLM;
 
+// Saved with each connection. It stays in Connect.Common because LlmConnection, which hosts store, holds
+// it; moving it would change saved connections.
 /// <summary>The xAI API region that serves a connection's requests.</summary>
 public enum XaiRegion
 {
@@ -9,6 +11,8 @@ public enum XaiRegion
     UnitedStates
 }
 
+// Saved with each connection. It stays in Connect.Common because LlmConnection, which hosts store, holds
+// it; moving it would change saved connections.
 /// <summary>The xAI service tier that requests are billed and scheduled under.</summary>
 public enum XaiServiceTier
 {
@@ -18,6 +22,8 @@ public enum XaiServiceTier
     Priority
 }
 
+// Saved with each connection. It stays in Connect.Common because LlmConnection, which hosts store, holds
+// it; moving it would change saved connections.
 /// <summary>Non-secret xAI routing and billing choices. Authentication remains in LlmCredential.</summary>
 public sealed record XaiConnectionOptions
 {
