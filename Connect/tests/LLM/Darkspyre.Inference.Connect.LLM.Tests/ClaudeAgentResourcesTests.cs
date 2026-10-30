@@ -984,7 +984,7 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         var factory = new Factory(process);
         var source = new ResourcePreparationTests.Source(Connection());
         await using var catalogs = new LlmProviderService(source,
-            [new DiscoveredModels(factory, new LlmModel("claude-haiku-9", "Claude Haiku 9") { MaxContextTokens = 400_000 })], []);
+            [new DiscoveredModels(new LlmModel("claude-haiku-9", "Claude Haiku 9") { MaxContextTokens = 400_000 })], []);
         await using var providers = new LlmAgentProviderService(source, [Client(factory)], catalogs);
         await using ILlmAgentSession session = await providers.StartSessionAsync("connection", new()
         {
@@ -998,9 +998,9 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
     }
 
     /// <summary>A Claude chat client whose model list is the given models.</summary>
-    private sealed class DiscoveredModels(IClaudeCliSessionProcessFactory factory, params LlmModel[] models) : ILlmClient, ILlmCatalogCapabilities
+    private sealed class DiscoveredModels(params LlmModel[] models) : ILlmClient, ILlmCatalogCapabilities
     {
-        private readonly ClaudeCliLlmClient _claude = new(Http, new Summaries(), factory, NoRateLimitLog);
+        private readonly ClaudeCliLlmClient _claude = new(Http, new Summaries(), NoRateLimitLog);
 
         public LlmTransport Transport => _claude.Transport;
         public LlmProviderDefinition ProviderDefinition => _claude.ProviderDefinition;
@@ -1279,7 +1279,11 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         }
     }
 
-    private static LlmConnection Connection() => new() { Version = "v1", Transport = LlmTransport.AnthropicClaudeCli, Endpoint = "claude" };
+    private static LlmConnection Connection() => new()
+    {
+        Version = "v1", Transport = LlmTransport.AnthropicClaudeCli, Endpoint = "claude",
+        Credential = new LlmCredential { OAuth = new() { AccessToken = "account-token" } }.Serialize()
+    };
 
     private static void AssertMcpWire(ManualProcess process, string controlRequestId, string message)
     {
@@ -1316,7 +1320,7 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
     private static readonly HttpClient Http = new();
 
     private static ClaudeAgentClient Client(IClaudeCliSessionProcessFactory factory, Summaries? summaries = null) =>
-        new(factory, new ClaudeCliLlmClient(Http, summaries ?? new Summaries(), factory, NoRateLimitLog), new LearnedModelContext(),
+        new(factory, new ClaudeCliLlmClient(Http, summaries ?? new Summaries(), NoRateLimitLog), new LearnedModelContext(),
             NoRateLimitLog, NullLogger<ClaudeAgentClient>.Instance);
 
     private static readonly ClaudeRateLimitLog NoRateLimitLog = new(NullLogger<ClaudeRateLimitLog>.Instance);

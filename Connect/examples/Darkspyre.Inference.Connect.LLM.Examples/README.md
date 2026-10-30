@@ -65,7 +65,7 @@ boundary and must preserve Darkspyre.Inference.Connect.LLM's versioned compare-a
 | AWS Bedrock Converse | Usually protected `LlmAwsCredentials` containing only profile and region | AWS SDK credential chain | No. The named profile, environment, workload identity, or other AWS SDK source owns the actual AWS credentials. |
 | AWS Bedrock AgentCore Harness | Usually protected `LlmAwsCredentials` containing only profile and region | AWS SDK credential chain | No. The connection endpoint is the deployed Harness ARN; AWS credentials still come from the standard SDK chain. |
 | ChatGPT Codex subscription | Protected ChatGPT OAuth credential | Host/vault | Device OAuth through `SignInAsync` is required for direct generation, models and usage. CLI login is not reused. |
-| Claude subscription | `null`, or a Claude account sign-in | Official `claude` CLI | Without a credential the CLI runs as the machine's active login. A Claude account sign-in stores a one-year token that runs every CLI process for the connection as that account and lists its models over HTTP. |
+| Claude subscription | A Claude account sign-in | Official `claude` CLI | Required. The sign-in stores a one-year token that runs every CLI process for the connection as that account and lists its models over HTTP. Without it the connection is not signed in and starts no CLI process; the computer's own Claude login is never used. |
 | Antigravity subscription | `null` | Official `agy` CLI | No host OAuth. Run `agy` interactively; the CLI owns its Google session. |
 
 ### Why Claude has two authentication dependencies

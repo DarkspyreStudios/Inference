@@ -21,7 +21,7 @@ public sealed class ClaudeCliExitTests
         var exits = new ClaudeCliExits(logger) { Limit = TimeSpan.FromSeconds(10) };
         var invocation = new ClaudeCliInvocation("/bin/sh",
             ["-c", "trap 'echo term >> \"$1\"; sleep 1; echo finished >> \"$1\"; exit 0' TERM; echo ready; while :; do sleep 0.1; done",
-                "claude-test", scratch.Log], StandardInput: null, scratch.Directory);
+                "claude-test", scratch.Log], StandardInput: null, scratch.Directory) { AccountToken = "account-token" };
         using var cancellation = new CancellationTokenSource();
 
         var clock = new Stopwatch();
@@ -50,7 +50,7 @@ public sealed class ClaudeCliExitTests
         var factory = new ClaudeCliSessionProcessFactory(exits);
         IClaudeCliSessionProcess process = await factory.StartAsync(new("/bin/sh",
             ["-c", "trap '' TERM; echo ready; cat >/dev/null; echo eof >> \"$1\"; sleep 1; echo finished >> \"$1\"", "claude-test", scratch.Log],
-            scratch.Directory));
+            scratch.Directory) { AccountToken = "account-token" });
         Assert.Equal("ready", await process.ReadLineAsync());
 
         var clock = Stopwatch.StartNew();
@@ -71,7 +71,7 @@ public sealed class ClaudeCliExitTests
         var exits = new ClaudeCliExits(logger) { Limit = TimeSpan.FromMilliseconds(250) };
         var invocation = new ClaudeCliInvocation("/bin/sh",
             ["-c", "trap '' TERM; /bin/sh -c 'trap \"\" TERM; echo \"$$\"; while :; do sleep 1; done' & wait"],
-            StandardInput: null, scratch.Directory);
+            StandardInput: null, scratch.Directory) { AccountToken = "account-token" };
         using var cancellation = new CancellationTokenSource();
         Process? child = null;
         try

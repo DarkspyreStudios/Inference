@@ -4844,7 +4844,8 @@ new LlmConnection
 };
 ```
 
-Configure a subscription connection with the CLI executable and no credential:
+Configure a subscription connection with the CLI executable and the Claude account's token, which the
+sign-in below saves:
 
 ```csharp
 new LlmConnection
@@ -4852,42 +4853,33 @@ new LlmConnection
     Version = version,
     Transport = LlmTransport.AnthropicClaudeCli,
     Endpoint = "claude",
-    Credential = null
+    Credential = new LlmCredential { OAuth = accountTokens }.Serialize()
 };
 ```
 
 For connections created by 0.9.0, migrate Claude subscriptions by changing `Transport` from
 `AnthropicMessages` to `AnthropicClaudeCli`, changing `Endpoint` from the Anthropic API URL to
-`claude` (or an absolute CLI path), and clearing `Credential`. Leaving the transport as
-`AnthropicMessages` now means direct API-key billing and will never launch the CLI.
+`claude` (or an absolute CLI path), and signing the connection in to a Claude account. Leaving the
+transport as `AnthropicMessages` now means direct API-key billing and will never launch the CLI.
 
-Install the official Claude CLI and ensure `claude` is on `PATH`. A connection runs as one of two
-accounts:
+Install the official Claude CLI and ensure `claude` is on `PATH`. A connection runs only as the Claude
+account it is signed in to. The settings action "Sign in to a Claude account" (`sign-in-claude`) shows a
+claude.com sign-in link; the person pastes back the `code#state` text the callback page shows. Connect
+exchanges it for a `user:inference` token with a one-year lifetime, the token `claude setup-token`
+creates, and saves it as the connection's `LlmCredential.OAuth`. Every Claude CLI process for the
+connection (chat, streaming, agent sessions and `auth status`) starts with `CLAUDE_CODE_OAUTH_TOKEN` set
+to that token, and without `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_SCOPES`,
+which the CLI would prefer to the token or read as its scopes. Model discovery lists the account's
+models over HTTP with the same token. The computer's own Claude login is never used or changed, so
+connections on different accounts run at the same time. The token is never refreshed; signing in again
+replaces it.
 
-- **The machine's active Claude login**, when the connection has no credential. Complete the CLI's
-  interactive sign-in once:
-
-```bash
-claude
-```
-
-- **A Claude account the connection is signed in to.** The settings action "Sign in to a Claude
-  account" (`sign-in-claude`) shows a claude.com sign-in link; the person pastes back the `code#state`
-  text the callback page shows. Connect exchanges it for a `user:inference` token with a one-year
-  lifetime, the token `claude setup-token` creates, and saves it as the connection's
-  `LlmCredential.OAuth`. Every Claude CLI process for the connection (chat, streaming, agent sessions,
-  `auth status` and model discovery) then starts with `CLAUDE_CODE_OAUTH_TOKEN` set to that
-  token, and without `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_SCOPES`, which
-  the CLI would prefer to the token or read as its scopes. The machine's login is neither used nor
-  changed, so connections on different accounts run at the same time. The token is never refreshed;
-  signing in again replaces it.
-
-The settings editor creates and saves only the second kind. A Claude subscription connection's
-settings count as signed in only when they hold an account token from "Sign in to a Claude account"
-(or keep the one already saved), so the machine's CLI login never marks them signed in and the sign-in
-action stays offered. Without that token the `check` action reports not signed in, the model field
-reports `claude-sign-in-required` instead of listing models through the CLI, and Save is unavailable.
-A connection saved earlier without a credential still runs as the machine's login.
+A connection without its own token is not signed in, whenever and however it was saved. It starts no CLI
+process: chat, agent sessions and model discovery fail with an `LlmProviderException` whose status is
+401 and whose provider code is `claude_sign_in_required`, which Connect reports as
+`AuthenticationRequired`, and the `auth status` check reports signed out. In the settings editor the
+sign-in action stays offered, the model field reports `claude-sign-in-required`, and Save is
+unavailable until the connection is signed in.
 
 Subscription prompts run in an empty temporary workspace with safe mode, tools, slash commands,
 permission prompts, and session persistence disabled. Darkspyre.Inference.Connect.LLM sends the complete prompt as BOM-free

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
@@ -12,17 +13,25 @@ internal static class ClaudeCliEnvironment
     private static readonly string[] ConflictingVariables =
         ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_SCOPES"];
 
-    /// <summary>The token of the account the connection is signed in to, or null to run as the machine's active login.</summary>
-    internal static string? AccountToken(LlmCredential? credential) => credential?.OAuth?.AccessToken;
+    /// <summary>Whether the connection holds the token of the Claude account it is signed in to.</summary>
+    internal static bool HasAccountToken(LlmCredential? credential) =>
+        !string.IsNullOrWhiteSpace(credential?.OAuth?.AccessToken);
 
-    /// <summary>Sets the account token on a CLI child. Without a token the child keeps the inherited environment.</summary>
-    internal static void Apply(ProcessStartInfo start, string? accountToken)
+    /// <summary>The token of the Claude account the connection is signed in to.</summary>
+    /// <exception cref="LlmProviderException">The connection holds no account token. A Claude connection never runs
+    /// as the computer's own Claude login.</exception>
+    internal static string AccountToken(LlmCredential? credential) =>
+        HasAccountToken(credential)
+            ? credential!.OAuth!.AccessToken
+            : throw new LlmProviderException(
+                "This Claude connection is not signed in. Sign in to a Claude account in Settings, Providers.",
+                LlmTransport.AnthropicClaudeCli, HttpStatusCode.Unauthorized, providerCode: "claude_sign_in_required");
+
+    /// <summary>Runs the CLI child as the account of <paramref name="accountToken"/>.</summary>
+    internal static void Apply(ProcessStartInfo start, string accountToken)
     {
         ArgumentNullException.ThrowIfNull(start);
-        if (accountToken is null)
-        {
-            return;
-        }
+        ArgumentException.ThrowIfNullOrWhiteSpace(accountToken);
         foreach (string name in ConflictingVariables)
         {
             start.Environment.Remove(name);

@@ -15,7 +15,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Chat-style adapter over the separately authenticated official Claude CLI.</summary>
 internal sealed class ClaudeCliLlmClient(
-    HttpClient http, IClaudeCliRunner runner, IClaudeCliSessionProcessFactory processFactory, ClaudeRateLimitLog rateLimits)
+    HttpClient http, IClaudeCliRunner runner, ClaudeRateLimitLog rateLimits)
     : LlmClientBase(http),
         ILlmContextEstimator,
         IExternalLlmAuthenticationProbe,
@@ -476,6 +476,8 @@ internal sealed class ClaudeCliLlmClient(
         CancellationToken cancellationToken = default)
     {
         LlmCredential? credential = ClaudeCliConfiguration.ValidateConnection(connection);
+        // A connection without its own account token is signed out; the computer's Claude login never counts.
+        if (!ClaudeCliEnvironment.HasAccountToken(credential)) return ExternalAuthenticationState.SignedOut;
         try
         {
             ClaudeCliProcessResult result = await InvokeClaudeAsync(
@@ -514,16 +516,7 @@ internal sealed class ClaudeCliLlmClient(
         CancellationToken cancellationToken = default)
     {
         LlmCredential? credential = ClaudeCliConfiguration.ValidateConnection(connection);
-        if (!HasCatalogCredential(credential))
-        {
-            using var cliConsumption = SdkHttpConsumption.Enter(Http, cancellationToken);
-            void Fence() { cliConsumption.Token.ThrowIfCancellationRequested(); cliConsumption.Fence(); }
-            IReadOnlyList<LlmModel> options = await ClaudeCliModelCatalog.ReadAsync(processFactory,
-                ClaudeCliConfiguration.ResolveExecutable(connection.Endpoint), ClaudeCliEnvironment.AccountToken(credential),
-                Fence, cliConsumption.Token).ConfigureAwait(false);
-            return cliConsumption.Publish(options);
-        }
-
+        _ = ClaudeCliEnvironment.AccountToken(credential);
         LlmOAuthTokens catalogCredential = credential!.OAuth!;
 
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
@@ -796,7 +789,7 @@ internal sealed class ClaudeCliLlmClient(
         IReadOnlyList<string> arguments,
         string? standardInput,
         int? maxOutputTokens,
-        string? accountToken,
+        string accountToken,
         CancellationToken cancellationToken)
     {
         string workingDirectory = CliInfrastructure.CreateWorkingDirectory(Path.GetTempPath(), "claude");
@@ -819,7 +812,7 @@ internal sealed class ClaudeCliLlmClient(
         string standardInput,
         bool requestReasoningText,
         int? maxOutputTokens,
-        string? accountToken,
+        string accountToken,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         string workingDirectory = CliInfrastructure.CreateWorkingDirectory(Path.GetTempPath(), "claude");
@@ -886,9 +879,6 @@ internal sealed class ClaudeCliLlmClient(
         request.Headers.TryAddWithoutValidation("anthropic-dangerous-direct-browser-access", "true");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
     }
-
-    private static bool HasCatalogCredential(LlmCredential? credential) =>
-        !string.IsNullOrWhiteSpace(credential?.OAuth?.AccessToken);
 
     private static LlmProviderException CreateClaudeExitException(ClaudeCliProcessResult result, LlmCredential? credential,
         ClaudeTerminalResult? terminal = null)
