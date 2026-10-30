@@ -612,8 +612,9 @@ backend set. Undefined tensor types are refused with the tensor's name and GGML 
 
 A draft enables TensorSharp speculation through the scheduler. Its path is set in `TS_SPEC_DRAFT_MODEL`
 only during load, under a process-wide lock, and cleared afterwards. TensorSharp's cost governor
-parks drafting while it loses. Prefix-cached turns decode plainly. Greedy parity with plain decoding
-holds on GGML CPU and CUDA; Metal can choose another token near a tie.
+parks drafting while it loses. Prefix-cached turns decode plainly. A draft changes speed, not
+quality: greedy text with a draft can choose another token near a tie on every backend, so it need
+not match plain decoding word for word.
 
 TensorSharp plans expert placement automatically; the GPU expert cache stays off. Qwen reads the
 pinned runtime's `_expertOnHost` plan through `QwenExpertPlacement`. Loaded status and observation
