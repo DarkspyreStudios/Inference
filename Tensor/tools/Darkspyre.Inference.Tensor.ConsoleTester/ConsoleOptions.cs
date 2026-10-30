@@ -89,6 +89,6 @@ internal sealed record ConsoleOptions
 
         Example:
           tensor qwen --repo ukisai/Swift-1.5-Qwen3.8-27B-GGUF --file Swift-1.5-Qwen3.8-27B-Q4_K_M.gguf \
-                      --store /Volumes/Data/Models/Tensor --install
+                      --store <the tensor.model-store setting's folder> --install
         """);
 }
