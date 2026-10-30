@@ -1,4 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <!-- L2 exception: phase 1 of the conversation contract leaves this project out of the solution, the package and the
+       source references. Its source stays unchanged and rejoins the build when its provider returns. -->
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <Description>Google Vertex AI Gemini and Claude protocol adapters.</Description>

@@ -21,7 +21,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Phase 1 leaves the xAI transport out of the build. Its source stays in the repository. -->
+    <!-- L2 exception: phase 1 leaves the xAI transport out of the build. Its source stays in the repository, unchanged,
+         and rejoins the build when the xAI provider returns. -->
     <Compile Remove="Internal/XaiImageProtocol.cs;Providers/XaiImagineImageTransport.cs" />
   </ItemGroup>
 

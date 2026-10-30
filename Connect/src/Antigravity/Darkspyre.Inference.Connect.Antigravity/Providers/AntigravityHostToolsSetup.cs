@@ -8,6 +8,8 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// AGY's global configuration for host tools: one MCP server entry that starts the host-tools MCP program, and the
 /// permission rule that lets headless AGY call its tools. AGY reads both only from the user's global configuration.
 /// </summary>
+// Exception to the operating-system boundaries rule: one Antigravity package must work on every operating system it is
+// restored on, so it picks its platform behaviour from the running OS. Brandon approved this on 2026-10-24.
 internal static class AntigravityHostToolsSetup
 {
     /// <summary>The allow rule for every tool of the host-tools server. A rule without "/tool" does not match on AGY 1.3.2.</summary>

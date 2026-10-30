@@ -15,6 +15,9 @@ internal interface IAppleProcessRunner
         CancellationToken cancellationToken = default);
 }
 
+// Exception to the operating-system boundaries rule: Connect keeps its macOS, Linux and Windows process handling
+// inside this library and picks the OS commands at runtime, not behind a separate OS capability contract. This code is
+// battle-tested on all three platforms. Brandon approved this on 2026-10-12.
 internal sealed class AppleProcessRunner : IAppleProcessRunner
 {
     public async IAsyncEnumerable<JsonElement> RunAsync(string executable, AppleCommand command, AppleProcessLimits limits,

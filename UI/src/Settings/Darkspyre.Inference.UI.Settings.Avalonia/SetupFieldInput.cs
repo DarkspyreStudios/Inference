@@ -421,6 +421,11 @@ public sealed class SetupFieldInput : UserControl
         this.error.IsVisible = this.FieldError is not null;
     }
 
+    // Exception to interface rule D6, which asks for a list with an Add button opening a layered editor: repeatable
+    // rows, such as an OpenAI API connection's per-model context lengths, are edited inline with Add row and Remove row.
+    // This group is the provider editor's one collection control (D3) and shows no row until Add row is pressed; a
+    // layered row editor inside the editor's sheet would be a second control for the same job. Brandon approved this
+    // on 2026-10-11.
     private void RenderGroup(SetupRepeatableGroupField group, bool unavailable)
     {
         StackPanel layout = (StackPanel)this.Content!;

@@ -18,6 +18,9 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// in the tree before killing it, and the runtime's child reaper can then block every process start and exit wait in
 /// the host.
 /// </remarks>
+// Exception to the operating-system boundaries rule: Connect keeps its macOS, Linux and Windows CLI process handling
+// inside this library and picks the OS commands at runtime, not behind a separate OS capability contract. This code is
+// battle-tested on all three platforms. Brandon approved this on 2026-10-12.
 internal static partial class CliProcessTermination
 {
     /// <summary>How long a killed process may take before the runtime reports it as exited.</summary>

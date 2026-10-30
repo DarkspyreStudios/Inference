@@ -127,7 +127,7 @@ public sealed record LlmAgentHostRuntimePolicy : LlmAgentRuntimePolicy
     /// <summary>
     /// Lets the runtime start subagents and output monitors of its own. Off by default. Only a runtime whose
     /// <see cref="LlmAgentCapabilities.ResourceObservation"/> is Supported accepts it.
-    /// No phase-1 runtime reads this value; it stays as a Host-visible stored setting (L2 exception in Inference AGENTS.md).
+    /// No phase-1 runtime reads this value; it stays as a Host-visible stored setting, an L2 exception kept for the runtimes that return after phase 1.
     /// </summary>
     public bool AllowRuntimeBackgroundWork { get; init; }
 }
@@ -218,7 +218,7 @@ public sealed record LlmAgentSessionOptions
     /// <summary>Models tried in order when the session model is overloaded or unavailable for a turn.</summary>
     public IReadOnlyList<string> FallbackModelIds { get; init; } = [];
 
-    /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it. No phase-1 runtime reads this value; it stays as a Host-visible stored setting (L2 exception in Inference AGENTS.md).</summary>
+    /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it. No phase-1 runtime reads this value; it stays as a Host-visible stored setting, an L2 exception kept for the runtimes that return after phase 1.</summary>
     public long ResourceOutputRetentionBytes { get; init; } = 1_048_576;
 }
 
@@ -286,7 +286,7 @@ public sealed record LlmAgentResumeOptions
     /// <summary>Runs host tool calls made after resuming.</summary>
     public LlmAgentToolHandler? ToolHandler { get; init; }
 
-    /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it. No phase-1 runtime reads this value; it stays as a Host-visible stored setting (L2 exception in Inference AGENTS.md).</summary>
+    /// <summary>Output Connect retains per resource when the runtime keeps none; the earliest cursor advances past it. No phase-1 runtime reads this value; it stays as a Host-visible stored setting, an L2 exception kept for the runtimes that return after phase 1.</summary>
     public long ResourceOutputRetentionBytes { get; init; } = 1_048_576;
 }
 

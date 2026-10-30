@@ -10,6 +10,9 @@ using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
+// Exception to the operating-system boundaries rule: Connect's CLI clients keep their macOS, Linux and Windows handling
+// inside the library and pick the OS commands at runtime, not behind a separate OS capability contract. This code is
+// battle-tested on all three platforms. Brandon approved this on 2026-10-12.
 internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner, ILlmDataFolder dataFolder)
     : ILlmClient, ILlmAccountUsageClient, IExternalLlmAuthenticationProbe, ILlmContextEstimator
 {

@@ -5,6 +5,9 @@ using System.Text.RegularExpressions;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
+// Exception to the operating-system boundaries rule: Connect keeps its macOS, Linux and Windows CLI process handling
+// inside this library and picks the OS commands at runtime, not behind a separate OS capability contract. This code is
+// battle-tested on all three platforms. Brandon approved this on 2026-10-12.
 internal static partial class CliProcessLauncher
 {
     internal const int MaximumBatchCommandCharacters = 8191;

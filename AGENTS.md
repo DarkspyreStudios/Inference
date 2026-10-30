@@ -56,14 +56,6 @@ Implementation-specific APIs are legal only inside the adapter that owns the imp
 
 Consumers depend on semantic contracts. They never receive provider-native payloads, concrete SDK clients, secret-store handles or persistence handles as a way around them. Do not create universal wrappers only to hide implementations; a contract is named for the capability its consumer needs.
 
-## Exception to the operating-system boundaries rule: Connect's in-library OS switching
-
-agent-ds `AGENTS.md` "Operating-system boundaries" states the rule.
-
-Connect keeps its platform handling for macOS, Linux and Windows inside its own libraries, and picks the right OS commands at runtime. This includes the CLI process launch and termination (`Connect/src/LLM/Darkspyre.Inference.Connect.LLM/Providers/CliProcessLauncher.cs`, `CliProcessTermination.cs`), `AppleProcessRunner.cs`, the CLI clients and `LlmAgentRuntimeProfile.cs`. It is not split behind a separate OS capability contract. The reason: this code is battle-tested and works on all three platforms today. Brandon approved this exception on 2026-10-12.
-
-The host-tools client and service pick their LocalServices platform implementation from the running operating system (`Connect/src/HostTools/Darkspyre.Inference.Connect.HostTools/Composition/HostToolsRuntime.Platform.cs` and `Connect/src/HostTools/Darkspyre.Inference.Connect.HostTools.Service/Composition/HostToolsBackend.Platform.cs`). The reason: one HostTools package and one Antigravity package must work on every operating system they are restored on. Brandon approved this on 2026-10-24.
-
 ## Packages
 
 | Package | Holds |
@@ -139,25 +131,3 @@ The version is `<net>.<release>.<minor>`: the .NET generation, a breaking-contra
 Before a release, each active solution is at zero warnings and passes restore, build, tests, pack and the dependency audit. `deploy-major.sh` and `deploy-minor.sh` prepare, verify and tag a release, and the Publish workflow (`.github/workflows/publish.yml`) publishes the tag to nuget.org, only on the user's word; `eng/README.md` documents their gates. When changing the release scripts, run `bash -n` on `deploy-major.sh`, `deploy-minor.sh`, `eng/deploy.sh` and `eng/pack.sh`, and run `bash eng/package-assets.tests.sh`, as `eng/README.md` "Offline verification" describes. Never test a script change by publishing a dummy version.
 
 Every package carries a readable README and the repository license. `eng/VerifyPackages` and `eng/VerifyConsumer` check package boundaries, the exact Common dependency and the release source; `eng/README.md` says how to run them.
-
-## Law exceptions
-
-### L2 — Code kept unbuilt or unused during phase 1 of the conversation contract
-
-Phase 1 of the conversation contract builds only the native Codex client and the Claude CLI. These stay in the repository on purpose and are not dead code under L2:
-
-- **Excluded provider files.** The LLM provider files excluded with `Compile Remove` in `Connect/src/Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj`, and the xAI transport files excluded in the Image and TTS projects. Their source is unchanged.
-- **Projects out of the build.** The Bedrock, Vertex and Azure projects, and the STT, Realtime, Video and Resources projects. They are out of the solution, the package and the source references, and their source is unchanged.
-- **Tensor projects that do not compile.** Any Tensor project that does not compile against the phase-1 library is out of this phase's build.
-- **Facade with no built implementer.** The context-cache facade stays compiled. It refuses with its documented message until a provider that implements it returns.
-- **Background-work settings.** `LlmAgentHostRuntimePolicy.AllowRuntimeBackgroundWork` and `ResourceOutputRetentionBytes` stay public. The Host shows and stores them, and no phase-1 runtime reads them.
-
-When a provider returns, its files rejoin the build and the matching line here is deleted.
-
-## Design rule exceptions
-
-### D6 — Per-model context lengths are repeatable rows
-
-An OpenAI API connection's `Context lengths` setting in the provider editor uses the existing repeatable group (`SetupRepeatableGroupField`, rendered by `SetupFieldInput.RenderGroup` in `UI/src/Settings/Darkspyre.Inference.UI.Settings.Avalonia/SetupFieldInput.cs`). Each row holds a model and its context length, edited inline, with `Add row` and `Remove row`. D6 asks for a list with an **Add** button that opens a layered editor.
-
-The reason: the repeatable group is the provider editor's one collection control (D3), and it shows no row until `Add row` is pressed, so no empty entry form appears. A layered row editor inside the provider editor's sheet would be a second collection control for the same job. Brandon approved this on 2026-10-11.
