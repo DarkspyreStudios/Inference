@@ -83,6 +83,26 @@ public sealed class GrokTests
         Assert.NotNull(GrokDefinition.Value.Icon);
     }
 
+    /// <summary>A custom X-search call completes as a social search carrying its string input; a non-string input is
+    /// malformed.</summary>
+    [Fact]
+    public void CustomXSearchCallCompletesWithItsStringInput()
+    {
+        static JsonDocument Done(string input) => JsonDocument.Parse(
+            """{"type":"response.output_item.done","output_index":0,"item":{"type":"custom_tool_call","id":"ctc_1","call_id":"xs_1","name":"x_keyword_search","status":"completed","input":"""
+            + input + "}}");
+        var observer = new XaiHostedToolsObserver(() => new InvalidDataException("malformed"));
+        using JsonDocument text = Done("\"darkspyre\"");
+
+        LlmHostedToolCall call = Assert.IsType<LlmHostedToolCallCompletedEvent>(Assert.Single(observer.Observe(text.RootElement))).Call;
+
+        Assert.Equal((LlmHostedToolKind.SocialSearch, "x_keyword_search", "xs_1"), (call.Kind, call.Name, call.CallId));
+        Assert.Equal("darkspyre", call.Input!.Value.GetString());
+        using JsonDocument nonString = Done("{\"query\":\"darkspyre\"}");
+        Assert.Throws<InvalidDataException>(() => new XaiHostedToolsObserver(() => new InvalidDataException("malformed"))
+            .Observe(nonString.RootElement).ToList());
+    }
+
     /// <summary>A denied code ends sign-in and saves nothing.</summary>
     [Fact]
     public async Task RefusedSignInSavesNothing()

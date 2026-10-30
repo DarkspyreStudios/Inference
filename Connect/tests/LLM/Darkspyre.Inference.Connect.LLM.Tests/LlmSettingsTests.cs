@@ -112,6 +112,43 @@ public sealed class LlmSettingsTests
         }
     }
 
+    /// <summary>A SelfHost connection's endpoint is an engine id, so its settings show the engine choice and no
+    /// endpoint URL field (its Engine endpoint declaration).</summary>
+    [Fact]
+    public async Task SelfHostSettingsShowTheEngineChoiceAndNoEndpointField()
+    {
+        using var provider = new LlmProviderService(new UnusedSource(), [new Client(SelfHostDefinition.Value)]);
+        var (manager, settings) = await OpenAsync(provider, LlmTransport.SelfHost,
+            new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
+        using (manager)
+        {
+            Assert.IsType<SetupChoiceField>(Fields(settings).Single(field => field.Description.Id == "engine"));
+            Assert.DoesNotContain(Fields(settings), field => field.Description.Id == "endpoint");
+        }
+    }
+
+    /// <summary>The Service tiers checkbox starts checked on OpenAI's own endpoint and unchecked on another one (the
+    /// OpenAI API definition's ServiceTiers declaration).</summary>
+    [Fact]
+    public async Task ServiceTiersStartCheckedOnlyOnOpenAisEndpoint()
+    {
+        using var provider = new LlmProviderService(new UnusedSource(), [new Client(OpenAiApiDefinition.Value)]);
+        var (openAiManager, openAi) = await OpenAsync(provider, LlmTransport.OpenAiResponses,
+            new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
+        LlmConnection local = new() { Version = "1", Transport = LlmTransport.OpenAiResponses, Endpoint = "http://localhost:8080/v1" };
+        var (localManager, other) = await OpenAsync(provider, LlmTransport.OpenAiResponses,
+            new(SetupChangeIntent.Edit, "id", "1"), new Target(), local, "model");
+        using (openAiManager)
+        using (localManager)
+        {
+            SetupBooleanField Tiers(LlmSettings settings) =>
+                Assert.IsType<SetupBooleanField>(Fields(settings).Single(field => field.Description.Id == "service-tiers"));
+            Assert.True(Tiers(openAi).Value);
+            Assert.False(Tiers(other).Value);
+            Assert.Equal(OpenAiApiDefinition.Value.ServiceTiers!.HelpText, Tiers(other).Description.HelpText);
+        }
+    }
+
     /// <summary>Complete context-length rows become model overrides; a removed row clears only its length, and an
     /// incomplete or duplicate row blocks the save (B6).</summary>
     [Fact]

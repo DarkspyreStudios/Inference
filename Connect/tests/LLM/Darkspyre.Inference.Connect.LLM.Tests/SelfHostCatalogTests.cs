@@ -59,6 +59,25 @@ public sealed class SelfHostCatalogTests : IDisposable
         Assert.Contains(request.Messages, message => message.Content.Contains("This content was not supplied to the model.", StringComparison.Ordinal));
     }
 
+    /// <summary>The engine decides which continuation state it can replay, so a SelfHost request keeps state that no
+    /// Connect codec binds, even when the request asks Connect to omit unbound state.</summary>
+    [Fact]
+    public async Task EngineReceivesContinuationStateNoCodecBinds()
+    {
+        var engine = new Engine();
+        await using ServiceProvider provider = Services(engine);
+        var state = new LlmContinuationState { ImplementationId = "engine", ModelId = "model", ScopeId = "engine-scope", Payload = "{}" };
+
+        await provider.GetRequiredService<LlmProviderService>().CompleteAsync("connection", new()
+        {
+            ModelId = "model",
+            UnboundContinuationState = LlmUnboundContinuationState.Omit,
+            Messages = [new("user", "first"), new("assistant", "reply") { ContinuationState = state }, new("user", "second")]
+        });
+
+        Assert.Equal(state, Assert.Single(engine.Requests).Messages.Single(message => message.Role == "assistant").ContinuationState);
+    }
+
     [Fact]
     public async Task ExplicitRefreshReplacesTheConnectCatalog()
     {
