@@ -24,6 +24,36 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
     protected override LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
         CodexRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
 
+    /// <inheritdoc />
+    public override ILlmContinuationCodec? ContinuationCodec => CodexReplay.Codec;
+
+    /// <summary>The encrypted reasoning and compaction state, counted as Codex does and removed from the counted text.</summary>
+    protected override long CountEncryptedState(JsonArray input)
+    {
+        long cipherTokens = 0;
+        foreach (JsonObject item in input.OfType<JsonObject>())
+        {
+            if (item["type"]?.GetValue<string>() is not ("reasoning" or "compaction" or "compaction_summary")
+                || item["encrypted_content"] is not { } cipher) continue;
+            // Codex 0.159.3 estimates decoded bytes minus fixed framing, then four bytes per token.
+            // A CLR string's int length keeps both multiplications below long overflow.
+            long bytes = Math.Max(0, cipher.GetValue<string>().Length * 3L / 4 - 650);
+            cipherTokens = checked(cipherTokens + (bytes + 3) / 4);
+            item.Remove("encrypted_content");
+        }
+        return cipherTokens;
+    }
+
+    /// <summary>Codex determines terminal state from the SSE type without requiring response.status.</summary>
+    protected override string? TerminalStatusFromEvent(JsonElement eventRoot) => LlmJson.GetString(eventRoot, "type") switch
+    {
+        "response.completed" => "completed",
+        "response.incomplete" => "incomplete",
+        "response.failed" => "failed",
+        "response.cancelled" => "cancelled",
+        _ => null
+    };
+
     public override LlmProviderDefinition ProviderDefinition => CodexDefinition.Value;
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
@@ -215,7 +245,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
             LlmCredential? credential = LlmCredential.Parse(connection.Credential);
             string[] secrets = request.Headers.SelectMany(header => header.Value).ToArray();
             await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, credential,
-                "Codex model discovery", secrets, cancellationToken);
+                "Codex model discovery", secrets, ErrorReading, cancellationToken);
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             try
             {
@@ -278,7 +308,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
             LlmCredential? credential = LlmCredential.Parse(connection.Credential);
             string[] secrets = request.Headers.SelectMany(header => header.Value).ToArray();
             await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, credential,
-                "Codex account usage", secrets, cancellationToken);
+                "Codex account usage", secrets, ErrorReading, cancellationToken);
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             try
             {

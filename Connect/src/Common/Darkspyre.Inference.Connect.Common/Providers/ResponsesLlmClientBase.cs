@@ -10,10 +10,29 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
+/// <summary>A stream idle limit and the provider code of the failure it raises.</summary>
+internal readonly record struct ResponsesStreamIdle(TimeSpan After, string ProviderCode);
+
 /// <summary>Shared Responses projection, streaming and retained-output mapping.</summary>
-internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(http), ILlmContextEstimator
+internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(http), ILlmContextEstimator, ILlmContinuationCodecSource
 {
     public string? EstimateDiagnostic => null;
+
+    /// <inheritdoc />
+    protected override ProviderErrorReading ErrorReading => ProviderErrorReading.Responses;
+
+    /// <summary>The codec that encodes and replays this provider's continuation state, or null when the client keeps the
+    /// shared static rules of <see cref="ProviderContinuationStateCodec"/>. Default null.</summary>
+    public virtual ILlmContinuationCodec? ContinuationCodec => null;
+
+    /// <summary>Counts the tokens of encrypted state in the projected input and removes the fields it counted. Default 0.</summary>
+    protected virtual long CountEncryptedState(JsonArray input) => 0;
+
+    /// <summary>Whether the payload carries a reasoning object for a model with these capabilities. Default true.</summary>
+    protected virtual bool SendsReasoning(LlmProviderCapabilities capabilities) => true;
+
+    /// <summary>The terminal status a stream event's type gives when the response carries none. Default null.</summary>
+    protected virtual string? TerminalStatusFromEvent(JsonElement eventRoot) => null;
 
     /// <summary>The local o200k estimate of the request; see <see cref="LocalEstimate"/>. A provider with its own
     /// tokenizer overrides it.</summary>
@@ -51,20 +70,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             ["tools"] = payload["tools"]?.DeepClone(),
             ["text"] = payload["text"]?.DeepClone()
         };
-        long cipherTokens = 0;
-        if (Transport == LlmTransport.OpenAiCodex)
-        {
-            foreach (JsonObject item in ((JsonArray)input["input"]!).OfType<JsonObject>())
-            {
-                if (item["type"]?.GetValue<string>() is not ("reasoning" or "compaction" or "compaction_summary")
-                    || item["encrypted_content"] is not { } cipher) continue;
-                // Codex 0.159.3 estimates decoded bytes minus fixed framing, then four bytes per token.
-                // A CLR string's int length keeps both multiplications below long overflow.
-                long bytes = Math.Max(0, cipher.GetValue<string>().Length * 3L / 4 - 650);
-                cipherTokens = checked(cipherTokens + (bytes + 3) / 4);
-                item.Remove("encrypted_content");
-            }
-        }
+        long cipherTokens = CountEncryptedState((JsonArray)input["input"]!);
         return new ContextEstimate(checked(LocalTokenCount.Count(DecodedText(input)) + cipherTokens + media));
     }
 
@@ -321,8 +327,9 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         }
     }
 
-    /// <summary>The longest wait for the next stream chunk, or null for none.</summary>
-    protected virtual TimeSpan? StreamIdleTimeout(LlmConnection connection, string modelId) => null;
+    /// <summary>How long the stream may stay silent before the step fails, and the provider code of that failure, or null
+    /// for no limit. Default null.</summary>
+    protected virtual ResponsesStreamIdle? StreamIdle(LlmConnection connection, string modelId) => null;
 
     /// <summary>The clock the stream idle timeout runs on.</summary>
     protected virtual TimeProvider StreamClock => TimeProvider.System;
@@ -336,7 +343,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
     /// <summary>Observes the terminal response before completion; a returned exception ends the stream.</summary>
     protected virtual Exception? ObserveTerminalResponse(JsonElement terminalEvent, HttpResponseMessage response) => null;
 
-    private async IAsyncEnumerable<string> ReadResponseDataAsync(Stream stream, HttpResponseMessage response, TimeSpan? idle,
+    private async IAsyncEnumerable<string> ReadResponseDataAsync(Stream stream, HttpResponseMessage response, ResponsesStreamIdle? idle,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var timer = idle is null ? null : new CancellationTokenSource(Timeout.InfiniteTimeSpan, StreamClock);
@@ -346,12 +353,12 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         while (true)
         {
             bool moved;
-            timer?.CancelAfter(idle!.Value);
+            timer?.CancelAfter(idle!.Value.After);
             try { moved = await data.MoveNextAsync().ConfigureAwait(false); }
             catch (OperationCanceledException) when (timer?.IsCancellationRequested == true && !cancellationToken.IsCancellationRequested)
             {
-                throw new LlmProviderException($"The model stopped responding after {(int)idle!.Value.TotalSeconds}s.",
-                    Transport, response.StatusCode, "grok_stream_idle_timeout");
+                throw new LlmProviderException($"The model stopped responding after {(int)idle!.Value.After.TotalSeconds}s.",
+                    Transport, response.StatusCode, idle.Value.ProviderCode);
             }
             catch (IOException error) when (!cancellationToken.IsCancellationRequested)
             {
@@ -391,7 +398,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         bool completed = false;
         string? observedModel = null;
 
-        await foreach (string data in ReadResponseDataAsync(stream!, response, StreamIdleTimeout(connection, request.ModelId), cancellationToken))
+        await foreach (string data in ReadResponseDataAsync(stream!, response, StreamIdle(connection, request.ModelId), cancellationToken))
         {
             if (data == "[DONE]")
             {
@@ -546,7 +553,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
     /// <param name="cancellationToken">Cancels reading the error body.</param>
     protected virtual Task ThrowIfUnsuccessfulAsync(HttpResponseMessage response, LlmCredential? credential,
         IReadOnlyList<string> secrets, CancellationToken cancellationToken) =>
-        ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, credential, "OpenAI Responses request", secrets, cancellationToken);
+        ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, credential, "OpenAI Responses request", secrets, ErrorReading,
+            cancellationToken);
 
     /// <summary>
     /// Maps the provider's terminal <c>status</c> to a completion status. A null result keeps the base mapping. A reply
@@ -556,11 +564,12 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
     /// <param name="incompleteReason">The terminal response's <c>incomplete_details.reason</c>, or null.</param>
     protected virtual LlmCompletionStatus? MapCompletionStatus(string status, string? incompleteReason) => null;
 
-    protected virtual LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
-        OpenAiRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
+    /// <summary>Account usage read from a response's headers. Default null.</summary>
+    protected virtual LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) => null;
 
-    /// <summary>Reports the hosted calls and citations of one reply; the payload carries a hosted tool only when the request asks for it.</summary>
-    private static ResponsesHostedToolsObserver CreateHostedToolObserver(Func<Exception> malformed) =>
+    /// <summary>The hosted-call observer; the default recognises the OpenAI Responses hosted item types. It reports the
+    /// hosted calls and citations of one reply; the payload carries a hosted tool only when the request asks for it.</summary>
+    protected virtual ResponsesHostedToolObserver CreateHostedToolObserver(Func<Exception> malformed) =>
         new ResponsesHostedToolsObserver(malformed);
 
     private const string ResponseName = "OpenAI Responses";
@@ -675,7 +684,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             request,
             connection,
             OpenAiResponsesTools.BuildMessage,
-            output => ProjectToolOutput(connection, request.ModelId, output));
+            output => ProjectToolOutput(connection, request.ModelId, output),
+            ContinuationCodec);
 
         var payload = new JsonObject
         {
@@ -713,9 +723,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         }
 
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
-        // An OpenAI API model that does not reason gets no reasoning object (B4). Codex accepts effort none from a
-        // catalog that offers only none, so its payload keeps it.
-        if (Transport != LlmTransport.OpenAiResponses || capabilities.SupportsReasoning != InferenceSupport.Unsupported)
+        if (SendsReasoning(capabilities))
         {
             if (request.ReasoningLevel is { } level)
             {
@@ -942,18 +950,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         LlmClientToolCall[] toolCalls = OpenAiResponsesTools.ReadToolCalls(responseRoot, connection.Transport);
 
         string? providerStatus = LlmJson.GetString(responseRoot, "status");
-        if (providerStatus is null && connection.Transport == LlmTransport.OpenAiCodex)
-        {
-            // Codex determines terminal state from the SSE type without requiring response.status.
-            providerStatus = LlmJson.GetString(eventRoot, "type") switch
-            {
-                "response.completed" => "completed",
-                "response.incomplete" => "incomplete",
-                "response.failed" => "failed",
-                "response.cancelled" => "cancelled",
-                _ => null
-            };
-        }
+        providerStatus ??= TerminalStatusFromEvent(eventRoot);
         string? incompleteReason = LlmJson.GetObject(responseRoot, "incomplete_details") is { } details
             ? LlmJson.GetString(details, "reason")
             : null;
@@ -999,7 +996,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             // The reported counts travel with the state, so later accounting can use them for this history.
             ContinuationState = status is LlmCompletionStatus.Failed or LlmCompletionStatus.Incomplete or LlmCompletionStatus.Unknown
                 ? null
-                : OpenAiResponsesTools.EncodeContinuationState(responseRoot, connection, modelId) is { } state
+                : OpenAiResponsesTools.EncodeContinuationState(responseRoot, connection, modelId, ContinuationCodec) is { } state
                     ? state with { InputTokens = usage?.InputTokens, OutputTokens = usage?.OutputTokens }
                     : null,
             StructuredOutput = validation,
@@ -1097,13 +1094,7 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
             && LlmJson.GetString(incomplete, "reason") == "context_length_exceeded")
             return true;
         JsonElement error = LlmJson.GetObject(root, "error") ?? root;
-        string? code = LlmJson.GetString(error, "code");
-        return Transport == LlmTransport.OpenAiResponses
-            ? LlmContextOverflow.OpenAiApi(code, LlmJson.GetString(error, "type"), LlmJson.GetString(error, "message"))
-            : LlmContextOverflow.Responses(code);
+        return ErrorReading.IsContextOverflow(new(LlmJson.GetString(error, "code"), LlmJson.GetString(error, "type"),
+            LlmJson.GetString(error, "message"), LlmJson.GetString(error, "param")));
     }
-    /// <summary>True when the endpoint's host is api.openai.com.</summary>
-    internal static bool IsOpenAiEndpoint(LlmConnection connection) =>
-        Uri.TryCreate(connection.Endpoint, UriKind.Absolute, out Uri? endpoint)
-        && string.Equals(endpoint.Host, "api.openai.com", StringComparison.OrdinalIgnoreCase);
 }

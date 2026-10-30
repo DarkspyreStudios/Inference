@@ -425,7 +425,7 @@ public sealed class LlmSettingsTests
         Assert.Equal(false, settings.Status.Authenticated.Value);
         Assert.False(settings.CanSave);
         SetupChoicePage page = await manager.QueryChoicesAsync(settings, "model", new(string.Empty, null, 50));
-        Assert.Equal("claude-sign-in-required", Assert.Single(page.Issues!).Code);
+        Assert.Equal("claude-subscription-sign-in-required", Assert.Single(page.Issues!).Code);
 
         await manager.RunAsync(settings, signIn.Id);
         Assert.IsType<SetupBrowserAuthorization>(settings.Interaction).Callback.SetValue("code#state");
@@ -459,12 +459,12 @@ public sealed class LlmSettingsTests
         }
     }
 
-    private sealed class BrowserAuth : IClaudePkceLogin
+    private sealed class BrowserAuth : ILlmBrowserLogin
     {
         public int Completed { get; private set; }
         public LlmTransport Transport => LlmTransport.AnthropicClaudeCli;
-        public LlmAuthorizationSession Start(string redirectUri) => new()
-        { AuthorizeUrl = "https://example.test/authorize", State = "state", CodeVerifier = "private-verifier", RedirectUri = redirectUri };
+        public LlmAuthorizationSession Start() => new()
+        { AuthorizeUrl = "https://example.test/authorize", State = "state", CodeVerifier = "private-verifier", RedirectUri = "https://example.test/callback" };
         public Task<LlmCredential> CompleteAsync(LlmAuthorizationSession session, string code, string state, CancellationToken cancellationToken = default)
         { Completed++; return Task.FromResult(new LlmCredential { OAuth = new() { AccessToken = "account-token" } }); }
         public Task<LlmCredential> EnsureFreshAsync(LlmCredential credential, CancellationToken cancellationToken = default) => Task.FromResult(credential);

@@ -349,7 +349,7 @@ public sealed class ClaudeCliLlmClientTests
         }));
         var authenticator = new ClaudeAuthenticator(http);
 
-        LlmAuthorizationSession session = authenticator.Start(LlmProviderService.ClaudeManualRedirectUri);
+        LlmAuthorizationSession session = authenticator.Start();
         LlmCredential credential = await authenticator.CompleteAsync(session, "code", session.State);
 
         Assert.Contains("scope=user%3Ainference&", session.AuthorizeUrl, StringComparison.Ordinal);

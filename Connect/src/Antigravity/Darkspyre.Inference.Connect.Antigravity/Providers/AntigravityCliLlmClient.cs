@@ -39,7 +39,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner, ILlm
         SupportsToolUse = InferenceSupport.Unsupported,
         SupportsAgentSessions = InferenceSupport.Supported,
         SupportsAgentToolUse = InferenceSupport.Supported,
-        Agent = NativeAgentContract.Antigravity
+        Agent = AntigravityNativeAgent.Capabilities
     };
 
     public LlmTransport Transport => LlmTransport.GoogleAntigravityCli;

@@ -1,68 +1,11 @@
 using Darkspyre.Inference.Common;
-using System.Collections.Frozen;
 using System.Runtime.CompilerServices;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
-/// <summary>Current native-runtime declarations and fail-fast managed-only option checks.</summary>
+/// <summary>Fail-fast checks and refusals the native agent runtimes share; each runtime declares its own capabilities.</summary>
 internal static class NativeAgentContract
 {
-    // Declared before the capability records that read it: static initializers run in textual order.
-    private static IReadOnlySet<LlmAgentRuntimePolicyKind> HostControlled { get; } =
-        FrozenSet.Create(LlmAgentRuntimePolicyKind.HostControlled);
-
-    public static LlmAgentCapabilities Claude { get; } = new()
-    {
-        ContextImport = LlmAgentContextImport.OpeningContext,
-        SupportsShellTools = InferenceSupport.Unsupported,
-        SupportsContextCapture = InferenceSupport.Unsupported,
-        SupportsContextReplacement = InferenceSupport.Unsupported,
-        // ClaudeConversation measures its own saved history.
-        SupportsContextStatus = InferenceSupport.Supported,
-        SupportsCompactionHandoff = InferenceSupport.Unsupported,
-        // A conversation reports Unsupported once its live CLI session is not the one its thread id names.
-        SupportsNativeResume = InferenceSupport.Supported,
-        // A steer goes to the CLI with priority "next": it joins the running turn at the next model step.
-        SupportsSteering = InferenceSupport.Supported,
-        SupportsInterrupt = InferenceSupport.Supported,
-        SupportsExternalToolHandoff = InferenceSupport.Unknown,
-        SupportsCompactNow = InferenceSupport.Supported,
-        SupportsFallbackModels = InferenceSupport.Unknown,
-        SupportsTurnCap = InferenceSupport.Unknown,
-        RichContentSupported = RichContentRoutes.ClaudeMcp,
-        SupportedRuntimePolicies = HostControlled,
-        ResourceObservation = LlmOperationSupport.Supported
-    };
-
-    private static IReadOnlySet<LlmAgentRuntimePolicyKind> ProviderConfigured { get; } =
-        FrozenSet.Create(LlmAgentRuntimePolicyKind.ProviderConfigured);
-
-    /// <summary>
-    /// The Antigravity CLI keeps its own conversation, compacts it itself and reopens it by its ID. It runs only its own
-    /// tools under the policy configured in its settings, and takes text only. AntigravityConversation measures its own
-    /// saved history and compacts it into a new AGY conversation.
-    /// </summary>
-    public static LlmAgentCapabilities Antigravity { get; } = new()
-    {
-        ContextImport = LlmAgentContextImport.OpeningContext,
-        SupportsShellTools = InferenceSupport.Unsupported,
-        SupportsContextCapture = InferenceSupport.Unsupported,
-        SupportsContextReplacement = InferenceSupport.Unsupported,
-        SupportsContextStatus = InferenceSupport.Supported,
-        SupportsCompactionHandoff = InferenceSupport.Unsupported,
-        // A conversation reports Unsupported once its open AGY conversation is not the one its thread id names.
-        SupportsNativeResume = InferenceSupport.Supported,
-        SupportsSteering = InferenceSupport.Unsupported,
-        SupportsInterrupt = InferenceSupport.Unsupported,
-        SupportsExternalToolHandoff = InferenceSupport.Unsupported,
-        SupportsCompactNow = InferenceSupport.Supported,
-        SupportsFallbackModels = InferenceSupport.Unsupported,
-        SupportsTurnCap = InferenceSupport.Unsupported,
-        RichContentSupported = RichContentRoutes.TextOnly,
-        SupportedRuntimePolicies = ProviderConfigured,
-        ResourceObservation = LlmOperationSupport.Unsupported
-    };
-
     /// <summary>
     /// Fails when the connection's overrides disable the operation. <paramref name="supportsAgentToolUse"/> is
     /// what the runtime implements; overrides can only lower it.

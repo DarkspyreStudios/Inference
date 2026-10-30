@@ -7,8 +7,11 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal sealed class ClaudeAuthenticator(HttpClient http)
-    : OAuthAuthenticatorBase(http), IClaudePkceLogin
+    : OAuthAuthenticatorBase(http), ILlmBrowserLogin
 {
+    /// <summary>The redirect page that shows the authorization code for the person to paste back.</summary>
+    internal const string ManualRedirectUri = "https://console.anthropic.com/oauth/code/callback";
+
     private const string AuthorizeUrl = "https://claude.com/cai/oauth/authorize";
     // The scope and lifetime claude setup-token requests: a token the CLI runs on through CLAUDE_CODE_OAUTH_TOKEN.
     private const string Scopes = "user:inference";
@@ -20,7 +23,7 @@ internal sealed class ClaudeAuthenticator(HttpClient http)
 
     protected override string TokenEndpoint => "https://platform.claude.com/v1/oauth/token";
 
-    public LlmAuthorizationSession Start(string redirectUri)
+    public LlmAuthorizationSession Start()
     {
         string codeVerifier = Base64Url(RandomNumberGenerator.GetBytes(32));
         string codeChallenge = Base64Url(
@@ -31,7 +34,7 @@ internal sealed class ClaudeAuthenticator(HttpClient http)
             ["code"] = "true",
             ["client_id"] = ClientId,
             ["response_type"] = "code",
-            ["redirect_uri"] = redirectUri,
+            ["redirect_uri"] = ManualRedirectUri,
             ["scope"] = Scopes,
             ["code_challenge"] = codeChallenge,
             ["code_challenge_method"] = "S256",
@@ -45,7 +48,7 @@ internal sealed class ClaudeAuthenticator(HttpClient http)
             AuthorizeUrl = $"{AuthorizeUrl}?{queryString}",
             State = state,
             CodeVerifier = codeVerifier,
-            RedirectUri = redirectUri
+            RedirectUri = ManualRedirectUri
         };
     }
 

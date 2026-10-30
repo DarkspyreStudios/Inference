@@ -26,11 +26,12 @@ public interface ILlmDeviceLogin : ILlmAuthenticator
         CancellationToken cancellationToken = default);
 }
 
-/// <summary>Signs in to Claude with the OAuth authorization-code flow and PKCE.</summary>
-public interface IClaudePkceLogin : ILlmAuthenticator
+/// <summary>Signs in with the OAuth authorization-code flow and PKCE, where the person pastes the code back.</summary>
+/// <remarks><see cref="LlmProviderService"/> finds the browser login for a transport by its <see cref="ILlmAuthenticator.Transport"/>.</remarks>
+public interface ILlmBrowserLogin : ILlmAuthenticator
 {
-    /// <summary>Creates an authorization session with a fresh state and code verifier for the given redirect URI.</summary>
-    LlmAuthorizationSession Start(string redirectUri);
+    /// <summary>Creates an authorization session with a fresh state and code verifier for the provider's own redirect address.</summary>
+    LlmAuthorizationSession Start();
 
     /// <summary>Exchanges the authorization code for a credential. Throws when <paramref name="state"/> does not match the session state.</summary>
     Task<LlmCredential> CompleteAsync(

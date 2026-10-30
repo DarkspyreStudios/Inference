@@ -4,12 +4,14 @@ using System.Collections.Frozen;
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 /// <summary>
-/// Each route's declared tool-output support. Direct Codex and the Claude CLI agent rows were measured live on
-/// 2026-09-24; the others follow their protocol and are not live-verified.
+/// The tool-output support of the routes several providers share. The Responses row was measured live through Direct
+/// Codex on 2026-09-24; the others follow their protocol and are not live-verified. A route only one provider uses lives
+/// in that provider's library.
 /// </summary>
 internal static class RichContentRoutes
 {
-    private static readonly FrozenSet<string> CommonImageTypes =
+    /// <summary>The image media types most tool-output routes carry natively.</summary>
+    internal static readonly FrozenSet<string> CommonImageTypes =
         new[] { "image/png", "image/jpeg", "image/gif", "image/webp" }.ToFrozenSet(StringComparer.Ordinal);
 
     /// <summary>OpenAI Responses and Direct Codex <c>function_call_output</c>.</summary>
@@ -27,6 +29,9 @@ internal static class RichContentRoutes
         AllowsEmpty = InferenceSupport.Supported
     };
 
+    // Anthropic Messages and Google Vertex AI use this; they are out of the build (Providers/AnthropicMessagesLlmClient.cs,
+    // under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex, outside the solution). It moves into
+    // their own libraries when they return to the build.
     /// <summary>Anthropic Messages <c>tool_result</c>.</summary>
     public static LlmRichContentSupported Anthropic { get; } = new()
     {
@@ -42,6 +47,8 @@ internal static class RichContentRoutes
         AllowsEmpty = InferenceSupport.Supported
     };
 
+    // AWS Bedrock uses this; AWS Bedrock is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     /// <summary>Bedrock Converse <c>ToolResultBlock</c>.</summary>
     public static LlmRichContentSupported BedrockConverse { get; } = new()
     {
@@ -68,16 +75,9 @@ internal static class RichContentRoutes
         AllowsEmpty = InferenceSupport.Supported
     };
 
-    /// <summary>Claude CLI stream-json prompt blocks appended to its flattened tool-history transcript.</summary>
-    public static LlmRichContentSupported ClaudePrompt { get; } = TextOnly with
-    {
-        Images = LlmRichContentCarriage.Native,
-        ImageMediaTypes = CommonImageTypes,
-        PdfDocuments = LlmRichContentCarriage.Native,
-        TextDocuments = LlmRichContentCarriage.Native,
-        PreservesOrder = InferenceSupport.Unsupported
-    };
-
+    // The Gemini API and Google Vertex AI use this; they are out of the build (Providers/GeminiApiLlmClient*.cs and
+    // Internal/Gemini/, under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex, outside the
+    // solution). It moves into their own libraries when they return to the build.
     /// <summary>Gemini functionResponse media referenced by nested inlineData display names.</summary>
     public static LlmRichContentSupported GeminiFunctionResponse { get; } = TextOnly with
     {
@@ -86,23 +86,5 @@ internal static class RichContentRoutes
         PdfDocuments = LlmRichContentCarriage.Native,
         ErrorFlag = LlmRichContentCarriage.Native,
         PreservesOrder = InferenceSupport.Unsupported
-    };
-
-    /// <summary>
-    /// The Claude CLI agent's MCP result. The CLI writes binary resources to disk and gives the model a path
-    /// note, so PDFs and other binaries are unsupported; it drops text parts when MCP structured content is
-    /// present, so structured content travels as a final text part.
-    /// </summary>
-    public static LlmRichContentSupported ClaudeMcp { get; } = new()
-    {
-        Images = LlmRichContentCarriage.Native,
-        ImageMediaTypes = CommonImageTypes,
-        TextDocuments = LlmRichContentCarriage.Text,
-        ResourceLinks = LlmRichContentCarriage.Native,
-        EmbeddedTextResources = LlmRichContentCarriage.Native,
-        StructuredContent = LlmRichContentCarriage.Text,
-        ErrorFlag = LlmRichContentCarriage.Native,
-        PreservesOrder = InferenceSupport.Supported,
-        AllowsEmpty = InferenceSupport.Supported
     };
 }

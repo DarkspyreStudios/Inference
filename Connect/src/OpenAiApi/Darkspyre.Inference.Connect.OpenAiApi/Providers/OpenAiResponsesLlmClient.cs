@@ -20,6 +20,20 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
 
     protected override bool SupportsResourcePreparation => true;
 
+    /// <inheritdoc />
+    protected override ProviderErrorReading ErrorReading => OpenAiApiErrors.Reading;
+
+    /// <inheritdoc />
+    public override ILlmContinuationCodec? ContinuationCodec => OpenAiApiReplay.Codec;
+
+    /// <summary>An OpenAI API model that does not reason gets no reasoning object (B4).</summary>
+    protected override bool SendsReasoning(LlmProviderCapabilities capabilities) =>
+        capabilities.SupportsReasoning != InferenceSupport.Unsupported;
+
+    /// <summary>The OpenAI rate-limit headers of the response.</summary>
+    protected override LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
+        OpenAiRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
+
     /// <summary>The feature list of an endpoint other than OpenAI's: every service feature not confirmed there is Unknown (B12).</summary>
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
@@ -56,7 +70,7 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
     public override LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
         EnsureTransport(connection);
-        bool openAi = IsOpenAiEndpoint(connection);
+        bool openAi = OpenAiApiDefinition.Value.ServiceTiers!.IsDefaultOn(connection.Endpoint);
         // The connection's Service tiers switch; unset, it is on for OpenAI's endpoint only (B13, S11 step 4).
         bool tiers = (connection.CapabilityOverrides?.SupportsServiceTiers
             ?? (openAi ? InferenceSupport.Supported : InferenceSupport.Unsupported)) == InferenceSupport.Supported;
@@ -102,7 +116,7 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
         CancellationToken cancellationToken = default)
     {
         IReadOnlyList<LlmModel> listed = await base.ListModelsAsync(connection, cancellationToken).ConfigureAwait(false);
-        bool openAi = IsOpenAiEndpoint(connection);
+        bool openAi = OpenAiApiDefinition.Value.ServiceTiers!.IsDefaultOn(connection.Endpoint);
         return [.. listed.Select(model =>
         {
             if (openAi && model.MaxContextTokens is null && OpenAiModelProfiles.Get(model.Id) is { ContextWindow: { } window } profile)
@@ -158,7 +172,7 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
         cancellationToken.ThrowIfCancellationRequested();
         string[] secrets = Secrets();
         await ProviderHttp.ThrowIfUnsuccessfulAsync(response, Transport, credential, "llama.cpp tokenization",
-            secrets, cancellationToken).ConfigureAwait(false);
+            secrets, ErrorReading, cancellationToken).ConfigureAwait(false);
         string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         LlmTokenization result;
@@ -219,6 +233,6 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
     /// <summary>Only a verified reasoning profile on OpenAI's endpoint reasons by default. Elsewhere a request with no
     /// level gets no reasoning object, so a cleared level after a reasoning refusal sends none (5.10).</summary>
     protected override bool ReasonsByDefault(LlmConnection connection, string modelId) =>
-        IsOpenAiEndpoint(connection) && OpenAiModelProfiles.Get(modelId) is { Verified: true, IsReasoning: true };
+        OpenAiApiDefinition.Value.ServiceTiers!.IsDefaultOn(connection.Endpoint) && OpenAiModelProfiles.Get(modelId) is { Verified: true, IsReasoning: true };
 
 }

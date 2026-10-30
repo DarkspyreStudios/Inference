@@ -7,24 +7,25 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 /// </summary>
 internal static class ContinuationStateProjection
 {
-    public static (LlmChatRequest Request, int Omitted) Project(LlmChatRequest request, LlmConnection connection)
+    public static (LlmChatRequest Request, int Omitted) Project(LlmChatRequest request, LlmConnection connection, ILlmClient client)
     {
         if (!Enum.IsDefined(request.UnboundContinuationState))
         {
             throw new ArgumentOutOfRangeException(nameof(request), "Unknown unbound continuation state handling.");
         }
-        // SelfHost delegates ownership/binding decisions to the selected engine.
-        if (connection.Transport == LlmTransport.SelfHost || request.UnboundContinuationState == LlmUnboundContinuationState.Reject)
+        // A client whose engine owns its continuation state decides what it can replay.
+        if (client is IEngineOwnedContinuation || request.UnboundContinuationState == LlmUnboundContinuationState.Reject)
         {
             return (request, 0);
         }
+        ILlmContinuationCodec? codec = (client as ILlmContinuationCodecSource)?.ContinuationCodec;
 
         int omitted = 0;
         LlmChatMessage[] messages = new LlmChatMessage[request.Messages.Count];
         for (int index = 0; index < messages.Length; index++)
         {
             LlmChatMessage message = request.Messages[index];
-            if (message.ContinuationState is not null && !ProviderContinuationStateCodec.IsReplayable(message, connection, request.ModelId))
+            if (message.ContinuationState is not null && !ProviderContinuationStateCodec.IsReplayable(message, connection, request.ModelId, codec))
             {
                 message = message with { ContinuationState = null };
                 omitted++;

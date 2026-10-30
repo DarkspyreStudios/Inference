@@ -40,8 +40,17 @@ internal sealed class GrokResponsesLlmClient(HttpClient http, TimeProvider time)
         XaiStepRetryPolicy.Decide(error, context, Random.Shared.NextDouble);
 
     protected override TimeProvider StreamClock => time;
-    protected override TimeSpan? StreamIdleTimeout(LlmConnection connection, string modelId) =>
-        XaiModelProfiles.Get(connection, modelId).IdleTimeout ?? TimeSpan.FromSeconds(600);
+    /// <summary>The model's idle timeout, 600 s when the catalog names none; the failure carries the code
+    /// <see cref="XaiStepRetryPolicy"/> resends on.</summary>
+    protected override ResponsesStreamIdle? StreamIdle(LlmConnection connection, string modelId) =>
+        new(XaiModelProfiles.Get(connection, modelId).IdleTimeout ?? TimeSpan.FromSeconds(600), "grok_stream_idle_timeout");
+
+    /// <inheritdoc />
+    public override ILlmContinuationCodec? ContinuationCodec => XaiReplay.Codec;
+
+    /// <summary>The shared hosted-call observer with Grok's X-search items.</summary>
+    protected override ResponsesHostedToolObserver CreateHostedToolObserver(Func<Exception> malformed) =>
+        new XaiHostedToolsObserver(malformed);
     protected override bool RetriesStreamError(JsonElement errorEvent) => true;
     protected override Exception? ObserveStreamEvent(string? type, JsonElement root, HttpResponseMessage response) =>
         type == "response.doom_loop_check" && XaiRepetitionCheck.IsConfident(root) ? RepetitionFailure(response) : null;

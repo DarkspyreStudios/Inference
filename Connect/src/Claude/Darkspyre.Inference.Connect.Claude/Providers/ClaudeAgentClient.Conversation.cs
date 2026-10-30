@@ -140,7 +140,7 @@ internal sealed partial class ClaudeAgentClient
         {
             ClaudeAgentSession? inner;
             lock (_sync) { inner = _inner; }
-            LlmAgentCapabilities marks = inner is null ? NativeAgentContract.Claude : await inner.GetCapabilitiesAsync(cancellationToken);
+            LlmAgentCapabilities marks = inner is null ? ClaudeNativeAgent.Capabilities : await inner.GetCapabilitiesAsync(cancellationToken);
             return !_ephemeral && inner is not null && inner.ThreadId == ThreadId
                 ? marks
                 : marks with { SupportsNativeResume = InferenceSupport.Unsupported };

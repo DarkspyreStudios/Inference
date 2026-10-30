@@ -44,6 +44,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped(provider => new LlmConnectionAccess(
             provider.GetRequiredService<ILlmConnectionSource>(), provider.GetServices<ILlmAuthenticator>(),
             provider.GetServices<ILlmClient>()));
+        // AWS Bedrock, Google Vertex AI and Azure OpenAI use the ILlmSetupEnvironment services; they are out of the build
+        // (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock, .LLM.Vertex and .LLM.Azure, outside the solution). It
+        // moves into their own libraries when they return to the build.
         services.AddScoped(provider => new LlmProviderService(
             provider.GetRequiredService<ILlmConnectionSource>(), provider.GetServices<ILlmClient>(),
             provider.GetServices<ILlmAuthenticator>(), provider.GetServices<ILlmSetupEnvironment>(),

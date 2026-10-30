@@ -15,6 +15,8 @@ internal static class CodexDefinition
         Icon = SetupIcons.FromResource(typeof(SetupIcons).Assembly, SetupIcons.OpenAiResource),
         Group = SetupProviderGroup.Subscription,
         HomeFolder = ".codex",
+        EndpointKind = LlmProviderEndpointKind.Fixed,
+        SignIn = new("authorize", "Sign in with ChatGPT", LlmProviderSignInFlow.DeviceCode) { IsRequired = true },
         SetupSteps =
         [
             new SetupStep

@@ -6,7 +6,10 @@ using System.Text.Json.Nodes;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
-/// <summary>Versioned, account-bound output only. Never stores the provider's response envelope.</summary>
+/// <summary>
+/// Versioned, account-bound output only. Never stores the provider's response envelope. The rules come from the
+/// client's own codec when it has one, then from the connection's codec, then from the static rules below.
+/// </summary>
 internal static class ProviderContinuationStateCodec
 {
     internal static string ImplementationId(LlmTransport transport) => $"darkspyre.connect.llm.{transport}";
@@ -14,26 +17,41 @@ internal static class ProviderContinuationStateCodec
     public static LlmContinuationState Encode(
         LlmConnection connection,
         string modelId,
-        JsonArray output) => connection.ContinuationCodec is { } codec ? codec.Encode(connection, modelId, output) : new()
+        JsonArray output,
+        ILlmContinuationCodec? codec) => Rules(connection, codec) is { } rules ? rules.Encode(connection, modelId, output) : new()
         {
             ImplementationId = ImplementationId(connection.Transport),
             ModelId = modelId,
             ScopeId = Scope(connection),
+            // Anthropic Messages uses this; Anthropic Messages is out of the build (Providers/AnthropicMessagesLlmClient.cs,
+            // under Compile Remove). It moves into that provider's own library when the provider returns to the build.
             Payload = connection.Transport == LlmTransport.AnthropicMessages
                 ? AnthropicContinuation.EncodePayload(Project(output, connection.Transport))
                 : Project(output, connection.Transport).ToJsonString()
         };
 
+    // The Gemini API, OpenAI-compatible Chat and Google Vertex AI use the connection's codec; they are out of the build
+    // (Providers/GeminiApiLlmClient*.cs and ChatCompletionsLlmClientBase.cs, under Compile Remove;
+    // Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex, outside the solution). It moves into their own libraries
+    // when they return to the build.
+    private static ILlmContinuationCodec? Rules(LlmConnection connection, ILlmContinuationCodec? codec) =>
+        codec ?? connection.ContinuationCodec;
+
+    // Azure OpenAI, Anthropic Messages and AWS Bedrock use this; they are out of the build
+    // (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure and .LLM.Bedrock, outside the solution;
+    // Providers/AnthropicMessagesLlmClient.cs, under Compile Remove). It moves into their own libraries when they return
+    // to the build.
     /// <summary>
-    /// Transports whose adapters keep continuation state. Bedrock Converse state carries the token counts the provider
-    /// reported, and the ordered reply when the reply contains reasoning.
+    /// Transports whose adapters keep continuation state through the static rules. Bedrock Converse state carries the
+    /// token counts the provider reported, and the ordered reply when the reply contains reasoning.
     /// </summary>
     public static bool Retains(LlmTransport transport) =>
-        transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses or LlmTransport.AnthropicMessages
-            or LlmTransport.AwsBedrockConverse or LlmTransport.XaiResponses;
+        transport is LlmTransport.AzureOpenAiResponses or LlmTransport.AnthropicMessages or LlmTransport.AwsBedrockConverse;
 
     private const string NoOutput = "[]";
 
+    // AWS Bedrock uses this; AWS Bedrock is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     /// <summary>
     /// State with no replayable output. It carries the token counts the provider reported, so accounting can count
     /// the history it closes. Bedrock Converse writes it for a reply without reasoning.
@@ -53,8 +71,8 @@ internal static class ProviderContinuationStateCodec
         };
 
     /// <summary>Whether this state can be replayed on the connection and model.</summary>
-    public static bool IsBound(LlmContinuationState state, LlmConnection connection, string modelId) =>
-        connection.ContinuationCodec is { } codec ? codec.IsBound(state, connection, modelId)
+    public static bool IsBound(LlmContinuationState state, LlmConnection connection, string modelId, ILlmContinuationCodec? codec) =>
+        Rules(connection, codec) is { } rules ? rules.IsBound(state, connection, modelId)
         : Retains(connection.Transport) && state.FormatVersion == 2 && state.ImplementationId == ImplementationId(connection.Transport)
         && state.ModelId == modelId && state.ScopeId == Scope(connection);
 
@@ -63,10 +81,12 @@ internal static class ProviderContinuationStateCodec
         LlmConnection connection,
         string modelId)
     {
-        if (state.Payload is null || state.Payload.Length > 16 * 1024 * 1024 || !IsBound(state, connection, modelId))
+        if (state.Payload is null || state.Payload.Length > 16 * 1024 * 1024 || !IsBound(state, connection, modelId, null))
         {
             throw new ArgumentException("Response state does not match this version, transport, model, or account scope.");
         }
+        // AWS Bedrock uses this; AWS Bedrock is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+        // outside the solution). It moves into that provider's own library when the provider returns to the build.
         if (connection.Transport == LlmTransport.AwsBedrockConverse && state.Payload == NoOutput)
         {
             return [];
@@ -74,6 +94,8 @@ internal static class ProviderContinuationStateCodec
 
         try
         {
+            // Anthropic Messages uses this; Anthropic Messages is out of the build (Providers/AnthropicMessagesLlmClient.cs,
+            // under Compile Remove). It moves into that provider's own library when the provider returns to the build.
             JsonArray output = connection.Transport == LlmTransport.AnthropicMessages
                 ? AnthropicContinuation.ReadPayload(state.Payload).Content
                 : JsonNode.Parse(state.Payload) as JsonArray
@@ -106,12 +128,12 @@ internal static class ProviderContinuationStateCodec
     /// Whether a message's state is bound to the connection and model and matches the message. State whose calls do not
     /// match the visible calls, or whose arguments do not parse, is unbound.
     /// </summary>
-    public static bool IsReplayable(LlmChatMessage message, LlmConnection connection, string modelId)
+    public static bool IsReplayable(LlmChatMessage message, LlmConnection connection, string modelId, ILlmContinuationCodec? codec)
     {
-        if (!IsBound(message.ContinuationState!, connection, modelId)) return false;
+        if (!IsBound(message.ContinuationState!, connection, modelId, codec)) return false;
         try
         {
-            _ = DecodeMessage(message, connection, modelId);
+            _ = DecodeMessage(message, connection, modelId, codec);
             return true;
         }
         catch (ArgumentException)
@@ -120,19 +142,31 @@ internal static class ProviderContinuationStateCodec
         }
     }
 
-    public static JsonArray DecodeMessage(LlmChatMessage message, LlmConnection connection, string modelId)
+    public static JsonArray DecodeMessage(LlmChatMessage message, LlmConnection connection, string modelId, ILlmContinuationCodec? codec)
     {
         ValidateMessage(message);
-        if (connection.ContinuationCodec is { } codec)
+        if (Rules(connection, codec) is { } rules)
         {
-            return codec.DecodeMessage(message, connection, modelId);
+            return rules.DecodeMessage(message, connection, modelId);
         }
         JsonArray output = Decode(message.ContinuationState!, connection, modelId);
+        // AWS Bedrock uses this; AWS Bedrock is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+        // outside the solution). It moves into that provider's own library when the provider returns to the build.
         if (connection.Transport == LlmTransport.AwsBedrockConverse && output.Count == 0)
         {
             return output;
         }
-        string text = connection.Transport is LlmTransport.AnthropicMessages or LlmTransport.AwsBedrockConverse
+        MatchMessage(message, output, connection.Transport);
+        return output;
+    }
+
+    /// <summary>Throws unless the message's text and tool calls match the retained output.</summary>
+    internal static void MatchMessage(LlmChatMessage message, JsonArray output, LlmTransport transport)
+    {
+        // Anthropic Messages and AWS Bedrock use this; they are out of the build (Providers/AnthropicMessagesLlmClient.cs,
+        // under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock, outside the solution). It moves
+        // into their own libraries when they return to the build.
+        string text = transport is LlmTransport.AnthropicMessages or LlmTransport.AwsBedrockConverse
             ? string.Concat(output.OfType<JsonObject>()
                 .Where(item => item["type"]?.GetValue<string>() == "text")
                 .Select(item => item["text"]?.GetValue<string>()))
@@ -186,8 +220,6 @@ internal static class ProviderContinuationStateCodec
                 throw new ArgumentException("Assistant tool arguments contain invalid JSON.");
             }
         }
-
-        return output;
     }
 
     internal static string Scope(LlmConnection connection)
@@ -196,6 +228,8 @@ internal static class ProviderContinuationStateCodec
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         // The concurrency Version and rotating OAuth tokens are not account identities. Missing an
         // OAuth account ID binds conservatively to its current token; never guess account equivalence.
+        // Azure OpenAI uses this; Azure OpenAI is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure,
+        // outside the solution). It moves into that provider's own library when the provider returns to the build.
         bool azure = connection.Transport is LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat;
         string endpoint = azure ? new Uri(connection.Endpoint, UriKind.Absolute).GetLeftPart(UriPartial.Authority) : connection.Endpoint;
         var identityValue = new ConnectContinuationScopeIdentity(connection.Transport, endpoint,
@@ -209,6 +243,10 @@ internal static class ProviderContinuationStateCodec
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }
 
+    // Azure OpenAI, Anthropic Messages and AWS Bedrock use this; they are out of the build
+    // (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure and .LLM.Bedrock, outside the solution;
+    // Providers/AnthropicMessagesLlmClient.cs, under Compile Remove). It moves into their own libraries when they return
+    // to the build.
     private static JsonArray Project(JsonArray output, LlmTransport transport)
     {
         var projected = new JsonArray();
@@ -219,51 +257,11 @@ internal static class ProviderContinuationStateCodec
                 throw new ArgumentException("Response state contains an invalid output item.");
             }
 
-            if (transport == LlmTransport.XaiResponses)
-            {
-                // Grok replays its output verbatim and in order, including the encrypted state of hosted calls and the
-                // compaction item from responses/compact. The payload is opaque: the library never runs or logs its fields.
-                if (type is not ("message" or "reasoning" or "function_call" or "compaction" or "web_search_call"
-                    or "x_search_call" or "code_interpreter_call" or "code_execution_call" or "file_search_call"
-                    or "mcp_call" or "image_generation_call" or "view_image_call" or "view_x_video_call"
-                    or "custom_tool_call" or "tool_search_call" or "tool_search_output"))
-                {
-                    throw new NotSupportedException("The adapter cannot retain this assistant output type.");
-                }
-                if (type == "message" && item["role"]?.GetValue<string>() != "assistant")
-                {
-                    throw new ArgumentException("Response state cannot contain non-assistant messages.");
-                }
-                if (type == "message" && (item["content"] is not JsonArray content || content.Any(part => part is not JsonObject)))
-                {
-                    throw new ArgumentException("Response state content must contain ordered assistant blocks.");
-                }
-                ValidateItem(item, transport, type);
-                projected.Add(item.DeepClone());
-                continue;
-            }
-
-            if (transport == LlmTransport.OpenAiCodex && type is "compaction" or "compaction_summary")
-            {
-                ValidateItem(item, transport, type);
-                projected.Add(item.DeepClone());
-                continue;
-            }
-
             string[] fields = (transport, type) switch
             {
-                (LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses, "message") =>
-                    ["type", "id", "role", "status", "phase", "content"],
-                (LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses, "reasoning") =>
-                    ["type", "id", "status", "summary", "content", "encrypted_content"],
-                (LlmTransport.OpenAiResponses or LlmTransport.OpenAiCodex or LlmTransport.AzureOpenAiResponses, "function_call") =>
-                    ["type", "id", "status", "call_id", "name", "arguments"],
-                (LlmTransport.OpenAiCodex or LlmTransport.OpenAiResponses, "image_generation_call") => ["type", "id", "status", "result"],
-                // Hosted tool calls are retained like the image tool's, so a replayed reasoning item keeps the call after it.
-                (LlmTransport.OpenAiResponses, "web_search_call") => ["type", "id", "status", "action"],
-                (LlmTransport.OpenAiResponses, "file_search_call") => ["type", "id", "status", "queries", "results"],
-                (LlmTransport.OpenAiResponses, "code_interpreter_call") => ["type", "id", "status", "code", "container_id", "outputs"],
-                (LlmTransport.OpenAiResponses, "mcp_call") => ["type", "id", "status", "server_label", "name", "arguments", "output", "error"],
+                (LlmTransport.AzureOpenAiResponses, "message") => ["type", "id", "role", "status", "phase", "content"],
+                (LlmTransport.AzureOpenAiResponses, "reasoning") => ["type", "id", "status", "summary", "content", "encrypted_content"],
+                (LlmTransport.AzureOpenAiResponses, "function_call") => ["type", "id", "status", "call_id", "name", "arguments"],
                 (LlmTransport.AnthropicMessages, "text") => ["type", "text", "citations"],
                 (LlmTransport.AnthropicMessages, "thinking") => ["type", "thinking", "signature"],
                 (LlmTransport.AnthropicMessages, "redacted_thinking") => ["type", "data"],
@@ -279,51 +277,7 @@ internal static class ProviderContinuationStateCodec
                 (LlmTransport.AwsBedrockConverse, "tool_use") => ["type", "id", "name", "input"],
                 _ => throw new NotSupportedException("The adapter cannot retain this assistant output type.")
             };
-            var copy = new JsonObject();
-            foreach (string field in fields)
-            {
-                if (item.TryGetPropertyValue(field, out JsonNode? value))
-                {
-                    if (transport == LlmTransport.AnthropicMessages && field == "citations")
-                    {
-                        if (value is not JsonArray citations || citations.Any(citation => citation is not JsonObject))
-                        { throw new ArgumentException("Assistant citations in continuation state must be ordered JSON objects."); }
-                        copy[field] = citations.DeepClone();
-                    }
-                    else if (transport == LlmTransport.AnthropicMessages && field is "content" or "caller")
-                    {
-                        // Provider-owned results/caller metadata are opaque replay data. Their strings,
-                        // URLs and code are never interpreted, executed or logged by the library.
-                        if (value is not JsonObject && (field != "content" || value is not JsonArray))
-                        { throw new ArgumentException("Server-tool continuation content must be a JSON object or ordered block array."); }
-                        copy[field] = value.DeepClone();
-                    }
-                    else if (field is "content" or "summary")
-                    {
-                        copy[field] = ProjectTextBlocks(value);
-                    }
-                    else if (field == "input")
-                    {
-                        if (value is not JsonObject)
-                        {
-                            throw new ArgumentException("Tool input in continuation state must be a JSON object.");
-                        }
-                        copy[field] = value.DeepClone();
-                    }
-                    else if (field is "action" or "queries" or "results" or "outputs")
-                    {
-                        // A hosted call's action, queries, results and outputs are opaque replay data, never interpreted.
-                        if (value is not (JsonObject or JsonArray or null))
-                        { throw new ArgumentException("Hosted-call continuation data must be a JSON object or array."); }
-                        copy[field] = value?.DeepClone();
-                    }
-                    else
-                    {
-                        _ = value?.GetValue<string>();
-                        copy[field] = value?.DeepClone();
-                    }
-                }
-            }
+            JsonObject copy = ProjectFields(item, fields, transport);
 
             if (type == "message" && copy["role"]?.GetValue<string>() != "assistant")
             {
@@ -336,13 +290,70 @@ internal static class ProviderContinuationStateCodec
         return projected;
     }
 
-    private static void ValidateItem(JsonObject item, LlmTransport transport, string type)
+    /// <summary>Copies the listed fields of one retained output item, checking each field's JSON kind.</summary>
+    internal static JsonObject ProjectFields(JsonObject item, string[] fields, LlmTransport transport)
+    {
+        var copy = new JsonObject();
+        foreach (string field in fields)
+        {
+            if (item.TryGetPropertyValue(field, out JsonNode? value))
+            {
+                // Anthropic Messages uses the two arms below; Anthropic Messages is out of the build
+                // (Providers/AnthropicMessagesLlmClient.cs, under Compile Remove). It moves into that provider's own
+                // library when the provider returns to the build.
+                if (transport == LlmTransport.AnthropicMessages && field == "citations")
+                {
+                    if (value is not JsonArray citations || citations.Any(citation => citation is not JsonObject))
+                    { throw new ArgumentException("Assistant citations in continuation state must be ordered JSON objects."); }
+                    copy[field] = citations.DeepClone();
+                }
+                else if (transport == LlmTransport.AnthropicMessages && field is "content" or "caller")
+                {
+                    // Provider-owned results/caller metadata are opaque replay data. Their strings,
+                    // URLs and code are never interpreted, executed or logged by the library.
+                    if (value is not JsonObject && (field != "content" || value is not JsonArray))
+                    { throw new ArgumentException("Server-tool continuation content must be a JSON object or ordered block array."); }
+                    copy[field] = value.DeepClone();
+                }
+                else if (field is "content" or "summary")
+                {
+                    copy[field] = ProjectTextBlocks(value);
+                }
+                else if (field == "input")
+                {
+                    if (value is not JsonObject)
+                    {
+                        throw new ArgumentException("Tool input in continuation state must be a JSON object.");
+                    }
+                    copy[field] = value.DeepClone();
+                }
+                else if (field is "action" or "queries" or "results" or "outputs")
+                {
+                    // A hosted call's action, queries, results and outputs are opaque replay data, never interpreted.
+                    if (value is not (JsonObject or JsonArray or null))
+                    { throw new ArgumentException("Hosted-call continuation data must be a JSON object or array."); }
+                    copy[field] = value?.DeepClone();
+                }
+                else
+                {
+                    _ = value?.GetValue<string>();
+                    copy[field] = value?.DeepClone();
+                }
+            }
+        }
+        return copy;
+    }
+
+    /// <summary>The shared required-field and field-kind checks of one retained output item.</summary>
+    internal static void ValidateItem(JsonObject item, LlmTransport transport, string type)
     {
         string[] required = (transport, type) switch
         {
             (_, "message") => ["content"],
             (_, "function_call") => ["call_id", "name", "arguments"],
             (_, "tool_use" or "server_tool_use") => ["id", "name", "input"],
+            // Anthropic Messages uses this; Anthropic Messages is out of the build (Providers/AnthropicMessagesLlmClient.cs,
+            // under Compile Remove). It moves into that provider's own library when the provider returns to the build.
             (LlmTransport.AnthropicMessages, "web_search_tool_result" or "web_fetch_tool_result"
                 or "code_execution_tool_result" or "bash_code_execution_tool_result"
                 or "text_editor_code_execution_tool_result" or "tool_search_tool_result" or "advisor_tool_result") => ["tool_use_id", "content"],
@@ -350,6 +361,9 @@ internal static class ProviderContinuationStateCodec
             (_, "redacted_thinking") => ["data"],
             (_, "compaction" or "compaction_summary") => ["encrypted_content"],
             (_, "text") => ["text"],
+            // AWS Bedrock uses the two arms below; AWS Bedrock is out of the build
+            // (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock, outside the solution). It moves into that
+            // provider's own library when the provider returns to the build.
             // Bedrock reasoning text may be empty: a signed block under an omitted display carries none.
             (LlmTransport.AwsBedrockConverse, "reasoning") => ["text"],
             (LlmTransport.AwsBedrockConverse, "redacted_reasoning") => ["data"],
@@ -380,18 +394,8 @@ internal static class ProviderContinuationStateCodec
             using JsonDocument document = JsonDocument.Parse(item.ToJsonString());
             _ = OpenAiResponsesTools.TryReadToolCall(document.RootElement, false, out _);
         }
-        if (transport == LlmTransport.XaiResponses && type is "custom_tool_call" or "tool_search_call" or "tool_search_output")
-        {
-            if (item["id"] is not JsonValue identity || !identity.TryGetValue<string>(out _))
-                throw new ArgumentException("Hosted continuation requires its item identity.");
-            foreach (string field in new[] { "call_id", "status", "name", "input", "execution" })
-                if (item[field] is { } value && (value is not JsonValue text || !text.TryGetValue<string>(out _)))
-                    throw new ArgumentException("Hosted continuation contains an invalid string field.");
-            if (type == "custom_tool_call" && (item["call_id"] is null || item["name"] is null))
-                throw new ArgumentException("Custom continuation requires its call identity and name.");
-            if (type == "tool_search_output" && item["tools"] is { } tools && tools is not JsonArray)
-                throw new ArgumentException("Tool-search output requires ordered definitions.");
-        }
+        // AWS Bedrock uses this; AWS Bedrock is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+        // outside the solution). It moves into that provider's own library when the provider returns to the build.
         if (transport == LlmTransport.AwsBedrockConverse && type == "redacted_reasoning")
         {
             try

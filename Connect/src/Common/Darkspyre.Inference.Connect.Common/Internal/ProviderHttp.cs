@@ -4,6 +4,22 @@ using System.Text.Json;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
+/// <summary>The fields of a provider error object, read from the unredacted body.</summary>
+internal readonly record struct ProviderError(string? Code, string? Type, string? Message, string? Param);
+
+/// <summary>How a provider reads its own HTTP error objects.</summary>
+internal sealed record ProviderErrorReading(Func<ProviderError, bool> IsContextOverflow)
+{
+    /// <summary>The settings a 400 response refused, or null when the provider names none.</summary>
+    public Func<ProviderError, LlmRefusedSettings>? RefusedSettings { get; init; }
+
+    /// <summary>No overflow and no refused settings.</summary>
+    public static ProviderErrorReading None { get; } = new(_ => false);
+
+    /// <summary>The Responses protocol's <c>context_length_exceeded</c> code.</summary>
+    public static ProviderErrorReading Responses { get; } = new(error => LlmContextOverflow.Responses(error.Code));
+}
+
 internal static class ProviderHttp
 {
     /// <summary>
@@ -73,6 +89,7 @@ internal static class ProviderHttp
         LlmCredential? credential,
         string operation,
         IEnumerable<string> additionalSecrets,
+        ProviderErrorReading reading,
         CancellationToken cancellationToken)
     {
         if (response.IsSuccessStatusCode)
@@ -82,7 +99,8 @@ internal static class ProviderHttp
 
         string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
         (string? actualCode, string? actualMessage, string? actualType, string? actualParam) = ReadProviderError(body);
-        bool overflow = LlmContextOverflow.Http(transport, actualCode, actualType, actualMessage);
+        ProviderError error = new(actualCode, actualType, actualMessage, actualParam);
+        bool overflow = reading.IsContextOverflow(error);
         string[] secrets = additionalSecrets.ToArray();
         string sanitized = SecretRedactor.Sanitize(body, credential, secrets);
         (string? code, string? providerMessage, _, _) = ReadProviderError(sanitized);
@@ -103,8 +121,8 @@ internal static class ProviderHttp
         {
             ReportedInputTokens = reportedTokens,
             ReportedContextLimit = reportedLimit,
-            RefusedSettings = transport == LlmTransport.OpenAiResponses && response.StatusCode == HttpStatusCode.BadRequest
-                ? LlmUnsupportedSetting.Read(actualCode, actualParam, actualMessage) : LlmRefusedSettings.None
+            RefusedSettings = response.StatusCode == HttpStatusCode.BadRequest && reading.RefusedSettings is { } refused
+                ? refused(error) : LlmRefusedSettings.None
         };
     }
 

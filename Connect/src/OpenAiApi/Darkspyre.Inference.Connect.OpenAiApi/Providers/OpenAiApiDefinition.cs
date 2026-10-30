@@ -14,6 +14,10 @@ internal static class OpenAiApiDefinition
         DisplayOrder = 10,
         Icon = SetupIcons.FromResource(typeof(SetupIcons).Assembly, SetupIcons.OpenAiResource),
         Group = SetupProviderGroup.ApiKey,
+        AcceptsApiKey = true,
+        OffersContextLengths = true,
+        ServiceTiers = new("api.openai.com",
+            "Show the service-tier choice in the chat panel and send the chosen tier. OpenAI's own service offers tiers."),
         SetupSteps =
         [
             new SetupStep

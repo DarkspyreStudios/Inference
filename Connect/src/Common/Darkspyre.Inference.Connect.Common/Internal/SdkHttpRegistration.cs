@@ -8,15 +8,6 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 internal static class SdkHttpRegistration
 {
-    internal static readonly string[] Names = ["AppleFoundationModelsClient", "GeminiApiLlmClient", "OpenAiResponsesLlmClient",
-        "OpenAiCompatibleChatLlmClient", "AnthropicMessagesLlmClient", "ClaudeCliLlmClient", "OpenAiEmbeddingClient", "OpenAiCodexLlmClient",
-        "CodexAuthenticator", "ClaudeAuthenticator", "AzureResponsesLlmClient", "AzureChatLlmClient", "VertexLlmClient", "", "PocketTtsHttpProvider", "TangoFluxHttpProvider",
-        "GrokResponsesLlmClient", "GrokAuthenticator", "XaiMediaDownloadClient", "XaiTtsProvider", "XaiSttProvider", "XaiRealtimeProvider"];
-    internal static void ValidateName(string name)
-    {
-        ArgumentNullException.ThrowIfNull(name);
-        if (!Names.Contains(name, StringComparer.Ordinal)) throw new ArgumentException("The HTTP pipeline name is not an SDK-owned registration.", nameof(name));
-    }
     internal static SdkHttpConfiguration Register(IServiceCollection services)
     {
         services.AddHttpClient();
@@ -28,7 +19,7 @@ internal static class SdkHttpRegistration
     }
     internal static IHttpClientBuilder AddInferenceHttpClient<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)] T>(this IServiceCollection services, Action<HttpClient>? configure = null) where T : class
     {
-        Register(services); string name = typeof(T).Name; ValidateName(name);
+        string name = typeof(T).Name; Register(services).RecordPipeline(name);
         IHttpClientBuilder builder = services.AddHttpClient(name);
         if (configure is not null) builder.ConfigureHttpClient(configure);
         services.TryAddTransient<T>(provider => provider.GetRequiredService<ITypedHttpClientFactory<T>>()
@@ -42,6 +33,8 @@ internal sealed record SdkHttpLoggerDefinition(Func<IServiceProvider, IHttpClien
 internal sealed class SdkHttpConfiguration
 {
     private readonly Dictionary<string, List<SdkHttpLoggerDefinition>> _loggers = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _pipelines = new(StringComparer.Ordinal);
+    private readonly List<string> _configured = [];
     private bool _selected;
     private bool _frozen;
     internal InferenceHttpCreationMode Mode { get; private set; }
@@ -52,6 +45,17 @@ internal sealed class SdkHttpConfiguration
         Mode = mode; _selected = true;
     }
     internal void Freeze() => _frozen = true;
+    /// <summary>Records a pipeline a Connect library registered. Throws ObjectDisposedException once frozen.</summary>
+    internal void RecordPipeline(string name) { ObjectDisposedException.ThrowIf(_frozen, this); _pipelines.Add(name); }
+    /// <summary>Records a pipeline name the host configured. Throws ObjectDisposedException once frozen.</summary>
+    internal void RecordConfigured(string name) { ObjectDisposedException.ThrowIf(_frozen, this); _configured.Add(name); }
+    /// <summary>Throws ArgumentException when <paramref name="name"/> is not a recorded pipeline.</summary>
+    internal void ValidateName(string name)
+    {
+        ArgumentNullException.ThrowIfNull(name);
+        if (!_pipelines.Contains(name))
+            throw new ArgumentException($"The HTTP pipeline name '{name}' is not registered by a Connect library.", nameof(name));
+    }
     internal void AddLogger(IHttpClientBuilder builder, SdkHttpLoggerDefinition logger)
     {
         ObjectDisposedException.ThrowIf(_frozen, this);
@@ -68,8 +72,13 @@ internal sealed class SdkHttpConfiguration
     internal void RemoveLoggers(string name) { ObjectDisposedException.ThrowIf(_frozen, this); if (_loggers.TryGetValue(name, out var loggers)) loggers.Clear(); }
     internal SdkHttpConfiguration Snapshot()
     {
-        Freeze(); var snapshot = new SdkHttpConfiguration { Mode = Mode, _selected = _selected, _frozen = true };
+        Freeze();
+        // Every registration has run when the container first creates the pool, so a configured name no library
+        // registered is refused here, whatever order the host configured and registered in.
+        foreach (string configured in _configured) ValidateName(configured);
+        var snapshot = new SdkHttpConfiguration { Mode = Mode, _selected = _selected, _frozen = true };
         foreach ((string name, List<SdkHttpLoggerDefinition> loggers) in _loggers) snapshot._loggers.Add(name, [.. loggers]);
+        snapshot._pipelines.UnionWith(_pipelines);
         return snapshot;
     }
     internal SdkHttpLoggerDefinition[] GetLoggers(string name) => _loggers[name].ToArray();

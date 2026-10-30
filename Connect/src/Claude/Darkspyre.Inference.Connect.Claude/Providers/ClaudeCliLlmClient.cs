@@ -65,11 +65,11 @@ internal sealed class ClaudeCliLlmClient(
         SupportsTemperature = InferenceSupport.Unsupported,
         SupportsToolUse = InferenceSupport.Unsupported,
         SupportsAgentSessions = InferenceSupport.Supported,
-        Agent = NativeAgentContract.Claude,
+        Agent = ClaudeNativeAgent.Capabilities,
         SupportsAgentToolUse = InferenceSupport.Supported,
         SupportsPromptImages = InferenceSupport.Supported,
         SupportsPromptDocuments = InferenceSupport.Supported,
-        RichContentSupported = RichContentRoutes.ClaudePrompt
+        RichContentSupported = ClaudeNativeAgent.PromptContent
     };
 
     public override LlmProviderCapabilities GetCapabilities(
@@ -538,6 +538,7 @@ internal sealed class ClaudeCliLlmClient(
                 credential,
                 "Anthropic model discovery",
                 secrets,
+                ErrorReading,
                 cancellationToken);
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             JsonDocument document;

@@ -122,12 +122,12 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
         IReadOnlyList<LlmHostedTool> hostedTools, int? maxHostedTurns)
     {
         ArgumentNullException.ThrowIfNull(tools);
-        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Antigravity, supportsAgentToolUse: true,
+        NativeAgentContract.ValidateConnection(connection, AntigravityNativeAgent.Capabilities, supportsAgentToolUse: true,
             modelId, tools, toolHandler);
         if (toolHandling == LlmAgentToolHandling.ReturnRequests)
             throw new NotSupportedException("Antigravity CLI runs each host tool call to its result; SupportsExternalToolHandoff is Unsupported.");
-        HostedTools.Validate(HostedTools.WithoutUnofferedImages(hostedTools, NativeAgentContract.Antigravity.HostedTools),
-            maxHostedTurns, NativeAgentContract.Antigravity.HostedTools);
+        HostedTools.Validate(HostedTools.WithoutUnofferedImages(hostedTools, AntigravityNativeAgent.Capabilities.HostedTools),
+            maxHostedTurns, AntigravityNativeAgent.Capabilities.HostedTools);
     }
 
     /// <summary>
@@ -137,7 +137,7 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
     private static LlmAgentNativeRuntimeOptions ValidateRuntime(LlmAgentNativeRuntimeOptions? runtime)
     {
         runtime ??= new LlmAgentNativeRuntimeOptions { WorkingDirectory = Environment.CurrentDirectory };
-        if (!NativeAgentContract.Antigravity.SupportedRuntimePolicies.Contains(runtime.Policy.Kind))
+        if (!AntigravityNativeAgent.Capabilities.SupportedRuntimePolicies.Contains(runtime.Policy.Kind))
         {
             throw new NotSupportedException(
                 $"Antigravity CLI does not accept a {runtime.Policy.Kind} runtime policy; check SupportedRuntimePolicies.");

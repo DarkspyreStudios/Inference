@@ -154,7 +154,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
         using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         ThrowIfDisposed();
-        return Task.FromResult(NativeAgentContract.Antigravity);
+        return Task.FromResult(AntigravityNativeAgent.Capabilities);
     }
 
     public Task<LlmRequestAccounting> MeasureContextAsync(

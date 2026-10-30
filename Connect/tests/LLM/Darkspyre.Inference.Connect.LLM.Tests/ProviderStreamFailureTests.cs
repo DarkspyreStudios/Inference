@@ -36,7 +36,7 @@ public sealed class ProviderStreamFailureTests
         using var response = new HttpResponseMessage(status)
         { Content = new StringContent(body, System.Text.Encoding.UTF8, "application/json") };
         return await Assert.ThrowsAsync<LlmProviderException>(() => ProviderHttp.ThrowIfUnsuccessfulAsync(response,
-            LlmTransport.OpenAiResponses, null, "OpenAI Responses request", [], CancellationToken.None));
+            LlmTransport.OpenAiResponses, null, "OpenAI Responses request", [], OpenAiApiErrors.Reading, CancellationToken.None));
     }
 
     /// <summary>The OpenAI API client has no client timeout: a busy local server answers a request after more than

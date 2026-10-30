@@ -2,6 +2,8 @@ using Darkspyre.Inference.Common.Setup;
 
 namespace Darkspyre.Inference.Connect.LLM;
 
+// Azure OpenAI uses this; Azure OpenAI is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure,
+// outside the solution). It moves into that provider's own library when the provider returns to the build.
 public sealed partial class LlmSettings
 {
     private void AddAzureFields(List<SetupField> fields)

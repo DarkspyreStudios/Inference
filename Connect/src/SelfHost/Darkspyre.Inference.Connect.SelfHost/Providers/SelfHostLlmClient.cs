@@ -12,7 +12,8 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// Runs a SelfHost connection on the host's in-process engine. The connection's endpoint is the engine ID;
 /// the engine is Common's <see cref="CommonLlm.ILlmInference"/>, so Connect references no engine library.
 /// </summary>
-internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmContextEstimator
+/// <remarks>The engine decides which continuation state it can replay, so the service passes state through.</remarks>
+internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmContextEstimator, IEngineOwnedContinuation
 {
     public LlmTransport Transport => LlmTransport.SelfHost;
 

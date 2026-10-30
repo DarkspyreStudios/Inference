@@ -19,6 +19,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
     private readonly Dictionary<LlmTransport, ILlmClient> _clients;
     private readonly Dictionary<LlmTransport, ILlmAccountUsageClient> _accountUsageClients;
     private readonly Dictionary<LlmTransport, ILlmAuthenticator> _authenticators;
+    // AWS Bedrock, Google Vertex AI and Azure OpenAI use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+    // .LLM.Vertex and .LLM.Azure, outside the solution). It moves into their own libraries when they return to the build.
     private readonly Dictionary<LlmTransport, ILlmSetupEnvironment> _setupEnvironments;
     private readonly LlmModelListCache _modelLists;
     private readonly bool _ownsModelLists;
@@ -44,6 +46,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         ILlmConnectionSource connections,
         IEnumerable<ILlmClient> clients,
         IEnumerable<ILlmAuthenticator> authenticators,
+        // AWS Bedrock, Google Vertex AI and Azure OpenAI use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+        // .LLM.Vertex and .LLM.Azure, outside the solution). It moves into their own libraries when they return to the build.
         IEnumerable<ILlmSetupEnvironment>? setupEnvironments = null,
         LlmModelListCache? modelLists = null,
         LlmAccountUsageObservations? observations = null,
@@ -59,6 +63,9 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
     }
 
     private LlmProviderService(ILlmConnectionSource connections, IEnumerable<ILlmClient> clients,
+        // AWS Bedrock, Google Vertex AI and Azure OpenAI use setupEnvironments; they are out of the build
+        // (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock, .LLM.Vertex and .LLM.Azure, outside the solution). It
+        // moves into their own libraries when they return to the build.
         IEnumerable<ILlmAuthenticator> authenticators, IEnumerable<ILlmSetupEnvironment>? setupEnvironments,
         LlmModelListCache? modelLists, LlmAccountUsageObservations? observations,
         LlmConnectionAccess? connectionAccess, Action? admission)
@@ -138,10 +145,6 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         agents?.ValidateSource(Connections);
         return new(_clients, _authenticators.Values, _setupEnvironments, target, agents);
     }
-
-    /// <summary>The redirect URI for a Claude sign-in whose code the person pastes back by hand.</summary>
-    public const string ClaudeManualRedirectUri =
-        "https://console.anthropic.com/oauth/code/callback";
 
     /// <summary>
     /// Binds the portable inference contract to one explicitly selected Connect connection. The
@@ -231,6 +234,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             connectionId,
             expectedVersion,
             cancellationToken);
+        // Azure OpenAI uses this; Azure OpenAI is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure,
+        // outside the solution). It moves into that provider's own library when the provider returns to the build.
         if (connection.Transport is LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat
             && connection.Azure is { AuthenticationMode: not LlmAzureAuthenticationMode.ApiKey })
             throw new NotSupportedException("The selected Azure authentication mode does not accept an API key.");
@@ -281,69 +286,30 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             cancellationToken);
     }
 
-    /// <summary>Starts a Claude account sign-in for a Claude subscription connection.</summary>
-    public Task<LlmAuthorizationSession> StartClaudeLoginAsync(CancellationToken cancellationToken = default) =>
-        StartClaudeLoginAsync(ClaudeManualRedirectUri, cancellationToken);
-
-    /// <summary>Starts a Claude account sign-in for a Claude subscription connection.</summary>
-    public Task<LlmAuthorizationSession> StartClaudeLoginAsync(
-        string redirectUri,
-        CancellationToken cancellationToken = default)
+    /// <summary>Starts the browser sign-in registered for <paramref name="transport"/>.</summary>
+    /// <exception cref="NotSupportedException">No browser login is registered for the transport.</exception>
+    internal Task<LlmAuthorizationSession> StartBrowserLoginAsync(LlmTransport transport, CancellationToken cancellationToken)
     {
-        _lifetime.ThrowIfStopping();
-        if (string.IsNullOrWhiteSpace(redirectUri))
-        {
-            throw new ArgumentException("A Claude redirect URI is required.", nameof(redirectUri));
-        }
-
         using var operation = _lifetime.Enter(cancellationToken);
-        return Task.FromResult(ClaudeLogin().Start(redirectUri));
+        return Task.FromResult(BrowserLogin(transport).Start());
     }
 
-    /// <summary>Completes a Claude account sign-in from the code the person pasted and saves the one-year token as the connection's credential.</summary>
-    public async Task CompleteClaudeLoginAsync(
-        string connectionId,
-        LlmAuthorizationSession session,
-        string pastedCode,
-        string expectedVersion,
-        CancellationToken cancellationToken = default)
+    /// <summary>Completes a browser sign-in from the pasted code and saves the credential on the connection, at
+    /// <paramref name="expectedVersion"/>. The login is the one registered for the connection's own transport.</summary>
+    internal async Task CompleteBrowserLoginAsync(string connectionId, LlmAuthorizationSession session, string pastedCode,
+        string expectedVersion, CancellationToken cancellationToken)
     {
         using var operation = _lifetime.Enter(cancellationToken);
         cancellationToken = operation.Token;
         LlmRedirectResult redirect = LlmRedirectResult.ParsePastedCode(pastedCode);
-        await CompleteClaudeLoginAsync(
-            connectionId,
-            session,
-            redirect.Code,
-            redirect.State,
-            expectedVersion,
-            cancellationToken);
-    }
-
-    /// <summary>Completes a Claude account sign-in from the redirect code and state and saves the one-year token as the connection's credential.</summary>
-    public async Task CompleteClaudeLoginAsync(
-        string connectionId,
-        LlmAuthorizationSession session,
-        string code,
-        string state,
-        string expectedVersion,
-        CancellationToken cancellationToken = default)
-    {
-        using var operation = _lifetime.Enter(cancellationToken);
-        cancellationToken = operation.Token;
         LlmConnection connection = await RequireExpectedVersionAsync(
             connectionId,
             expectedVersion,
             cancellationToken);
-        if (connection.Transport != LlmTransport.AnthropicClaudeCli)
-        {
-            throw new InvalidOperationException(
-                "A Claude account can be signed in only on a Claude subscription CLI connection.");
-        }
-        LlmCredential credential = await ClaudeLogin().CompleteAsync(
+        LlmCredential credential = await BrowserLogin(connection.Transport).CompleteAsync(
             session,
-            code,
-            state,
+            redirect.Code,
+            redirect.State,
             cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         RuntimeInputAdmission.ValidateCredential(connection.Transport, credential);
@@ -354,6 +320,8 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             cancellationToken);
     }
 
+    // AWS Bedrock uses this; AWS Bedrock is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     /// <summary>Saves AWS credentials as a Bedrock connection's credential.</summary>
     public async Task SetBedrockCredentialsAsync(
         string connectionId,
@@ -376,9 +344,9 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
     }
 
     /// <summary>
-    /// Runs the interactive sign-in flow for a Codex or Claude connection. The connection version is
-    /// captured before authentication starts, so a delayed result cannot overwrite a connection that
-    /// the host changed or replaced while the user was signing in.
+    /// Runs the interactive sign-in the connection's provider declares: a device-code sign-in, or a check that its
+    /// command-line tool is signed in. The connection version is captured before authentication starts, so a delayed
+    /// result cannot overwrite a connection that the host changed or replaced while the user was signing in.
     /// </summary>
     public async Task SignInAsync(
         string connectionId,
@@ -391,42 +359,39 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         LlmConnection connection = await ResolveConnectionAsync(
             connectionId,
             cancellationToken);
-        switch (connection.Transport)
+        ILlmClient client = ClientFor(connection.Transport);
+        LlmProviderDefinition definition = client.ProviderDefinition;
+        if (definition.SignIn is { Flow: LlmProviderSignInFlow.DeviceCode })
         {
-            case LlmTransport.OpenAiCodex:
-            case LlmTransport.XaiResponses:
-                ILlmDeviceLogin login = DeviceLogin(connection.Transport);
-                LlmDeviceCode code = await login.StartAsync(cancellationToken);
-                await prompt.ShowDeviceCodeAsync(code, cancellationToken);
-                LlmCredential deviceCredential = await PollDeviceLoginAsync(login, code, cancellationToken);
-                ThrowIfOperationCanceled(cancellationToken);
-                RuntimeInputAdmission.ValidateCredential(connection.Transport, deviceCredential);
-                await Connections.SaveCredentialAsync(
-                    connectionId,
-                    deviceCredential.Serialize(),
-                    connection.Version,
-                    cancellationToken);
-                break;
-
-            case LlmTransport.AnthropicClaudeCli:
-                if (_clients.TryGetValue(connection.Transport, out ILlmClient? claudeClient)
-                    && claudeClient is IExternalLlmAuthenticationProbe claudeProbe)
-                {
-                    if (await claudeProbe.CheckAuthenticationAsync(connection, cancellationToken) == ExternalAuthenticationState.SignedIn)
-                    {
-                        break;
-                    }
-
-                    throw new InvalidOperationException(
-                        "Claude CLI is not authenticated. Run 'claude' in a terminal, complete sign-in, then retry.");
-                }
-
+            ILlmDeviceLogin login = DeviceLogin(connection.Transport);
+            LlmDeviceCode code = await login.StartAsync(cancellationToken);
+            await prompt.ShowDeviceCodeAsync(code, cancellationToken);
+            LlmCredential deviceCredential = await PollDeviceLoginAsync(login, code, cancellationToken);
+            ThrowIfOperationCanceled(cancellationToken);
+            RuntimeInputAdmission.ValidateCredential(connection.Transport, deviceCredential);
+            await Connections.SaveCredentialAsync(
+                connectionId,
+                deviceCredential.Serialize(),
+                connection.Version,
+                cancellationToken);
+        }
+        else if (definition.AuthenticationCheck == LlmProviderAuthenticationCheck.ExternalTool)
+        {
+            if (client is not IExternalLlmAuthenticationProbe probe)
+            {
                 throw new InvalidOperationException(
-                    "Claude CLI authentication status is unavailable. Run 'claude' in a terminal and complete sign-in.");
-
-            default:
-                throw new NotSupportedException(
-                    $"{connection.Transport} does not use interactive sign-in; use SetApiKeyAsync.");
+                    $"{definition.DisplayName} cannot report whether its command-line tool is signed in.");
+            }
+            if (await probe.CheckAuthenticationAsync(connection, cancellationToken) != ExternalAuthenticationState.SignedIn)
+            {
+                throw new InvalidOperationException(
+                    $"{definition.DisplayName} is not signed in. {definition.SetupSteps[0].Troubleshooting}");
+            }
+        }
+        else
+        {
+            throw new NotSupportedException(
+                $"{connection.Transport} does not use interactive sign-in; use SetApiKeyAsync.");
         }
     }
 
@@ -500,6 +465,10 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         }
         // The adapter names the connection in its logs through the binding; the service alone records chat observations.
         connection = connection with { AccountUsageObservationBinding = observationBinding };
+        // The Gemini API, OpenAI-compatible Chat and Google Vertex AI use this; they are out of the build
+        // (Providers/GeminiApiLlmClient*.cs and ChatCompletionsLlmClientBase.cs, under Compile Remove;
+        // Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex, outside the solution). It moves into their own libraries
+        // when they return to the build.
         if (client is ILlmConnectionPreparation preparation)
         {
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
@@ -516,7 +485,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
                 throw new LlmProviderException("The connection now disables the requested agent operation.", connection.Transport);
             }
         }
-        (request, int omitted) = ContinuationStateProjection.Project(request, connection);
+        (request, int omitted) = ContinuationStateProjection.Project(request, connection, client);
         connection = await AttachCatalogCoreAsync(connectionId, connection, client, cancellationToken);
         HostedTools.Validate(request, client.GetCapabilities(connection, request.ModelId));
         ThrowIfOperationCanceled(cancellationToken);
@@ -649,6 +618,10 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         cancellationToken = operation.Token;
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
+        // The Gemini API, OpenAI-compatible Chat and Google Vertex AI use this; they are out of the build
+        // (Providers/GeminiApiLlmClient*.cs and ChatCompletionsLlmClientBase.cs, under Compile Remove;
+        // Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex, outside the solution). It moves into their own libraries
+        // when they return to the build.
         if (client is ILlmConnectionPreparation preparation)
         {
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
@@ -669,6 +642,10 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         cancellationToken = operation.Token;
         LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, cancellationToken);
         ILlmClient client = ClientFor(connection.Transport);
+        // The Gemini API, OpenAI-compatible Chat and Google Vertex AI use this; they are out of the build
+        // (Providers/GeminiApiLlmClient*.cs and ChatCompletionsLlmClientBase.cs, under Compile Remove;
+        // Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex, outside the solution). It moves into their own libraries
+        // when they return to the build.
         if (client is ILlmConnectionPreparation preparation)
         {
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
@@ -731,10 +708,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             return observed;
         }
 
-        if (connection.Transport is LlmTransport.OpenAiCodex or LlmTransport.XaiResponses)
-        {
-            connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken);
-        }
+        connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
         LlmAccountUsageSnapshot usage = await usageClient.GetAccountUsageAsync(connection, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
@@ -845,6 +819,10 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         ThrowIfOperationCanceled(cancellationToken);
         connection = await RefreshConnectionAsync(connectionId, connection, client, cancellationToken).ConfigureAwait(false);
         ThrowIfOperationCanceled(cancellationToken);
+        // The Gemini API, OpenAI-compatible Chat and Google Vertex AI use this; they are out of the build
+        // (Providers/GeminiApiLlmClient*.cs and ChatCompletionsLlmClientBase.cs, under Compile Remove;
+        // Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex, outside the solution). It moves into their own libraries
+        // when they return to the build.
         if (client is ILlmConnectionPreparation preparation)
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         ThrowIfOperationCanceled(cancellationToken);
@@ -981,11 +959,11 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
                 ? login
                 : throw new NotSupportedException($"No device login is registered for transport {transport}.");
 
-    private IClaudePkceLogin ClaudeLogin() =>
-        _authenticators.TryGetValue(LlmTransport.AnthropicClaudeCli, out ILlmAuthenticator? authenticator)
-            && authenticator is IClaudePkceLogin login
+    private ILlmBrowserLogin BrowserLogin(LlmTransport transport) =>
+        _authenticators.TryGetValue(transport, out ILlmAuthenticator? authenticator)
+            && authenticator is ILlmBrowserLogin login
                 ? login
-                : throw new NotSupportedException("Claude login is not registered.");
+                : throw new NotSupportedException($"No browser login is registered for transport {transport}.");
 
     /// <summary>
     /// Fences new operations, cancels and awaits active facade work, and retires a privately owned model cache.

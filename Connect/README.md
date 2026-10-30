@@ -408,9 +408,11 @@ the shared `RemoteMcpAuthorization`: each authority is asked once per request, i
 from diagnostics. An authority that returns no header, or one that is not a bearer token, fails the request with
 `MCP authorization must be a bearer token.` or `MCP authorization returned no header.`
 
-One observer, `ResponsesHostedToolsObserver`, reads every Responses reply. A hosted item (`image_generation_call`,
-`web_search_call`, `x_search_call`, `file_search_call`, `code_interpreter_call`, `mcp_call`, and Grok's
-`custom_tool_call` X-search calls, identified by an `xs_` call id or an X-search tool name) raises a started event on
+One observer, `ResponsesHostedToolsObserver`, reads every Responses reply. Grok's client uses its subclass
+`XaiHostedToolsObserver` in the Grok library, which adds `x_search_call` and the `custom_tool_call` X-search calls,
+identified by an `xs_` call id or an X-search tool name, and reads a custom call's string `input` through the
+observer's `TryReadItem` hook. A hosted item (`image_generation_call`, `web_search_call`, `file_search_call`,
+`code_interpreter_call`, `mcp_call`, and Grok's X-search items) raises a started event on
 `response.output_item.added` and a completed event with its output on `response.output_item.done`. A hosted item
 that appears only in the terminal output completes there. Web search reports its sources, document search its
 matches, code execution its code, logs and image URLs, and MCP its arguments, output and error. Each `url_citation`
@@ -594,18 +596,20 @@ sent without tool definitions; Required still needs an available tool and Specif
 
 ## SDK HTTP composition
 
-SDK HTTP registrations use one generation-owned pool for the finite SDK named pipelines,
-including ComfyUI's empty default name. Named `AddHttpClient` actions, public handler-builder filters,
+SDK HTTP registrations use one generation-owned pool for the named pipelines the Connect libraries register. Each
+library records its own names when it registers: `AddInferenceHttpClient<T>` records `T`'s type name, and the Image
+library records ComfyUI's empty default name. Named `AddHttpClient` actions, public handler-builder filters,
 handler scopes and selected meter factories configure the owned chains. Direct client and factory
 constructors remain borrowed. The SDK never replaces the application's `IHttpClientFactory`.
 
 `AddLlmConnect(configureHttp)` and `ConfigureInferenceHttpPipelines(configureHttp)` select
 `SdkGenerationOwned` or explicit `BorrowHostFactory`. The latter delegates creation to the registered
-host factory and does not dispose it. Configuration accepts only the SDK names and freezes
-before client construction. Conflicting creation modes are rejected.
-The speech pipelines are `XaiTtsProvider`, `XaiSttProvider` and `XaiRealtimeProvider`.
-Their registrations disable redirects and set an infinite HTTP-client timeout; each operation
-retains its explicit connection timeout. The same generation owns their HTTP handlers and leases.
+host factory and does not dispose it. The configuration freezes when the container first creates the SDK HTTP pool,
+after every registration, and that creation refuses a configured name no Connect library registered with an
+`ArgumentException` ("The HTTP pipeline name '{name}' is not registered by a Connect library."). A host may
+therefore configure a name before or after the library that registers it. Conflicting creation modes are rejected.
+The xAI speech pipelines `XaiTtsProvider`, `XaiSttProvider` and `XaiRealtimeProvider` belong to projects outside the
+build and record their names when they return to it.
 
 Custom logger registrations in owned mode use `ConfigureLogging(name, logging => ...)` and its
 `AddLogger` methods. Legacy framework `AddLogger` actions are not inspected or automatically migrated.
@@ -1020,6 +1024,12 @@ The direct Codex and host-owned managed-agent behavior from the former `Mathis.L
 retained; Claude and AgentCore retain provider-owned sessions.
 See the [Darkspyre handoff](docs/agent-ds-contract-handoff.md),
 [technical design](docs/enhancements.md), and [verification record](docs/managed-agent-verification.md).
+
+Each provider package holds the code only its provider runs: its definition and declarations, its client and its
+Responses hooks, its replay rules, its account-usage parser and its sign-in. Connect.Common holds the contracts and
+the code several providers share, including `ILlmDeviceLogin` and `ILlmBrowserLogin`. Code Connect.Common still
+compiles for a provider outside the build carries a comment that names the provider and where it lives.
+`ILlmSelfHost` and `LlmSelfHostEngine` are in the SelfHost package.
 
 The Apple on-device adapter is registered by `AddLlmConnect`. Its separately built Swift
 helper and release gates are described in the [connector design](docs/apple-foundation-models-design.md).
@@ -3323,6 +3333,17 @@ Nonstreaming responses retain complete reasoning blocks in order, including thei
 signatures. Only streaming text and summary fragments are joined; merging complete blocks loses
 the identities required for tool-enabled replay.
 
+Each Responses provider owns its replay rules. The ChatGPT subscription (`CodexReplay`), OpenAI API
+(`OpenAiApiReplay`) and Grok (`XaiReplay`) libraries each hold one `ResponsesContinuationCodec`, which their client
+returns as `ContinuationCodec`. Codex keeps the message, reasoning, function_call and image_generation_call fields
+and replays compaction items verbatim. The OpenAI API keeps the same projected items plus its web search, file
+search, code interpreter and MCP calls. Grok replays every item verbatim and in order, and checks the identity and
+string fields of its custom tool calls and tool-search items. The codec writes the format the shared rules wrote
+(`darkspyre.connect.llm.<transport>`, format version 2 and the account scope), so saved states keep binding. A
+client with no codec of its own uses the connection's codec, then the shared rules, which retain only transports
+outside the build. A SelfHost client is `IEngineOwnedContinuation`: Connect passes its continuation state to the
+engine unprojected, and the engine decides what it can replay.
+
 ### Carrying history to another model or provider
 
 A conversation that moves to another model or provider starts a new session from the host's retained history.
@@ -3582,6 +3603,20 @@ runs their actions against actual provider operations. `LlmProviderDefinition.Se
 descriptive `SetupStep`. Render fields and run actions from the settings object, not by interpreting a
 descriptive step or switching on a provider ID.
 
+Each provider's `LlmProviderDefinition` declares what its settings show, and the settings decide only from those
+declarations for the providers in the build. `EndpointKind` picks the endpoint field: `Url` shows the Endpoint
+field, `Fixed` shows none and replaces a saved endpoint with `DefaultEndpoint`, `Executable` shows the CLI executable
+under More options, and `Engine` shows the engine choice. `AuthenticationCheck` picks the Check action:
+`ModelList` lists the connection's models, and `ExternalTool` asks the provider's command-line tool whether it is
+installed and signed in. `SignIn` names the sign-in action's id, its button text, its flow (`DeviceCode` through the
+transport's `ILlmDeviceLogin`, or `BrowserCode` through its `ILlmBrowserLogin`, which owns its redirect address) and
+whether Save needs it. `AcceptsApiKey` shows an optional API key field, `ServiceTiers` shows the Service tiers
+checkbox with its help text and the endpoint host on which it starts checked, and `OffersContextLengths` shows the
+Context lengths rows. A provider whose Check asks its command-line tool and whose sign-in is required runs only on
+that sign-in's own token: the tool's own login counts for neither Save, the Check nor the model list, and the model
+field reports `{definition id}-sign-in-required` until the sign-in completes. `LlmProviderService.SignInAsync` follows
+the same declarations: a device-code sign-in, or the command-line tool's check.
+
 ```csharp
 LlmSettingsManager manager = llms.CreateSettingsManager(hostCommitTarget);
 LlmSettings settings = await manager.OpenAsync(
@@ -3604,8 +3639,7 @@ expected version matches that connection. The host's `ISetupCommitTarget<LlmSetu
 atomically compare that version over configuration and credentials. Authentication uses a draft-local
 `ILlmConnectionSource`; neither device completion nor the Claude account sign-in replaces saved
 credentials before commit. Normal runtime credential refresh still uses the existing host seam unchanged.
-A Claude connection that is not signed in uses the CLI's own login; signing in to a Claude account
-marks the draft authenticated.
+A completed sign-in marks the draft authenticated.
 Every LLM provider's settings have two steps. The connection step names its sign-in action
 (`authorize` for ChatGPT, `sign-in-claude` for Claude) and `check` in `SetupStep.ActionIds`; the
 model step names `test`. A CLI or Apple helper executable field sits in the connection step's
@@ -4261,9 +4295,11 @@ before returning the snapshot. Retiring the facade drains admitted operations
 without disposing borrowed clients or the borrowed observation store.
 
 `GetObservedAccountUsageAsync(connectionId)` reads passive provider evidence without a provider call.
-It returns null until that connection identity reports a quota. OpenAI Responses and compatible Chat
-Completions read rate-limit headers, Anthropic Messages reads its rate-limit headers, Codex reads quota
-headers, and both Claude CLI lanes record `rate_limit_event`. HTTP observations precede status handling,
+It returns null until that connection identity reports a quota. The OpenAI API client reads OpenAI rate-limit
+headers through its own `ObserveAccountUsage` override, with the shared `OpenAiRateLimitHeaders` parser; the shared
+Responses client reads none by default. Compatible Chat Completions reads the same headers, Anthropic Messages reads
+its rate-limit headers, Codex reads quota headers with `CodexRateLimitHeaders` in the Codex library, and both
+Claude CLI lanes record `rate_limit_event`. A queried read refreshes the connection's credential first. HTTP observations precede status handling,
 including failed responses, and cover streaming and complete response paths. Vertex Claude does not
 inherit Anthropic account observations. These measurements are separate from generation-token usage
 and are not public stream events.
@@ -4863,8 +4899,10 @@ For connections created by 0.9.0, migrate Claude subscriptions by changing `Tran
 transport as `AnthropicMessages` now means direct API-key billing and will never launch the CLI.
 
 Install the official Claude CLI and ensure `claude` is on `PATH`. A connection runs only as the Claude
-account it is signed in to. The settings action "Sign in to a Claude account" (`sign-in-claude`) shows a
-claude.com sign-in link; the person pastes back the `code#state` text the callback page shows. Connect
+account it is signed in to. The settings action "Sign in to a Claude account" (`sign-in-claude`, the Claude
+definition's required `BrowserCode` sign-in) shows a claude.com sign-in link; the person pastes back the
+`code#state` text the callback page shows. `ClaudeAuthenticator`, the Claude library's `ILlmBrowserLogin`, owns the
+redirect address `https://console.anthropic.com/oauth/code/callback`. Connect
 exchanges it for a `user:inference` token with a one-year lifetime, the token `claude setup-token`
 creates, and saves it as the connection's `LlmCredential.OAuth`. Every Claude CLI process for the
 connection (chat, streaming, agent sessions and `auth status`) starts with `CLAUDE_CODE_OAUTH_TOKEN` set
@@ -4878,7 +4916,7 @@ A connection without its own token is not signed in, whenever and however it was
 process: chat, agent sessions and model discovery fail with an `LlmProviderException` whose status is
 401 and whose provider code is `claude_sign_in_required`, which Connect reports as
 `AuthenticationRequired`, and the `auth status` check reports signed out. In the settings editor the
-sign-in action stays offered, the model field reports `claude-sign-in-required`, and Save is
+sign-in action stays offered, the model field reports `claude-subscription-sign-in-required`, and Save is
 unavailable until the connection is signed in.
 
 Subscription prompts run in an empty temporary workspace with safe mode, tools, slash commands,
@@ -4896,7 +4934,7 @@ The installed CLI 2.1.289 discovery path is qualified through the public Connect
 choices. Other versions, refresh, generation and target-platform paths remain separate qualifications.
 
 Claude subscription account usage is the quota the connection's own turns report. Both Claude CLI
-lanes read each `rate_limit_event` (`ClaudeRateLimitEvent`): every entry of the `unifiedWindows` object
+lanes read each `rate_limit_event` (`ClaudeRateLimitEvent`, in the Claude library): every entry of the `unifiedWindows` object
 (`five_hour`, `seven_day` and any other key the CLI sends) is one window, keyed by its name, with its
 `utilization` (the used fraction; the remaining fraction is `1 - utilization`) and its `resetsAt`. The
 event's top-level `status` is the state of the window named by `rateLimitType`; the other windows are
@@ -5479,7 +5517,8 @@ included in the Connect NuGet.
 ## SelfHost transport: in-process engines
 
 `LlmTransport.SelfHost` runs a model that the host loads in its own process, such as a Tensor Qwen
-engine. The application references `Darkspyre.Inference.Connect.SelfHost` and supplies `ILlmSelfHost`.
+engine. The application references `Darkspyre.Inference.Connect.SelfHost` and supplies `ILlmSelfHost`, which that
+package defines with `LlmSelfHostEngine`, in the `Darkspyre.Inference.Connect.LLM` namespace.
 `AddLlmConnect()` discovers the included provider:
 
 ```csharp

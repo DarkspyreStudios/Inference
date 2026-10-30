@@ -48,6 +48,27 @@ public sealed record LlmProviderDefinition
     /// </summary>
     public string? HomeFolder { get; init; }
 
+    /// <summary>What the connection's endpoint holds. Default <see cref="LlmProviderEndpointKind.Url"/>.</summary>
+    public LlmProviderEndpointKind EndpointKind { get; init; }
+
+    /// <summary>How the settings' Check action confirms the connection. Default <see cref="LlmProviderAuthenticationCheck.ModelList"/>.</summary>
+    public LlmProviderAuthenticationCheck AuthenticationCheck { get; init; }
+
+    /// <summary>The sign-in action the settings offer, or null when the provider has none. When
+    /// <see cref="AuthenticationCheck"/> is <see cref="LlmProviderAuthenticationCheck.ExternalTool"/> and the sign-in is
+    /// required, the connection runs only on this sign-in's own token: the command-line tool's own login does not count
+    /// for Save, for the Check, or for listing models.</summary>
+    public LlmProviderSignIn? SignIn { get; init; }
+
+    /// <summary>True when the settings show an optional API key field.</summary>
+    public bool AcceptsApiKey { get; init; }
+
+    /// <summary>The Service tiers checkbox the settings show, or null when they show none.</summary>
+    public LlmProviderServiceTiers? ServiceTiers { get; init; }
+
+    /// <summary>True when the settings show the Context lengths rows.</summary>
+    public bool OffersContextLengths { get; init; }
+
     /// <summary>The provider as a text-generation setup definition for the inference catalog, with its icon and group.</summary>
     public InferenceSetupDefinition SetupDefinition => new(
         new(Id, DisplayName, InferenceImplementationKind.Connect, InferenceTask.TextGeneration),

@@ -1,19 +1,5 @@
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
-/// <summary>The request values a service refused as unsupported, per connection and model.</summary>
-[Flags]
-internal enum LlmRefusedSettings
-{
-    /// <summary>The refusal named no value the provider can leave out.</summary>
-    None = 0,
-
-    /// <summary>The temperature.</summary>
-    Temperature = 1,
-
-    /// <summary>The reasoning object.</summary>
-    Reasoning = 2
-}
-
 /// <summary>Reads an "unsupported" refusal: OpenAI's code and param, or a message naming the value (OpenRouter, inferred).</summary>
 internal static class LlmUnsupportedSetting
 {

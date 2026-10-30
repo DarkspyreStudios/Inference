@@ -6,12 +6,14 @@ namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 internal static class OpenAiResponsesTools
 {
-    /// <summary>Builds the input items; each tool output goes through the route's projection.</summary>
+    /// <summary>Builds the input items; each tool output goes through the route's projection, and retained state is
+    /// replayed through the client's <paramref name="codec"/>, or the shared rules when it is null.</summary>
     public static JsonArray BuildInput(
         LlmChatRequest request,
         LlmConnection connection,
         Func<LlmChatMessage, JsonObject> mapTextMessage,
         Func<LlmToolOutput, ProjectedToolOutput> projectToolOutput,
+        ILlmContinuationCodec? codec,
         int? messageCount = null)
     {
         var input = new JsonArray();
@@ -22,7 +24,7 @@ internal static class OpenAiResponsesTools
         {
             if (message.ContinuationState is not null)
             {
-                AppendClones(input, ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId));
+                AppendClones(input, ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId, codec));
                 continue;
             }
 
@@ -331,7 +333,8 @@ internal static class OpenAiResponsesTools
     public static LlmContinuationState? EncodeContinuationState(
         JsonElement responseRoot,
         LlmConnection connection,
-        string modelId)
+        string modelId,
+        ILlmContinuationCodec? codec)
     {
         if (!responseRoot.TryGetProperty("output", out JsonElement output)
             || output.ValueKind != JsonValueKind.Array
@@ -341,7 +344,7 @@ internal static class OpenAiResponsesTools
         }
 
         return ProviderContinuationStateCodec.Encode(
-            connection, modelId, (JsonArray)JsonNode.Parse(output.GetRawText())!);
+            connection, modelId, (JsonArray)JsonNode.Parse(output.GetRawText())!, codec);
     }
 
     private static void AppendClones(JsonArray target, JsonArray source)

@@ -414,7 +414,7 @@ public sealed class ManagedAgentTests
     public async Task ForeignHistoryContinuesOnStart()
     {
         // State another model wrote cannot be replayed here; it is left out and counted, and the turn runs.
-        LlmContinuationState foreign = ProviderContinuationStateCodec.Encode(Harness.Connection, "removed-model",
+        LlmContinuationState foreign = CodexReplay.Codec.Encode(Harness.Connection, "removed-model",
             new JsonArray(new JsonObject { ["type"] = "reasoning", ["encrypted_content"] = "opaque" }));
         var harness = new Harness();
         harness.Results.Enqueue(Done());
@@ -1025,8 +1025,12 @@ public sealed class ManagedAgentTests
         return events;
     }
 
-    private sealed class Harness : ILlmContextEstimator, ILlmResourcePreparationClient
+    private sealed class Harness : ILlmContextEstimator, ILlmResourcePreparationClient, ILlmContinuationCodecSource
     {
+        /// <summary>The replay codec of the client the harness stands in for: the OpenAI API's on an OpenAI API connection,
+        /// otherwise Codex's.</summary>
+        public ILlmContinuationCodec? ContinuationCodec => SessionConnection.Transport == LlmTransport.OpenAiResponses
+            ? OpenAiApiReplay.Codec : CodexReplay.Codec;
         /// <summary>Whether the session may take caller-owned resource access; the harness itself prepares nothing.</summary>
         public bool PreparesResources { get; init; }
         public bool CanPrepareResources => PreparesResources;

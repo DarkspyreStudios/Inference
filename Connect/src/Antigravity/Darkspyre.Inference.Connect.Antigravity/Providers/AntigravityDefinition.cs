@@ -15,6 +15,8 @@ internal static class AntigravityDefinition
         DisplayOrder = 40,
         Group = SetupProviderGroup.Subscription,
         HomeFolder = ".gemini",
+        EndpointKind = LlmProviderEndpointKind.Executable,
+        AuthenticationCheck = LlmProviderAuthenticationCheck.ExternalTool,
         SetupSteps =
         [
             new SetupStep

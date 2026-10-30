@@ -74,13 +74,13 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         CancellationToken cancellationToken)
     {
         options = ClientTools.Snapshot(options);
-        options = options with { HostedTools = HostedTools.WithoutUnofferedImages(options.HostedTools, NativeAgentContract.Claude.HostedTools) };
-        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, NativeAgentContract.Claude.HostedTools);
+        options = options with { HostedTools = HostedTools.WithoutUnofferedImages(options.HostedTools, ClaudeNativeAgent.Capabilities.HostedTools) };
+        HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, ClaudeNativeAgent.Capabilities.HostedTools);
         // The CLI owns its id, so ThreadId is ignored. The runtime policy is accepted and not read: no provider tool runs.
         string workingDirectory = options.Runtime?.WorkingDirectory ?? Environment.CurrentDirectory;
         // Returned tool calls are never answered, so the CLI keeps no record of the interrupted session.
         bool ephemeral = (options.Runtime?.Ephemeral ?? false) || options.ToolHandling == LlmAgentToolHandling.ReturnRequests;
-        NativeAgentContract.ValidateConnection(connection, NativeAgentContract.Claude, supportsAgentToolUse: true,
+        NativeAgentContract.ValidateConnection(connection, ClaudeNativeAgent.Capabilities, supportsAgentToolUse: true,
             options.ModelId, options.Tools, options.ToolHandler);
         ClaudeCliConfiguration.ValidateConnection(connection);
         ValidateOptions(options.ModelId, workingDirectory);
@@ -178,8 +178,8 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             names,
             options.ToolHandler,
             options.ToolHandling == LlmAgentToolHandling.ReturnRequests,
-            NativeAgentContract.Claude.RichContentSupported.For(connection, null),
-            NativeAgentContract.Claude.RichContentSupported.For(connection, modelId),
+            ClaudeNativeAgent.Capabilities.RichContentSupported.For(connection, null),
+            ClaudeNativeAgent.Capabilities.RichContentSupported.For(connection, modelId),
             openingContext,
             resourceAccess,
             resourceScope,
@@ -396,7 +396,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         public Task<LlmAgentCapabilities> GetCapabilitiesAsync(CancellationToken cancellationToken = default)
         {
             using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
-            return Task.FromResult(NativeAgentContract.Claude);
+            return Task.FromResult(ClaudeNativeAgent.Capabilities);
         }
 
         public LlmCompactionResponsibility CompactionResponsibility => LlmCompactionResponsibility.Provider;
@@ -1628,7 +1628,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                     ? $"Claude CLI returned result subtype '{subtype}' with stop reason '{stopReason}'." : null;
             Emit(new LlmAgentTurnCompletedEvent(ThreadId, target.Id, reason, error)
             {
-                IsContextOverflow = isError && LlmContextOverflow.ClaudeCli(error),
+                IsContextOverflow = isError && ClaudeOverflow.IsContextOverflow(error),
                 StructuredOutput = (target as HostTurn)?.OutputSchema is { } schema
                     ? ClientTools.AnswerCheck(schema, text, reason, LlmStructuredOutputEnforcement.LocalValidationOnly) : null
             });

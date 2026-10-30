@@ -15,6 +15,9 @@ internal static class ClaudeDefinition
         Icon = SetupIcons.FromResource(typeof(ClaudeDefinition).Assembly, "Icons/claude.svg"),
         Group = SetupProviderGroup.Subscription,
         HomeFolder = ".claude",
+        EndpointKind = LlmProviderEndpointKind.Executable,
+        AuthenticationCheck = LlmProviderAuthenticationCheck.ExternalTool,
+        SignIn = new("sign-in-claude", "Sign in to a Claude account", LlmProviderSignInFlow.BrowserCode) { IsRequired = true },
         SetupSteps =
         [
             new SetupStep

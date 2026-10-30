@@ -14,13 +14,14 @@ internal static class ManagedAgentContext
     /// from any provider, model or account continues.
     /// </summary>
     public static (LlmAgentContext Context, int Omitted) Import(
-        LlmAgentContext context, LlmConnection connection, string modelId, bool supportsResources = false)
+        LlmAgentContext context, LlmConnection connection, string modelId, ILlmContinuationCodec? codec,
+        bool supportsResources = false)
     {
         if (!supportsResources) ValidateRuntimeResources(context);
         int omitted = 0;
         LlmAgentContext imported = Validate(context, message =>
         {
-            if (ProviderContinuationStateCodec.IsReplayable(message, connection, modelId))
+            if (ProviderContinuationStateCodec.IsReplayable(message, connection, modelId, codec))
             {
                 return message;
             }

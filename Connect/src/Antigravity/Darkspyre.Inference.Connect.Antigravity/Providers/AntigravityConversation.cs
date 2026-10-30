@@ -85,7 +85,7 @@ internal sealed class AntigravityConversation : ILlmAgentSession
         cancellationToken.ThrowIfCancellationRequested();
         AntigravityAgentSession? inner;
         lock (_sync) { inner = _inner; }
-        LlmAgentCapabilities marks = NativeAgentContract.Antigravity;
+        LlmAgentCapabilities marks = AntigravityNativeAgent.Capabilities;
         return Task.FromResult(inner is not null && inner.ThreadId == ThreadId
             ? marks
             : marks with { SupportsNativeResume = InferenceSupport.Unsupported });

@@ -15,6 +15,8 @@ internal static class GrokDefinition
         DisplayOrder = 35,
         Icon = SetupIcons.FromResource(typeof(GrokDefinition).Assembly, "Icons/grok.svg"),
         Group = SetupProviderGroup.Subscription,
+        EndpointKind = LlmProviderEndpointKind.Fixed,
+        SignIn = new("authorize", "Sign in with Grok", LlmProviderSignInFlow.DeviceCode) { IsRequired = true },
         SetupSteps =
         [
             new SetupStep

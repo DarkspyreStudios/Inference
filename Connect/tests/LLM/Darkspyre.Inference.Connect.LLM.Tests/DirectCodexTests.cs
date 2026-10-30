@@ -252,7 +252,7 @@ public sealed class DirectCodexTests
         using var http = new HttpClient(handler);
         var client = new OpenAiCodexLlmClient(http);
         LlmConnection connection = Connection();
-        LlmContinuationState state = ProviderContinuationStateCodec.Encode(connection, "model",
+        LlmContinuationState state = CodexReplay.Codec.Encode(connection, "model",
             new JsonArray(new JsonObject
             {
                 ["type"] = "compaction",
@@ -369,7 +369,7 @@ public sealed class DirectCodexTests
         (LlmAgentContext imported, int omitted) = ManagedAgentContext.Import(new()
         {
             Entries = [new("u", "t", new("user", "hello")), new("a", "t", assistant)]
-        }, Connection(), "model");
+        }, Connection(), "model", codec: client.ContinuationCodec);
 
         Assert.Equal(0, omitted);
         Assert.NotNull(imported.Entries[1].Message.ContinuationState);

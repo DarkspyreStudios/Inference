@@ -30,15 +30,21 @@ public sealed class InferenceHttpPipelineOptions
         set { ObjectDisposedException.ThrowIf(_sealed, this); if (!Enum.IsDefined(value)) throw new ArgumentOutOfRangeException(nameof(value)); _mode = value; }
     }
     /// <summary>Adds logging configuration for the named HTTP client. Throws <see cref="ObjectDisposedException"/> once the options are applied.</summary>
+    /// <gotcha>The name is checked against the pipelines Connect libraries registered when the SDK's HTTP pool is first
+    /// created, not when this is called.</gotcha>
     public void ConfigureLogging(string name, Action<InferenceHttpLoggingBuilder> configure)
     {
-        ObjectDisposedException.ThrowIf(_sealed, this); SdkHttpRegistration.ValidateName(name); ArgumentNullException.ThrowIfNull(configure);
+        ObjectDisposedException.ThrowIf(_sealed, this); ArgumentNullException.ThrowIfNull(name); ArgumentNullException.ThrowIfNull(configure);
         var builder = new InferenceHttpLoggingBuilder(); configure(builder); _logging.Add((name, builder));
     }
     internal void Apply(IServiceCollection services, SdkHttpConfiguration configuration)
     {
         _sealed = true; configuration.SelectMode(_mode);
-        foreach ((string name, InferenceHttpLoggingBuilder logger) in _logging) logger.Apply(services.AddHttpClient(name), configuration);
+        foreach ((string name, InferenceHttpLoggingBuilder logger) in _logging)
+        {
+            configuration.RecordConfigured(name);
+            logger.Apply(services.AddHttpClient(name), configuration);
+        }
         _logging.Clear();
     }
     /// <summary>Returns the type name only.</summary>

@@ -21,6 +21,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private readonly LlmAgentExecutionOptions _execution;
     private readonly IReadOnlyList<LlmModel> _models;
     private readonly ILlmContextEstimator _estimator;
+    // The client's continuation codec, read from the estimator, which is the client; null keeps the shared rules.
+    private readonly ILlmContinuationCodec? _codec;
     private readonly Func<string, LlmProviderCapabilities> _capabilities;
     private readonly Func<LlmChatRequest, CancellationToken, IAsyncEnumerable<LlmStreamEvent>> _stream;
     private readonly Dictionary<string, LlmAgentToolDefinition> _tools;
@@ -112,6 +114,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         _connection = connection;
         _models = Array.AsReadOnly(models.ToArray());
         _estimator = estimator;
+        _codec = (estimator as ILlmContinuationCodecSource)?.ContinuationCodec;
         _stream = stream;
         _capabilities = capabilities;
         IReadOnlyList<LlmHostedTool> offered = HostedTools.WithoutUnofferedImages(options.HostedTools,
@@ -135,7 +138,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         _tools = _options.Tools.OfType<LlmAgentToolDefinition>().DistinctBy(tool => tool.Name, StringComparer.Ordinal)
             .ToDictionary(tool => tool.Name, StringComparer.Ordinal);
         (_context, _startOmittedContinuationStates) = ManagedAgentContext.Import(
-            options.Context ?? new(), connection, options.ModelId, supportsResources);
+            options.Context ?? new(), connection, options.ModelId, _codec, supportsResources);
         if (_callerServices?.Resources is null) { _context = LlmResourcePreparation.Adopt(_context, null); }
         _emptiedByOmission = EmptiedByOmission(options.Context, _context);
         ThreadId = options.ThreadId ?? Guid.NewGuid().ToString();
@@ -255,7 +258,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             RequireCapability(Capabilities.SupportsContextStatus);
             if (_segmentActive) { throw new InvalidOperationException("Proposal accounting requires idle or paused execution."); }
             turn = _run?.Turn ?? BaseTurn();
-            var proposal = ManagedAgentContext.Import(proposedContext, _connection, turn.ModelId!, _supportsResources).Context;
+            var proposal = ManagedAgentContext.Import(proposedContext, _connection, turn.ModelId!, _codec, _supportsResources).Context;
             if (_run is not null) { proposal = WithQueuedSteering(proposal, _run); }
             request = Request(proposal, turn);
             revision = _context.Revision;
@@ -314,7 +317,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             RequireCapability(Capabilities.SupportsContextReplacement);
             RequireIdle();
             RequireRevision(expectedRevision);
-            replacement = ManagedAgentContext.Import(context, _connection, _options.ModelId, _supportsResources).Context;
+            replacement = ManagedAgentContext.Import(context, _connection, _options.ModelId, _codec, _supportsResources).Context;
             access = _callerServices?.Resources;
         }
         if (access is not null)
@@ -356,7 +359,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             RequireIdle();
             turn = FreezeTurn(request);
             // Validate the entire projected request before mutating context or emitting start.
-            _ = ManagedAgentContext.Import(_context, _connection, turn.ModelId!, _supportsResources);
+            _ = ManagedAgentContext.Import(_context, _connection, turn.ModelId!, _codec, _supportsResources);
             turnId = NewId();
             // Empty input appends no user entry: the turn sends the context as it is.
             LlmAgentContextEntry? user = turn.Input.Count == 0 && turn.Attachments.Count == 0

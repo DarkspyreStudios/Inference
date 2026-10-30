@@ -103,7 +103,8 @@ public sealed class CollectibleSerializationTests
             Assert.IsAssignableFrom(sourceContract, source);
             IServiceCollection services = new ServiceCollection();
             services.Add(ServiceDescriptor.Singleton(sourceContract, source));
-            Type hostContract = assembly.GetType(typeof(ILlmSelfHost).FullName!, throwOnError: true)!;
+            Assembly selfHost = context.LoadFromAssemblyPath(typeof(ILlmSelfHost).Assembly.Location);
+            Type hostContract = selfHost.GetType(typeof(ILlmSelfHost).FullName!, throwOnError: true)!;
             object host = Activator.CreateInstance(fixtures.GetType(
                 typeof(CollectibleSerializationTests).FullName + "+UnusedSelfHost", throwOnError: true)!, nonPublic: true)!;
             services.Add(ServiceDescriptor.Singleton(hostContract, host));

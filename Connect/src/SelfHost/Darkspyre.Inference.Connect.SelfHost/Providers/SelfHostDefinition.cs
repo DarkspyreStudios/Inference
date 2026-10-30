@@ -11,6 +11,7 @@ internal static class SelfHostDefinition
         Description = "Run a model that this application loads in its own process, such as a Tensor engine.",
         Transport = LlmTransport.SelfHost,
         DefaultEndpoint = string.Empty,
+        EndpointKind = LlmProviderEndpointKind.Engine,
         DisplayOrder = 95,
         SetupSteps =
         [

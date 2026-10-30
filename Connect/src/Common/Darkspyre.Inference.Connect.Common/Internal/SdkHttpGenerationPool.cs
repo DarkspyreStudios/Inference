@@ -35,8 +35,8 @@ internal sealed class SdkHttpGenerationPool : IHttpClientFactory, IDisposable, I
 
     public HttpClient CreateClient(string name)
     {
-        SdkHttpRegistration.ValidateName(name);
         using LlmOperationLifetime.Lease operation = _lifetime.Enter(default);
+        _configuration!.ValidateName(name);
         if (_mode == InferenceHttpCreationMode.BorrowHostFactory) return _services!.GetRequiredService<IHttpClientFactory>().CreateClient(name);
         SdkHttpPipelineEntry entry;
         lock (_gate)

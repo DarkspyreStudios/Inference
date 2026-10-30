@@ -22,6 +22,8 @@ public sealed record LlmSetupChanges(
     SetupConfigurationIdentity Identity, LlmSetupConfiguration Configuration,
     SetupSecretEdit Credential, bool RequiresReauthentication, bool RequiresRetest);
 
+// AWS Bedrock, Google Vertex AI and Azure OpenAI use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+// .LLM.Vertex and .LLM.Azure, outside the solution). It moves into their own libraries when they return to the build.
 /// <summary>Optional provider SDK operations implemented in the SDK-owning adapter assembly.</summary>
 public interface ILlmSetupEnvironment
 {
@@ -44,18 +46,31 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     /// <summary>The connection version the settings present to their own sign-in; a draft has no saved version.</summary>
     internal const string DraftVersion = "draft";
 
+    // OpenAI-compatible Chat and Azure OpenAI use this; they are out of the build (Providers/ChatCompletionsLlmClientBase.cs
+    // and OpenAiCompatibleChatLlmClient.cs, under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure,
+    // outside the solution). It moves into their own libraries when they return to the build.
     private static readonly SetupChoice[] OverrideChoices =
         [new("default", "Default"), new("enabled", "Enabled"), new("disabled", "Disabled")];
 
+    // OpenAI-compatible Chat and Azure OpenAI use this; they are out of the build (Providers/ChatCompletionsLlmClientBase.cs
+    // and OpenAiCompatibleChatLlmClient.cs, under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure,
+    // outside the solution). It moves into their own libraries when they return to the build.
     private static readonly SetupChoice[] SupportChoices =
         [new("default", "Default"), new("unknown", "Unknown"), new("enabled", "Supported"), new("disabled", "Unsupported")];
 
     private readonly LlmProviderDefinition _definition;
+    // AWS Bedrock, Google Vertex AI and Azure OpenAI use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+    // .LLM.Vertex and .LLM.Azure, outside the solution). It moves into their own libraries when they return to the build.
     private readonly Func<LlmConnection, SetupValidation>? _validateEnvironment;
+    // AWS Bedrock, Google Vertex AI and Azure OpenAI use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+    // .LLM.Vertex and .LLM.Azure, outside the solution). It moves into their own libraries when they return to the build.
     private readonly bool _hasEnvironment;
     private readonly LlmConnection? _original;
     private readonly LlmConnection _baseline;
     private readonly string _originalModel;
+    // OpenAI-compatible Chat and Azure OpenAI use this; they are out of the build (Providers/ChatCompletionsLlmClientBase.cs
+    // and OpenAiCompatibleChatLlmClient.cs, under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure,
+    // outside the solution). It moves into their own libraries when they return to the build.
     private readonly HashSet<string> _overrideFields = new(StringComparer.Ordinal);
     private LlmConnection _draft;
     private string _model;
@@ -63,8 +78,14 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     private string _callback = string.Empty;
     private bool _editingCallback;
     private string _callbackFieldId = string.Empty;
+    // Google Vertex AI uses this; Google Vertex AI is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     private string _cacheBucket = string.Empty;
+    // Google Vertex AI uses this; Google Vertex AI is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     private string _cachePrefix = string.Empty;
+    // Azure OpenAI uses this; Azure OpenAI is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     private readonly AzureEditorDraft? _azure;
     private readonly List<ContextLengthRow> _contextRows = [];
 
@@ -111,7 +132,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         {
             Configured = SetupObservation.Known(existing is not null),
             Authenticated = SetupObservation.Unknown,
-            Installed = UsesCli ? SetupObservation.Unknown : SetupObservation.NotApplicable
+            Installed = ChecksExternalTool ? SetupObservation.Unknown : SetupObservation.NotApplicable
         };
     }
 
@@ -119,12 +140,25 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
 
     internal string ModelId => _model;
 
-    internal bool UsesCli => _draft.Transport is LlmTransport.AnthropicClaudeCli or LlmTransport.GoogleAntigravityCli;
-    internal bool UsesApple => _draft.Transport == LlmTransport.AppleFoundationModels;
-    internal string? ApplePrerequisite { get; set; }
-    // A SelfHost connection's endpoint is the ID of an engine the host runs in its own process.
-    private bool UsesSelfHost => _draft.Transport == LlmTransport.SelfHost;
+    /// <summary>True when the endpoint is the name or path of the provider's command-line tool.</summary>
+    private bool UsesExecutable => _definition.EndpointKind == LlmProviderEndpointKind.Executable;
 
+    /// <summary>True when the Check action asks the provider's command-line tool whether it is installed and signed in.</summary>
+    internal bool ChecksExternalTool => _definition.AuthenticationCheck == LlmProviderAuthenticationCheck.ExternalTool;
+
+    // Apple Foundation Models uses this; Apple Foundation Models is out of the build (Providers/Apple*.cs and
+    // Providers/ManagedAppleAgentClient.cs, under Compile Remove). It moves into that provider's own library when the
+    // provider returns to the build.
+    internal bool UsesApple => _draft.Transport == LlmTransport.AppleFoundationModels;
+    // Apple Foundation Models uses this; Apple Foundation Models is out of the build (Providers/Apple*.cs and
+    // Providers/ManagedAppleAgentClient.cs, under Compile Remove). It moves into that provider's own library when the
+    // provider returns to the build.
+    internal string? ApplePrerequisite { get; set; }
+    // An engine connection's endpoint is the ID of an engine the host runs in its own process.
+    private bool UsesEngine => _definition.EndpointKind == LlmProviderEndpointKind.Engine;
+
+    // AWS Bedrock and AgentCore use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     internal string? AwsProfile => Credential.Aws?.Profile;
 
     /// <summary>The device sign-in in progress, if any.</summary>
@@ -142,25 +176,41 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     internal IReadOnlyDictionary<string, string> ModelNames { get; set; } = new Dictionary<string, string>(StringComparer.Ordinal);
 
     /// <summary>True when the settings offer an action that signs in.</summary>
-    internal bool HasSignInAction => SignInActionId is not null;
+    internal bool HasSignInAction => _definition.SignIn is not null;
 
-    /// <summary>The id of the action that signs in, or null when the transport signs in some other way.</summary>
-    private string? SignInActionId => _draft.Transport switch
-    {
-        LlmTransport.OpenAiCodex or LlmTransport.XaiResponses => "authorize",
-        LlmTransport.AnthropicClaudeCli => "sign-in-claude",
-        _ => null
-    };
+    /// <summary>The sign-in action the provider declares, or null when it has none.</summary>
+    internal LlmProviderSignIn? SignIn => _definition.SignIn;
 
-    private static bool UsesFixedEndpoint(LlmTransport transport) => transport is LlmTransport.OpenAiCodex or LlmTransport.GoogleVertexAi
-        or LlmTransport.GoogleGeminiApi or LlmTransport.XaiResponses;
-    private bool UsesXai => _draft.Transport == LlmTransport.XaiResponses;
+    private bool UsesFixedEndpoint(LlmTransport transport) =>
+        _definition.EndpointKind == LlmProviderEndpointKind.Fixed || KeptFixedEndpoint(transport);
+    // Google Vertex AI and the Gemini API use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex,
+    // outside the solution; Providers/GeminiApiLlmClient*.cs and Internal/Gemini/, under Compile Remove). It moves into
+    // their own libraries when they return to the build.
+    private static bool KeptFixedEndpoint(LlmTransport transport) => transport is LlmTransport.GoogleVertexAi or LlmTransport.GoogleGeminiApi;
+    // Google Vertex AI uses this; Google Vertex AI is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     private bool UsesVertex => _draft.Transport == LlmTransport.GoogleVertexAi;
+    // Azure OpenAI uses this; Azure OpenAI is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     private bool UsesAzure => _draft.Transport is LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat;
+    // Google Vertex AI uses this; Google Vertex AI is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     private LlmVertexConfiguration Vertex => _draft.Vertex ?? new();
+    // AWS Bedrock and AgentCore use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     private bool UsesAws => _draft.Transport is LlmTransport.AwsBedrockConverse or LlmTransport.AwsBedrockAgentCore;
-    private bool UsesApiKey => _draft.Transport is LlmTransport.OpenAiResponses or LlmTransport.OpenAiCompatibleChat or LlmTransport.AnthropicMessages
-        or LlmTransport.GoogleGeminiApi || UsesVertex && Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey
+    // OpenAI-compatible Chat uses this; OpenAI-compatible Chat is out of the build (Providers/ChatCompletionsLlmClientBase.cs,
+    // OpenAiCompatibleChatLlmClient.cs and ManagedOpenAiCompatibleAgentClient.cs, under Compile Remove). It moves into
+    // that provider's own library when the provider returns to the build.
+    private bool UsesChatCompletions => _draft.Transport == LlmTransport.OpenAiCompatibleChat;
+    private bool UsesApiKey => _definition.AcceptsApiKey || KeptApiKey;
+    // OpenAI-compatible Chat, Anthropic Messages, the Gemini API, Google Vertex AI and Azure OpenAI use this; they are out
+    // of the build (Providers/ChatCompletionsLlmClientBase.cs, OpenAiCompatibleChatLlmClient.cs, AnthropicMessagesLlmClient.cs
+    // and GeminiApiLlmClient*.cs, under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex and
+    // Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure, outside the solution). It moves into their own libraries
+    // when they return to the build.
+    private bool KeptApiKey => UsesChatCompletions || _draft.Transport is LlmTransport.AnthropicMessages or LlmTransport.GoogleGeminiApi
+        || UsesVertex && Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey
         || UsesAzure && _azure!.Authentication == LlmAzureAuthenticationMode.ApiKey;
     private LlmCredential Credential => LlmCredential.Parse(_draft.Credential) ?? new();
 
@@ -174,16 +224,28 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             || (UsesAws ? NormalizeAws(Credential.Aws) != NormalizeAws(LlmCredential.Parse(_baseline.Credential)?.Aws)
                 : UsesAzure ? _azure!.HasCredentialEdits : _credentialChange != SetupSecretEditKind.Keep);
 
-    /// <summary>Subscription API connections require sign-in or a retained saved credential. A Claude subscription
-    /// connection requires its own account token from the app's sign-in; the Claude CLI's own login does not count.</summary>
-    protected override bool IsSignInSatisfied => _draft.Transport == LlmTransport.AnthropicClaudeCli ? HasClaudeAccountToken :
-        _draft.Transport is not (LlmTransport.OpenAiCodex or LlmTransport.XaiResponses) || Status.Authenticated.Value == true
-            || _credentialChange == SetupSecretEditKind.Keep && !string.IsNullOrEmpty(LlmCredential.Parse(_original?.Credential)?.Serialize());
+    /// <summary>A required sign-in must complete or keep the saved credential. A connection that runs only on its own
+    /// sign-in's token (<see cref="RequiresSignInToken"/>) needs that token; its command-line tool's own login does not count.</summary>
+    protected override bool IsSignInSatisfied => _definition.SignIn is not { IsRequired: true }
+        || (RequiresSignInToken ? HasSignInToken : Status.Authenticated.Value == true
+            || _credentialChange == SetupSecretEditKind.Keep && !string.IsNullOrEmpty(LlmCredential.Parse(_original?.Credential)?.Serialize()));
 
-    /// <summary>The draft holds a Claude account token: a new one from "Sign in to a Claude account", or the saved one it keeps.</summary>
-    internal bool HasClaudeAccountToken => !string.IsNullOrWhiteSpace(Credential.OAuth?.AccessToken)
+    /// <summary>True when the provider's Check asks its command-line tool and its sign-in is required: the connection then
+    /// runs only on its own sign-in's token, never on the tool's own login.</summary>
+    internal bool RequiresSignInToken => ChecksExternalTool && _definition.SignIn is { IsRequired: true };
+
+    /// <summary>The draft holds a sign-in token: a new one from the provider's sign-in, or the saved one it keeps.</summary>
+    internal bool HasSignInToken => !string.IsNullOrWhiteSpace(Credential.OAuth?.AccessToken)
         || _credentialChange == SetupSecretEditKind.Keep && !string.IsNullOrWhiteSpace(LlmCredential.Parse(_original?.Credential)?.OAuth?.AccessToken);
 
+    /// <summary>The model-list refusal while a connection that runs only on its own sign-in's token has none, or null when
+    /// its models may be listed.</summary>
+    internal SetupIssue? MissingSignInToken => RequiresSignInToken && !HasSignInToken
+        ? new($"{_definition.Id}-sign-in-required", $"{_definition.SignIn!.DisplayName} in the previous step to list its models.", "model")
+        : null;
+
+    // AWS Bedrock and AgentCore use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     private static LlmAwsCredentials NormalizeAws(LlmAwsCredentials? value) => (value ?? new()) with
     { Profile = value?.Profile ?? string.Empty, Region = value?.Region ?? string.Empty };
 
@@ -191,11 +253,11 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     protected override IReadOnlyList<SetupStep> CreateSteps()
     {
         var fields = new List<SetupField>();
-        SetupExecutableField? executable = UsesCli || UsesApple
-            ? new(new("executable", UsesApple ? "Apple helper executable or absolute path" : "CLI executable or absolute path") { IsRequired = !UsesCli },
+        SetupExecutableField? executable = UsesExecutable || UsesApple
+            ? new(new("executable", UsesApple ? "Apple helper executable or absolute path" : "CLI executable or absolute path") { IsRequired = !UsesExecutable },
                 new(_draft.Endpoint), new(_definition.DefaultEndpoint), value => Edit(() => _draft = _draft with { Endpoint = value.Value }))
             : null;
-        if (UsesSelfHost)
+        if (UsesEngine)
         {
             fields.Add(new SetupChoiceField(new("engine", "Engine")
             {
@@ -205,6 +267,8 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
                 _draft.Endpoint, string.Empty, value => Edit(() => _draft = _draft with { Endpoint = value }), false,
                 SetupSideEffect.None, SetupChoiceCapabilities.Searchable));
         }
+        // AWS AgentCore uses this; AWS AgentCore is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+        // outside the solution). It moves into that provider's own library when the provider returns to the build.
         else if (_draft.Transport == LlmTransport.AwsBedrockAgentCore)
         {
             fields.Add(new SetupTextField(new("harness-arn", "Harness ARN") { IsRequired = true }, _draft.Endpoint,
@@ -222,7 +286,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         {
             fields.Add(new SetupSecretField(new("api-key", "API key")
             {
-                IsRequired = _draft.Transport is not (LlmTransport.OpenAiCompatibleChat or LlmTransport.OpenAiResponses),
+                IsRequired = KeptApiKey && !UsesChatCompletions,
                 HelpText = "Keep preserves the saved key; replace and clear are committed only when saved."
             }, !string.IsNullOrEmpty(Credential.ApiKey), _credentialChange,
                 value => Edit(() =>
@@ -237,11 +301,10 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
                     _draft = _draft with { Credential = (Credential with { ApiKey = key }).Serialize() };
                 })));
         }
-        if (_draft.Transport == LlmTransport.OpenAiResponses)
-        {
-            fields.Add(ServiceTiersField());
-            fields.Add(ContextLengthsField());
-        }
+        if (_definition.ServiceTiers is not null) fields.Add(ServiceTiersField());
+        if (_definition.OffersContextLengths) fields.Add(ContextLengthsField());
+        // Google Vertex AI uses this; Google Vertex AI is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex,
+        // outside the solution). It moves into that provider's own library when the provider returns to the build.
         if (UsesVertex)
         {
             if (Vertex.AuthenticationMode != LlmGoogleAuthenticationMode.ApiKey)
@@ -295,6 +358,8 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             fields.Add(new SetupTextField(new("google-cache-prefix", "Cache staging object prefix"), _cachePrefix,
                 string.Empty, value => Edit(() => _cachePrefix = value)));
         }
+        // AWS Bedrock and AgentCore use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+        // outside the solution). It moves into that provider's own library when the provider returns to the build.
         if (UsesAws)
         {
             LlmAwsCredentials aws = Credential.Aws ?? new();
@@ -314,7 +379,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
                 value => Edit(() => _azure.Profile = value)));
         }
         var connectionSections = new List<SetupSection>();
-        if (_draft.Transport == LlmTransport.OpenAiCompatibleChat || UsesAzure)
+        if (UsesChatCompletions || UsesAzure)
         {
             connectionSections.Add(new("connection", "Connection", fields.AsReadOnly()));
             connectionSections.Add(AdvancedCapabilities());
@@ -326,13 +391,13 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             connectionStep with
             {
                 Sections = connectionSections.AsReadOnly(),
-                ActionIds = SignInActionId is { } signIn ? [signIn, "check"] : ["check"]
+                ActionIds = _definition.SignIn is { } signIn ? [signIn.ActionId, "check"] : ["check"]
             },
             modelStep with { ActionIds = ["test"], Sections = [new("model", "Model",
             [new SetupChoiceField(new("model", UsesAzure ? "Deployment" : "Model") { IsRequired = true,
                 HelpText = UsesAzure ? "Enter the exact Azure deployment name, not its underlying public model ID." : "Discover available models where supported, or enter an exact model ID." }, _model,
                 _definition.DefaultModelId, value => Edit(() => SetModel(value)), true,
-                UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesSelfHost || UsesAzure ? SetupSideEffect.None : SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
+                UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesEngine || UsesAzure ? SetupSideEffect.None : SetupSideEffect.Network | (ChecksExternalTool ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
                 SetupChoiceCapabilities.Searchable)])] }
         ];
     }
@@ -341,16 +406,14 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     /// later endpoint change (B13).</summary>
     private SetupBooleanField ServiceTiersField()
     {
-        bool defaultValue = ResponsesLlmClientBase.IsOpenAiEndpoint(_draft);
-        return new(new("service-tiers", "Service tiers")
-        {
-            HelpText = "Show the service-tier choice in the chat panel and send the chosen tier. OpenAI's own service offers tiers."
-        }, _draft.CapabilityOverrides?.SupportsServiceTiers is { } set ? set == InferenceSupport.Supported : defaultValue, defaultValue,
+        LlmProviderServiceTiers tiers = _definition.ServiceTiers!;
+        bool defaultValue = tiers.IsDefaultOn(_draft.Endpoint);
+        return new(new("service-tiers", "Service tiers") { HelpText = tiers.HelpText }, _draft.CapabilityOverrides?.SupportsServiceTiers is { } set ? set == InferenceSupport.Supported : defaultValue, defaultValue,
             value => Edit(() => _draft = _draft with
             {
                 CapabilityOverrides = (_draft.CapabilityOverrides ?? new()) with
                 {
-                    SupportsServiceTiers = value == ResponsesLlmClientBase.IsOpenAiEndpoint(_draft) ? null
+                    SupportsServiceTiers = value == tiers.IsDefaultOn(_draft.Endpoint) ? null
                         : value ? InferenceSupport.Supported : InferenceSupport.Unsupported
                 }
             }));
@@ -420,6 +483,9 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         first.Count == second.Count
         && first.All(pair => second.TryGetValue(pair.Key, out LlmCapabilityOverrides? other) && other == pair.Value);
 
+    // OpenAI-compatible Chat and Azure OpenAI use this; they are out of the build (Providers/ChatCompletionsLlmClientBase.cs
+    // and OpenAiCompatibleChatLlmClient.cs, under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure,
+    // outside the solution). It moves into their own libraries when they return to the build.
     private SetupSection AdvancedCapabilities()
     {
         LlmCapabilityOverrides current = _draft.CapabilityOverrides ?? new();
@@ -526,6 +592,9 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         };
     }
 
+    // OpenAI-compatible Chat and Azure OpenAI use this; they are out of the build (Providers/ChatCompletionsLlmClientBase.cs
+    // and OpenAiCompatibleChatLlmClient.cs, under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure,
+    // outside the solution). It moves into their own libraries when they return to the build.
     /// <summary>
     /// Updates the accepted-level override for one level. An explicit Enabled or Disabled makes the
     /// override explicit: the endpoint then accepts exactly the enabled levels. Default removes the level,
@@ -540,12 +609,17 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         return selection is null && updated.Count == 0 ? null : updated;
     }
 
+    // AWS Bedrock and AgentCore use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     private void SetAws(LlmAwsCredentials aws)
     {
         _draft = _draft with { Credential = (Credential with { Aws = aws }).Serialize() };
         _credentialChange = SetupSecretEditKind.Replace;
     }
 
+    // OpenAI-compatible Chat and Azure OpenAI use this; they are out of the build (Providers/ChatCompletionsLlmClientBase.cs
+    // and OpenAiCompatibleChatLlmClient.cs, under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure,
+    // outside the solution). It moves into their own libraries when they return to the build.
     private void SetChatCompletions(LlmChatCompletionsConfiguration configuration) =>
         _draft = _draft with { ChatCompletions = configuration.OutputLimitField is null && configuration.UsePromptCacheKey is null ? null : configuration };
 
@@ -555,6 +629,10 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         if (UsesAzure) _azure!.DeploymentEdited = true;
     }
 
+    // OpenAI-compatible Chat, Azure OpenAI and Google Vertex AI use this; they are out of the build
+    // (Providers/ChatCompletionsLlmClientBase.cs and OpenAiCompatibleChatLlmClient.cs, under Compile Remove;
+    // Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure and .LLM.Vertex, outside the solution). It moves into their own
+    // libraries when they return to the build.
     /// <inheritdoc />
     protected internal override SetupChoicePage? GetLocalChoices(string fieldId, SetupChoiceQuery query)
     {
@@ -574,19 +652,9 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     protected override IReadOnlyList<SetupActionDescriptor> CreateActions()
     {
         var actions = new List<SetupActionDescriptor>();
-        if (_draft.Transport == LlmTransport.OpenAiCodex)
+        if (_definition.SignIn is { } signIn)
         {
-            actions.Add(new("authorize", "Sign in with ChatGPT", SetupActionPurpose.Authenticate,
-                SetupSideEffect.Network | SetupSideEffect.BrowserInteraction));
-        }
-        if (UsesXai)
-        {
-            actions.Add(new("authorize", "Sign in with Grok", SetupActionPurpose.Authenticate,
-                SetupSideEffect.Network | SetupSideEffect.BrowserInteraction));
-        }
-        if (_draft.Transport == LlmTransport.AnthropicClaudeCli)
-        {
-            actions.Add(new("sign-in-claude", "Sign in to a Claude account", SetupActionPurpose.Authenticate,
+            actions.Add(new(signIn.ActionId, signIn.DisplayName, SetupActionPurpose.Authenticate,
                 SetupSideEffect.Network | SetupSideEffect.BrowserInteraction));
         }
         if (DeviceCode is not null || BrowserAuthorization is not null)
@@ -594,13 +662,13 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             actions.Add(ContinueAction);
             actions.Add(CancelAction);
         }
-        actions.Add(new("check", UsesApple ? "Check helper and on-device model" : UsesCli ? "Check CLI and authentication" : UsesSelfHost ? "Check the engine's models" : "Check authentication and model access",
+        actions.Add(new("check", UsesApple ? "Check helper and on-device model" : ChecksExternalTool ? "Check CLI and authentication" : UsesEngine ? "Check the engine's models" : "Check authentication and model access",
             SetupActionPurpose.CheckPrerequisites,
-            UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesSelfHost ? SetupSideEffect.LocalVerification : SetupSideEffect.Network | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
+            UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesEngine ? SetupSideEffect.LocalVerification : SetupSideEffect.Network | (ChecksExternalTool ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
             ConnectionValidation().IsValid));
         actions.Add(new("test", "Test selected model", SetupActionPurpose.Test,
-            UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesSelfHost ? SetupSideEffect.LocalVerification
-                : SetupSideEffect.Network | SetupSideEffect.PotentialBilling | (UsesCli ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
+            UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesEngine ? SetupSideEffect.LocalVerification
+                : SetupSideEffect.Network | SetupSideEffect.PotentialBilling | (ChecksExternalTool ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
             ValidateDraft().IsValid));
         return actions.AsReadOnly();
     }
@@ -680,7 +748,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         _credentialChange = SetupSecretEditKind.Replace;
         Status = Status with
         {
-            Authenticated = UsesCli ? Status.Authenticated : SetupObservation.Unknown,
+            Authenticated = ChecksExternalTool ? Status.Authenticated : SetupObservation.Unknown,
             Verified = SetupObservation.Unknown,
             Ready = SetupObservation.Unknown
         };
@@ -697,6 +765,8 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     internal SetupValidation ConnectionValidation()
     {
         var issues = new List<SetupIssue>();
+        // Google Vertex AI uses this; Google Vertex AI is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex,
+        // outside the solution). It moves into that provider's own library when the provider returns to the build.
         if (UsesVertex)
         {
             try { _ = CacheStaging(); }
@@ -706,20 +776,21 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         try { RuntimeInputAdmission.Validate(_draft); }
         catch (NotSupportedException error)
         { return new([new("runtime-inputs-unsupported", error.Message)]); }
-        if (UsesCli)
+        if (UsesExecutable)
         {
             if (_draft.Endpoint.IndexOfAny(['\r', '\n', '\0']) >= 0)
             { issues.Add(new("executable-invalid", "Enter an executable name or path, not a shell command.", "executable")); }
         }
+        // AWS AgentCore uses this; AWS AgentCore is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+        // outside the solution). It moves into that provider's own library when the provider returns to the build.
         else if (_draft.Transport != LlmTransport.AwsBedrockAgentCore
             && (!Uri.TryCreate(_draft.Endpoint, UriKind.Absolute, out Uri? endpoint) || endpoint.Scheme is not ("http" or "https")
                 || endpoint.UserInfo.Length > 0 || endpoint.Query.Length > 0 || endpoint.Fragment.Length > 0))
         { issues.Add(new("endpoint-invalid", "Use an HTTP(S) base URL without credentials, query or fragment.", "endpoint")); }
-        if (UsesApiKey && !UsesAzure && _draft.Transport != LlmTransport.OpenAiCompatibleChat
-            && _draft.Transport != LlmTransport.OpenAiResponses
+        if (KeptApiKey && !UsesAzure && !UsesChatCompletions
             && string.IsNullOrWhiteSpace(Credential.ApiKey) && Credential.SecretHeaders.Count == 0)
         { issues.Add(new("key-required", "An API credential is required.", "api-key")); }
-        if (_draft.Transport == LlmTransport.OpenAiResponses)
+        if (_definition.OffersContextLengths)
         {
             if (_contextRows.Any(row => row.ModelId is null || row.Length is null))
             { issues.Add(new("context-length-incomplete", "Enter a model and a context length, or remove the row.", "context-lengths")); }
@@ -732,6 +803,8 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             issues.AddRange(azureIssues);
             if (azureIssues.Length > 0) return new(issues.AsReadOnly());
         }
+        // AWS Bedrock, Google Vertex AI and Azure OpenAI use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+        // .LLM.Vertex and .LLM.Azure, outside the solution). It moves into their own libraries when they return to the build.
         if (UsesAws || UsesVertex || UsesAzure)
         {
             if (_validateEnvironment is null) { issues.Add(new("setup-environment-missing", "Register the provider's setup support.")); }
@@ -754,13 +827,15 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         LlmConnection current = _draft with
         {
             Version = DraftVersion,
-            Endpoint = UsesCli && string.IsNullOrWhiteSpace(_draft.Endpoint) ? _definition.DefaultEndpoint : _draft.Endpoint,
+            Endpoint = UsesExecutable && string.IsNullOrWhiteSpace(_draft.Endpoint) ? _definition.DefaultEndpoint : _draft.Endpoint,
             Vertex = UsesVertex ? Vertex with { CacheStaging = CacheStaging() } : _draft.Vertex
         };
         return !UsesAzure ? current : current with
         { Azure = _azure!.Configuration(_model), Credential = _azure.ComposeCredential().Serialize() };
     }
 
+    // Google Vertex AI uses this; Google Vertex AI is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex,
+    // outside the solution). It moves into that provider's own library when the provider returns to the build.
     private LlmVertexCacheStaging? CacheStaging()
     {
         if (_cacheBucket.Length != 0) return new(_cacheBucket, _cachePrefix);
@@ -793,6 +868,8 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
 {
     private IReadOnlyDictionary<LlmTransport, ILlmClient>? _clients;
     private IReadOnlyList<ILlmAuthenticator>? _authenticators;
+    // AWS Bedrock, Google Vertex AI and Azure OpenAI use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+    // .LLM.Vertex and .LLM.Azure, outside the solution). It moves into their own libraries when they return to the build.
     private IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment>? _environments;
     private LlmAgentProviderService? _agents;
     private readonly LlmOperationLifetime _lifetime = new();
@@ -859,15 +936,19 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         Fence(cancellationToken);
         switch (action.Id)
         {
-            case "authorize":
-                LlmDeviceCode code = await service.StartDeviceLoginAsync(settings.Transport, cancellationToken).ConfigureAwait(false);
-                Fence(cancellationToken);
-                settings.BeginDeviceAuthorization(code);
-                return new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);
-            case "sign-in-claude":
-                LlmAuthorizationSession authorization = await service.StartClaudeLoginAsync(cancellationToken).ConfigureAwait(false);
-                Fence(cancellationToken);
-                settings.BeginBrowserAuthorization(authorization);
+            case var id when settings.SignIn is { } signIn && id == signIn.ActionId:
+                if (signIn.Flow == LlmProviderSignInFlow.DeviceCode)
+                {
+                    LlmDeviceCode code = await service.StartDeviceLoginAsync(settings.Transport, cancellationToken).ConfigureAwait(false);
+                    Fence(cancellationToken);
+                    settings.BeginDeviceAuthorization(code);
+                }
+                else
+                {
+                    LlmAuthorizationSession authorization = await service.StartBrowserLoginAsync(settings.Transport, cancellationToken).ConfigureAwait(false);
+                    Fence(cancellationToken);
+                    settings.BeginBrowserAuthorization(authorization);
+                }
                 return new(SetupActionState.NeedsInteraction, Interaction: settings.Interaction);
             case "continue-authorization":
                 return await ContinueAuthorizationAsync(settings, service, progress, cancellationToken).ConfigureAwait(false);
@@ -892,6 +973,8 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         ILlmSetupEnvironment? environment = _environments!.GetValueOrDefault(settings.Transport);
         switch (fieldId)
         {
+            // AWS Bedrock and AgentCore use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+            // outside the solution). It moves into that provider's own library when the provider returns to the build.
             case "aws-profile" when environment is not null:
                 var profiles = await environment.GetProfilesAsync(cancellationToken).ConfigureAwait(false);
                 Fence(cancellationToken);
@@ -902,11 +985,11 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
                 return InferenceSettings.Page(query, regions);
             case var modelField when modelField == "model" || modelField.StartsWith("context-model-", StringComparison.Ordinal):
                 {
-                    // A Claude connection lists its account's models with its own token, never through the CLI's login.
-                    if (settings.Transport == LlmTransport.AnthropicClaudeCli && !settings.HasClaudeAccountToken)
+                    // A connection that runs only on its own sign-in's token lists models with that token, never through
+                    // its command-line tool's login.
+                    if (settings.MissingSignInToken is { } signInIssue)
                     {
-                        return new([], State: SetupChoiceState.Unavailable,
-                            Issues: [new("claude-sign-in-required", "Sign in to a Claude account in the previous step to list its models.", "model")]);
+                        return new([], State: SetupChoiceState.Unavailable, Issues: [signInIssue]);
                     }
                     await using LlmProviderService service = Service(settings, cancellationToken);
                     Fence(cancellationToken);
@@ -967,16 +1050,13 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         }
         else if (settings.BrowserAuthorization is { } authorization)
         {
-            await service.CompleteClaudeLoginAsync(settings.Identity.Id, authorization, settings.AuthorizationCallback,
+            await service.CompleteBrowserLoginAsync(settings.Identity.Id, authorization, settings.AuthorizationCallback,
                 LlmSettings.DraftVersion, token).ConfigureAwait(false);
         }
         else { return new(SetupActionState.Unavailable); }
         Fence(token);
         settings.ClearAuthorization();
-        if (settings.Transport is LlmTransport.OpenAiCodex or LlmTransport.AnthropicClaudeCli or LlmTransport.XaiResponses)
-        {
-            settings.Status = settings.Status with { Authenticated = SetupObservation.Known(true) };
-        }
+        settings.Status = settings.Status with { Authenticated = SetupObservation.Known(true) };
         return SetupActionResult.Completed;
     }
 
@@ -984,7 +1064,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
     {
         Fence(token);
         settings.Status = settings.Status with { Authenticated = SetupObservation.Unknown, Verified = SetupObservation.Unknown };
-        if (settings.UsesCli) return await CheckCliAsync(settings, service, token).ConfigureAwait(false);
+        if (settings.ChecksExternalTool) return await CheckCliAsync(settings, service, token).ConfigureAwait(false);
         LlmProviderCapabilities capabilities = await service.GetCapabilitiesAsync(settings.Identity.Id, token).ConfigureAwait(false);
         Fence(token);
         if ((capabilities.SupportsModelListing == InferenceSupport.Unsupported))
@@ -996,6 +1076,9 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         settings.Status = settings.Status with
         {
             Authenticated = SetupObservation.Known(true),
+            // Google Vertex AI and Azure OpenAI use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex
+            // and Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure, outside the solution). It moves into their own
+            // libraries when they return to the build.
             Verified = settings.Transport is LlmTransport.GoogleVertexAi or LlmTransport.AzureOpenAiResponses or LlmTransport.AzureOpenAiChat
                 ? SetupObservation.Unknown : SetupObservation.Known(true)
         };
@@ -1014,9 +1097,10 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         ExternalAuthenticationState state = await service.CheckAuthenticationAsync(settings.Identity.Id, token).ConfigureAwait(false);
         Fence(token);
         bool installed = state != ExternalAuthenticationState.NotInstalled;
-        // A Claude connection is signed in only through its own account token; the CLI's own login is not used.
+        // A connection that runs only on its own sign-in's token is signed in only through that token; the tool's own
+        // login is not used.
         bool signedIn = state == ExternalAuthenticationState.SignedIn
-            && (settings.Transport != LlmTransport.AnthropicClaudeCli || settings.HasClaudeAccountToken);
+            && (!settings.RequiresSignInToken || settings.HasSignInToken);
         settings.Status = settings.Status with
         {
             Installed = SetupObservation.Known(installed),
@@ -1035,6 +1119,8 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         bool completed;
         var reply = new System.Text.StringBuilder();
         long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        // AWS AgentCore uses this; AWS AgentCore is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
+        // outside the solution). It moves into that provider's own library when the provider returns to the build.
         if (settings.Transport == LlmTransport.AwsBedrockAgentCore && Client(settings.Transport) is ILlmAgentClient agent)
         {
             await using ILlmAgentSession session = await agent.StartSessionAsync(settings.Identity.Id, settings.CurrentConnection(), new()

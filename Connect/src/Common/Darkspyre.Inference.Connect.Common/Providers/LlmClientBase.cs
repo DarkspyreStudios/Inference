@@ -17,6 +17,9 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
 
     protected virtual bool OffersUsageDeltas => DefaultCapabilities.SupportsUsageDeltas == InferenceSupport.Supported;
 
+    /// <summary>How this provider reads its HTTP error objects. Default: no context-overflow or refused-setting reading.</summary>
+    protected virtual ProviderErrorReading ErrorReading => ProviderErrorReading.None;
+
     public virtual LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null)
     {
         EnsureTransport(connection);
@@ -53,6 +56,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
                 credential,
                 "Model discovery",
                 secrets,
+                ErrorReading,
                 cancellationToken);
 
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);

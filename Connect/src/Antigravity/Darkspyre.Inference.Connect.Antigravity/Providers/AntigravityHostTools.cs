@@ -69,8 +69,8 @@ internal sealed class AntigravityHostTools : IAsyncDisposable
         }
         var bridge = new McpToolBridge(HostToolsProtocol.ServerName, definitions,
             LlmToolNames.Create(definitions.Select(tool => tool.Name), McpToolBridge.IsValidToolName), handler,
-            NativeAgentContract.Antigravity.RichContentSupported.For(connection, null),
-            NativeAgentContract.Antigravity.RichContentSupported.For(connection, modelId),
+            AntigravityNativeAgent.Capabilities.RichContentSupported.For(connection, null),
+            AntigravityNativeAgent.Capabilities.RichContentSupported.For(connection, modelId),
             () => connection, () => resources, scope);
         var hostTools = new AntigravityHostTools(bridge);
         try

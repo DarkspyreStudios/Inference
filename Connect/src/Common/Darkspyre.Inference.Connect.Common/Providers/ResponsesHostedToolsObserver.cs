@@ -4,9 +4,10 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
-/// <summary>Reports the hosted tool calls and citations of a Responses reply: image generation, web search, X search,
-/// file search, code interpreter and remote MCP calls, url_citation annotations and a top-level citations list.</summary>
-internal sealed class ResponsesHostedToolsObserver(Func<Exception> malformed) : ResponsesHostedToolObserver
+/// <summary>Reports the hosted tool calls and citations of a Responses reply: image generation, web search, file search,
+/// code interpreter and remote MCP calls, url_citation annotations and a top-level citations list. A provider with hosted
+/// items of its own overrides <see cref="Identify"/>, <see cref="CallIdentity"/> and <see cref="TryReadItem"/>.</summary>
+internal class ResponsesHostedToolsObserver(Func<Exception> malformed) : ResponsesHostedToolObserver
 {
     private const string ImageName = "image_generation";
     private readonly HashSet<string> _started = new(StringComparer.Ordinal);
@@ -86,11 +87,24 @@ internal sealed class ResponsesHostedToolsObserver(Func<Exception> malformed) : 
     /// <summary>The result with every citation the reply carried, each once.</summary>
     internal override LlmChatResult Decorate(LlmChatResult result) => result with { Citations = _citations.ToArray() };
 
+    /// <summary>Reads the input and output of a completed hosted item this provider defines; false leaves it to the shared
+    /// reading. Default false.</summary>
+    protected virtual bool TryReadItem(JsonElement item, LlmHostedToolKind kind, out JsonElement? input,
+        out LlmHostedToolOutput? output)
+    {
+        input = null;
+        output = null;
+        return false;
+    }
+
+    /// <summary>Throws the malformed-response failure the observer was created with.</summary>
+    protected Exception Malformed() => malformed();
+
     private LlmHostedToolCallCompletedEvent Complete(JsonElement item, string? id, (LlmHostedToolKind Kind, string Name) tool)
     {
         string? status = LlmJson.GetString(item, "status");
-        JsonElement? input = null;
-        LlmHostedToolOutput? output = null;
+        if (TryReadItem(item, tool.Kind, out JsonElement? input, out LlmHostedToolOutput? output))
+            return new LlmHostedToolCallCompletedEvent(new(id, tool.Kind, tool.Name, status, input, output));
         switch (tool.Kind)
         {
             case LlmHostedToolKind.ImageGeneration:
@@ -99,10 +113,6 @@ internal sealed class ResponsesHostedToolsObserver(Func<Exception> malformed) : 
                 input = OptionalValue(item, "action");
                 if (input is { ValueKind: not JsonValueKind.Object }) throw malformed();
                 output = new LlmHostedSearchOutput(input is { } action ? ReadSources(action) : null);
-                break;
-            case LlmHostedToolKind.SocialSearch when LlmJson.GetString(item, "type") == "custom_tool_call":
-                input = OptionalValue(item, "input");
-                if (input is { ValueKind: not JsonValueKind.String }) throw malformed();
                 break;
             case LlmHostedToolKind.DocumentSearch:
                 input = OptionalArray(item, "queries", strings: true);
@@ -132,24 +142,19 @@ internal sealed class ResponsesHostedToolsObserver(Func<Exception> malformed) : 
             status, null, new LlmHostedImageOutput(bytes, "image/" + format)));
     }
 
-    private (LlmHostedToolKind Kind, string Name)? Identify(JsonElement item) => LlmJson.GetString(item, "type") switch
+    /// <summary>The hosted tool an output item reports, or null when it is not a hosted item.</summary>
+    protected virtual (LlmHostedToolKind Kind, string Name)? Identify(JsonElement item) => LlmJson.GetString(item, "type") switch
     {
         "image_generation_call" => (LlmHostedToolKind.ImageGeneration, ImageName),
         "web_search_call" => (LlmHostedToolKind.WebSearch, "web_search"),
-        "x_search_call" => (LlmHostedToolKind.SocialSearch, "x_search"),
         "file_search_call" => (LlmHostedToolKind.DocumentSearch, "file_search"),
         "code_interpreter_call" => (LlmHostedToolKind.CodeExecution, "code_interpreter"),
         "mcp_call" => (LlmHostedToolKind.RemoteMcp, RequiredString(item, "name")),
-        // https://docs.x.ai/developers/tools/tool-usage-details identifies Grok's X search by its call id or tool name.
-        "custom_tool_call" when LlmJson.GetString(item, "call_id")?.StartsWith("xs_", StringComparison.Ordinal) == true
-            || LlmJson.GetString(item, "name") is "x_keyword_search" or "x_semantic_search" or "x_user_search" or "x_thread_fetch"
-            => (LlmHostedToolKind.SocialSearch, RequiredString(item, "name")),
         _ => null
     };
 
-    /// <summary>The call's identity: call_id for Grok's custom X-search calls, id for every other item.</summary>
-    private string? CallIdentity(JsonElement item, LlmHostedToolKind kind) => OptionalString(item,
-        kind == LlmHostedToolKind.SocialSearch && LlmJson.GetString(item, "type") == "custom_tool_call" ? "call_id" : "id");
+    /// <summary>The call's identity: the item's id.</summary>
+    protected virtual string? CallIdentity(JsonElement item, LlmHostedToolKind kind) => OptionalString(item, "id");
 
     /// <summary>A citation event for each url_citation annotation of a message item not already observed, keyed by the
     /// item's id (or output position), the content part and the annotation.</summary>
@@ -220,7 +225,7 @@ internal sealed class ResponsesHostedToolsObserver(Func<Exception> malformed) : 
         return new(OptionalString(item, "code"), logs, images);
     }
 
-    private static JsonElement? OptionalValue(JsonElement item, string name) => item.TryGetProperty(name, out JsonElement value)
+    protected static JsonElement? OptionalValue(JsonElement item, string name) => item.TryGetProperty(name, out JsonElement value)
         && value.ValueKind != JsonValueKind.Null ? value.Clone() : null;
 
     private JsonElement? OptionalArray(JsonElement item, string name, bool strings = false)
@@ -231,9 +236,9 @@ internal sealed class ResponsesHostedToolsObserver(Func<Exception> malformed) : 
         return value;
     }
 
-    private string RequiredString(JsonElement item, string name) => OptionalString(item, name) ?? throw malformed();
+    protected string RequiredString(JsonElement item, string name) => OptionalString(item, name) ?? throw malformed();
 
-    private string? OptionalString(JsonElement item, string name)
+    protected string? OptionalString(JsonElement item, string name)
     {
         if (item.ValueKind != JsonValueKind.Object) throw malformed();
         if (!item.TryGetProperty(name, out JsonElement value) || value.ValueKind == JsonValueKind.Null) return null;
