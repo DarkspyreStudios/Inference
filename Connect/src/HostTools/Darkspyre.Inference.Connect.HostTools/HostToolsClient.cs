@@ -66,7 +66,10 @@ public sealed class HostToolsClient : IAsyncDisposable
     private async Task<JsonElement?> InvokeAsync<T>(string operation, T message, int deadline, CancellationToken cancellationToken)
     {
         using var body = new MemoryStream(JsonSerializer.SerializeToUtf8Bytes(message, HostToolsProtocol.Json));
-        ServiceCallResult result = await _subscription.InvokeAsync(operation, body, deadline, cancellationToken).ConfigureAwait(false);
+        // The host-tools service keeps no store, so no operation of it takes a write lock and none is held back from the
+        // connection's requests for one that does.
+        ServiceCallResult result = await _subscription.InvokeAsync(operation, body, deadline, ServiceRequestClass.Read, cancellationToken)
+            .ConfigureAwait(false);
         cancellationToken.ThrowIfCancellationRequested();
         if (result.Status != ServiceResultStatus.Succeeded)
             throw new IOException($"The host-tools service did not complete {operation}: {result.Status}{(result.Error is { } error ? $" ({error.Code})" : "")}.");
