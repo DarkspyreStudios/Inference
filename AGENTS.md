@@ -66,6 +66,7 @@ Consumers depend on semantic contracts. They never receive provider-native paylo
 | `Darkspyre.Inference.UI.Settings.*` | Host-placed editors for provider settings and their managers: `UI.Settings.Avalonia` and `UI.Settings.Blazor`, and the UI-neutral `UI.Settings.Core` both share |
 
 - Each library is packed as its own package at the shared version; none is versioned on its own. There is no root `Darkspyre.Inference` package or facade assembly.
+- Each package's nuget.org page is the `PACKAGE.md` beside its project followed by the family section in `eng/PackageFamily.md`, composed at pack time (`eng/README.md`, "Package contents"). A page holds only that package's consumer documentation: no build or development notes, ticket keys, out-of-build providers or version numbers. The product READMEs are the design record and are not packed.
 - Connect, Tensor and the UI.Settings packages reference the Common package at the exact release version and never embed the Common assembly. No project overrides the version from `/Directory.Build.props`.
 - Put a contract in Common only when Connect and Tensor share its semantics. Similar property names are not a shared contract. Connector-only contracts stay in their Connect capability assembly.
 - `Tensor.Common` holds only behaviour two Tensor capabilities share. `Tensor.Registry` owns `TensorEngineRegistry` and `AddTensorEngines`; `Tensor.Common` and the implementations never reference it.
@@ -130,4 +131,4 @@ The version is `<net>.<release>.<minor>`: the .NET generation, a breaking-contra
 
 Before a release, each active solution is at zero warnings and passes restore, build, tests, pack and the dependency audit. `deploy-major.sh` and `deploy-minor.sh` prepare, verify and tag a release, and the Publish workflow (`.github/workflows/publish.yml`) publishes the tag to nuget.org, only on the user's word; `eng/README.md` documents their gates. When changing the release scripts, run `bash -n` on `deploy-major.sh`, `deploy-minor.sh`, `eng/deploy.sh` and `eng/pack.sh`, and run `bash eng/package-assets.tests.sh`, as `eng/README.md` "Offline verification" describes. Never test a script change by publishing a dummy version.
 
-Every package carries a readable README and the repository license. `eng/VerifyPackages` and `eng/VerifyConsumer` check package boundaries, the exact Common dependency and the release source; `eng/README.md` says how to run them.
+Every package carries its own page as `README.md`, composed from its `PACKAGE.md` and `eng/PackageFamily.md`, and the repository license. `eng/VerifyPackages` and `eng/VerifyConsumer` check package boundaries, each archive's page, the exact Common dependency and the release source; `eng/README.md` says how to run them.

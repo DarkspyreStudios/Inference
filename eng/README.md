@@ -64,7 +64,15 @@ packages are ignored outputs under `artifacts/`.
 
 ## Package contents
 
-Every package includes a readable package README and the repository license. Pack verification
+Every package includes its own nuget.org page as `README.md` and the repository license. The page's sources are
+`PACKAGE.md` beside the package's project, which starts with `# <PackageId>` and holds only that package's consumer
+documentation, and `eng/PackageFamily.md`, the family section written once. The `ComposePackageReadme` target in
+`Directory.Build.targets` runs before `_GetPackageFiles` and writes `obj/<configuration>/<tfm>/package/README.md`: the
+page and the family section, each with trailing white space removed, one blank line between them and one final line
+break, in UTF-8 without a byte order mark. It fails the pack when `PACKAGE.md` is missing, when its first line is not
+`# <PackageId>`, or when the page or the family section holds a work note: a ticket key (`DSA-<n>`), "phase 1" or a
+person's name the check lists. The repository READMEs are the design record and are not packed. Package pages carry no
+version number, so a release changes no page. Pack verification
 confirms that the Common assembly appears only in the Common package, that internal library dependencies use the exact synchronized version, and that each Tensor library
 contains only its own assembly plus XML documentation. Connect.Common and each provider own one assembly.
 The media Connect package keeps Image, TTS and Audio together and depends on Connect.Common.
@@ -75,7 +83,11 @@ consumer copies beside its output and never references (`Connect/README.md`).
 
 Source builds use project references. `Directory.Build.targets` pins internal library dependencies to `[$(Version)]` when generating each library's NuGet manifest. `eng/VerifyPackages`
 rejects foreign DLLs, native binaries and shader sources, local-only dependencies, missing owned
-assemblies or documentation, and mismatched Common versions.
+assemblies or documentation, and mismatched Common versions. It also recomputes each archive's expected `README.md`
+from the package's `PACKAGE.md` and `eng/PackageFamily.md` in its source context with the same composition rule, and
+rejects an archive whose `README.md` differs from it in any byte, starts with a byte order mark or is not valid UTF-8.
+It finds the page beside the one `<PackageId>.csproj` under the repository root, skipping `bin`, `obj`, `artifacts`
+and `tmp` folders.
 
 Whisper runtime build assets flow through its public NuGet dependency (`PrivateAssets="none"`).
 The shared build target marks assets imported from `Whisper.net.Runtime`, `Whisper.net.Runtime.Metal` and
@@ -110,7 +122,10 @@ bash eng/package-assets.tests.sh # Requires restored Tensor dependency assets; n
 The package-asset checks evaluate real Tensor pack inputs and synthetic copy-path fixtures.
 They verify that Whisper's shader remains a copy-to-output asset but is excluded from Tensor's own
 archive inputs. Duplicate None/None and None/Content destinations fail; unique paths and noncopied
-files pass. The archive verifier also rejects versioned ELF libraries, `.metal` shader sources,
+files pass. For each of the 22 projects `eng/pack.sh` lists, they check that `_GetPackageFiles` packs exactly one
+`README.md`, from `obj/.../package/README.md`, and that the file equals the composition of the project's `PACKAGE.md`
+and `eng/PackageFamily.md`. `eng/VerifyConsumer.Tests/PackagePageFixture.proj` composes a page holding a ticket key,
+and the checks expect the work-note error. The archive verifier also rejects versioned ELF libraries, `.metal` shader sources,
 compiled shaders and GPU code alongside native binaries.
 
 `VerifyPackages` reads expected dependency versions from `Directory.Packages.props` in its own

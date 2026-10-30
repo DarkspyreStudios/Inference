@@ -1,5 +1,6 @@
 using System.IO.Compression;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
 using NuGet.Versioning;
@@ -160,6 +161,15 @@ internal static class PackageVerification
         foreach (string assembly in assemblies.Where(name => name.StartsWith("Darkspyre.Inference.", StringComparison.Ordinal)))
             Require(entries.Contains($"lib/net11.0/{assembly}.xml", StringComparer.Ordinal), $"{id}: missing XML documentation for {assembly}");
         Require(entries.Contains("README.md", StringComparer.Ordinal) && entries.Contains("LICENSE.md", StringComparer.Ordinal), $"{id}: missing README or license");
+        // The archive's README.md must be exactly the composition Directory.Build.targets writes: the package's PACKAGE.md
+        // and eng/PackageFamily.md, each with trailing white space removed, one blank line between them and one final
+        // line break, in UTF-8 without a byte order mark.
+        byte[] readmeBytes = ReadBytes(archive, "README.md");
+        (string pageText, string familyText) = PackagePages.Sources(id);
+        string expectedReadme = pageText.TrimEnd() + "\n\n" + familyText.TrimEnd() + "\n";
+        Require(readmeBytes is not [0xEF, 0xBB, 0xBF, ..]
+            && new UTF8Encoding(encoderShouldEmitUTF8Identifier: false, throwOnInvalidBytes: true).GetString(readmeBytes) == expectedReadme,
+            $"{id}: README.md is not exactly the package's PACKAGE.md followed by the family section");
         if (id == "Darkspyre.Inference.Tensor.Image.Supra")
             Require(entries.Contains("THIRD-PARTY-NOTICES.md", StringComparer.Ordinal), $"{id}: missing third-party notice for ported TensorSharp code");
         if (id == "Darkspyre.Inference.UI.Settings.Blazor")
@@ -199,6 +209,15 @@ internal static class PackageVerification
         }
     }
 
+    private static byte[] ReadBytes(ZipArchive archive, string path)
+    {
+        ZipArchiveEntry entry = archive.GetEntry(path) ?? throw new InvalidDataException($"missing {path}");
+        using Stream stream = entry.Open();
+        using var buffer = new MemoryStream();
+        stream.CopyTo(buffer);
+        return buffer.ToArray();
+    }
+
     private static bool IsNativeOrGpu(string path) => path.EndsWith(".so", StringComparison.OrdinalIgnoreCase)
         || Path.GetFileName(path).Contains(".so.", StringComparison.OrdinalIgnoreCase)
         || NativeOrGpuExtensions.Any(extension => path.EndsWith(extension, StringComparison.OrdinalIgnoreCase));
@@ -234,5 +253,46 @@ internal static class PackageVerification
     internal static void Require(bool condition, string message)
     {
         if (!condition) throw new InvalidDataException(message);
+    }
+}
+
+/// <summary>Reads the sources of a package's nuget.org page from the verifier's source context.</summary>
+internal static class PackagePages
+{
+    private static readonly string[] SkippedFolders = ["bin", "obj", "artifacts", "tmp"];
+
+    /// <summary>The package's PACKAGE.md beside its project file, and eng/PackageFamily.md. Every package id equals its
+    /// project file's name.</summary>
+    internal static (string Page, string Family) Sources(string id)
+    {
+        string root = RepositoryRoot();
+        string[] projects = Find(root, id + ".csproj").ToArray();
+        PackageVerification.Require(projects.Length == 1, $"{id}: expected one project file for the package");
+        string page = File.ReadAllText(Path.Combine(Path.GetDirectoryName(projects[0])!, "PACKAGE.md"), Encoding.UTF8);
+        string family = File.ReadAllText(Path.Combine(root, "eng", "PackageFamily.md"), Encoding.UTF8);
+        return (page, family);
+    }
+
+    // The repository root is the folder of the Directory.Packages.props DependencyPolicy.ReadSourcePolicy reads.
+    private static string RepositoryRoot()
+    {
+        DirectoryInfo? directory = new(AppContext.BaseDirectory);
+        while (directory is not null)
+        {
+            if (File.Exists(Path.Combine(directory.FullName, "Directory.Packages.props"))) return directory.FullName;
+            directory = directory.Parent;
+        }
+        throw new InvalidDataException("The verifier's source context has no authoritative Directory.Packages.props.");
+    }
+
+    private static IEnumerable<string> Find(string directory, string fileName)
+    {
+        string candidate = Path.Combine(directory, fileName);
+        if (File.Exists(candidate)) yield return candidate;
+        foreach (string child in Directory.EnumerateDirectories(directory))
+        {
+            if (SkippedFolders.Contains(Path.GetFileName(child), StringComparer.Ordinal)) continue;
+            foreach (string found in Find(child, fileName)) yield return found;
+        }
     }
 }

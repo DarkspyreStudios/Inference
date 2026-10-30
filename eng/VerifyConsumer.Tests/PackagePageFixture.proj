@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- eng/package-assets.tests.sh composes a page that holds a ticket key through the shared ComposePackageReadme task in
+       Directory.Build.targets and expects the work-note error. The page is written under obj/, never committed. -->
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <FixtureFolder>$(BaseIntermediateOutputPath)package-page-fixture/</FixtureFolder>
+  </PropertyGroup>
+  <Target Name="ComposeFixturePage">
+    <WriteLinesToFile File="$(FixtureFolder)PACKAGE.md" Lines="# Fixture.PackagePage;The fix for DSA-1 is in this release." Overwrite="true" />
+    <ComposePackageReadme PackageId="Fixture.PackagePage" Page="$(FixtureFolder)PACKAGE.md"
+                          Family="$(MSBuildThisFileDirectory)../PackageFamily.md" Output="$(FixtureFolder)README.md" />
+  </Target>
+</Project>
