@@ -22,7 +22,7 @@ internal static class ManagedAgentPolicy
         SupportsCompactNow = InferenceSupport.Supported,
         SupportsSteering = InferenceSupport.Supported,
         SupportsInterrupt = InferenceSupport.Supported,
-        // The managed runtime sends tool output through Direct Codex Responses.
+        // The managed runtime sends tool output through the Responses route.
         RichContentSupported = RichContentRoutes.Responses
     };
 
