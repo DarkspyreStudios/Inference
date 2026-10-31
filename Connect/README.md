@@ -245,6 +245,7 @@ in its own message by the attachment notice, so any history opens.
 | SupportsCompactionHandoff | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported |
 | SupportsNativeResume | Unsupported | Unsupported | Supported | Supported | Unsupported |
 | SupportsSteering | Supported | Supported | Supported | Unsupported | Supported |
+| SupportsSteeringAttachments | Unsupported | Unsupported | Supported | Unsupported | Unsupported |
 | SupportsInterrupt | Supported | Supported | Supported | Unsupported | Supported |
 | SupportsExternalToolHandoff | Supported | Supported | Unknown | Unsupported | Supported |
 | ResourceObservation | Unsupported | Unsupported | Supported | Unsupported | Unsupported |
@@ -4544,7 +4545,9 @@ attachment access must survive reopen or live compaction. Keep the original file
 cache affinity is not file storage.
 
 Managed sessions expose `ThreadId` and `SessionId`, explicit interrupt, safe-boundary steering,
-and host context operations. Codex and Claude continue, fork and rewind by starting a new session with the cut
+and host context operations. A managed steer joins the running turn as text, so it reports
+`SupportsSteeringAttachments` Unsupported and throws `NotSupportedException` for a steer with attachments rather
+than dropping them. Codex and Claude continue, fork and rewind by starting a new session with the cut
 history; `ResumeSessionAsync` refuses on both. Claude supports interrupt and steering. Tools return
 text plus provider-neutral image/document attachments. On Codex, an image URL in a turn's input
 becomes the text `[Image: {url}]`. Claude receives tool-result resources inline in the bridge's MCP results;
@@ -4557,7 +4560,10 @@ instructions when a `SkillFolders` folder holds a `SKILL.md`. Inference answers 
 SKILL.md text and the skill's folder); a Host tool of either name is used in its place.
 
 A Claude steer is a user message written to the CLI with `priority: "next"` and `origin: {kind: "human"}`, keyed by a
-new uuid. It does not wait for the turn gate, and its echo never starts a host turn. During a tool call the CLI adds
+new uuid. It carries the attachments passed to `SteerAsync` as the content blocks of that message, the same blocks a
+turn's attachments become, so `SupportsSteeringAttachments` is Supported. They take the turn path's normalization,
+reference validation and resource inlining: an attachment the model or route cannot take is left out and named in a
+text block of the same message. The steer does not wait for the turn gate, and its echo never starts a host turn. During a tool call the CLI adds
 the steer to the tool results of the same turn. When the steer arrives as the model finishes, the CLI ends its turn
 with `queued_turn_count` above 0 and then starts its own turn for the steer. The host turn stays open across both CLI
 turns and completes at the second result; its usage request ids carry a suffix per CLI turn, and its run totals add

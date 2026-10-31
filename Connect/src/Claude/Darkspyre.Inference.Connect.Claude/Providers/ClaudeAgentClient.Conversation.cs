@@ -147,12 +147,14 @@ internal sealed partial class ClaudeAgentClient
         }
 
         /// <summary>
-        /// Sends <paramref name="input"/> to the running inner turn. The saved history records it where the CLI takes it
-        /// in, when its lifecycle reports it started.
+        /// Sends <paramref name="input"/> and <paramref name="attachments"/> to the running inner turn. The saved
+        /// history records them where the CLI takes them in, when its lifecycle reports it started.
         /// </summary>
-        public async Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input, CancellationToken cancellationToken = default)
+        public async Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input,
+            IReadOnlyList<LlmMessageAttachment> attachments, CancellationToken cancellationToken = default)
         {
             ArgumentNullException.ThrowIfNull(input);
+            ArgumentNullException.ThrowIfNull(attachments);
             ObjectDisposedException.ThrowIf(_retirement is not null, this);
             string steerId = Guid.NewGuid().ToString();
             ActiveTurn turn;
@@ -164,11 +166,11 @@ internal sealed partial class ClaudeAgentClient
                 if (_turn is not { } active || active.Id != turnId || active.InnerTurnId is not { } running || _inner is not { } open)
                     throw new ArgumentException("The requested turn is not active.", nameof(turnId));
                 (turn, inner, innerTurnId) = (active, open, running);
-                turn.Steers.Add(steerId, ManagedAgentSession.UserMessage(new LlmAgentTurnRequest { Input = input }));
+                turn.Steers.Add(steerId, ManagedAgentSession.UserMessage(new LlmAgentTurnRequest { Input = input, Attachments = attachments }));
             }
             try
             {
-                await inner.SteerAsync(innerTurnId, steerId, input, cancellationToken);
+                await inner.SteerAsync(innerTurnId, steerId, input, attachments, cancellationToken);
             }
             catch
             {

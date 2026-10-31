@@ -402,9 +402,14 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         yield break;
     }
 
-    public Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input, CancellationToken cancellationToken = default)
+    public Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input,
+        IReadOnlyList<LlmMessageAttachment> attachments, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        ArgumentNullException.ThrowIfNull(attachments);
+        // This runtime adds a steer to the running turn as text, so attachments would be lost instead of sent.
+        if (attachments.Count > 0)
+            throw new NotSupportedException("This runtime's steer channel carries no binary attachments.");
         string text = TextContent(input);
         if (text.Length == 0) { throw new ArgumentException("Steering requires nonempty text."); }
         lock (_sync)

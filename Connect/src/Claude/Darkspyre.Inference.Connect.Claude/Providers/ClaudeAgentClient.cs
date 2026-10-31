@@ -611,34 +611,48 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         /// The turn's content: the opening context, then the turn instructions, the input, a notice for each attachment
         /// left out, and the answer schema's guidance, followed by the attachments that are sent.
         /// </summary>
-        private async Task<(JsonArray Content, string? Notice)> PrepareInputAsync(LlmAgentTurnRequest turn, string? selectedModelId,
-            LlmProviderCapabilities capabilities, CancellationToken token)
+        private Task<(JsonArray Content, string? Notice)> PrepareInputAsync(LlmAgentTurnRequest turn, string? selectedModelId,
+            LlmProviderCapabilities capabilities, CancellationToken token) =>
+            ProjectUserMessageAsync(turn.Attachments, turn.ModelId ?? selectedModelId ?? string.Empty, capabilities,
+                _openingContext, notice =>
+                {
+                    LlmAgentContent[] composed =
+                    [
+                        .. string.IsNullOrEmpty(turn.Instructions) ? [] : new LlmAgentContent[]
+                        {
+                            new LlmAgentTextContent($"Instructions for this turn:\n{turn.Instructions}\n\n")
+                        },
+                        .. turn.Input,
+                        .. notice.Length == 0 ? [] : new LlmAgentContent[] { new LlmAgentTextContent(notice) },
+                        .. turn.OutputSchema is { } schema ? new LlmAgentContent[] { new LlmAgentTextContent(StructuredOutput.Guidance(schema)) } : []
+                    ];
+                    return composed;
+                }, token);
+
+        /// <summary>
+        /// One user message's CLI content: the content <paramref name="compose"/> returns, then the attachments the
+        /// model and route can take. Normalization leaves out an attachment they cannot take and names it in the notice
+        /// text <paramref name="compose"/> receives, and a resource reference is inlined under the session's resource
+        /// scope. A turn and a steer both put their input on the wire this way.
+        /// </summary>
+        private async Task<(JsonArray Content, string? Notice)> ProjectUserMessageAsync(
+            IReadOnlyList<LlmMessageAttachment> attachments, string modelId, LlmProviderCapabilities capabilities,
+            LlmAgentContext? openingContext, Func<string, IReadOnlyList<LlmAgentContent>> compose, CancellationToken token)
         {
-            LlmAgentContext? openingContext = _openingContext;
-            string modelId = turn.ModelId ?? selectedModelId ?? string.Empty;
             // An attachment the model or route cannot take is left out of this request, with a notice in its place.
-            LlmChatMessage turnMessage = LlmRequestNormalizer.Normalize(_connection, new LlmChatRequest
+            LlmChatMessage message = LlmRequestNormalizer.Normalize(_connection, new LlmChatRequest
             {
                 ModelId = modelId,
                 Resources = _resourceAccess,
-                Messages = [new("user", string.Empty) { Attachments = turn.Attachments }]
+                Messages = [new("user", string.Empty) { Attachments = attachments }]
             }, capabilities).Messages[0];
-            LlmAgentContent[] input =
-            [
-                .. string.IsNullOrEmpty(turn.Instructions) ? [] : new LlmAgentContent[]
-                {
-                    new LlmAgentTextContent($"Instructions for this turn:\n{turn.Instructions}\n\n")
-                },
-                .. turn.Input,
-                .. turnMessage.Content.Length == 0 ? [] : new LlmAgentContent[] { new LlmAgentTextContent(turnMessage.Content) },
-                .. turn.OutputSchema is { } schema ? new LlmAgentContent[] { new LlmAgentTextContent(StructuredOutput.Guidance(schema)) } : []
-            ];
+            IReadOnlyList<LlmAgentContent> input = compose(message.Content);
             var request = new LlmChatRequest
             {
                 ModelId = modelId,
                 Resources = _resourceAccess,
                 Messages = [.. openingContext?.Entries.Select(entry => entry.Message) ?? [],
-                    new("user", string.Empty) { Attachments = turnMessage.Attachments }]
+                    new("user", string.Empty) { Attachments = message.Attachments }]
             };
             LlmAttachments.ValidateReferences(request, supportsResources: _resourceAccess is not null);
             (JsonArray Content, string? Notice) Project(LlmChatRequest prepared)
@@ -667,26 +681,39 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         public Task SteerAsync(
             string turnId,
             IReadOnlyList<LlmAgentContent> input,
+            IReadOnlyList<LlmMessageAttachment> attachments,
             CancellationToken cancellationToken = default) =>
-            SteerAsync(turnId, Guid.NewGuid().ToString(), input, cancellationToken);
+            SteerAsync(turnId, Guid.NewGuid().ToString(), input, attachments, cancellationToken);
 
         /// <summary>
-        /// Writes <paramref name="input"/> as a user message with <c>priority: "next"</c>, keyed by
-        /// <paramref name="steerId"/>. The CLI takes it into the running turn at the next model step, or starts its own
-        /// turn for it once the running one ends; either way its output stays in the host turn. The steer does not
-        /// wait for the turn gate, and its echo never starts a host turn.
+        /// Writes <paramref name="input"/> and <paramref name="attachments"/> as a user message with
+        /// <c>priority: "next"</c>, keyed by <paramref name="steerId"/>. The CLI takes it into the running turn at the
+        /// next model step, or starts its own turn for it once the running one ends; either way its output stays in the
+        /// host turn. The steer does not wait for the turn gate, and its echo never starts a host turn.
         /// </summary>
         internal async Task SteerAsync(
             string turnId,
             string steerId,
             IReadOnlyList<LlmAgentContent> input,
+            IReadOnlyList<LlmMessageAttachment> attachments,
             CancellationToken cancellationToken)
         {
             using LlmOperationLifetime.Lease operation = _lifetime.Enter(cancellationToken);
             cancellationToken = operation.Token;
             ArgumentNullException.ThrowIfNull(input);
+            ArgumentNullException.ThrowIfNull(attachments);
             if (input.Count == 0) throw new ArgumentException("Steering requires input.", nameof(input));
-            JsonArray content = SerializeInput(input, []);
+            string? steerModelId;
+            lock (_route) { steerModelId = _selectedModelId; }
+            // The steer's attachments take the turn path's normalization, reference validation and resource inlining.
+            // The conversation is already open, so no opening context goes with it.
+            (JsonArray content, _) = await ProjectUserMessageAsync(attachments, steerModelId ?? string.Empty,
+                ClaudeCliLlmClient.ResolveCapabilities(_connection, steerModelId), openingContext: null, notice =>
+                {
+                    LlmAgentContent[] composed =
+                        [.. input, .. notice.Length == 0 ? [] : new LlmAgentContent[] { new LlmAgentTextContent(notice) }];
+                    return composed;
+                }, cancellationToken);
             lock (_route)
             {
                 if (_failure is { } failure) { throw failure; }

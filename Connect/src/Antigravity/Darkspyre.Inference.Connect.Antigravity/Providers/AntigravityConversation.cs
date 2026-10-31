@@ -113,8 +113,9 @@ internal sealed class AntigravityConversation : ILlmAgentSession
     public IAsyncEnumerable<LlmAgentEvent> ContinueTurnAsync(LlmAgentTurnContinuation continuation,
         CancellationToken cancellationToken = default) => NativeAgentContract.UnsupportedContinuation(cancellationToken);
 
-    public Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input, CancellationToken cancellationToken = default) =>
-        Inner().SteerAsync(turnId, input, cancellationToken);
+    public Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input,
+        IReadOnlyList<LlmMessageAttachment> attachments, CancellationToken cancellationToken = default) =>
+        Inner().SteerAsync(turnId, input, attachments, cancellationToken);
 
     public Task InterruptAsync(string turnId, CancellationToken cancellationToken = default) =>
         Inner().InterruptAsync(turnId, cancellationToken);

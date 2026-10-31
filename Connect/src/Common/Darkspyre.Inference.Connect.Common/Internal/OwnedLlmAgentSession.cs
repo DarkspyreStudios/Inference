@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using Darkspyre.Inference.Common.LLM;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -54,8 +55,8 @@ internal sealed class OwnedLlmAgentSession : ILlmAgentSession
         StreamAsync((session, token) => session.RunTurnAsync(request, token), cancellationToken);
 
     public Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input,
-        CancellationToken cancellationToken = default) =>
-        InvokeAsync((session, token) => session.SteerAsync(turnId, input, token), cancellationToken);
+        IReadOnlyList<LlmMessageAttachment> attachments, CancellationToken cancellationToken = default) =>
+        InvokeAsync((session, token) => session.SteerAsync(turnId, input, attachments, token), cancellationToken);
 
     public Task InterruptAsync(string turnId, CancellationToken cancellationToken = default) =>
         InvokeAsync((session, token) => session.InterruptAsync(turnId, token), cancellationToken);

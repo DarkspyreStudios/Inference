@@ -373,6 +373,7 @@ internal sealed class AntigravityAgentSession : ILlmAgentSession
     public Task SteerAsync(
         string turnId,
         IReadOnlyList<LlmAgentContent> input,
+        IReadOnlyList<LlmMessageAttachment> attachments,
         CancellationToken cancellationToken = default)
     {
         using LlmOperationLifetime.Lease operation = _retirement.Enter(cancellationToken);

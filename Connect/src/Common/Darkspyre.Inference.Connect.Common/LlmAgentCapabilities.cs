@@ -63,6 +63,13 @@ public sealed record LlmAgentCapabilities
     /// <summary>SteerAsync adds input to a running turn.</summary>
     public InferenceSupport SupportsSteering { get; init; }
 
+    /// <summary>
+    /// The steer channel carries the binary attachments passed to <see cref="ILlmAgentSession.SteerAsync"/>.
+    /// Only <see cref="InferenceSupport.Supported"/> takes them; every other value takes text and image content
+    /// alone, and a caller that passes attachments to such a session gets a <see cref="NotSupportedException"/>.
+    /// </summary>
+    public InferenceSupport SupportsSteeringAttachments { get; init; }
+
     /// <summary>Explicit InterruptAsync support; enumeration cancellation is separate.</summary>
     public InferenceSupport SupportsInterrupt { get; init; }
 
@@ -110,7 +117,8 @@ public sealed record LlmAgentCapabilities
             || SupportedRuntimePolicies is null || SupportedRuntimePolicies.Any(kind => !Enum.IsDefined(kind))
             || HostedTools.Any(kind => !Enum.IsDefined(kind))
             || ((SupportsCompactionHandoff == InferenceSupport.Supported)
-                && ((SupportsContextCapture == InferenceSupport.Unsupported) || (SupportsContextReplacement == InferenceSupport.Unsupported) || (SupportsContextStatus == InferenceSupport.Unsupported))))
+                && ((SupportsContextCapture == InferenceSupport.Unsupported) || (SupportsContextReplacement == InferenceSupport.Unsupported) || (SupportsContextStatus == InferenceSupport.Unsupported)))
+            || ((SupportsSteeringAttachments == InferenceSupport.Supported) && (SupportsSteering != InferenceSupport.Supported)))
         {
             throw new ArgumentException("The agent capability combination cannot be implemented consistently.");
         }

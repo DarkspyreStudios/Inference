@@ -741,7 +741,8 @@ public sealed class ConsoleAgentDiagnosticsTests
         public Task ReplaceContextAsync(LlmAgentContext context, long expectedRevision, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<LlmAgentContext> CompactWithProviderAsync(LlmProviderCompactionRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public IAsyncEnumerable<LlmAgentEvent> ContinueTurnAsync(LlmAgentTurnContinuation continuation, CancellationToken cancellationToken = default) => throw new NotSupportedException();
-        public Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+        public Task SteerAsync(string turnId, IReadOnlyList<LlmAgentContent> input,
+            IReadOnlyList<LlmMessageAttachment> attachments, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task InterruptAsync(string turnId, CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public IAsyncEnumerable<LlmAgentEvent> ObserveAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<LlmAgentResource>> GetResourcesAsync(CancellationToken cancellationToken = default) => throw new NotSupportedException();

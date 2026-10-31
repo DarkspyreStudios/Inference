@@ -666,9 +666,19 @@ public interface ILlmAgentSession : IAsyncDisposable
         CancellationToken cancellationToken = default);
 
     /// <summary>Adds input to the running turn.</summary>
+    /// <param name="turnId">The running turn the input joins.</param>
+    /// <param name="input">The input content, which cannot be empty.</param>
+    /// <param name="attachments">
+    /// The binary content sent with the input, as <see cref="LlmAgentTurnRequest.Attachments"/> sends a turn's.
+    /// Pass none unless <see cref="LlmAgentCapabilities.SupportsSteeringAttachments"/> is
+    /// <see cref="Darkspyre.Inference.Common.InferenceSupport.Supported"/>; a session whose steer channel carries no
+    /// binary content throws <see cref="NotSupportedException"/> rather than dropping the attachments.
+    /// </param>
+    /// <param name="cancellationToken">Cancels the call.</param>
     Task SteerAsync(
         string turnId,
         IReadOnlyList<LlmAgentContent> input,
+        IReadOnlyList<LlmMessageAttachment> attachments,
         CancellationToken cancellationToken = default);
 
     /// <summary>Interrupts the running turn.</summary>

@@ -50,6 +50,8 @@ internal static class ClaudeNativeAgent
         SupportsNativeResume = InferenceSupport.Supported,
         // A steer goes to the CLI with priority "next": it joins the running turn at the next model step.
         SupportsSteering = InferenceSupport.Supported,
+        // A steer is a user message, so it carries the same attachment content blocks a turn's input does.
+        SupportsSteeringAttachments = InferenceSupport.Supported,
         SupportsInterrupt = InferenceSupport.Supported,
         SupportsExternalToolHandoff = InferenceSupport.Unknown,
         SupportsCompactNow = InferenceSupport.Supported,

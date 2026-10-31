@@ -357,10 +357,12 @@ internal sealed class BedrockAgentCoreSession : ILlmAgentSession
     public Task SteerAsync(
         string turnId,
         IReadOnlyList<LlmAgentContent> input,
+        IReadOnlyList<LlmMessageAttachment> attachments,
         CancellationToken cancellationToken = default)
     {
         _ = turnId;
         _ = input;
+        _ = attachments;
         _ = cancellationToken;
         _lifetime.ThrowIfStopping();
         throw new NotSupportedException("AgentCore Harness does not support steering an active turn.");

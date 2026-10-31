@@ -21,6 +21,8 @@ internal static class ManagedAgentPolicy
         SupportsCompactionHandoff = InferenceSupport.Unsupported,
         SupportsCompactNow = InferenceSupport.Supported,
         SupportsSteering = InferenceSupport.Supported,
+        // The managed runtime folds a steer into the running turn as text, so it takes no attachments.
+        SupportsSteeringAttachments = InferenceSupport.Unsupported,
         SupportsInterrupt = InferenceSupport.Supported,
         // The managed runtime sends tool output through the Responses route.
         RichContentSupported = RichContentRoutes.Responses

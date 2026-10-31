@@ -23,6 +23,7 @@ internal static class AntigravityNativeAgent
         // A conversation reports Unsupported once its open AGY conversation is not the one its thread id names.
         SupportsNativeResume = InferenceSupport.Supported,
         SupportsSteering = InferenceSupport.Unsupported,
+        SupportsSteeringAttachments = InferenceSupport.Unsupported,
         SupportsInterrupt = InferenceSupport.Unsupported,
         SupportsExternalToolHandoff = InferenceSupport.Unsupported,
         SupportsCompactNow = InferenceSupport.Supported,

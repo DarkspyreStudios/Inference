@@ -1034,7 +1034,7 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         process.Push(ToolCall("c1", 1));
         await entered.Task.WaitAsync(limit.Token);
 
-        await session.SteerAsync(turnId, [new LlmAgentTextContent("Also end with BANANA.")], limit.Token);
+        await session.SteerAsync(turnId, [new LlmAgentTextContent("Also end with BANANA.")], [], limit.Token);
 
         string steerId = await process.WaitForUserMessage(limit.Token, index: 1);
         JsonElement steer = process.Writes().Single(root => root.GetProperty("type").GetString() == "user"
@@ -1073,7 +1073,7 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         string hostInput = await process.WaitForUserMessage(limit.Token);
         process.Push(new { type = "assistant", message = new { id = "m1", content = new[] { new { type = "text", text = "first reply" } } } });
 
-        await session.SteerAsync(turnId, [new LlmAgentTextContent("Also end with BANANA.")], limit.Token);
+        await session.SteerAsync(turnId, [new LlmAgentTextContent("Also end with BANANA.")], [], limit.Token);
         string steerId = await process.WaitForUserMessage(limit.Token, index: 1);
         process.Push(Lifecycle(steerId, "queued"));
         // The steer came too late for this reply: the CLI ends its turn, then starts one of its own for the steer.
@@ -1102,6 +1102,35 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
     }
 
     [Fact]
+    public async Task ASteerSendsItsAttachmentsWithItsText()
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await Start(process);
+        Assert.Equal(InferenceSupport.Supported, (await session.GetCapabilitiesAsync()).SupportsSteeringAttachments);
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, process, limit.Token);
+        string turnId = feed.Current.TurnId!;
+        await process.WaitForUserMessage(limit.Token);
+
+        await session.SteerAsync(turnId, [new LlmAgentTextContent("Use the notes too.")],
+            [new LlmAttachment
+            {
+                Kind = LlmBinaryKind.Document,
+                FileName = "notes.txt",
+                MediaType = "text/plain",
+                Data = System.Text.Encoding.UTF8.GetBytes("the attached notes")
+            }], limit.Token);
+
+        string steerId = await process.WaitForUserMessage(limit.Token, index: 1);
+        JsonElement content = process.Writes().Single(root => root.GetProperty("type").GetString() == "user"
+            && root.GetProperty("uuid").GetString() == steerId).GetProperty("message").GetProperty("content");
+        Assert.Equal("Use the notes too.", content[0].GetProperty("text").GetString());
+        Assert.Equal("document", content[1].GetProperty("type").GetString());
+        Assert.Equal("notes.txt", content[1].GetProperty("title").GetString());
+        Assert.Equal("the attached notes", content[1].GetProperty("source").GetProperty("data").GetString());
+    }
+
+    [Fact]
     public async Task AnInterruptWithdrawsAQueuedSteer()
     {
         var process = new ManualProcess();
@@ -1110,7 +1139,7 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         await using IAsyncEnumerator<LlmAgentEvent> feed = await HostTurnAsync(session, process, limit.Token);
         List<LlmAgentEvent> events = [feed.Current];
         string turnId = feed.Current.TurnId!;
-        await session.SteerAsync(turnId, [new LlmAgentTextContent("Also end with BANANA.")], limit.Token);
+        await session.SteerAsync(turnId, [new LlmAgentTextContent("Also end with BANANA.")], [], limit.Token);
         string steerId = await process.WaitForUserMessage(limit.Token, index: 1);
         process.Push(Lifecycle(steerId, "queued"));
 
@@ -1157,7 +1186,7 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         first.Push(new { type = "stream_event", @event = new { type = "message_stop" } });
         first.Push(ToolCall("c1", 1, "fetch"));
         await entered.Task.WaitAsync(limit.Token);
-        await session.SteerAsync(turnId, [new LlmAgentTextContent("Also end with BANANA.")], limit.Token);
+        await session.SteerAsync(turnId, [new LlmAgentTextContent("Also end with BANANA.")], [], limit.Token);
         await first.WaitForUserMessage(limit.Token, index: 1);
 
         // The settled step measures over the trigger, so the result is never written and the steer never starts.
