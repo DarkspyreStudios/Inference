@@ -187,7 +187,8 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             record,
             steerSettled,
             beforeResults,
-            rateLimits);
+            rateLimits,
+            logger);
         try
         {
             session.Start();
@@ -218,7 +219,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             "--verbose",
             "--input-format", "stream-json",
             "--output-format", "stream-json",
-            // The echo marks where each host turn starts; output with no echo before it is the runtime's own turn.
+            // The echo marks where each host turn starts. Output with no echo goes to a written turn, or else is the runtime's own turn.
             "--replay-user-messages",
             "--include-partial-messages",
             .. ClaudeCliConfiguration.IsolationArguments,
@@ -298,6 +299,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         private string? _selectedModelId;
         private LlmConnection _connection;
         private readonly ClaudeRateLimitLog _rateLimits;
+        private readonly ILogger _logger;
         private readonly HashSet<string> _accountedCalls = new(StringComparer.Ordinal);
         private readonly HashSet<string> _completedResults = new(StringComparer.Ordinal);
         // The host tools the CLI reaches through its in-process MCP server.
@@ -363,9 +365,11 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             Action<LlmAgentEvent> record,
             Action<string, bool> steerSettled,
             Func<CancellationToken, ValueTask<bool>> beforeResults,
-            ClaudeRateLimitLog rateLimits)
+            ClaudeRateLimitLog rateLimits,
+            ILogger logger)
         {
             _rateLimits = rateLimits;
+            _logger = logger;
             _process = process;
             _record = record;
             _steerSettled = steerSettled;
@@ -1410,7 +1414,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         /// <summary>
         /// Reads the CLI for the session's lifetime. With <c>--replay-user-messages</c> the CLI echoes each host
         /// message when it starts processing it: output after the echo belongs to that host turn, and output with
-        /// no echo before it is a turn the runtime started itself.
+        /// no echo before it belongs to a written turn that is waiting, or otherwise is a turn the runtime started itself.
         /// </summary>
         private async Task ReadAsync(CancellationToken cancellationToken)
         {
@@ -1582,7 +1586,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         {
             lock (_route)
             {
-                TurnTarget? running = (TurnTarget?)_host ?? _provider;
+                TurnTarget? running = (TurnTarget?)_host ?? (TurnTarget?)_provider ?? AdoptWrittenTurn();
                 if (running is not null)
                 {
                     return running;
@@ -1593,8 +1597,27 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
                 _activeTurnId = _provider.Id;
                 _pendingToolCalls.Clear();
                 _sessionEvents.Writer.TryWrite(new LlmAgentProviderTurnStartedEvent(ThreadId, _provider.Id, null));
+                LogProviderTurnStarted(_logger, ThreadId, _provider.Id);
                 return _provider;
             }
+        }
+
+        /// <summary>
+        /// Output with no turn running and a written turn waiting belongs to that turn, whether or not its echo came.
+        /// A provider turn in its place would wait for the session to go idle while the session waits for this turn to end.
+        /// </summary>
+        /// <remarks>The caller holds <c>_route</c>.</remarks>
+        private HostTurn? AdoptWrittenTurn()
+        {
+            if (_written.Count == 0) return null;
+            HostTurn turn = _written[0];
+            _written.RemoveAt(0);
+            _host = turn;
+            _activeTurnId = turn.Id;
+            _pendingToolCalls.Clear();
+            LogWrittenTurnAdopted(_logger, ThreadId, turn.Id);
+            if (turn.InterruptOnStart || turn.Abandoned) _ = TryInterruptAsync(turn);
+            return turn;
         }
 
         private void Emit(LlmAgentEvent item)
@@ -1616,9 +1639,12 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         private void EndTurn(JsonElement root)
         {
             if (OptionalString(root, "uuid") is { } resultId && !_completedResults.Add(resultId)) { return; }
-            TurnTarget? target = CurrentTarget();
+            TurnTarget? target;
+            lock (_route) { target = (TurnTarget?)_host ?? (TurnTarget?)_provider ?? AdoptWrittenTurn(); }
             if (target is null)
             {
+                string unmatched = OptionalString(root, "subtype") ?? "none";
+                LogResultWithoutTurn(_logger, ThreadId, unmatched);
                 return;
             }
             target.Usage.Finish();
@@ -1630,15 +1656,18 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
             {
                 Emit(new LlmAgentMessageCompletedEvent(ThreadId, target.Id, $"result-{target.Id}", text));
             }
-            if (target is HostTurn waiting && WaitsForSteer(waiting, root))
+            bool continues = target is HostTurn waiting && WaitsForSteer(waiting, root);
+            string subtype = OptionalString(root, "subtype") ?? string.Empty;
+            string? stopReason = OptionalString(root, "stop_reason") ?? OptionalString(root, "terminal_reason");
+            int queuedTurns = OptionalInt32(root, "queued_turn_count") ?? 0;
+            LogTurnResult(_logger, ThreadId, target.Id, target is HostTurn, subtype, stopReason ?? "none", queuedTurns, continues);
+            if (continues)
             {
                 // A steer arrived as the model finished. The CLI starts the steer's own turn next, and its output
                 // continues this host turn, so the steer's reply reaches the same conversation.
                 target.Continue(usage);
                 return;
             }
-            string subtype = OptionalString(root, "subtype") ?? string.Empty;
-            string? stopReason = OptionalString(root, "stop_reason") ?? OptionalString(root, "terminal_reason");
             LlmAgentCompletionReason reason = subtype.Contains("interrupt", StringComparison.OrdinalIgnoreCase)
                 ? LlmAgentCompletionReason.Interruption
                 : subtype == "error_max_turns" ? LlmAgentCompletionReason.IterationLimit

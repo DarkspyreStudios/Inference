@@ -48,6 +48,31 @@ public sealed partial class ClaudeAgentResourcesTests : IDisposable
         Assert.False(settings.TryGetProperty("effortLevel", out _));
     }
 
+    [Fact]
+    public async Task OutputWithNoEchoBelongsToTheWrittenTurn()
+    {
+        var process = new ManualProcess();
+        await using ILlmAgentSession session = await Start(process, Connection());
+        using var limit = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using IAsyncEnumerator<LlmAgentEvent> feed = session.RunTurnAsync(new()
+        {
+            Input = [new LlmAgentTextContent("Reply with OK.")],
+        }, limit.Token).GetAsyncEnumerator(limit.Token);
+
+        Assert.True(await feed.MoveNextAsync());
+        await process.WaitForUserMessage(limit.Token);
+        process.Push(new
+        {
+            type = "assistant",
+            message = new { id = "message-1", content = new object[] { new { type = "text", text = "OK" } } },
+        });
+        process.Push(new { type = "result", subtype = "success", is_error = false, result = "OK", stop_reason = "end_turn" });
+        List<LlmAgentEvent> events = await ReadUntil(feed, item => item is LlmAgentTurnCompletedEvent);
+
+        Assert.Contains(events, item => item is LlmAgentMessageCompletedEvent { Text: "OK" });
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.IsType<LlmAgentTurnCompletedEvent>(events[^1]).Reason);
+    }
+
     [Theory]
     [InlineData(false, "low")]
     [InlineData(true, "medium")]

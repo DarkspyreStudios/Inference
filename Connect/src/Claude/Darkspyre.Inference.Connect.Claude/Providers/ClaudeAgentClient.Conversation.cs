@@ -19,6 +19,23 @@ internal sealed partial class ClaudeAgentClient
 
     private ILogger Logger => logger;
 
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Claude output on thread {ThreadId} came with no echo of written turn {TurnId}; it continues that turn")]
+    private static partial void LogWrittenTurnAdopted(ILogger logger, string threadId, string turnId);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Claude started its own turn {TurnId} on thread {ThreadId} with no written turn waiting")]
+    private static partial void LogProviderTurnStarted(ILogger logger, string threadId, string turnId);
+
+    [LoggerMessage(Level = LogLevel.Warning,
+        Message = "Claude reported result {Subtype} on thread {ThreadId} with no turn running")]
+    private static partial void LogResultWithoutTurn(ILogger logger, string threadId, string subtype);
+
+    [LoggerMessage(Level = LogLevel.Information,
+        Message = "Claude turn {TurnId} on thread {ThreadId} (written {Written}) reported result {Subtype}, stop {StopReason}, queued turns {QueuedTurns}, waits for a steer {WaitsForSteer}")]
+    private static partial void LogTurnResult(ILogger logger, string threadId, string turnId, bool written, string subtype,
+        string stopReason, int queuedTurns, bool waitsForSteer);
+
     [LoggerMessage(Level = LogLevel.Information,
         Message = "Claude context on {ConnectionId} thread {ThreadId} at {Point}: model {ModelId}, {UsedTokens} of {WindowTokens} tokens, compaction needed {NeedsCompaction}; window is the smallest of listed {ListedTokens}, learned {LearnedTokens}, policy cap {CapTokens}")]
     private static partial void LogContextStatus(ILogger logger, string connectionId, string threadId, string point, string modelId,
