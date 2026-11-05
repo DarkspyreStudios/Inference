@@ -6,7 +6,7 @@ in to one Claude account and runs only as that account. Its provider appears as 
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect.Claude
+dotnet add package Darkspyre.Inference.Connect.Claude --prerelease
 ```
 
 ## Register

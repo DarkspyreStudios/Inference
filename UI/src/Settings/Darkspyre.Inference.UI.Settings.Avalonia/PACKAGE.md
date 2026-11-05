@@ -8,7 +8,7 @@ appears.
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.UI.Settings.Avalonia
+dotnet add package Darkspyre.Inference.UI.Settings.Avalonia --prerelease
 ```
 
 ## Register

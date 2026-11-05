@@ -7,7 +7,7 @@ provider.
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Tensor.LLM.Qwen
+dotnet add package Darkspyre.Inference.Tensor.LLM.Qwen --prerelease
 ```
 
 ## Register
@@ -17,11 +17,19 @@ Construct `QwenLlmInference`, or call `AddTensorEngines()` from `Darkspyre.Infer
 
 ## Example
 
+Register the imported pack in the manager's catalog and install it through `packs.InstallAsync(modelKey)` when the
+person chooses to acquire it. The following load uses that installed pack.
+
 ```csharp
 await using var qwen = new QwenLlmInference(packs, TensorBackendKind.Auto, scratchDirectory);
 await qwen.StartAsync();
-await qwen.LoadAsync(modelKey); // Loaded or Failed arrives through EngineStatusChanged.
+await qwen.LoadAsync(modelKey); // Accepts loading, not completion.
+```
 
+Subscribe to `EngineStatusChanged` before loading. After it reports Loaded, make requests; handle Failed instead of
+sending a request after a failed load. Awaiting `LoadAsync` alone does not wait for Loaded.
+
+```csharp
 LlmInferenceResult result = await qwen.CompleteAsync(new LlmInferenceRequest
 {
     ModelId = modelKey.ModelId,

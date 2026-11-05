@@ -6,7 +6,7 @@ The model stays loaded across requests on CPU or CUDA. The application owns mode
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Tensor.STT.Whisper
+dotnet add package Darkspyre.Inference.Tensor.STT.Whisper --prerelease
 ```
 
 Whisper.net, its CPU and CUDA 12 Linux runtimes and NAudio.Core arrive as NuGet dependencies.
@@ -20,12 +20,20 @@ and large-v3-turbo.
 
 ## Example
 
+Install the selected pack through `TensorModelPackManager.InstallAsync` when the person chooses to acquire it. The
+following load assumes `modelKey` names an installed entry from `TensorSpeechModels.Whisper`.
+
 ```csharp
 using var packs = new TensorModelPackManager(new TensorModelCatalog(TensorSpeechModels.Whisper), packDirectory);
 await using var whisper = new WhisperSpeechToTextInference(packs);
 await whisper.StartAsync();
-await whisper.LoadAsync(modelKey); // Loaded or Failed arrives through EngineStatusChanged.
+await whisper.LoadAsync(modelKey); // Accepts loading, not completion.
+```
 
+Subscribe to `EngineStatusChanged` before loading. After it reports Loaded, transcribe; handle Failed instead of sending
+a request after a failed load. Awaiting `LoadAsync` alone does not wait for Loaded.
+
+```csharp
 SpeechTranscriptionResult result = await whisper.TranscribeAsync(new SpeechTranscriptionRequest(audio));
 ```
 

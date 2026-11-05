@@ -7,7 +7,7 @@ selected.
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Tensor.Ggml
+dotnet add package Darkspyre.Inference.Tensor.Ggml --prerelease
 ```
 
 The package ships no native GGML library. The application supplies verified GGML drivers and describes them in a

@@ -6,7 +6,7 @@ CPU. The engine implements Common's `IEmbeddingInference` and returns 768-dimens
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Tensor.Embedding.Gemma
+dotnet add package Darkspyre.Inference.Tensor.Embedding.Gemma --prerelease
 ```
 
 ## Register
@@ -17,13 +17,21 @@ Construct `GemmaEmbeddingInference` over a `TensorModelPackManager`, or call `Ad
 
 ## Example
 
+Install the selected pack through `TensorModelPackManager.InstallAsync` when the person chooses to acquire it. The
+following load assumes `GemmaEmbeddingModels.EmbeddingGemma2` is installed in `packDirectory`.
+
 ```csharp
 TensorModelPackDefinition gemma = GemmaEmbeddingModels.EmbeddingGemma2;
 using var packs = new TensorModelPackManager(new TensorModelCatalog([gemma]), packDirectory);
 await using var embeddings = new GemmaEmbeddingInference(packs);
 await embeddings.StartAsync();
-await embeddings.LoadAsync(gemma.Key); // Loaded or Failed arrives through EngineStatusChanged.
+await embeddings.LoadAsync(gemma.Key); // Accepts loading, not completion.
+```
 
+Subscribe to `EngineStatusChanged` before loading. After it reports Loaded, make requests; handle Failed instead of
+sending a request after a failed load. Awaiting `LoadAsync` alone does not wait for Loaded.
+
+```csharp
 EmbeddingResult result = await embeddings.EmbedAsync(new EmbeddingRequest
 {
     ModelId = gemma.Key.ModelId,

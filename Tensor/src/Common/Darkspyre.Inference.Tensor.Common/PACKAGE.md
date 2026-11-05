@@ -8,7 +8,7 @@ interfaces (`ITensorLlmInference`, `ITensorImageInference`, `ITensorDecisionInfe
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Tensor.Common
+dotnet add package Darkspyre.Inference.Tensor.Common --prerelease
 ```
 
 ## Register
@@ -29,7 +29,8 @@ await packs.InstallAsync(definition.Key, progress, cancellationToken);
 
 An engine then follows the same lifecycle: `StartAsync`, `LoadAsync`, the capability's inference calls,
 `UnloadAsync` and `StopAsync`. Each call returns once the engine accepts it; `EngineStatusChanged` reports Loading,
-Loaded, Unloaded, Stopped or Failed with its error.
+Loaded, Unloaded, Stopped or Failed with its error. Subscribe before calling `LoadAsync`, and start inference only after
+Loaded. A failed load reports Failed; awaiting `LoadAsync` alone does not wait for Loaded.
 
 ## Settings
 

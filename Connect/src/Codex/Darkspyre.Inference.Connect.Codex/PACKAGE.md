@@ -7,7 +7,7 @@ sessions. Its provider appears as "ChatGPT Subscription".
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect.Codex
+dotnet add package Darkspyre.Inference.Connect.Codex --prerelease
 ```
 
 ## Register

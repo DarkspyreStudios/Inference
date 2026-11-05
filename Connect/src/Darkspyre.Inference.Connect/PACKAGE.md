@@ -7,7 +7,7 @@ names; it never starts the server, installs models or plays audio.
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect
+dotnet add package Darkspyre.Inference.Connect --prerelease
 ```
 
 ## Register

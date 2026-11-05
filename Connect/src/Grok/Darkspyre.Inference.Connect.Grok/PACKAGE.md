@@ -7,7 +7,7 @@ sessions. Its provider appears as "Grok Subscription".
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect.Grok
+dotnet add package Darkspyre.Inference.Connect.Grok --prerelease
 ```
 
 ## Register

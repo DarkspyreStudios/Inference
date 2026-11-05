@@ -8,7 +8,7 @@ wording and states as the Avalonia editor.
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.UI.Settings.Blazor
+dotnet add package Darkspyre.Inference.UI.Settings.Blazor --prerelease
 ```
 
 ## Register

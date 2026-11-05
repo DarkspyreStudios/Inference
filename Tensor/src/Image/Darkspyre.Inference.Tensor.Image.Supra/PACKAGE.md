@@ -7,7 +7,7 @@ in the shared `ImageGenerationResult`.
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Tensor.Image.Supra
+dotnet add package Darkspyre.Inference.Tensor.Image.Supra --prerelease
 ```
 
 ## Register
@@ -24,7 +24,13 @@ using var packs = new TensorModelPackManager(new TensorModelCatalog([supra]), pa
 await using ITensorImageInference image = new SupraImageInference(packs);
 
 await image.StartAsync();
-await image.LoadAsync(supra.Key); // Loaded or Failed arrives through EngineStatusChanged.
+await image.LoadAsync(supra.Key); // Accepts loading, not completion.
+```
+
+Subscribe to `EngineStatusChanged` before loading. After it reports Loaded, generate; handle Failed instead of sending
+a request after a failed load. Awaiting `LoadAsync` alone does not wait for Loaded.
+
+```csharp
 ImageGenerationResult result = await image.GenerateAsync(new ImageGenerationRequest
 {
     ModelId = supra.Key.ModelId,
@@ -33,8 +39,7 @@ ImageGenerationResult result = await image.GenerateAsync(new ImageGenerationRequ
 await image.StopAsync();
 ```
 
-Wait for `EngineStatusChanged` to report Loaded before generating. The pack must already be installed through
-`TensorModelPackManager.InstallAsync`.
+The pack must already be installed through `TensorModelPackManager.InstallAsync` when the person chooses to acquire it.
 
 ## Settings
 

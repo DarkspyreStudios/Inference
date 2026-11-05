@@ -8,7 +8,7 @@ provider packages, such as `Darkspyre.Inference.Connect.OpenAiApi`.
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect.Common
+dotnet add package Darkspyre.Inference.Connect.Common --prerelease
 ```
 
 ## Register

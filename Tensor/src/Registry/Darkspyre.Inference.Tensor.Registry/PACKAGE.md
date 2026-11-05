@@ -7,7 +7,7 @@ an application offers every engine without keeping its own engine list.
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Tensor.Registry
+dotnet add package Darkspyre.Inference.Tensor.Registry --prerelease
 ```
 
 The package references every engine package. An application that uses one engine can reference that engine alone.

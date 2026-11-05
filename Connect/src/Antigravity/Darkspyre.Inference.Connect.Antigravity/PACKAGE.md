@@ -7,7 +7,7 @@ CLI keeps its own Google sign-in; Connect never reads, copies or stores its cred
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect.Antigravity
+dotnet add package Darkspyre.Inference.Connect.Antigravity --prerelease
 ```
 
 The package brings `Darkspyre.Inference.Connect.HostTools`. Both copy a program built for the application's runtime

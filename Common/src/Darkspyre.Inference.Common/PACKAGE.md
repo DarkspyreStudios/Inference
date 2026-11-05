@@ -8,7 +8,7 @@ calls a contract does not depend on where the model runs.
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Common
+dotnet add package Darkspyre.Inference.Common --prerelease
 ```
 
 ## Register

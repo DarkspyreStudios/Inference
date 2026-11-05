@@ -7,7 +7,7 @@ and `IInferenceSettingsPathPicker`, the editor's `SetupEditorState`, and exact n
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.UI.Settings.Core
+dotnet add package Darkspyre.Inference.UI.Settings.Core --prerelease
 ```
 
 ## Register

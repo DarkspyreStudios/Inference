@@ -8,7 +8,7 @@ framing and calibration run in C#. The engine implements Common's `IDecisionInfe
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Tensor.Decision.Laya
+dotnet add package Darkspyre.Inference.Tensor.Decision.Laya --prerelease
 ```
 
 ## Register
@@ -26,7 +26,13 @@ await packs.InstallAsync(customPack.Key, cancellationToken: cancellationToken);
 
 await using var laya = new LayaDecisionInference(packs);
 await laya.StartAsync(cancellationToken);
-await laya.LoadAsync(customPack.Key, cancellationToken); // Loaded or Failed arrives through EngineStatusChanged.
+await laya.LoadAsync(customPack.Key, cancellationToken); // Accepts loading, not completion.
+```
+
+Subscribe to `EngineStatusChanged` before loading. After it reports Loaded, make requests; handle Failed instead of
+sending a request after a failed load. Awaiting `LoadAsync` alone does not wait for Loaded.
+
+```csharp
 DecisionInferenceResult result = await laya.DecideAsync(
     request with { ModelId = customPack.Key.ModelId }, cancellationToken);
 ```

@@ -6,7 +6,7 @@ implements Common's `IEmbeddingInference` and returns unit-length vectors.
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Tensor.Embedding
+dotnet add package Darkspyre.Inference.Tensor.Embedding --prerelease
 ```
 
 ## Register
@@ -17,11 +17,19 @@ has no built-in pack.
 
 ## Example
 
+Register the imported pack in the manager's catalog and install it through `packs.InstallAsync(modelKey)` when the
+person chooses to acquire it. The following load uses that installed pack.
+
 ```csharp
 await using var embeddings = new TensorEmbeddingInference(packs);
 await embeddings.StartAsync();
-await embeddings.LoadAsync(modelKey); // Loaded or Failed arrives through EngineStatusChanged.
+await embeddings.LoadAsync(modelKey); // Accepts loading, not completion.
+```
 
+Subscribe to `EngineStatusChanged` before loading. After it reports Loaded, make requests; handle Failed instead of
+sending a request after a failed load. Awaiting `LoadAsync` alone does not wait for Loaded.
+
+```csharp
 EmbeddingResult result = await embeddings.EmbedAsync(new EmbeddingRequest
 {
     ModelId = modelKey.ModelId,

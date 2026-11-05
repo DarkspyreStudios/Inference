@@ -7,7 +7,7 @@ loading and retirement. Its provider appears as "In-process model".
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect.SelfHost
+dotnet add package Darkspyre.Inference.Connect.SelfHost --prerelease
 ```
 
 ## Register

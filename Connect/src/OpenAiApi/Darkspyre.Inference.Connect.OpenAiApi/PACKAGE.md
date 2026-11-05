@@ -6,7 +6,7 @@ that serves the same API at its own endpoint, such as a local model server. Its 
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect.OpenAiApi
+dotnet add package Darkspyre.Inference.Connect.OpenAiApi --prerelease
 ```
 
 ## Register

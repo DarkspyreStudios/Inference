@@ -7,7 +7,7 @@ the same service. `Darkspyre.Inference.Connect.Antigravity` uses it to give the 
 ## Install
 
 ```bash
-dotnet add package Darkspyre.Inference.Connect.HostTools
+dotnet add package Darkspyre.Inference.Connect.HostTools --prerelease
 ```
 
 The package carries the service built for each supported runtime: `osx-arm64`, `osx-x64`, `linux-x64`, `linux-arm64`,
