@@ -216,7 +216,7 @@ public sealed class ImageJobCleanupException : Exception
     }
 
     /// <summary>The execution failure classification.</summary>
-    public InferenceFailureCode Code => InferenceFailureCode.ExecutionFailed;
+    public InferenceFailureCode Code { get; } = InferenceFailureCode.ExecutionFailed;
     /// <summary>The caller-owned native job identifier.</summary>
     public string ProviderJobId { get; }
     /// <summary>The canonical provider endpoint, without credentials or request headers.</summary>

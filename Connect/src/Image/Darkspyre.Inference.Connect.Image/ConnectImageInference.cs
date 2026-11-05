@@ -210,6 +210,7 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                 }
                 throw;
             }
+#pragma warning disable CA2219 // Release must report cleanup refusal on every exit; the original operation error is preserved first in the aggregate.
             finally
             {
                 if (jobId is not null)
@@ -228,6 +229,7 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                     }
                 }
             }
+#pragma warning restore CA2219
         }
         catch (Exception error)
         {
