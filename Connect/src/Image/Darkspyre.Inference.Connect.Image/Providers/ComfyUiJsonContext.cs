@@ -41,3 +41,39 @@ internal sealed record ComfyWorkflowDiagnostics(string WorkflowId, string Workfl
 internal sealed record ComfyHistoryDiagnostics(string Source, string Status);
 internal sealed record ComfyQueueDiagnostics(string Source, bool Running, bool Pending);
 internal sealed record ComfyResponseDiagnostics(string Status, string Response);
+
+[JsonSourceGenerationOptions(JsonSerializerDefaults.Web, GenerationMode = JsonSourceGenerationMode.Metadata)]
+[JsonSerializable(typeof(ComfyInlineReference))]
+[JsonSerializable(typeof(ComfyInlinePreparedEnvelope))]
+[JsonSerializable(typeof(ComfyInlineOutput))]
+[JsonSerializable(typeof(ComfyInlinePromptRequest))]
+[JsonSerializable(typeof(ComfyTargetedInterrupt))]
+internal sealed partial class ComfyInlineJsonContext : JsonSerializerContext;
+
+// Boundary policy: base64 and rendered graph values are opaque image/request data. Structural validation owns them;
+// text sanitization would corrupt bytes. They are neither executable host content nor paths and their ToString omits payloads.
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+internal sealed record ComfyInlineReference([property: JsonRequired] string Kind, [property: JsonRequired] string Data)
+{
+    public override string ToString() => "ComfyInlineReference [image data]";
+}
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+internal sealed record ComfyInlinePreparedEnvelope(
+    [property: JsonRequired] bool Inline,
+    [property: JsonRequired] JsonElement Workflow,
+    [property: JsonRequired] string OutputNodeId,
+    [property: JsonRequired] string RequestId,
+    [property: JsonRequired] IReadOnlyList<InferenceResourceScope> ReferenceScopes)
+{
+    public override string ToString() => "ComfyInlinePreparedEnvelope [request]";
+}
+
+internal sealed record ComfyInlineOutput(Guid CaptureId, int Index);
+internal sealed record ComfyInlinePromptRequest(JsonElement Prompt,
+    [property: JsonPropertyName("client_id")] string ClientId,
+    [property: JsonPropertyName("prompt_id")] string PromptId)
+{
+    public override string ToString() => "ComfyInlinePromptRequest [request]";
+}
+internal sealed record ComfyTargetedInterrupt([property: JsonPropertyName("prompt_id")] string PromptId);

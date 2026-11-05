@@ -15,7 +15,15 @@ internal sealed class ImageTestTransport : IImageTransport
     public IImageTransport? ReferenceMaterializer { get; init; }
 
     public static ImageWorkflow Workflow() =>
-        new() { Id = "workflow", Label = "Workflow", Transport = ImageTransport.ComfyUi, TransportConfiguration = JsonElement.Parse("{}") };
+        new()
+        {
+            Id = "workflow", Label = "Workflow", Transport = ImageTransport.ComfyUi,
+            TransportConfiguration = JsonElement.Parse("""
+                {"outputNodeId":"2","filenamePrefixTemplate":"${cacheKey}","defaultParameters":{},
+                 "workflow":{"1":{"class_type":"LoadImage","inputs":{"image":"${referenceImageName}","text":"${positivePrompt}","width":"${width}","height":"${height}","seed":"${seed}"}},
+                             "2":{"class_type":"SaveImage","inputs":{"images":["1",0]}}}}
+                """)
+        };
 
     public static ImageGenerationRequest Request() => new() { ModelId = "workflow", Prompt = "draw" };
 
@@ -47,8 +55,8 @@ internal sealed class ImageTestTransport : IImageTransport
     public Task<ImagePreparedReference> UploadReferenceAsync(ImageConnection connection, ImageReference reference, Stream content, CancellationToken cancellationToken = default) =>
         throw new NotSupportedException();
 
-    public Task<ImagePreparedReference> ResolveReferenceAsync(ImageConnection connection, InferenceMediaSource source, IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default) =>
-        ReferenceMaterializer?.ResolveReferenceAsync(connection, source, resources, cancellationToken)
+    public Task<ImagePreparedReference> ResolveReferenceAsync(ImageConnection connection, ImageWorkflow workflow, InferenceMediaSource source, IInferenceResourceAccess? resources = null, CancellationToken cancellationToken = default) =>
+        ReferenceMaterializer?.ResolveReferenceAsync(connection, workflow, source, resources, cancellationToken)
             ?? Task.FromResult(new ImagePreparedReference(new() { Id = Guid.NewGuid() }, new("owner", "identity"), JsonElement.Parse("{}")));
 
     public Task<string> SubmitAsync(ImageConnection connection, PreparedImageTransportRequest request, CancellationToken cancellationToken = default) =>

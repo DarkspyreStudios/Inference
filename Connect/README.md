@@ -2731,13 +2731,13 @@ ImageTransportJobSnapshot status = await transport.GetJobAsync(
 `ImageWorkflow.TransportConfiguration`, `PreparedImageTransportRequest.ProviderRequest`, and
 `ImageTransportOutput.ProviderState` are opaque adapter-owned data. `UploadReferenceAsync` returns
 an immutable receipt; `Prepare` copies that receipt without authentication, reads, uploads, or native
-ID lookups. Consumers may round-trip prepared data but it does not prove authority to reuse a native
-reference. ComfyUI accepts native receipts only on the same unchanged transport/connection owner.
+ID lookups. File-workflow consumers may round-trip prepared data but it does not prove authority to reuse a native
+reference. Inline prepared data contains image bytes and remains sensitive caller-owned request data. ComfyUI accepts native receipts only on the same unchanged transport/connection owner.
 Changed static headers, a different connection, or a different transport owner require reupload of
 logical content. The package does not own an image
 database, media library, workflow catalog, cache, or background worker.
 
-A host that stores a prepared request and uploads the reference later calls `PlanReference(connection, reference)`
+A file-workflow host that stores a prepared request and uploads the reference later calls `PlanReference(connection, reference)`
 in place of an upload. ComfyUI names every reference upload `darkspyre-reference-<id><ext>` with `overwrite=true`, so
 the planned reference carries that name and the later `UploadReferenceAsync` of the same `ImageReference` writes the
 file it names. A planned reference is fenced to its endpoint, not to the connection object: the stored request
@@ -2753,12 +2753,13 @@ ComfyUI accepts static protected headers. Its newly optional dynamic `Authorizat
 members remain unqualified and refuse before callbacks or HTTP. Image generation accepts one binary
 reference or one logical resource resolved through caller-owned access. URL, native-file, multiple
 references, step/guidance overrides and Count greater than one refuse before effects. All observed
-outputs are retained. Download MIME comes from actual HTTP metadata, not a workflow default.
+outputs are retained. File-download MIME comes from actual HTTP metadata, not a workflow default.
+Inline-download MIME is image/png after validation of the native frame header and PNG signature.
 Composite admission copies binary reference bytes before credential or capability awaits. Constructing
 a BinaryMediaSource still borrows caller memory; the operation owns its entered byte snapshot.
 
 When resource access is supplied, a binary reference is committed and selected for the caller's
-session before ComfyUI uploads the authorized logical resource. Resource reads and uploads retain
+session before the workflow-selected transport materializes the authorized logical resource. Resource reads and materialization retain
 the endpoint/header snapshot admitted before the first callback. Generated outputs are likewise
 committed and selected before the composite publishes completion. Typed failures preserve known
 content/selection outcomes; a dispatched commit with no matching response remains unknown.
@@ -2780,6 +2781,55 @@ before publishing a completed listing. Provider failures retain their original i
 synchronous facade calls keep their original outcomes; returned inference objects and settings
 managers keep independent caller ownership. Concurrent disposal callers share completion, including
 cancellation-callback failures. Disposal releases the borrowed transport map without disposing it.
+
+### Workflow-selected ComfyUI transfer
+
+The configured `outputNodeId` selects transfer during preparation. An output node with class_type
+`SaveImageWebsocket` selects inline references and final WebSocket PNG capture. Every other supported
+output keeps the file/history path, including `SaveImage` and `SaveImageWithAlpha`. A different,
+unselected WebSocket node does not change a file workflow. File prepared envelopes, planned reference
+names, overwrite uploads, submit payloads, restart semantics and history/view downloads retain their
+existing formats. The new inline envelope records its selected output node and request id; submission
+rejects a contradictory inline graph without falling back to the file decoder.
+
+`ResolveReferenceAsync(connection, workflow, source, resources, cancellationToken)` resolves the one
+binary or authorized resource reference according to that workflow. Inline references use an
+`easy loadImageBase64` node with exact `${referenceImageBase64}` input and `image_output=Hide`.
+Planned file receipts and `${referenceImageName}` are not inline references. Inline resolution makes
+no native upload. Native payloads, prompts, frames and base64 values never enter diagnostic messages.
+The host is responsible for its custom graph's other node effects.
+
+Inline submission reserves the unique CacheKey as the native prompt id, opens its dedicated client
+socket and starts receiving before POST/prompt. The acknowledgement must name that same id. Binary
+frames count as final images only inside the matching prompt's selected-output execution window.
+The reader reassembles fragments and verifies the big-endian event/format header and PNG signature.
+A foreign execution clears that window. Pre-completion stream loss or malformed/oversize output
+fails the job with no history-based image recovery, reconnect or native resubmission. Execution success
+freezes all captured PNGs; a later socket close does not discard or downgrade them. Owner-fenced
+DownloadAsync returns a copy until release and never calls view. An internal 64 MiB limit bounds
+individual messages and aggregate raw reference/final payloads. The transport holds its SDK admission
+through capture lifetime; DI disposal drains captures, while ImageProviderService continues borrowing
+the transport.
+
+The caller invokes `ReleaseJobAsync(connection, workflow, providerJobId, cancellationToken)` after
+copying outputs or terminating an operation. File mode leaves its files/history unchanged. Inline mode
+always drains local capture and drops its retained image buffers. Remote cleanup removes only this
+job's history, after a matching post-task_done marker or scoped terminal history plus queue absence
+proves execution is finished. It then verifies scoped history and queue absence. Known non-dispatch
+or conclusive validation rejection can complete on verified absence. A lost acknowledgement, empty
+lookups or a successful no-op delete never prove an ambiguous dispatch finished. False or a sanitized
+failure requires host-owned cleanup retry against the persisted id/endpoint, not generation replay.
+After restart, scoped cleanup may finish but cannot reconstruct lost output; lost completion proof
+can leave cleanup explicitly unresolved. Cancellation deletes only that queued id; inline running
+interrupt uses ComfyUI's targeted prompt_id body, never the file branch's existing global body.
+No native image file, global history clear, model/cache purge or cache-mode setting belongs to the
+inline lifecycle. Transient native GPU/system-memory caches are not persistent image storage.
+
+The bound image facade releases each admitted job after output copying/resource commits. An
+`ImageJobCleanupException` reports incomplete cleanup with its non-secret id/endpoint and honest
+MayStillBeRunning flag. Original operation errors precede cleanup errors; committed caller-resource
+facts and retirement reporting survive cleanup refusal. The exception's text and ToString omit raw
+provider data. A returned caller-owned byte copy survives adapter release.
 
 `ConnectImageJson` exports exact type-name metadata for the complete public Image data graph.
 Runtime authority, bindings, resource handles and binding factories refuse non-null serialization.

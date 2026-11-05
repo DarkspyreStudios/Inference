@@ -77,7 +77,7 @@ public sealed record ImagePreparedReference(ImageReference Metadata,
     public override string ToString() => "ImagePreparedReference { <receipt> }";
 }
 
-/// <summary>Opaque adapter request state that can be persisted and submitted later.</summary>
+/// <summary>Opaque adapter request state. File workflows support persisted submission; inline workflows contain sensitive live-request data.</summary>
 /// <param name="ProviderRequest">The adapter's serialized request, which only the same adapter reads.</param>
 public sealed record PreparedImageTransportRequest(string ProviderRequest)
 {
@@ -201,6 +201,32 @@ public interface IImageTransportProgressConnection : IAsyncDisposable
         CancellationToken cancellationToken);
 }
 
+/// <summary>Reports incomplete release of a caller-owned image job.</summary>
+/// <gotcha>The trusted host retains the job identity and retries cleanup; it must not resubmit generation.</gotcha>
+public sealed class ImageJobCleanupException : Exception
+{
+    /// <summary>Creates a cleanup failure with the named job's non-secret routing identity.</summary>
+    public ImageJobCleanupException(string providerJobId, string endpoint,
+        bool mayStillBeRunning, Exception? innerException = null)
+        : base("The image job could not be fully released.", innerException)
+    {
+        ProviderJobId = providerJobId;
+        Endpoint = endpoint;
+        MayStillBeRunning = mayStillBeRunning;
+    }
+
+    /// <summary>The execution failure classification.</summary>
+    public InferenceFailureCode Code => InferenceFailureCode.ExecutionFailed;
+    /// <summary>The caller-owned native job identifier.</summary>
+    public string ProviderJobId { get; }
+    /// <summary>The canonical provider endpoint, without credentials or request headers.</summary>
+    public string Endpoint { get; }
+    /// <summary>True when the named job is active or its completion is unknown.</summary>
+    public bool MayStillBeRunning { get; }
+    /// <summary>Returns a fixed label without raw provider or request data.</summary>
+    public override string ToString() => "ImageJobCleanupException [cleanup incomplete]";
+}
+
 /// <summary>Provider-neutral image generation seam implemented by transport adapters.</summary>
 public interface IImageTransport
 {
@@ -252,9 +278,11 @@ public interface IImageTransport
         throw new InferenceException(InferenceFailureCode.UnsupportedFeature,
             $"{Descriptor.DisplayName} cannot name a reference image before it is uploaded.");
 
-    /// <summary>Prepares a reference image from a media source, reading caller resources through <paramref name="resources"/> when given.</summary>
+    /// <summary>Prepares a reference image using the workflow-selected transfer, reading caller resources through <paramref name="resources"/> when given.</summary>
+    /// <gotcha>Inline receipts contain sensitive image data. Keep the same connection and transport owner through consumption and release; do not persist them as remote file authority.</gotcha>
     Task<ImagePreparedReference> ResolveReferenceAsync(
         ImageConnection connection,
+        ImageWorkflow workflow,
         InferenceMediaSource source,
         IInferenceResourceAccess? resources = null,
         CancellationToken cancellationToken = default);
@@ -277,6 +305,12 @@ public interface IImageTransport
         ImageConnection connection,
         ImageTransportOutput output,
         CancellationToken cancellationToken = default);
+
+    /// <summary>Releases caller-owned live job state and requests cleanup of its transient remote metadata.</summary>
+    /// <returns>True only after proven cleanup completion; false while the named remote job is active or completion is unproven.</returns>
+    /// <gotcha>The caller must own the job id and endpoint. False or an exception requires caller-owned cleanup retry; it is not permission to resubmit.</gotcha>
+    Task<bool> ReleaseJobAsync(ImageConnection connection, ImageWorkflow workflow,
+        string providerJobId, CancellationToken cancellationToken = default) => Task.FromResult(true);
 
     /// <summary>Removes a job from the provider queue and, when <paramref name="interruptRunning"/> is true, interrupts it if running. Returns false when cancellation failed.</summary>
     Task<bool> TryCancelAsync(

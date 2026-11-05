@@ -94,7 +94,7 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
             foreach (InferenceMediaSource source in references)
             {
                 Fence(lease.Token);
-                ImagePreparedReference receipt = await transport.ResolveReferenceAsync(connection, source, resources, lease.Token).ConfigureAwait(false);
+                ImagePreparedReference receipt = await transport.ResolveReferenceAsync(connection, workflow, source, resources, lease.Token).ConfigureAwait(false);
                 receipts.Add(receipt);
                 Fence(lease.Token);
             }
@@ -117,6 +117,7 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
             Fence(lease.Token);
             progress?.Report(new(ImageGenerationStage.Queued));
             string? jobId = null;
+            Exception? operationFailure = null;
             long started = Stopwatch.GetTimestamp();
             try
             {
@@ -195,11 +196,37 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
                     Fence(lease.Token);
                 }
             }
-            catch (OperationCanceledException error) when (jobId is not null)
+            catch (Exception error)
             {
-                try { await transport.TryCancelAsync(connection, jobId, interruptRunning: true, CancellationToken.None).ConfigureAwait(false); }
-                catch (Exception cleanup) when (cleanup is not OutOfMemoryException) { throw new AggregateException(error, cleanup); }
+                operationFailure = error;
+                if (error is OperationCanceledException && jobId is not null)
+                {
+                    try { await transport.TryCancelAsync(connection, jobId, interruptRunning: true, CancellationToken.None).ConfigureAwait(false); }
+                    catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
+                    {
+                        operationFailure = new AggregateException(error, cleanup);
+                        throw operationFailure;
+                    }
+                }
                 throw;
+            }
+            finally
+            {
+                if (jobId is not null)
+                {
+                    try
+                    {
+                        if (!await transport.ReleaseJobAsync(connection, workflow, jobId, CancellationToken.None).ConfigureAwait(false))
+                            throw new ImageJobCleanupException(jobId, new Uri(connection.Endpoint.TrimEnd('/') + "/").AbsoluteUri, mayStillBeRunning: true);
+                    }
+                    catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
+                    {
+                        Exception safe = cleanup is ImageJobCleanupException ? cleanup
+                            : new ImageJobCleanupException(jobId, new Uri(connection.Endpoint.TrimEnd('/') + "/").AbsoluteUri, mayStillBeRunning: true);
+                        if (operationFailure is not null) throw new AggregateException(operationFailure, safe);
+                        throw safe;
+                    }
+                }
             }
         }
         catch (Exception error)
@@ -264,6 +291,11 @@ internal sealed class ConnectImageInference : IImageInference, IDisposable, IAsy
             while (pending.TryPop(out Exception? current))
             {
                 if (!visited.Add(current)) continue;
+                if (current is ImageJobCleanupException)
+                {
+                    if (!_cleanupFailures.Any(existing => ReferenceEquals(existing.Original, current))) _cleanupFailures.Add((current, current));
+                    continue;
+                }
                 if (current is InferenceResourceOperationException resource && resource.Failure.Phase == InferenceResourceOperationPhase.Cleanup
                     || current is InferenceResourceOperationCanceledException canceled && canceled.Failure.Phase == InferenceResourceOperationPhase.Cleanup)
                 {
