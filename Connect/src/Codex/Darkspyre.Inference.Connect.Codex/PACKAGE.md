@@ -38,6 +38,13 @@ await llms.SignInAsync(connectionId, authPrompt, cancellationToken);
 The application returns the connection from its `ILlmConnectionSource`, then opens sessions through
 `LlmAgentProviderService.StartSessionAsync`.
 
+## Hosted web search
+
+Set `HostedTools = [new LlmWebSearchTool()]` on a chat request or agent-session opening to ask the subscription service to
+search the web. The connection advertises `LlmHostedToolKind.WebSearch`. Responses expose the provider's URL citations and
+retain the web-search call and its action in continuation state, so subsequent turns replay the same source-bearing history.
+The provider determines availability for the selected model. Other unsupported hosted-tool kinds still fail validation.
+
 ## Settings
 
 - **Sign in with ChatGPT** shows a device code and a link. The person enters the code at the link, and the draft

@@ -5,11 +5,12 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// <summary>The Responses output items a ChatGPT subscription connection retains and replays.</summary>
 internal static class CodexReplay
 {
-    /// <summary>The projected base items, the image tool's call, and the compaction items replayed verbatim.</summary>
+    /// <summary>The projected base items, image and web-search calls, and compaction items replayed verbatim.</summary>
     internal static ResponsesReplayRules Rules { get; } = new(
         new Dictionary<string, string[]?>(ResponsesReplayRules.ProjectedBase, StringComparer.Ordinal)
         {
             ["image_generation_call"] = ["type", "id", "status", "result"],
+            ["web_search_call"] = ["type", "id", "status", "action"],
             ["compaction"] = null,
             ["compaction_summary"] = null
         });

@@ -69,7 +69,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         // No catalog observation means unknown effort support, not a transport-wide model allowlist.
         ReasoningLevels = LlmReasoningEffort.Levels(),
         SupportsToolUse = InferenceSupport.Supported,
-        HostedTools = new[] { LlmHostedToolKind.ImageGeneration }.ToFrozenSet(),
+        HostedTools = new[] { LlmHostedToolKind.ImageGeneration, LlmHostedToolKind.WebSearch }.ToFrozenSet(),
         Tools = new()
         {
             ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),

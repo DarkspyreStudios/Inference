@@ -404,6 +404,61 @@ public sealed class DirectCodexTests
         Assert.Equal(JsonValueKind.False, tool.GetProperty("strict").ValueKind);
     }
 
+    /// <summary>The validated Codex shape returns observed citations and replays the call, action, sources and text.</summary>
+    [Fact]
+    public async Task WebSearchIsMappedAndReplayedWithCitations()
+    {
+        const string searchReply = """
+            data: {"type":"response.output_item.done","output_index":0,"item":{"type":"web_search_call","id":"ws_probe","status":"completed","action":{"type":"search","queries":["site.nasa.gov Artemis program NASA official"],"query":"site.nasa.gov Artemis program NASA official","sources":[{"type":"url","url":"https://www.nasa.gov/humans-in-space/artemis/"}]}}}
+
+            data: {"type":"response.output_text.delta","delta":"NASA Artemis"}
+
+            data: {"type":"response.output_item.done","output_index":1,"item":{"type":"message","id":"msg_probe","role":"assistant","content":[{"type":"output_text","text":"NASA Artemis","annotations":[{"type":"url_citation","url":"https://www.nasa.gov/humans-in-space/artemis/","title":"NASA Artemis","start_index":0,"end_index":12}]}]}}
+
+            data: {"type":"response.completed","response":{"id":"response_probe","status":"completed","output":[]}}
+
+            """;
+        using var handler = new Handler(_ => Sse(searchReply));
+        using var http = new HttpClient(handler);
+        var client = new OpenAiCodexLlmClient(http);
+        LlmConnection connection = Connection();
+        Assert.Contains(LlmHostedToolKind.WebSearch, client.GetCapabilities(connection, "gpt-6.1-sol").HostedTools);
+        LlmChatResult first = await Complete(client, connection, Request() with
+        {
+            ModelId = "gpt-6.1-sol", HostedTools = [new LlmWebSearchTool()],
+        });
+        Assert.Equal(LlmCompletionStatus.Completed, first.Status);
+        LlmCitation citation = Assert.Single(first.Citations);
+        Assert.Equal("https://www.nasa.gov/humans-in-space/artemis/", citation.Url);
+        Assert.Equal("NASA Artemis", citation.Title);
+        Assert.Equal("0.159.3", handler.Headers["version"]);
+        using (JsonDocument sent = JsonDocument.Parse(handler.Body!))
+        {
+            Assert.Equal("web_search", Assert.Single(sent.RootElement.GetProperty("tools").EnumerateArray()).GetProperty("type").GetString());
+            Assert.Contains(sent.RootElement.GetProperty("include").EnumerateArray(), entry => entry.GetString() == "web_search_call.action.sources");
+        }
+        Assert.NotNull(first.ContinuationState);
+        handler.Response = _ => Sse(Completed);
+        _ = await Complete(client, connection, Request() with
+        {
+            ModelId = "gpt-6.1-sol", HostedTools = [new LlmWebSearchTool()],
+            Messages = [new("user", "Find NASA Artemis"),
+                new("assistant", first.Text) { ContinuationState = first.ContinuationState }, new("user", "What was the source?")],
+        });
+        using JsonDocument replay = JsonDocument.Parse(handler.Body!);
+        JsonElement[] input = [.. replay.RootElement.GetProperty("input").EnumerateArray()];
+        JsonElement call = Assert.Single(input, item => item.GetProperty("type").GetString() == "web_search_call");
+        Assert.Equal("ws_probe", call.GetProperty("id").GetString());
+        Assert.Equal("completed", call.GetProperty("status").GetString());
+        Assert.Equal("search", call.GetProperty("action").GetProperty("type").GetString());
+        Assert.Equal("site.nasa.gov Artemis program NASA official", call.GetProperty("action").GetProperty("queries")[0].GetString());
+        JsonElement answer = Assert.Single(input, item => item.GetProperty("type").GetString() == "message" &&
+            item.GetProperty("role").GetString() == "assistant");
+        Assert.Equal(citation.Url, call.GetProperty("action").GetProperty("sources")[0].GetProperty("url").GetString());
+        Assert.Equal(first.Text, answer.GetProperty("content")[0].GetProperty("text").GetString());
+        Assert.Equal(2, handler.Calls);
+    }
+
     /// <summary>An image_generation_call item is saved as a session resource and reported as an image output.</summary>
     [Fact]
     public async Task ImageGenerationCommitsAResource()

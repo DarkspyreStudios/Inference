@@ -238,7 +238,7 @@ in its own message by the attachment notice, so any history opens.
 
 | Member | Codex | OpenAI API | Claude | Antigravity | Grok |
 | --- | --- | --- | --- | --- | --- |
-| HostedTools | ImageGeneration | ImageGeneration; on `api.openai.com` also WebSearch, CodeExecution, DocumentSearch, RemoteMcp | none | none | ImageGeneration, WebSearch, SocialSearch, CodeExecution, DocumentSearch, RemoteMcp |
+| HostedTools | ImageGeneration, WebSearch | ImageGeneration; on `api.openai.com` also WebSearch, CodeExecution, DocumentSearch, RemoteMcp | none | none | ImageGeneration, WebSearch, SocialSearch, CodeExecution, DocumentSearch, RemoteMcp |
 | SupportsShellTools | Unsupported | Unsupported | Unsupported | Unsupported | Unsupported |
 | SupportsContextCapture, SupportsContextReplacement | Supported | Supported | Unsupported | Unsupported | Supported |
 | SupportsContextStatus | Supported | Supported | Supported | Supported | Supported |
@@ -367,7 +367,8 @@ selection, so the image is not sent again as an attachment: the next Codex or Op
 
 **Hosted search.** `HostedTools` can also ask for web search (`LlmWebSearchTool`), X search (`LlmSocialSearchTool`),
 code execution (`LlmCodeExecutionTool`), document search over stored collections (`LlmDocumentSearchTool`) and a
-remote MCP server (`LlmRemoteMcpTool`). The OpenAI API offers all of them except X search on `api.openai.com`; a kind
+remote MCP server (`LlmRemoteMcpTool`). The direct ChatGPT subscription route offers web search and image generation.
+The OpenAI API offers all of them except X search on `api.openai.com`; a kind
 the model's `HostedTools` lacks is refused with its name, such as `This route does not implement X search.`. The
 shared Responses client writes one wire tool per hosted tool through `WriteHostedTool`, in OpenAI's shape:
 
@@ -384,6 +385,16 @@ fields are not sent there. `HostedIncludes` adds `web_search_call.action.sources
 `code_interpreter_call.outputs` to `include` when the matching tool is present. The hosted-turn limit is not sent
 on the OpenAI API: its Responses API has no `max_turns`. A provider whose wire differs overrides either hook per
 tool.
+
+Codex uses the same web-search serializer and observer. `CodexReplay` retains `web_search_call` type, id, status and action,
+including search queries and any returned sources. Citations remain observed `result.Citations`. The existing shared codec
+omits output-only annotations from replayed message blocks; replay carries text and the source-bearing search action.
+The capability is route-wide; no model allowlist or bypass of hosted-tool validation is added. A manually authorized
+subscription-wire qualification with compatibility `0.159.3` and `gpt-6.1-sol` accepts `tools:[{"type":"web_search"}]`, returns
+HTTP 200/`response.completed`, a completed `web_search_call` and a URL citation for a public NASA query. That qualification
+names one model; it does not assert that every subscription model offers the operation. The focused
+`DirectCodexTests.WebSearchIsMappedAndReplayedWithCitations` uses a synthetic form of that event shape, checks the requested
+tool/source include and citation output, then retains the call/action/sources and text on the next request. It makes no live call.
 
 Grok offers image generation on every model, and web and X search on models whose catalog row enables backend
 search. Its `ILlmSessionHostedTools` supplies web and X search to managed steps only, not summaries. A caller's tool
@@ -3395,8 +3406,8 @@ the identities required for tool-enabled replay.
 
 Each Responses provider owns its replay rules. The ChatGPT subscription (`CodexReplay`), OpenAI API
 (`OpenAiApiReplay`) and Grok (`XaiReplay`) libraries each hold one `ResponsesContinuationCodec`, which their client
-returns as `ContinuationCodec`. Codex keeps the message, reasoning, function_call and image_generation_call fields
-and replays compaction items verbatim. The OpenAI API keeps the same projected items plus its web search, file
+returns as `ContinuationCodec`. Codex keeps the message, reasoning, function_call, image_generation_call and web_search_call
+fields and replays compaction items verbatim. The OpenAI API keeps the same projected items plus its web search, file
 search, code interpreter and MCP calls. Grok replays every item verbatim and in order, and checks the identity and
 string fields of its custom tool calls and tool-search items. The codec writes the format the shared rules wrote
 (`darkspyre.connect.llm.<transport>`, format version 2 and the account scope), so saved states keep binding. A
