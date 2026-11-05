@@ -162,6 +162,95 @@ public sealed partial class ComfyUiImageTransportTests
         Assert.Equal(1, server.PromptPosts);
     }
 
+    /// <summary>Confirmed scoped release evicts its live registry entry without touching another owner or history.</summary>
+    [Fact]
+    public async Task ConfirmedInlineReleaseRemovesItsLiveRegistryEntry()
+    {
+        await using InlineServer server = await InlineServer.StartAsync(async native =>
+        {
+            await native.EventAsync("executing", native.Id, "9");
+            await native.BinaryAsync(InlineFrame(InlinePng));
+            await native.EventAsync("execution_success", native.Id);
+            native.PublishTerminal();
+        });
+        await using ComfyUiImageTransport transport = CreateTransport(new HttpClientHandler());
+        ImageConnection owner = Connection() with { Endpoint = server.Endpoint };
+        ImageWorkflow workflow = InlineWorkflow(reference: false);
+        string id = await transport.SubmitAsync(owner, InlinePrepared(transport, workflow, "registry-release"));
+        Assert.Equal(ImageTransportJobState.Completed, (await WaitInlineAsync(transport, owner, workflow, id)).State);
+        Assert.Equal(1, InlineRegistryCount(transport));
+        await Assert.ThrowsAsync<InferenceException>(() => transport.ReleaseJobAsync(owner with { }, workflow, id));
+        Assert.Equal(1, InlineRegistryCount(transport));
+        Assert.True(await transport.ReleaseJobAsync(owner, workflow, id));
+        Assert.Equal(0, InlineRegistryCount(transport));
+        Assert.Equal([id], server.Deleted);
+        Assert.True(server.ForeignHistory);
+    }
+
+    /// <summary>A held failed-submit control request has one independent cleanup budget and cannot retain the local socket.</summary>
+    [Fact]
+    public async Task FailedInlineSubmitBoundsHeldCleanupAndDrainsCapture()
+    {
+        var admit = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        await using InlineServer server = await InlineServer.StartAsync(_ => admit.Task);
+        using var handler = new HeldInlineControlHandler();
+        var log = new InlineCleanupLogger();
+        await using var transport = new ComfyUiImageTransport(new StubHttpClientFactory(handler), log);
+        ImageConnection owner = Connection() with { Endpoint = server.Endpoint, RequestTimeout = TimeSpan.FromMinutes(5) };
+        ImageWorkflow workflow = InlineWorkflow(reference: false);
+        using var cancellation = new CancellationTokenSource();
+        try
+        {
+            Task submit = transport.SubmitAsync(owner, InlinePrepared(transport, workflow, "held-cleanup"), cancellation.Token);
+            await server.PromptEntered.Task.WaitAsync(InlineBound);
+            await cancellation.CancelAsync();
+            await handler.Entered.Task.WaitAsync(InlineBound);
+            using var drain = new CancellationTokenSource(InlineBound);
+            await server.ObserveCaptureCloseAsync(drain.Token);
+            Exception error = await Assert.ThrowsAnyAsync<Exception>(() => submit.WaitAsync(TimeSpan.FromSeconds(15)));
+            Assert.IsNotType<TimeoutException>(error);
+            Assert.Contains(FlattenInline(error), failure => failure is ImageJobCleanupException { MayStillBeRunning: true });
+            Assert.True(handler.Cancelled.Task.IsCompletedSuccessfully);
+            Assert.Equal(1, handler.Attempts);
+            Assert.Equal(1, server.PromptPosts);
+            Assert.Empty(server.Deleted);
+            Assert.Equal(ImageTransportJobState.Failed, (await transport.GetJobAsync(owner, "held-cleanup", workflow)).State);
+            Assert.Single(log.Messages, message => message.Contains("confirmed=False", StringComparison.Ordinal));
+        }
+        finally { admit.TrySetResult(); }
+    }
+
+    private static int InlineRegistryCount(ComfyUiImageTransport transport) =>
+        Assert.IsAssignableFrom<System.Collections.IDictionary>(typeof(ComfyUiImageTransport)
+            .GetField("_inlineJobs", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(transport)).Count;
+
+    private sealed class HeldInlineControlHandler() : DelegatingHandler(new HttpClientHandler())
+    {
+        private int _attempts;
+        internal int Attempts => Volatile.Read(ref _attempts);
+        internal TaskCompletionSource Entered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource Cancelled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            if (!request.RequestUri!.AbsolutePath.StartsWith("/history/", StringComparison.Ordinal))
+                return await base.SendAsync(request, cancellationToken);
+            Interlocked.Increment(ref _attempts);
+            Entered.TrySetResult();
+            try { await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken); }
+            finally { if (cancellationToken.IsCancellationRequested) Cancelled.TrySetResult(); }
+            throw new InvalidOperationException("The held control request cannot complete.");
+        }
+    }
+
+    private sealed class InlineCleanupLogger : ILogger<ComfyUiImageTransport>
+    {
+        internal ConcurrentQueue<string> Messages { get; } = new();
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Messages.Enqueue(formatter(state, exception));
+    }
+
     private static IEnumerable<Exception> FlattenInline(Exception exception) => exception is AggregateException aggregate
         ? aggregate.InnerExceptions.SelectMany(FlattenInline) : [exception];
 
@@ -294,6 +383,17 @@ public sealed partial class ComfyUiImageTransportTests
         {
             WebSocket socket = await _socket.Task.WaitAsync(InlineBound);
             await socket.SendAsync(data, WebSocketMessageType.Binary, final, CancellationToken.None);
+        }
+
+        internal async Task ObserveCaptureCloseAsync(CancellationToken token)
+        {
+            WebSocket socket = await _socket.Task.WaitAsync(token);
+            try
+            {
+                ValueWebSocketReceiveResult result = await socket.ReceiveAsync(new byte[1].AsMemory(), token);
+                Assert.Equal(WebSocketMessageType.Close, result.MessageType);
+            }
+            catch (WebSocketException) { }
         }
 
         internal async Task CloseOutputAsync()

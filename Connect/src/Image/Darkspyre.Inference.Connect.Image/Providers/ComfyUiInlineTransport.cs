@@ -5,11 +5,15 @@ using System.Text.Json;
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Media;
 using Darkspyre.Inference.Connect.LLM.Internal;
+using Microsoft.Extensions.Logging;
 
 namespace Darkspyre.Inference.Connect.Image.Providers;
 
 internal sealed partial class ComfyUiImageTransport
 {
+    private static readonly Action<ILogger, string, bool, Exception?> LogInlineSubmitCleanup = LoggerMessage.Define<string, bool>(
+        LogLevel.Information, new EventId(2, "InlineSubmissionCleanup"),
+        "ComfyUI failed-submission cleanup for {PromptId}: confirmed={Confirmed}.");
     private readonly Dictionary<(InferenceResourceScope Scope, string Id), ComfyInlineJob> _inlineJobs = [];
     private bool _disposed;
 
@@ -127,11 +131,14 @@ internal sealed partial class ComfyUiImageTransport
         }
         catch (Exception error) when (error is not OutOfMemoryException)
         {
-            // A lost ACK still owns this reserved id. Local capture always drains, even when cleanup cannot be proven.
+            // A lost ACK still owns this reserved id. Cleanup gets its own short budget after caller cancellation.
+            using var cleanupBudget = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            bool cleanupComplete = false;
             try
             {
-                if (!await ReleaseInlineAsync(connection, scope, job.Id, CancellationToken.None).ConfigureAwait(false))
+                if (!await ReleaseInlineAsync(connection, scope, job.Id, cleanupBudget.Token).ConfigureAwait(false))
                     throw new ImageJobCleanupException(job.Id, connection.Endpoint, mayStillBeRunning: true);
+                cleanupComplete = true;
             }
             catch (Exception cleanup) when (cleanup is not OutOfMemoryException)
             {
@@ -139,6 +146,7 @@ internal sealed partial class ComfyUiImageTransport
                     : new ImageJobCleanupException(job.Id, connection.Endpoint, !job.NoDispatch && !job.TerminalProof);
                 throw new AggregateException(SafeInlineSubmissionFailure(error, token), safeCleanup);
             }
+            finally { LogInlineSubmitCleanup(logger, job.Id, cleanupComplete, null); }
             throw SafeInlineSubmissionFailure(error, token);
         }
     }
@@ -194,15 +202,27 @@ internal sealed partial class ComfyUiImageTransport
                 state.GetString() is "success" or "error";
             if (terminal) job?.ConfirmTerminalProof();
             bool proven = terminal || job?.TerminalProof == true;
+            bool released;
             if (!proven)
-                return consumption.Publish(job?.NoDispatch == true && !exists);
-            using HttpResponseMessage deletion = await client.PostAsJsonAsync(BuildUri(connection, "history"),
-                new ComfyDeleteRequest([id]), ComfyProtocolJsonContext.Default.ComfyDeleteRequest, token).ConfigureAwait(false);
-            if (!deletion.IsSuccessStatusCode) throw new InferenceException(InferenceFailureCode.ExecutionFailed, "The image job metadata could not be released.");
-            using JsonDocument remaining = await GetInlineJsonAsync(client, connection, $"history/{Uri.EscapeDataString(id)}", token).ConfigureAwait(false);
-            using JsonDocument remainingQueue = await GetInlineJsonAsync(client, connection, "queue", token).ConfigureAwait(false);
-            return consumption.Publish(!remaining.RootElement.TryGetProperty(id, out _) &&
-                !InlineQueueContains(remainingQueue.RootElement, "queue_running", id) && !InlineQueueContains(remainingQueue.RootElement, "queue_pending", id));
+                released = job?.NoDispatch == true && !exists;
+            else
+            {
+                using HttpResponseMessage deletion = await client.PostAsJsonAsync(BuildUri(connection, "history"),
+                    new ComfyDeleteRequest([id]), ComfyProtocolJsonContext.Default.ComfyDeleteRequest, token).ConfigureAwait(false);
+                if (!deletion.IsSuccessStatusCode) throw new InferenceException(InferenceFailureCode.ExecutionFailed, "The image job metadata could not be released.");
+                using JsonDocument remaining = await GetInlineJsonAsync(client, connection, $"history/{Uri.EscapeDataString(id)}", token).ConfigureAwait(false);
+                using JsonDocument remainingQueue = await GetInlineJsonAsync(client, connection, "queue", token).ConfigureAwait(false);
+                released = !remaining.RootElement.TryGetProperty(id, out _) &&
+                    !InlineQueueContains(remainingQueue.RootElement, "queue_running", id) && !InlineQueueContains(remainingQueue.RootElement, "queue_pending", id);
+            }
+            released = consumption.Publish(released);
+            if (released && job is not null)
+            {
+                lock (_scopeGate)
+                    if (_inlineJobs.TryGetValue((scope, id), out ComfyInlineJob? current) && ReferenceEquals(current, job))
+                        _inlineJobs.Remove((scope, id));
+            }
+            return released;
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception error) when (error is not OutOfMemoryException)

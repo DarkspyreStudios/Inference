@@ -2813,7 +2813,11 @@ the transport.
 
 The caller invokes `ReleaseJobAsync(connection, workflow, providerJobId, cancellationToken)` after
 copying outputs or terminating an operation. File mode leaves its files/history unchanged. Inline mode
-always drains local capture and drops its retained image buffers. Remote cleanup removes only this
+always drains local capture and drops its retained image buffers. Confirmed release removes that
+capture from the live registry; unresolved cleanup retains its owner metadata, not its image buffers.
+A failed submit makes one cleanup attempt with an independent ten-second budget, even after caller
+cancellation, and logs only its id and confirmed/unresolved outcome. Local capture drains before
+remote control requests, so a held response cannot retain it. Remote cleanup removes only this
 job's history, after a matching post-task_done marker or scoped terminal history plus queue absence
 proves execution is finished. It then verifies scoped history and queue absence. Known non-dispatch
 or conclusive validation rejection can complete on verified absence. A lost acknowledgement, empty
