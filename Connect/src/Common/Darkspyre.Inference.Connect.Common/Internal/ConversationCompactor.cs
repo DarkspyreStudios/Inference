@@ -65,8 +65,8 @@ internal sealed record CompactionResult(LlmAgentContext Context, int? DroppedMes
         };
 }
 
-/// <summary>Compaction cannot bring a request under the usable window, so the request is not sent.</summary>
-internal sealed class CompactionFailedException(string message, LlmUsage? usage) : Exception(message)
+/// <summary>Compaction cannot produce usable context; the original context remains unchanged.</summary>
+internal sealed class CompactionFailedException(string message, LlmUsage? usage, Exception? innerException) : Exception(message, innerException)
 {
     internal LlmUsage? Usage { get; } = usage;
 }
@@ -93,9 +93,6 @@ internal sealed class ConversationCompactor(
     // 2,000 characters is the Host's summary cut; a shortened result keeps its first and last 1,000.
     private const int KeptCharacters = 1000;
 
-    // 0.75 is the English words-per-token average.
-    private const double WordsPerToken = 0.75;
-
     // About 2,000 tokens: the smallest summary that holds decisions and open work when the kept entries fill the target.
     private const int MinimumSummaryWords = 1500;
 
@@ -104,7 +101,7 @@ internal sealed class ConversationCompactor(
     private const int MaximumSummaryWords = 3000;
 
     // The longest summary's size in tokens.
-    private const long MaximumSummaryTokens = (long)(MaximumSummaryWords / WordsPerToken);
+    private const long MaximumSummaryTokens = (long)(MaximumSummaryWords / SummaryRequest.WordsPerToken);
 
     // About 1,000 tokens for each part's summary.
     private const int MinimumPartWords = 750;
@@ -155,7 +152,7 @@ internal sealed class ConversationCompactor(
                 .ConfigureAwait(false);
 
         await stage("Summarizing earlier messages", cancellationToken).ConfigureAwait(false);
-        int words = (int)Math.Clamp(WordsPerToken * (limits.TargetTokens - keptMeasure), MinimumSummaryWords, MaximumSummaryWords);
+        int words = (int)Math.Clamp(SummaryRequest.WordsPerToken * (limits.TargetTokens - keptMeasure), MinimumSummaryWords, MaximumSummaryWords);
         (string summary, LlmUsage? usage) = await SummarizeAsync(source, modelId, words, limits, cancellationToken)
             .ConfigureAwait(false);
         var summaryEntry = new LlmAgentContextEntry(Guid.NewGuid().ToString("N"), SummaryTurnId,
@@ -278,7 +275,7 @@ internal sealed class ConversationCompactor(
         LlmAgentContextEntry[] kept = Kept(remaining.Entries, keptTurns);
         await stage("Summarizing earlier messages", cancellationToken).ConfigureAwait(false);
         long keptMeasure = await Measure(remaining, kept, cancellationToken).ConfigureAwait(false);
-        int words = (int)Math.Clamp(WordsPerToken * (limits.TargetTokens - keptMeasure), MinimumSummaryWords, MaximumSummaryWords);
+        int words = (int)Math.Clamp(SummaryRequest.WordsPerToken * (limits.TargetTokens - keptMeasure), MinimumSummaryWords, MaximumSummaryWords);
         (string summary, LlmUsage? usage) = await SummarizeAsync(source, modelId, words, limits, cancellationToken)
             .ConfigureAwait(false);
         var summaryEntry = new LlmAgentContextEntry(Guid.NewGuid().ToString("N"), SummaryTurnId,
@@ -313,7 +310,7 @@ internal sealed class ConversationCompactor(
         long mandatory = await Measure(result, current, cancellationToken).ConfigureAwait(false);
         throw new CompactionFailedException(
             $"Compaction could not bring this request under the limit: {measured} tokens remain in a {limits.UsableWindow}-token "
-            + $"usable window. The current turn alone measures {mandatory} tokens.", usage);
+            + $"usable window. The current turn alone measures {mandatory} tokens.", usage, null);
     }
 
     private ValueTask<long> Measure(LlmAgentContext context, IEnumerable<LlmAgentContextEntry> entries,
@@ -387,13 +384,17 @@ internal sealed class ConversationCompactor(
                 result = await sideRequest(SummaryRequest.Create(modelId, text,
                     (int)Math.Max(MinimumPartWords, (double)words * tokens / total)), limit.Token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException failure) when (limit.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
             {
                 throw new CompactionFailedException(
                     $"Compaction stopped: a summary request of about {tokens} tokens did not finish within {PartTimeout.TotalMinutes:0} "
-                    + "minutes. The context is unchanged.", usage.Total);
+                    + "minutes. The context is unchanged.", usage.Total, failure);
             }
             usage.Add(result.Usage);
+            if (result.Status is LlmCompletionStatus.Incomplete or LlmCompletionStatus.Failed or LlmCompletionStatus.Refused)
+                throw new CompactionFailedException(
+                    $"Compaction stopped: a summary request ended with {result.Status} status. The context is unchanged.",
+                    usage.Total, null);
             summaries.Add((result.Text, await EstimateAsync(result.Text, cancellationToken).ConfigureAwait(false)));
         }
         return summaries;

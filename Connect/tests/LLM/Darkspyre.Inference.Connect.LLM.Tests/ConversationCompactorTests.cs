@@ -94,6 +94,46 @@ public sealed class ConversationCompactorTests
             new HashSet<string>(), Limits, NoStage, CancellationToken.None));
 
         Assert.Contains("did not finish within", failure.Message, StringComparison.Ordinal);
+        Assert.IsAssignableFrom<OperationCanceledException>(failure.InnerException);
+
+        var interrupted = new OperationCanceledException("The transport was cancelled.");
+        var cancelled = new ConversationCompactor(
+            (measured, _) => ValueTask.FromResult(Harness.Measure(measured)),
+            (_, _) => Task.FromException<LlmChatResult>(interrupted),
+            (text, _) => ValueTask.FromResult<long?>(Harness.Tokens(text)), null);
+        var actual = await Assert.ThrowsAsync<OperationCanceledException>(() => cancelled.CompactAsync(context, "model", "t2",
+            new HashSet<string>(), Limits, NoStage, CancellationToken.None));
+        Assert.Same(interrupted, actual);
+    }
+
+    /// <summary>A capped partial summary cannot replace the original conversation context.</summary>
+    [Fact]
+    public async Task IncompleteSummaryAtTheOutputCapLeavesTheContextUnchanged()
+    {
+        var context = new LlmAgentContext { Entries = [.. Turn("t1", "older " + new string('z', 16_000)), .. Turn("t2", "now")] };
+        LlmAgentContextEntry[] original = [.. context.Entries];
+        int? sentCap = null;
+        var compactor = new ConversationCompactor(
+            (measured, _) => ValueTask.FromResult(Harness.Measure(measured)),
+            (request, _) =>
+            {
+                sentCap = request.MaxOutputTokens;
+                return Task.FromResult(new LlmChatResult
+                {
+                    Diagnostics = new(200, null, null),
+                    Text = "A partial summary", Status = LlmCompletionStatus.Incomplete, IncompleteReason = "max_output_tokens",
+                    Usage = new(20, sentCap ?? 0, 20 + (sentCap ?? 0))
+                });
+            },
+            (text, _) => ValueTask.FromResult<long?>(Harness.Tokens(text)), null);
+
+        var failure = await Assert.ThrowsAsync<CompactionFailedException>(() => compactor.CompactAsync(context, "model", "t2",
+            new HashSet<string>(), Limits, NoStage, CancellationToken.None));
+
+        Assert.InRange(sentCap ?? 0, 1_000, 4_000);
+        Assert.Contains("Incomplete", failure.Message, StringComparison.Ordinal);
+        Assert.Equal(sentCap, failure.Usage!.OutputTokens);
+        Assert.Equal(original, context.Entries);
     }
 
     [Fact]
