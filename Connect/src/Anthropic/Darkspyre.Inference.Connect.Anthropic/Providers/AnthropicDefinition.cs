@@ -1,3 +1,5 @@
+using Darkspyre.Inference.Common.Setup;
+
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal static class AnthropicDefinition

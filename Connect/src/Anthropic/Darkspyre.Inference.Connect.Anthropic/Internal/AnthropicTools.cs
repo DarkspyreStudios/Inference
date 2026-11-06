@@ -66,8 +66,6 @@ internal sealed class AnthropicTools
                     if (programmatic && !result.serverTools.Any(tool => CanAttemptProgrammaticCalls(
                         (string?)tool!["type"], (string?)tool["name"])))
                         throw new ArgumentException("Programmatic Claude clients require a compatible code-execution tool.");
-                    if (programmatic && definition.Strict)
-                        throw new NotSupportedException("Programmatic Claude client tools do not support strict input schemas.");
                     if (programmatic) AnthropicProgrammaticSchemas.Validate(definition.InputSchema);
                     if (request.ToolChoice is { Mode: LlmToolChoiceMode.Specific } choice && choice.Name == field.Name
                         && !callers.EnumerateArray().Any(caller => caller.GetString() == "direct"))
@@ -101,8 +99,6 @@ internal sealed class AnthropicTools
                 ["name"] = definition.Name,
                 ["input_schema"] = JsonNode.Parse(definition.InputSchema.GetRawText())
             };
-            // Non-strict models can reject the field even when it is false.
-            if (definition.Strict) tool["strict"] = true;
             if (!string.IsNullOrWhiteSpace(definition.Description)) tool["description"] = definition.Description;
             if (clientOptions.TryGetValue(definition.Name, out JsonElement options))
                 foreach (JsonProperty field in options.EnumerateObject()) tool[field.Name] = JsonNode.Parse(field.Value.GetRawText());

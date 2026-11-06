@@ -22,30 +22,13 @@ internal static class AnthropicSchemas
     internal static LlmStructuredOutputEnforcement? Enforcement(LlmChatRequest request,
         LlmProviderCapabilities capabilities)
     {
-        SchemaCost tools = StrictToolCost(request);
         if (request.StructuredOutput is not { } output) return null;
         return StructuredOutput.ResolveEnforcement(output, capabilities with
         {
-            SupportsJsonSchema = Analyze(output.Schema, out SchemaCost cost) && tools.Add(cost).Fits
+            SupportsJsonSchema = Analyze(output.Schema, out SchemaCost cost) && cost.Fits
                 ? capabilities.SupportsJsonSchema : InferenceSupport.Unsupported,
             SupportsJsonObject = InferenceSupport.Unsupported
         });
-    }
-
-    private static SchemaCost StrictToolCost(LlmChatRequest request)
-    {
-        if (ClientTools.Functions(request.Tools).Count(tool => tool.Strict) > 20)
-        { throw new NotSupportedException("Claude accepts at most 20 strict tools in one request."); }
-        SchemaCost total = default;
-        foreach (LlmToolDefinition tool in ClientTools.Functions(request.Tools).Where(tool => tool.Strict))
-        {
-            if (!Analyze(tool.InputSchema, out SchemaCost cost))
-            { throw new NotSupportedException("A strict tool schema contains constraints outside Claude's native subset. The tool schema is not weakened or sent as non-strict."); }
-            total = total.Add(cost);
-            if (!total.Fits)
-            { throw new NotSupportedException("Claude accepts at most 24 optional parameters and 16 union parameters across strict schemas. Strict tools are not weakened to fit these limits."); }
-        }
-        return total;
     }
 
     private static bool Analyze(JsonElement schema, out SchemaCost cost)

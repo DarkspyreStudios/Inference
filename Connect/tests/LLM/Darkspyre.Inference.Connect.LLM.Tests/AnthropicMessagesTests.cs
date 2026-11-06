@@ -65,7 +65,7 @@ public sealed class AnthropicMessagesTests
             Tools = [new LlmAgentToolDefinition { Name = "read_fact", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
             ToolHandler = (call, _) =>
             {
-                toolInput = call.ArgumentsJson;
+                toolInput = call.Arguments.GetRawText();
                 return Task.FromResult(LlmToolOutput.FromText("fact a"));
             }
         });

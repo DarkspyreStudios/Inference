@@ -16,7 +16,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// It reads the first-party Models API catalog for per-model reasoning levels and web search. Vertex Claude, which
 /// derives from it, has no Models API; the service never attaches a catalog to a Vertex connection.
 /// </remarks>
-internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabilities, ILlmProviderTokenCounter, ILlmContextEstimator
+internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabilities, ILlmContextEstimator
 {
     private const string AnthropicVersion = "2023-06-01";
     private const int DefaultMaxOutputTokens = 8192;
@@ -29,6 +29,10 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     }
 
     public override LlmTransport Transport => LlmTransport.AnthropicMessages;
+
+    /// <summary>Anthropic reports a prompt that is too long as an <c>invalid_request_error</c>.</summary>
+    protected override ProviderErrorReading ErrorReading { get; } =
+        new(error => LlmContextOverflow.Anthropic(error.Type, error.Message));
 
     public override LlmProviderDefinition ProviderDefinition => AnthropicDefinition.Value;
 
@@ -53,7 +57,6 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         Tools = new()
         {
             ChoiceModes = new[] { LlmToolChoiceMode.Auto, LlmToolChoiceMode.None, LlmToolChoiceMode.Required, LlmToolChoiceMode.Specific }.ToFrozenSet(),
-            StrictInputSchema = LlmStrictInputSchemaSupport.Unknown,
             SupportsParallelCalls = InferenceSupport.Supported,
             SupportsParallelCallControl = InferenceSupport.Supported,
             SupportsArgumentStreaming = InferenceSupport.Supported
@@ -84,15 +87,6 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsJsonSchema)
                     ? capabilities.SupportsJsonSchema : profile.SupportsStructuredOutputs ?? InferenceSupport.Unknown),
             SupportsJsonObject = InferenceSupport.Unsupported,
-            Tools = capabilities.Tools with
-            {
-                StrictInputSchema = profile.SupportsStructuredOutputs switch
-                {
-                    InferenceSupport.Supported => LlmStrictInputSchemaSupport.Supported,
-                    InferenceSupport.Unsupported => LlmStrictInputSchemaSupport.Unsupported,
-                    _ => LlmStrictInputSchemaSupport.Unknown
-                }
-            },
             SupportsAccountUsage = InferenceSupport.Unsupported,
             // Web search is offered only where the Models API reports it for the model.
             HostedTools = AnthropicWebSearch.Offered(entry)
@@ -197,41 +191,6 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         }));
     }
 
-    public async Task<LlmProviderInputTokenCount> CountInputTokensAsync(LlmConnection connection, LlmChatRequest request,
-        CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        ValidateTokenCountOptions(connection, request);
-        _ = ValidateMessagesRequest(connection, request);
-        if (request.Resources is not null)
-            throw new NotSupportedException("The Anthropic count route does not materialize caller-owned resources.");
-        JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), false);
-        // Count APIs exclude generation-only controls; every prompt-bearing field remains unchanged.
-        foreach (string name in CountExcludedFields)
-            payload.Remove(name);
-        if (payload.Any(field => !IsTokenCountField(field.Key)))
-            throw new NotSupportedException("The Anthropic count API cannot represent one of the configured provider fields.");
-        using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
-        LlmProviderInputTokenCount result;
-        {
-            using HttpRequestMessage message = CreateTokenCountRequest(connection, request, payload);
-            result = await AnthropicTokenCounting.SendAsync(Http, message, Transport, request.ModelId, cancellationToken).ConfigureAwait(false);
-        }
-        return consumption.Publish(result);
-    }
-
-    internal static void ValidateTokenCountOptions(LlmConnection connection, LlmChatRequest request)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        AnthropicPromptCache.ValidateOptions(connection, request);
-        if (connection.ProviderOptions.Keys.Concat(request.ProviderOptions.Keys).Any(name => name != AnthropicTools.OptionName
-            && !IsTokenCountField(name) && !CountExcludedFields.Contains(name, StringComparer.Ordinal)))
-            throw new NotSupportedException("The Anthropic count API cannot represent one of the configured provider fields.");
-    }
-
-    private static bool IsTokenCountField(string name) => name is
-        "model" or "messages" or "system" or "tools" or "tool_choice" or "thinking" or "output_config" or "cache_control";
-
     protected override bool SupportsResourcePreparation => true;
 
     public override IAsyncEnumerable<LlmStreamEvent> StreamAsync(
@@ -272,6 +231,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 credential,
                 "Anthropic Messages request",
                 secrets,
+                ErrorReading,
                 cancellationToken);
 
             if (!stream)
@@ -759,7 +719,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             ToolCalls = completionStatus is LlmCompletionStatus.RequiresAction or LlmCompletionStatus.Unknown ? toolCalls : [],
             ContinuationState = completionStatus is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction
                 && buildContent() is { } content
-                    ? AnthropicContinuation.WithContainer(ProviderContinuationStateCodec.Encode(connection, request.ModelId, content), containerId) : null,
+                    ? AnthropicContinuation.WithContainer(ProviderContinuationStateCodec.Encode(connection, request.ModelId, content, codec: null), containerId) : null,
             StructuredOutput = validation,
             Diagnostics = new LlmProviderDiagnostics(
                 (int)response.StatusCode,
@@ -785,7 +745,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     {
         JsonElement error = LlmJson.GetObject(root, "error") ?? root;
         string safe = SecretRedactor.Sanitize(raw, credential, secrets);
-        (_, string? message, string? type) = ProviderHttp.ReadProviderError(safe);
+        (_, string? message, string? type, _) = ProviderHttp.ReadProviderError(safe);
         return new LlmProviderException(
             message ?? "Anthropic returned a stream error.",
             Transport,
@@ -822,6 +782,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 credential,
                 "Anthropic model discovery",
                 secrets,
+                ErrorReading,
                 cancellationToken);
             string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
             JsonDocument document;
@@ -888,14 +849,6 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         return result;
     }
 
-    protected virtual HttpRequestMessage CreateTokenCountRequest(LlmConnection connection, LlmChatRequest request, JsonObject payload)
-    {
-        var result = new HttpRequestMessage(HttpMethod.Post, BuildApiUri(connection, "messages/count_tokens"))
-        { Content = RequestJson.Content(payload) };
-        ApplyAnthropicHeaders(result, connection, LlmCredential.Parse(connection.Credential));
-        return result;
-    }
-
     protected virtual string ReasoningModelId(string modelId) => modelId;
 
     protected virtual JsonObject BuildPayload(
@@ -916,7 +869,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         {
             if (message.ContinuationState is not null)
             {
-                JsonArray retained = ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId);
+                JsonArray retained = ProviderContinuationStateCodec.DecodeMessage(message, connection, request.ModelId, codec: null);
                 containerId = AnthropicContinuation.ReadPayload(message.ContinuationState.Payload).ContainerId ?? containerId;
                 messages.Add(item: new JsonObject
                 {
