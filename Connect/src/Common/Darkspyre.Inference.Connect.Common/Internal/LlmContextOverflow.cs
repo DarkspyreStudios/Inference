@@ -25,10 +25,10 @@ internal static class LlmContextOverflow
     internal static bool BedrockValidation(string? message) => Contains(message, "Input is too long")
         || Contains(message, "too many input tokens");
 
-    // Anthropic Messages (Darkspyre.Inference.Connect.Anthropic) uses this. Azure OpenAI, OpenAI-compatible Chat and Google
-    // Vertex AI use it too; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure and
-    // .LLM.Vertex, outside the solution; Providers/ChatCompletionsLlmClientBase.cs, under Compile Remove), and their parts
-    // move into their own libraries when they return to the build.
+    // Azure OpenAI, OpenAI-compatible Chat and Google Vertex AI use this; they are out of the build
+    // (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure and .LLM.Vertex, outside the solution;
+    // Providers/ChatCompletionsLlmClientBase.cs, under Compile Remove). It moves into their own libraries when they return
+    // to the build. Anthropic Messages reads its overflow through Anthropic above.
     internal static bool Http(LlmTransport transport, string? code, string? type, string? message) => transport switch
     {
         LlmTransport.AzureOpenAiResponses => Responses(code),
