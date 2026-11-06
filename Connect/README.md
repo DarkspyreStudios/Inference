@@ -3588,7 +3588,9 @@ A managed `LlmAgentTurnCompletedEvent` whose reason is `ProviderFailure` carries
 `ProviderError`, `StreamInterrupted`, `StreamEndedWithoutAnswer`, `ToolRequestWithoutCalls`, `CompactionFailed` and `Other`.
 Provider facts come from the existing exception, including its recognized not-attempted resource wrapper; a compaction
 wrapper retains any inner provider facts. A failed response with no provider exception and a local failure carry no
-HTTP facts. `ManagedFailure.Label` is the one boundary for codes and request ids: 1 to 128 ASCII letters, digits, `_`,
+HTTP facts. These facts can be unavailable even when a provider reported a failed response. Null facts do not establish
+whether a provider error answer was received. `ManagedFailure.Label` is the one boundary for codes and request ids:
+1 to 128 ASCII letters, digits, `_`,
 `-`, `.` or `:` pass unchanged, and every other value becomes null. This keeps provider prose, bodies and headers out of
 these fields. Schema failure names have their own schema-owned policy above. No provider or model message is added.
 The existing completion reason, `Error` text, warning and retry behavior are unchanged. Other completion reasons and

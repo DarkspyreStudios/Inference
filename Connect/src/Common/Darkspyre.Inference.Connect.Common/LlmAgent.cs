@@ -547,8 +547,8 @@ public enum LlmAgentFailureKind
 /// <param name="HttpStatus">The HTTP status the provider answered with, when the failure came from an HTTP answer.</param>
 /// <param name="ProviderCode">The provider's error code, such as <c>rate_limit_error</c>, when it reported one.</param>
 /// <param name="RequestId">The request id the provider assigned, when it reported one.</param>
-/// <gotcha>The status, code and id may all be null. A null status, code and id with a kind other than ProviderError means the failure
-/// never reached a provider error answer.</gotcha>
+/// <gotcha>The status, code and id may all be unavailable even when a provider reported a failed response.
+/// Null facts do not establish whether a provider error answer was received.</gotcha>
 public sealed record LlmAgentFailureDiagnostic(LlmAgentFailureKind Kind, int? HttpStatus, string? ProviderCode,
     string? RequestId);
 
