@@ -126,7 +126,7 @@ internal sealed class AntigravityAgentClient(IAntigravityCliSessionProcessFactor
             modelId, tools, toolHandler);
         if (toolHandling == LlmAgentToolHandling.ReturnRequests)
             throw new NotSupportedException("Antigravity CLI runs each host tool call to its result; SupportsExternalToolHandoff is Unsupported.");
-        HostedTools.Validate(HostedTools.WithoutUnofferedImages(hostedTools, AntigravityNativeAgent.Capabilities.HostedTools),
+        HostedTools.Validate(HostedTools.WithoutUnoffered(hostedTools, AntigravityNativeAgent.Capabilities.HostedTools),
             maxHostedTurns, AntigravityNativeAgent.Capabilities.HostedTools);
     }
 

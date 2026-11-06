@@ -104,8 +104,7 @@ internal static class OpenAiRateLimitHeaders
     }
 }
 
-// Anthropic Messages uses this; Anthropic Messages is out of the build (Providers/AnthropicMessagesLlmClient.cs, under
-// Compile Remove). It moves into that provider's own library when the provider returns to the build.
+// Anthropic Messages (Darkspyre.Inference.Connect.Anthropic) uses this.
 internal static class AnthropicRateLimitHeaders
 {
     internal static LlmAccountUsageSnapshot? Parse(HttpResponseHeaders headers, DateTimeOffset observedAt)

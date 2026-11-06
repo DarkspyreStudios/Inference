@@ -12,6 +12,7 @@ The conversation libraries are independently consumable:
 | `Darkspyre.Inference.Connect.Antigravity` | Official Antigravity CLI conversations, native resume, host tools and account usage |
 | `Darkspyre.Inference.Connect.Grok` | Grok (xAI) Responses conversations on xAI's subscription proxy, with a Grok subscription's device sign-in, hosted search and account usage |
 | `Darkspyre.Inference.Connect.HostTools` | The host-tools local service, bundled under `hosttools/service`, and its client, with Darkspyre.Common's local-service libraries in its own `lib/` |
+| `Darkspyre.Inference.Connect.Anthropic` | Anthropic Messages conversations with an Anthropic API key, with Anthropic's hosted web search |
 | `Darkspyre.Inference.Connect.OpenAiApi` | OpenAI Responses conversations and text embeddings |
 | `Darkspyre.Inference.Connect.SelfHost` | Conversations and text/image embeddings through caller-owned engines |
 
@@ -45,7 +46,7 @@ scratch there. Antigravity also registers an `ILlmDataFolderUser`. A host that m
 `ReleaseAsync` on every registered `ILlmDataFolderUser`, which stops the provider's service in the folder, closing
 every connection to it, and returns once it has exited. Including SelfHost also requires caller-owned
 `ILlmSelfHost` when resolving its clients. Connect borrows those engines through Common contracts;
-the caller owns their loading and disposal. Codex, OpenAiApi, Grok and SelfHost use the shared managed
+the caller owns their loading and disposal. Codex, Anthropic, OpenAiApi, Grok and SelfHost use the shared managed
 conversation implementation. Claude and Antigravity use their native universal conversation implementations.
 
 Every library is one managed artifact for Mac, Linux and Windows. Existing runtime OS handling
@@ -56,7 +57,7 @@ Provider package buildTransitive targets and source-mode targets preserve provid
 trimming. This rooting does not establish full application trimming or NativeAOT compatibility.
 
 Every other LLM provider is out of the build. `Darkspyre.Inference.Connect.Common.csproj` excludes the
-Anthropic API, Apple, OpenAI-compatible chat and Gemini API files with
+Apple, OpenAI-compatible chat and Gemini API files with
 `Compile Remove`. The Image project excludes the xAI image transport and the TTS project
 excludes the xAI speech transport. The Bedrock, Vertex, Azure, STT, Realtime, Video, Resources and examples
 projects are out of the solution, the `Darkspyre.Inference.Connect` package and the source references in
@@ -385,6 +386,23 @@ fields are not sent there. `HostedIncludes` adds `web_search_call.action.sources
 `code_interpreter_call.outputs` to `include` when the matching tool is present. The hosted-turn limit is not sent
 on the OpenAI API: its Responses API has no `max_turns`. A provider whose wire differs overrides either hook per
 tool.
+
+Anthropic Messages maps web search to Anthropic's own server tool, `{"type":"web_search_20250305","name":"web_search"}`,
+with `allowed_domains`, `blocked_domains` and `user_location` (`{"type":"approximate"}` plus each of `city`, `region`,
+`country` and `timezone` that is set) from `AllowedDomains`, `ExcludedDomains` and `Location`. `max_uses` is not sent,
+so Anthropic's default applies, and the hosted-turn limit is not sent. The basic version calls search directly on every
+model that supports it; later versions route searches through code execution by default. `GetCapabilities` lists
+`WebSearch` only for a model whose Models API entry reports `capabilities.server_tools.web_search.supported` as true.
+After the shared validation, the adapter's `ValidateAdditionalRequest` refuses allowed and excluded domains together
+("Anthropic web search accepts allowed or excluded domains, not both."), image search or image understanding
+("Anthropic web search has no image search or image understanding."), and a `web_search` entry in the raw
+`anthropic_tools.server_tools` option ("Web search uses the hosted web-search tool."). `AnthropicWebSearch` reports a
+`server_tool_use` block named `web_search` that has an id as `LlmHostedToolCallStartedEvent`, and its
+`web_search_tool_result` as one `LlmHostedToolCallCompletedEvent`: the input is the call's assembled `input`, a result
+list gives `LlmHostedSearchOutput` with each result's URL and title and no status, and an error gives the provider's
+`error_code` as the status and no output. Each `web_search_result_location` citation becomes an `LlmCitationEvent`
+with its URL and title and joins `result.Citations`. `page_age`, `encrypted_content` and the error object stay in the
+native continuation, and every block is sent back unchanged.
 
 Codex uses the same web-search serializer and observer. `CodexReplay` retains `web_search_call` type, id, status and action,
 including search queries and any returned sources. Citations remain observed `result.Citations`. The existing shared codec
@@ -2386,8 +2404,10 @@ sampling/tool controls. Anthropic Messages, Vertex Claude and Bedrock Claude use
 First-party post-Opus-4.6 Messages models additionally accept the documented temperature and top-p
 defaults described under Sampling Defaults. Those values do not represent controllable sampling.
 
-Anthropic Messages and Vertex Claude report `pause_turn` as `Incomplete` with its native reason and
-opaque continuation state. Ordered server-tool calls, their result blocks, caller metadata and
+Anthropic Messages and Vertex Claude continue a server-only `pause_turn` in the same step: the client sends the paused
+assistant content back unchanged as the next request, and the step's one result holds every paused block, its text and
+its summed usage. An intermediate pause emits no completion. A paused reply that also holds client tool calls is
+refused as an invalid mixed reply. Ordered server-tool calls, their result blocks, caller metadata and
 citations remain replay data; they do not become host tool actions. Streaming retains partial
 server-tool argument deltas before constructing that state. Calls from native code execution retain
 their `caller` metadata, including client calls that still require a tool result. A caller replays a
@@ -4943,6 +4963,16 @@ key or protected `x-api-key` header. It supports chat-style host tools and never
 CLI. `AnthropicClaudeCli` is the Claude subscription transport; it launches the official CLI, reports
 agent-tool support, and rejects API-key credentials. OAuth is never used to choose between them.
 The CLI process starts and ends as [Wrapped CLI processes](#wrapped-cli-processes) describes.
+
+`AnthropicMessages` lives in its own library, `Darkspyre.Inference.Connect.Anthropic`, provider `anthropic-api-key`
+("Anthropic API Key"). Its `AnthropicConnectProviderAttribute` registers `AnthropicMessagesLlmClient` and the shared
+`ManagedLlmAgentClient<AnthropicMessagesLlmClient>`, so its sessions open as every managed provider's do. Its sessions
+report token usage, including cache reads and writes, and no account usage; caching is `PromptCaching.Claude`. Its
+context estimate (`EstimateAsync`) counts the Messages projection locally and makes no network call: caller-owned
+resources count by their resolved descriptors, and a request whose projection is not plain text gets no estimate. It
+offers web search on the models whose Models API entry reports it (see "Hosted search"); the Claude CLI transport
+offers none. `AnthropicAttachments`, `AnthropicContinuation` and `AnthropicUsage` stay in Connect.Common, which both
+Claude libraries use.
 
 Configure an API-key connection with the API endpoint and a host-owned credential:
 

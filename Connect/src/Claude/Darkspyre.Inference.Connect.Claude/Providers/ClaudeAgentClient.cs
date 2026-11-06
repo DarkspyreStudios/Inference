@@ -74,7 +74,7 @@ internal sealed partial class ClaudeAgentClient(IClaudeCliSessionProcessFactory 
         CancellationToken cancellationToken)
     {
         options = ClientTools.Snapshot(options);
-        options = options with { HostedTools = HostedTools.WithoutUnofferedImages(options.HostedTools, ClaudeNativeAgent.Capabilities.HostedTools) };
+        options = options with { HostedTools = HostedTools.WithoutUnoffered(options.HostedTools, ClaudeNativeAgent.Capabilities.HostedTools) };
         HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, ClaudeNativeAgent.Capabilities.HostedTools);
         // The CLI owns its id, so ThreadId is ignored. The runtime policy is accepted and not read: no provider tool runs.
         string workingDirectory = options.Runtime?.WorkingDirectory ?? Environment.CurrentDirectory;

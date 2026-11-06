@@ -267,6 +267,39 @@ public sealed class ManagedAgentTests
         Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
     }
 
+    /// <summary>
+    /// Through the shared opening, so through Preflight and LlmProviderService, a session asking for image generation and
+    /// web search opens on a model offering neither and runs without them, while a model lacking X search still refuses
+    /// an X search request. Defect: the opening refuses the session before the session's own filter runs.
+    /// </summary>
+    [Fact]
+    public async Task UnofferedHostedToolsAreDroppedAtOpening()
+    {
+        using var handler = new DirectCodexTests.Handler(request => request.Method == HttpMethod.Get
+            ? AnthropicMessagesTests.Models(webSearch: false)
+            : AnthropicMessagesTests.Sse(AnthropicMessagesTests.Start(),
+                AnthropicMessagesTests.Block(0, new System.Text.Json.Nodes.JsonObject { ["type"] = "text", ["text"] = "done" }),
+                AnthropicMessagesTests.Stop(0), AnthropicMessagesTests.End("end_turn"), AnthropicMessagesTests.Done()));
+        var client = new AnthropicMessagesLlmClient(new HttpClient(handler));
+        LlmConnection connection = AnthropicMessagesTests.Connection();
+        using var providers = new LlmProviderService(new AnthropicMessagesTests.Source(connection), [client], []);
+        var agents = new ManagedLlmAgentClient<AnthropicMessagesLlmClient>(client, providers, new());
+
+        await using (ILlmAgentSession session = await agents.StartSessionAsync("anthropic", connection, new()
+        { ModelId = "claude-test", HostedTools = [new LlmImageGenerationTool(), new LlmWebSearchTool()] }))
+        {
+            List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
+            Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        }
+        string sent = handler.Bodies.Single(body => body.Contains("\"messages\"", StringComparison.Ordinal));
+        Assert.DoesNotContain("web_search", sent, StringComparison.Ordinal);
+        Assert.DoesNotContain("image_generation", sent, StringComparison.Ordinal);
+
+        NotSupportedException refused = await Assert.ThrowsAsync<NotSupportedException>(() => agents.StartSessionAsync("anthropic",
+            connection, new() { ModelId = "claude-test", HostedTools = [new LlmSocialSearchTool()] }));
+        Assert.Equal("This route does not implement X search.", refused.Message);
+    }
+
     /// <summary>A stored context whose selection differs from the caller's current one opens with the current one.</summary>
     [Fact]
     public async Task OpeningAdoptsTheCurrentSelection()

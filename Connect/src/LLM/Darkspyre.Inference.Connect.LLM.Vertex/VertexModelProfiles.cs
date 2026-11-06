@@ -6,6 +6,8 @@ using Darkspyre.Inference.Connect.LLM.Providers;
 
 namespace Darkspyre.Inference.Connect.LLM.Vertex;
 
+// AnthropicModelProfiles now lives in Darkspyre.Inference.Connect.Anthropic, its only user in the build. It returns to
+// Connect.Common when Vertex returns to the build, so both libraries share one set of Claude profiles.
 internal sealed record VertexModelProfile(string Id, long? ContextTokens, int? OutputTokens, LlmProviderCapabilities Capabilities)
 {
     public bool IsClaude => Id.StartsWith("anthropic/", StringComparison.Ordinal);

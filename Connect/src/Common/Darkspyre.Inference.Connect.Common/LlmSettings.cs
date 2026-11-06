@@ -204,11 +204,11 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     // that provider's own library when the provider returns to the build.
     private bool UsesChatCompletions => _draft.Transport == LlmTransport.OpenAiCompatibleChat;
     private bool UsesApiKey => _definition.AcceptsApiKey || KeptApiKey;
-    // OpenAI-compatible Chat, Anthropic Messages, the Gemini API, Google Vertex AI and Azure OpenAI use this; they are out
-    // of the build (Providers/ChatCompletionsLlmClientBase.cs, OpenAiCompatibleChatLlmClient.cs, AnthropicMessagesLlmClient.cs
-    // and GeminiApiLlmClient*.cs, under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex and
-    // Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure, outside the solution). It moves into their own libraries
-    // when they return to the build.
+    // Anthropic Messages (Darkspyre.Inference.Connect.Anthropic) uses this. OpenAI-compatible Chat, the Gemini API, Google
+    // Vertex AI and Azure OpenAI use it too; they are out of the build (Providers/ChatCompletionsLlmClientBase.cs,
+    // OpenAiCompatibleChatLlmClient.cs and GeminiApiLlmClient*.cs, under Compile Remove;
+    // Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex and Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure,
+    // outside the solution), and their parts move into their own libraries when they return to the build.
     private bool KeptApiKey => UsesChatCompletions || _draft.Transport is LlmTransport.AnthropicMessages or LlmTransport.GoogleGeminiApi
         || UsesVertex && Vertex.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey
         || UsesAzure && _azure!.Authentication == LlmAzureAuthenticationMode.ApiKey;

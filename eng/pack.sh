@@ -15,6 +15,7 @@ projects=(
     Connect/src/HostTools/Darkspyre.Inference.Connect.HostTools/Darkspyre.Inference.Connect.HostTools.csproj
     Connect/src/Antigravity/Darkspyre.Inference.Connect.Antigravity/Darkspyre.Inference.Connect.Antigravity.csproj
     Connect/src/Grok/Darkspyre.Inference.Connect.Grok/Darkspyre.Inference.Connect.Grok.csproj
+    Connect/src/Anthropic/Darkspyre.Inference.Connect.Anthropic/Darkspyre.Inference.Connect.Anthropic.csproj
     Connect/src/OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi.csproj
     Connect/src/SelfHost/Darkspyre.Inference.Connect.SelfHost/Darkspyre.Inference.Connect.SelfHost.csproj
     Tensor/src/Common/Darkspyre.Inference.Tensor.Common/Darkspyre.Inference.Tensor.Common.csproj

@@ -29,9 +29,8 @@ internal static class RichContentRoutes
         AllowsEmpty = InferenceSupport.Supported
     };
 
-    // Anthropic Messages and Google Vertex AI use this; they are out of the build (Providers/AnthropicMessagesLlmClient.cs,
-    // under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex, outside the solution). It moves into
-    // their own libraries when they return to the build.
+    // Anthropic Messages (Darkspyre.Inference.Connect.Anthropic) uses this. Google Vertex AI uses it too; it is out of the
+    // build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex, outside the solution).
     /// <summary>Anthropic Messages <c>tool_result</c>.</summary>
     public static LlmRichContentSupported Anthropic { get; } = new()
     {

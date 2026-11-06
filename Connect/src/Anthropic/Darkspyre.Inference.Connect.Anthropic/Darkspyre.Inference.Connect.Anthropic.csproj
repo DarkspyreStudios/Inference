@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <Description>Conversations and agent sessions through the Anthropic Messages API with an Anthropic API key, with Anthropic's hosted web search.</Description>
+    <PackageTags>llm;ai;anthropic;claude;messages-api;agents;web-search</PackageTags>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../Common/Darkspyre.Inference.Connect.Common/Darkspyre.Inference.Connect.Common.csproj" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.LLM.Tests" />
+    <InternalsVisibleTo Include="Darkspyre.Inference.Connect.ConsoleTester" />
+    <None Include="buildTransitive/Darkspyre.Inference.Connect.Anthropic.targets" Pack="true" PackagePath="buildTransitive/" />
+  </ItemGroup>
+</Project>

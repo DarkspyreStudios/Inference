@@ -25,6 +25,7 @@ The packages are licensed under the MIT license. `LICENSE.md` in each package ho
 | [Darkspyre.Inference.Connect.HostTools](https://www.nuget.org/packages/Darkspyre.Inference.Connect.HostTools) | The host-tools local service and its client |
 | [Darkspyre.Inference.Connect.Antigravity](https://www.nuget.org/packages/Darkspyre.Inference.Connect.Antigravity) | Conversations on a Google subscription through the Antigravity CLI |
 | [Darkspyre.Inference.Connect.Grok](https://www.nuget.org/packages/Darkspyre.Inference.Connect.Grok) | Conversations on a Grok subscription |
+| [Darkspyre.Inference.Connect.Anthropic](https://www.nuget.org/packages/Darkspyre.Inference.Connect.Anthropic) | Conversations through the Anthropic API with an API key, with hosted web search |
 | [Darkspyre.Inference.Connect.OpenAiApi](https://www.nuget.org/packages/Darkspyre.Inference.Connect.OpenAiApi) | Conversations and embeddings through the OpenAI API |
 | [Darkspyre.Inference.Connect.SelfHost](https://www.nuget.org/packages/Darkspyre.Inference.Connect.SelfHost) | Conversations and embeddings on engines the application runs |
 | [Darkspyre.Inference.Tensor.Common](https://www.nuget.org/packages/Darkspyre.Inference.Tensor.Common) | Model packs, the model lifecycle and the Tensor capability interfaces |

@@ -3,6 +3,8 @@ using System.Text.Json;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
+// The Gemini API and Google Vertex AI use this; they are out of the build, and this file is under Compile Remove.
+// Anthropic Messages no longer uses it: Darkspyre.Inference.Connect.Anthropic counts through its own AnthropicTokenCounting.
 internal static class ProviderTokenCounting
 {
     internal static readonly TimeSpan ControlTimeout = TimeSpan.FromSeconds(100);

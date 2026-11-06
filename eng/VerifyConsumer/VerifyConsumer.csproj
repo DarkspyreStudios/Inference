@@ -14,6 +14,7 @@
     <PackageReference Include="Darkspyre.Inference.Connect.Antigravity" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Connect.HostTools" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Connect.Grok" Version="[$(Version)]" />
+    <PackageReference Include="Darkspyre.Inference.Connect.Anthropic" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Connect.OpenAiApi" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Connect.SelfHost" Version="[$(Version)]" />
     <PackageReference Include="Darkspyre.Inference.Tensor.Common" Version="[$(Version)]" />

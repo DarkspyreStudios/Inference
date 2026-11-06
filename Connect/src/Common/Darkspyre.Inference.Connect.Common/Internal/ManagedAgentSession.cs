@@ -117,7 +117,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         _codec = (estimator as ILlmContinuationCodecSource)?.ContinuationCodec;
         _stream = stream;
         _capabilities = capabilities;
-        IReadOnlyList<LlmHostedTool> offered = HostedTools.WithoutUnofferedImages(options.HostedTools,
+        IReadOnlyList<LlmHostedTool> offered = HostedTools.WithoutUnoffered(options.HostedTools,
             capabilities(options.ModelId).HostedTools);
         HostedTools.Validate(offered, options.MaxHostedTurns, capabilities(options.ModelId).HostedTools);
         ClientTools.ValidateManagedOpening(options, capabilities(options.ModelId), supportsResources);
@@ -1199,7 +1199,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     private IReadOnlyList<LlmHostedTool> StepHostedTools(string modelId)
     {
         IReadOnlySet<LlmHostedToolKind> offered = _capabilities(modelId).HostedTools;
-        IReadOnlyList<LlmHostedTool> caller = HostedTools.WithoutUnofferedImages(_hostedTools, offered);
+        IReadOnlyList<LlmHostedTool> caller = HostedTools.WithoutUnoffered(_hostedTools, offered);
         return [.. caller, .. _sessionHostedTools.Where(tool => offered.Contains(tool.Kind)
             && !_hostedTools.Any(existing => existing.Kind == tool.Kind))];
     }
@@ -1514,7 +1514,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         ArgumentNullException.ThrowIfNull(turn.Input);
         ArgumentNullException.ThrowIfNull(turn.Attachments);
         var capabilities = _capabilities(turn.ModelId ?? _options.ModelId);
-        HostedTools.Validate(HostedTools.WithoutUnofferedImages(_hostedTools, capabilities.HostedTools),
+        HostedTools.Validate(HostedTools.WithoutUnoffered(_hostedTools, capabilities.HostedTools),
             _options.MaxHostedTurns, capabilities.HostedTools);
         ClientTools.ValidateManagedOpening(_options with { ToolHandler = _toolHandler, CallerServices = _callerServices }, capabilities, _supportsResources);
         if (capabilities.SupportsAgentSessions == InferenceSupport.Unsupported)

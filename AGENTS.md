@@ -61,7 +61,7 @@ Consumers depend on semantic contracts. They never receive provider-native paylo
 | Package | Holds |
 | --- | --- |
 | `Darkspyre.Inference.Common` | Contracts and models that Connect and Tensor genuinely share |
-| `Darkspyre.Inference.Connect.*` | One package per connector library: `Connect.Common`, the providers `Connect.Codex`, `Connect.Claude`, `Connect.Antigravity`, `Connect.Grok`, `Connect.OpenAiApi` and `Connect.SelfHost`, and `Connect.HostTools`. `Darkspyre.Inference.Connect` holds the Image, TTS and Audio assemblies |
+| `Darkspyre.Inference.Connect.*` | One package per connector library: `Connect.Common`, the providers `Connect.Codex`, `Connect.Claude`, `Connect.Antigravity`, `Connect.Grok`, `Connect.Anthropic`, `Connect.OpenAiApi` and `Connect.SelfHost`, and `Connect.HostTools`. `Darkspyre.Inference.Connect` holds the Image, TTS and Audio assemblies |
 | `Darkspyre.Inference.Tensor.*` | One package per in-process engine library: `Tensor.Common`, `Tensor.Decision.Laya`, `Tensor.Embedding`, `Tensor.Embedding.Gemma`, `Tensor.Ggml`, `Tensor.Image.Supra`, `Tensor.LLM.Qwen`, `Tensor.Registry` and `Tensor.STT.Whisper` |
 | `Darkspyre.Inference.UI.Settings.*` | Host-placed editors for provider settings and their managers: `UI.Settings.Avalonia` and `UI.Settings.Blazor`, and the UI-neutral `UI.Settings.Core` both share |
 

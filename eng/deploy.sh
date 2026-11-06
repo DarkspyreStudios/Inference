@@ -30,7 +30,7 @@ main() {
     local mode="${1:-}" option="${2:-}" root current version source_commit family configuration
     local release_token id code package artifact
     local stage='preflight'
-    local -a packages=(Common Connect Connect.Common Connect.Codex Connect.Claude Connect.HostTools Connect.Antigravity Connect.Grok Connect.OpenAiApi Connect.SelfHost Tensor.Common Tensor.Decision.Laya Tensor.Embedding Tensor.Embedding.Gemma Tensor.Ggml Tensor.Image.Supra Tensor.LLM.Qwen Tensor.Registry Tensor.STT.Whisper UI.Settings.Core UI.Settings.Avalonia UI.Settings.Blazor)
+    local -a packages=(Common Connect Connect.Common Connect.Codex Connect.Claude Connect.HostTools Connect.Antigravity Connect.Grok Connect.Anthropic Connect.OpenAiApi Connect.SelfHost Tensor.Common Tensor.Decision.Laya Tensor.Embedding Tensor.Embedding.Gemma Tensor.Ggml Tensor.Image.Supra Tensor.LLM.Qwen Tensor.Registry Tensor.STT.Whisper UI.Settings.Core UI.Settings.Avalonia UI.Settings.Blazor)
     local -a version_files=(Directory.Build.props README.md Common/README.md Connect/README.md Tensor/README.md UI/README.md)
     [[ "$mode" == major || "$mode" == minor ]] || fail 'Use deploy-major.sh or deploy-minor.sh.'
     if [[ "$option" == --help ]]; then

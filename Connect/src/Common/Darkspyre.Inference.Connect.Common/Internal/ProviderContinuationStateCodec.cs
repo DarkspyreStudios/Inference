@@ -23,8 +23,7 @@ internal static class ProviderContinuationStateCodec
             ImplementationId = ImplementationId(connection.Transport),
             ModelId = modelId,
             ScopeId = Scope(connection),
-            // Anthropic Messages uses this; Anthropic Messages is out of the build (Providers/AnthropicMessagesLlmClient.cs,
-            // under Compile Remove). It moves into that provider's own library when the provider returns to the build.
+            // Anthropic Messages (Darkspyre.Inference.Connect.Anthropic) uses this.
             Payload = connection.Transport == LlmTransport.AnthropicMessages
                 ? AnthropicContinuation.EncodePayload(Project(output, connection.Transport))
                 : Project(output, connection.Transport).ToJsonString()
@@ -37,10 +36,9 @@ internal static class ProviderContinuationStateCodec
     private static ILlmContinuationCodec? Rules(LlmConnection connection, ILlmContinuationCodec? codec) =>
         codec ?? connection.ContinuationCodec;
 
-    // Azure OpenAI, Anthropic Messages and AWS Bedrock use this; they are out of the build
-    // (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure and .LLM.Bedrock, outside the solution;
-    // Providers/AnthropicMessagesLlmClient.cs, under Compile Remove). It moves into their own libraries when they return
-    // to the build.
+    // Anthropic Messages (Darkspyre.Inference.Connect.Anthropic) uses this. Azure OpenAI and AWS Bedrock use it too; they
+    // are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure and .LLM.Bedrock, outside the solution),
+    // and their parts move into their own libraries when they return to the build.
     /// <summary>
     /// Transports whose adapters keep continuation state through the static rules. Bedrock Converse state carries the
     /// token counts the provider reported, and the ordered reply when the reply contains reasoning.
@@ -94,8 +92,7 @@ internal static class ProviderContinuationStateCodec
 
         try
         {
-            // Anthropic Messages uses this; Anthropic Messages is out of the build (Providers/AnthropicMessagesLlmClient.cs,
-            // under Compile Remove). It moves into that provider's own library when the provider returns to the build.
+            // Anthropic Messages (Darkspyre.Inference.Connect.Anthropic) uses this.
             JsonArray output = connection.Transport == LlmTransport.AnthropicMessages
                 ? AnthropicContinuation.ReadPayload(state.Payload).Content
                 : JsonNode.Parse(state.Payload) as JsonArray
@@ -163,9 +160,9 @@ internal static class ProviderContinuationStateCodec
     /// <summary>Throws unless the message's text and tool calls match the retained output.</summary>
     internal static void MatchMessage(LlmChatMessage message, JsonArray output, LlmTransport transport)
     {
-        // Anthropic Messages and AWS Bedrock use this; they are out of the build (Providers/AnthropicMessagesLlmClient.cs,
-        // under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock, outside the solution). It moves
-        // into their own libraries when they return to the build.
+        // Anthropic Messages (Darkspyre.Inference.Connect.Anthropic) uses this. AWS Bedrock uses it too; it is out of the
+        // build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock, outside the solution), and its part moves into its
+        // own library when it returns to the build.
         string text = transport is LlmTransport.AnthropicMessages or LlmTransport.AwsBedrockConverse
             ? string.Concat(output.OfType<JsonObject>()
                 .Where(item => item["type"]?.GetValue<string>() == "text")
@@ -243,10 +240,9 @@ internal static class ProviderContinuationStateCodec
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }
 
-    // Azure OpenAI, Anthropic Messages and AWS Bedrock use this; they are out of the build
-    // (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure and .LLM.Bedrock, outside the solution;
-    // Providers/AnthropicMessagesLlmClient.cs, under Compile Remove). It moves into their own libraries when they return
-    // to the build.
+    // Anthropic Messages (Darkspyre.Inference.Connect.Anthropic) uses this. Azure OpenAI and AWS Bedrock use it too; they
+    // are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure and .LLM.Bedrock, outside the solution),
+    // and their parts move into their own libraries when they return to the build.
     private static JsonArray Project(JsonArray output, LlmTransport transport)
     {
         var projected = new JsonArray();
@@ -298,9 +294,7 @@ internal static class ProviderContinuationStateCodec
         {
             if (item.TryGetPropertyValue(field, out JsonNode? value))
             {
-                // Anthropic Messages uses the two arms below; Anthropic Messages is out of the build
-                // (Providers/AnthropicMessagesLlmClient.cs, under Compile Remove). It moves into that provider's own
-                // library when the provider returns to the build.
+                // Anthropic Messages (Darkspyre.Inference.Connect.Anthropic) uses the two arms below.
                 if (transport == LlmTransport.AnthropicMessages && field == "citations")
                 {
                     if (value is not JsonArray citations || citations.Any(citation => citation is not JsonObject))
@@ -352,8 +346,7 @@ internal static class ProviderContinuationStateCodec
             (_, "message") => ["content"],
             (_, "function_call") => ["call_id", "name", "arguments"],
             (_, "tool_use" or "server_tool_use") => ["id", "name", "input"],
-            // Anthropic Messages uses this; Anthropic Messages is out of the build (Providers/AnthropicMessagesLlmClient.cs,
-            // under Compile Remove). It moves into that provider's own library when the provider returns to the build.
+            // Anthropic Messages (Darkspyre.Inference.Connect.Anthropic) uses this.
             (LlmTransport.AnthropicMessages, "web_search_tool_result" or "web_fetch_tool_result"
                 or "code_execution_tool_result" or "bash_code_execution_tool_result"
                 or "text_editor_code_execution_tool_result" or "tool_search_tool_result" or "advisor_tool_result") => ["tool_use_id", "content"],

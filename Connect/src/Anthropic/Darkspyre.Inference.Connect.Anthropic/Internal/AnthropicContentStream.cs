@@ -65,6 +65,22 @@ internal sealed class AnthropicContentStream
         }
     }
 
+    /// <summary>
+    /// The id and final input of the streamed <c>server_tool_use</c> block at <paramref name="index"/>: its assembled
+    /// <c>input_json_delta</c>s, or the input its start carried. Null when that block is not a server tool use with an id.
+    /// </summary>
+    internal (string Id, JsonElement? Input)? ServerToolAt(int index)
+    {
+        if (!_blocks.TryGetValue(index, out JsonObject? block) || block["type"] is not JsonValue type
+            || type.GetValue<string>() != "server_tool_use" || block["id"] is not JsonValue id
+            || id.GetValue<string>() is not { Length: > 0 } callId) return null;
+        JsonNode? input = _toolArguments.TryGetValue(index, out StringBuilder? arguments) && arguments.Length > 0
+            ? JsonNode.Parse(arguments.ToString()) : block["input"];
+        if (input is null) return (callId, null);
+        using JsonDocument parsed = JsonDocument.Parse(input.ToJsonString());
+        return (callId, parsed.RootElement.Clone());
+    }
+
     /// <summary>The streamed content blocks in index order, or null when the stream carried none.</summary>
     internal JsonArray? BuildContent()
     {

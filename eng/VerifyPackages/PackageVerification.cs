@@ -122,6 +122,7 @@ internal static class PackageVerification
             "Darkspyre.LocalServices.Platform.MacOS", "Darkspyre.LocalServices.Platform.Linux", "Darkspyre.LocalServices.Platform.Windows"
         ],
         ["Darkspyre.Inference.Connect.Grok"] = ["Darkspyre.Inference.Connect.Grok"],
+        ["Darkspyre.Inference.Connect.Anthropic"] = ["Darkspyre.Inference.Connect.Anthropic"],
         ["Darkspyre.Inference.Connect.OpenAiApi"] = ["Darkspyre.Inference.Connect.OpenAiApi"],
         ["Darkspyre.Inference.Connect.SelfHost"] = ["Darkspyre.Inference.Connect.SelfHost"],
         ["Darkspyre.Inference.Tensor.Common"] = ["Darkspyre.Inference.Tensor.Common"],

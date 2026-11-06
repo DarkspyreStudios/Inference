@@ -26,7 +26,9 @@ internal sealed class ManagedLlmAgentClient<TClient>(TClient client, LlmProvider
             if (options.Context is not null && options.CallerServices?.Resources is null)
                 ManagedAgentContext.ValidateRuntimeResources(options.Context);
             var capabilities = client.GetCapabilities(selected, options.ModelId);
-            HostedTools.Validate(options.HostedTools, options.MaxHostedTurns, capabilities.HostedTools);
+            // A tool the model does not offer and the session can run without is dropped first, as the session does.
+            HostedTools.Validate(HostedTools.WithoutUnoffered(options.HostedTools, capabilities.HostedTools), options.MaxHostedTurns,
+                capabilities.HostedTools);
             ClientTools.ValidateManagedOpening(options, capabilities, supportsResources: true);
             if (capabilities.SupportsAgentSessions == InferenceSupport.Unsupported)
                 throw new NotSupportedException(NativeAgentContract.AgentSessionsUnsupported);

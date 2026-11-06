@@ -49,6 +49,9 @@
     <Project Path="src/HostTools/Darkspyre.Inference.Connect.HostTools/Darkspyre.Inference.Connect.HostTools.csproj" />
     <Project Path="src/HostTools/Darkspyre.Inference.Connect.HostTools.Mcp/Darkspyre.Inference.Connect.HostTools.Mcp.csproj" />
   </Folder>
+  <Folder Name="/src/Anthropic/">
+    <Project Path="src/Anthropic/Darkspyre.Inference.Connect.Anthropic/Darkspyre.Inference.Connect.Anthropic.csproj" />
+  </Folder>
   <Folder Name="/src/OpenAiApi/">
     <Project Path="src/OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi/Darkspyre.Inference.Connect.OpenAiApi.csproj" />
   </Folder>

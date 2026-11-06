@@ -17,6 +17,8 @@ using Microsoft.Extensions.Logging;
 
 namespace Darkspyre.Inference.Connect.LLM.Bedrock;
 
+// AnthropicModelProfiles now lives in Darkspyre.Inference.Connect.Anthropic, its only user in the build. It returns to
+// Connect.Common when Bedrock returns to the build, so both libraries share one set of Claude profiles.
 internal sealed class BedrockLlmClient(
     BedrockClientFactory factory,
     BedrockLoggingGuard loggingGuard,

@@ -6,14 +6,15 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 
 namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>Direct Anthropic Messages API adapter for API-key connections.</summary>
 /// <remarks>
-/// It reads the first-party Models API catalog for per-model reasoning levels. Vertex Claude, which derives from it,
-/// has no Models API; the service never attaches a catalog to a Vertex connection.
+/// It reads the first-party Models API catalog for per-model reasoning levels and web search. Vertex Claude, which
+/// derives from it, has no Models API; the service never attaches a catalog to a Vertex connection.
 /// </remarks>
 internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabilities, ILlmProviderTokenCounter, ILlmContextEstimator
 {
@@ -29,9 +30,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
 
     public override LlmTransport Transport => LlmTransport.AnthropicMessages;
 
-    public override LlmProviderDefinition ProviderDefinition => ProviderDefinitions.AnthropicApiKey;
-
-    protected override bool OffersNonStreamingRequests => true;
+    public override LlmProviderDefinition ProviderDefinition => AnthropicDefinition.Value;
 
     protected override LlmProviderCapabilities DefaultCapabilities { get; } = new()
     {
@@ -69,7 +68,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         string? modelId = null)
     {
         LlmProviderCapabilities capabilities = base.GetCapabilities(connection, modelId);
-        AnthropicModelProfile profile = AnthropicModelProfiles.Resolve(modelId, ILlmCatalogCapabilities.EntryFor(connection, modelId));
+        JsonElement? entry = ILlmCatalogCapabilities.EntryFor(connection, modelId);
+        AnthropicModelProfile profile = AnthropicModelProfiles.Resolve(modelId, entry);
         InferenceSupport sampling = Transport == LlmTransport.AnthropicMessages
             && profile.AllowsSampling == InferenceSupport.Unsupported ? InferenceSupport.Unknown : profile.AllowsSampling;
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
@@ -94,6 +94,9 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 }
             },
             SupportsAccountUsage = InferenceSupport.Unsupported,
+            // Web search is offered only where the Models API reports it for the model.
+            HostedTools = AnthropicWebSearch.Offered(entry)
+                ? new HashSet<LlmHostedToolKind>(capabilities.HostedTools) { LlmHostedToolKind.WebSearch } : capabilities.HostedTools,
             SupportsTemperature = LlmProviderCapabilities.Intersect(sampling,
                 LlmCapabilityOverrideLookup.Overrides(connection, modelId, overrides => overrides.SupportsTemperature)
                     ? capabilities.SupportsTemperature : sampling),
@@ -120,7 +123,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
     {
         ArgumentNullException.ThrowIfNull(request);
         LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
-        ValidateRequest(connection, request, capabilities, AnthropicTools.Resolve(connection, request).NativeNames);
+        ValidateRequest(connection, request, capabilities);
         AnthropicModelProfile profile = AnthropicModelProfiles.Resolve(
             ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId))
             with { ReasoningLevels = capabilities.ReasoningLevels };
@@ -139,25 +142,45 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         return (capabilities, enforcement);
     }
 
-    protected override void ValidateReasoningRequest(LlmConnection connection, LlmChatRequest request,
-        LlmProviderCapabilities capabilities) => _ = AnthropicModelProfiles.MapReasoning(
-            AnthropicModelProfiles.Resolve(ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId))
-                with { ReasoningLevels = capabilities.ReasoningLevels }, request.ReasoningLevel);
+    /// <summary>
+    /// The adapter's own checks, after the shared ones: the native tool configuration (a native server tool's name never
+    /// equals a function tool's) and Anthropic's web-search checks.
+    /// </summary>
+    protected override void ValidateAdditionalRequest(LlmConnection connection, LlmChatRequest request) =>
+        AnthropicWebSearch.Validate(request, AnthropicTools.Resolve(connection, request));
 
     public string? EstimateDiagnostic =>
         "Estimated from the Messages plaintext projection with a general-purpose tokenizer; media and opaque provider state remain unknown.";
 
-    public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)
+    /// <summary>
+    /// Validates the generation projection and counts it locally, without a network call. Caller-owned resources count by
+    /// their resolved descriptors; the text projection counts without them, and a request whose projection is not plain
+    /// text gets no estimate.
+    /// </summary>
+    public ValueTask<ContextEstimate?> EstimateAsync(LlmConnection connection, LlmChatRequest request,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources, CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         _ = ValidateMessagesRequest(connection, request);
-        if (request.Resources is not null) return null;
-        JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), false);
+        long sized = ResourceSizes.Tokens(request.Messages, request.Messages, resources);
+        LlmChatRequest text = request with
+        {
+            Resources = null,
+            Messages = [.. request.Messages.Select(message => message with
+            {
+                Attachments = [.. message.Attachments.OfType<LlmAttachment>()],
+                ToolResults = [.. message.ToolResults.Select(result => result is LlmToolResult function
+                    ? function with { Output = function.Output with { Parts = [.. function.Output.Parts.Where(part => part is not LlmToolOutputSessionResource)] } }
+                    : result)]
+            })]
+        };
+        JsonObject payload = BuildPayload(connection, text, output => ProjectToolOutput(connection, text.ModelId, output), false);
         if (payload["container"] is not null
             || payload["messages"] is not JsonArray messages
             || messages.Any(message => message is not JsonObject item || !IsPlaintextContent(item["content"]))
-            || payload["system"] is { } system && !IsPlaintextContent(system)) return null;
+            || payload["system"] is { } system && !IsPlaintextContent(system)) return ValueTask.FromResult<ContextEstimate?>(null);
         foreach (string name in CountExcludedFields) payload.Remove(name);
-        return new ContextEstimate(LocalTokenCount.Count(payload.ToJsonString()));
+        return ValueTask.FromResult<ContextEstimate?>(new ContextEstimate(checked(LocalTokenCount.Count(payload.ToJsonString()) + sized)));
     }
 
     private static bool IsPlaintextContent(JsonNode? content)
@@ -192,7 +215,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         LlmProviderInputTokenCount result;
         {
             using HttpRequestMessage message = CreateTokenCountRequest(connection, request, payload);
-            result = await ProviderTokenCounting.SendAsync(Http, message, Transport, request.ModelId, true, cancellationToken).ConfigureAwait(false);
+            result = await AnthropicTokenCounting.SendAsync(Http, message, Transport, request.ModelId, cancellationToken).ConfigureAwait(false);
         }
         return consumption.Publish(result);
     }
@@ -225,239 +248,289 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         var (capabilities, enforcement) = ValidateMessagesRequest(connection, request);
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         bool stream = (capabilities.SupportsStreaming != InferenceSupport.Unsupported);
+        bool reasoningText = capabilities.SupportsReasoningText != InferenceSupport.Unsupported;
         JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), stream);
-        using HttpRequestMessage httpRequest = CreateHttpRequest(connection, request, payload, stream);
-
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
-        using HttpResponseMessage response = await Http.SendAsync(
-            httpRequest,
-            HttpCompletionOption.ResponseHeadersRead,
-            cancellationToken);
-        string[] secrets = httpRequest.Headers.SelectMany(header => header.Value).ToArray();
-        if (ObserveAccountUsage(response) is { } observed) { yield return consumption.Publish<LlmStreamEvent>(new AccountUsageObservedEvent(observed)); }
-        await ProviderHttp.ThrowIfUnsuccessfulAsync(
-            response,
-            Transport,
-            credential,
-            "Anthropic Messages request",
-            secrets,
-            cancellationToken);
-
-        if (!stream)
-        {
-            string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
-            foreach (LlmStreamEvent completeEvent in ReadCompleteResponse(
-                         body, response, connection, request, enforcement, credential, secrets, (capabilities.SupportsReasoningText != InferenceSupport.Unsupported)))
-            {
-                yield return consumption.Publish<LlmStreamEvent>(completeEvent);
-            }
-
-            yield break;
-        }
-
-        await using Stream events = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken);
+        var webSearch = new AnthropicWebSearch();
+        // A valid server-only pause_turn continues in the same step: each request after it sends the paused content back
+        // unchanged, and the step's one result holds every paused block and its usage.
+        var paused = new PausedTurn(payload);
         var text = new StringBuilder();
-        int? inputTokens = null;
-        int? cachedTokens = null;
-        int? cacheWriteTokens = null;
-        int? outputTokens = null;
-        string? responseId = null;
-        string? observedModel = null;
-        string? stopReason = null;
-        string? containerId = null;
-        string? refusalCategory = null;
-        string? refusalExplanation = null;
-        string? lastEvent = null;
-        var toolCalls = new Dictionary<int, AnthropicToolCallBuilder>();
-        var streamedContent = new AnthropicContentStream();
         var usageDeltas = new UsageDeltas((capabilities.SupportsUsageDeltas != InferenceSupport.Unsupported));
-
-        await foreach (string data in Sse.ReadDataPayloadsAsync(events, cancellationToken))
+        while (true)
         {
-            lastEvent = data;
-            JsonDocument document;
-            try
-            {
-                document = JsonDocument.Parse(data);
-            }
-            catch (JsonException exception)
-            {
-                throw ProtocolException(
-                    "Anthropic Messages returned a malformed stream event.",
-                    response,
-                    data,
-                    credential,
-                    exception, secrets);
-            }
+            using HttpRequestMessage httpRequest = CreateHttpRequest(connection, request, payload, stream);
+            using HttpResponseMessage response = await Http.SendAsync(
+                httpRequest,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+            string[] secrets = httpRequest.Headers.SelectMany(header => header.Value).ToArray();
+            if (ObserveAccountUsage(response) is { } observed) { yield return consumption.Publish<LlmStreamEvent>(new AccountUsageObservedEvent(observed)); }
+            await ProviderHttp.ThrowIfUnsuccessfulAsync(
+                response,
+                Transport,
+                credential,
+                "Anthropic Messages request",
+                secrets,
+                cancellationToken);
 
-            using (document)
+            if (!stream)
             {
-                JsonElement root = document.RootElement;
-                switch (LlmJson.GetString(root, "type"))
+                string body = await SdkHttpConsumption.ReadAsStringAsync(response.Content, cancellationToken);
+                (List<LlmStreamEvent> completeEvents, bool pausedComplete) = ReadCompleteResponse(
+                    body, response, connection, request, enforcement, credential, secrets, reasoningText, webSearch, paused);
+                foreach (LlmStreamEvent completeEvent in completeEvents)
                 {
-                    case "message_start":
-                        if (LlmJson.GetObject(root, "message") is { } message)
-                        {
-                            responseId = LlmJson.GetString(message, "id");
-                            observedModel = ObservedModel.Read(message, "model", Transport, connection,
-                                credential, response.RequestMessage, observedModel, secrets);
-                            if (message.TryGetProperty("container", out _)) containerId = ReadContainer(message, connection.Transport);
-                            inputTokens = ReadToken(message, "usage", "input_tokens") ?? inputTokens;
-                            outputTokens = ReadToken(message, "usage", "output_tokens") ?? outputTokens;
-                            cachedTokens = ReadToken(message, "usage", "cache_read_input_tokens") ?? cachedTokens;
-                            cacheWriteTokens = ReadToken(message, "usage", "cache_creation_input_tokens") ?? cacheWriteTokens;
-                        }
-
-                        if (usageDeltas.Next(AnthropicUsage.Create(inputTokens, outputTokens, cachedTokens, cacheWriteTokens)) is { } initialUsage)
-                        {
-                            yield return consumption.Publish<LlmStreamEvent>(initialUsage);
-                        }
-
-                        break;
-                    case "content_block_delta":
-                        streamedContent.ObserveDelta(root);
-                        if (LlmJson.GetObject(root, "delta") is { } delta
-                            && LlmJson.GetString(delta, "type") == "text_delta")
-                        {
-                            string value = LlmJson.GetString(delta, "text") ?? string.Empty;
-                            if (value.Length > 0)
-                            {
-                                text.Append(value);
-                                yield return consumption.Publish<LlmStreamEvent>(new LlmTextDeltaEvent(value));
-                            }
-                        }
-                        else if (LlmJson.GetObject(root, "delta") is { } thinkingDelta
-                            && LlmJson.GetString(thinkingDelta, "type") == "thinking_delta"
-                            && LlmJson.GetString(thinkingDelta, "thinking") is { Length: > 0 } thinking)
-                        {
-                            if ((capabilities.SupportsReasoningText != InferenceSupport.Unsupported)) { yield return consumption.Publish<LlmStreamEvent>(new LlmReasoningDeltaEvent(thinking, true)); }
-                        }
-                        else if (LlmJson.GetObject(root, "delta") is { } toolDelta
-                            && LlmJson.GetString(toolDelta, "type") == "input_json_delta")
-                        {
-                            int? index = LlmJson.GetInt(root, "index");
-                            string partialJson = LlmJson.GetString(toolDelta, "partial_json")
-                                ?? string.Empty;
-                            if (index is not null
-                                && partialJson.Length > 0
-                                && toolCalls.TryGetValue(index.Value, out AnthropicToolCallBuilder? builder))
-                            {
-                                builder.Arguments.Append(partialJson);
-                                yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallArgumentsDeltaEvent(builder.Id, partialJson));
-                            }
-                        }
-
-                        break;
-                    case "content_block_start":
-                        streamedContent.ObserveStart(root);
-                        if (LlmJson.GetObject(root, "content_block") is { } initialBlock
-                            && LlmJson.GetString(initialBlock, "type") == "text"
-                            && LlmJson.GetString(initialBlock, "text") is { Length: > 0 } initialText)
-                        {
-                            text.Append(initialText);
-                            yield return consumption.Publish<LlmStreamEvent>(new LlmTextDeltaEvent(initialText));
-                        }
-                        if (LlmJson.GetObject(root, "content_block") is { } contentBlock
-                            && LlmJson.GetString(contentBlock, "type") == "tool_use"
-                            && LlmJson.GetInt(root, "index") is int toolIndex
-                            && LlmJson.GetString(contentBlock, "id") is { Length: > 0 } toolId
-                            && LlmJson.GetString(contentBlock, "name") is { Length: > 0 } toolName)
-                        {
-                            var builder = new AnthropicToolCallBuilder(toolId, toolName);
-                            if (contentBlock.TryGetProperty("input", out JsonElement initialInput)
-                                && initialInput.ValueKind == JsonValueKind.Object
-                                && initialInput.GetRawText() != "{}")
-                            {
-                                builder.InitialArguments = initialInput.GetRawText();
-                            }
-
-                            toolCalls[toolIndex] = builder;
-                            yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallStartedEvent(toolId, toolName, toolIndex));
-                        }
-
-                        break;
-                    case "content_block_stop":
-                        if (LlmJson.GetInt(root, "index") is int completedIndex
-                            && toolCalls.TryGetValue(completedIndex, out AnthropicToolCallBuilder? completedBuilder)
-                            && !completedBuilder.Completed)
-                        {
-                            completedBuilder.Completed = true;
-                            yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallCompletedEvent(completedBuilder.Build()));
-                        }
-
-                        break;
-                    case "message_delta":
-                        if (LlmJson.GetObject(root, "delta") is { } messageDelta)
-                        {
-                            stopReason = LlmJson.GetString(messageDelta, "stop_reason") ?? stopReason;
-                            if (messageDelta.TryGetProperty("container", out _)) containerId = ReadContainer(messageDelta, connection.Transport);
-                            ReadStopDetails(messageDelta, ref refusalCategory, ref refusalExplanation);
-                        }
-
-                        ReadStopDetails(root, ref refusalCategory, ref refusalExplanation);
-                        outputTokens = ReadToken(root, "usage", "output_tokens") ?? outputTokens;
-                        inputTokens = ReadToken(root, "usage", "input_tokens") ?? inputTokens;
-                        cachedTokens = ReadToken(root, "usage", "cache_read_input_tokens") ?? cachedTokens;
-                        cacheWriteTokens = ReadToken(root, "usage", "cache_creation_input_tokens") ?? cacheWriteTokens;
-                        if (usageDeltas.Next(AnthropicUsage.Create(inputTokens, outputTokens, cachedTokens, cacheWriteTokens)) is { } runningUsage)
-                        {
-                            yield return consumption.Publish<LlmStreamEvent>(runningUsage);
-                        }
-                        if (string.Equals(stopReason, "refusal", StringComparison.Ordinal)
-                            && refusalExplanation is { Length: > 0 } declined)
-                        {
-                            yield return consumption.Publish<LlmStreamEvent>(new LlmRefusalDeltaEvent(declined));
-                        }
-
-                        break;
-                    case "error":
-                        throw ProviderError(root, response, data, credential, secrets);
-                    case "message_stop":
-                        LlmToolCall[] completedToolCalls = toolCalls
-                            .OrderBy(pair => pair.Key)
-                            .Select(pair => pair.Value.Build())
-                            .ToArray();
-                        foreach (AnthropicToolCallBuilder builder in toolCalls.Values.Where(value => !value.Completed))
-                        {
-                            builder.Completed = true;
-                            yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallCompletedEvent(builder.Build()));
-                        }
-
-                        yield return consumption.Publish<LlmStreamEvent>(new LlmChatCompletionEvent(BuildResult(
-                            connection,
-                            request,
-                            enforcement,
-                            text.ToString(),
-                            stopReason,
-                            refusalCategory,
-                            refusalExplanation,
-                            completedToolCalls,
-                            AnthropicUsage.Create(inputTokens, outputTokens, cachedTokens, cacheWriteTokens),
-                            responseId,
-                            observedModel,
-                            streamedContent.BuildContent,
-                            containerId,
-                            response,
-                            lastEvent,
-                            credential,
-                            secrets)));
-                        yield break;
+                    yield return consumption.Publish<LlmStreamEvent>(completeEvent);
                 }
-            }
-        }
 
-        throw ProtocolException(
-            "Anthropic Messages ended without a terminal event.",
-            response,
-            lastEvent ?? string.Empty,
-            credential, extraSecrets: secrets);
+                if (pausedComplete) continue;
+                yield break;
+            }
+
+            await using Stream events = await SdkHttpConsumption.ReadAsStreamAsync(response.Content, cancellationToken);
+            int? inputTokens = null;
+            int? cachedTokens = null;
+            int? cacheWriteTokens = null;
+            int? outputTokens = null;
+            string? responseId = null;
+            string? observedModel = null;
+            string? stopReason = null;
+            string? containerId = null;
+            string? refusalCategory = null;
+            string? refusalExplanation = null;
+            string? lastEvent = null;
+            bool continued = false;
+            var toolCalls = new Dictionary<int, AnthropicToolCallBuilder>();
+            var streamedContent = new AnthropicContentStream();
+
+            await foreach (string data in Sse.ReadDataPayloadsAsync(events, cancellationToken))
+            {
+                lastEvent = data;
+                JsonDocument document;
+                try
+                {
+                    document = JsonDocument.Parse(data);
+                }
+                catch (JsonException exception)
+                {
+                    throw ProtocolException(
+                        "Anthropic Messages returned a malformed stream event.",
+                        response,
+                        data,
+                        credential,
+                        exception, secrets);
+                }
+
+                using (document)
+                {
+                    JsonElement root = document.RootElement;
+                    switch (LlmJson.GetString(root, "type"))
+                    {
+                        case "message_start":
+                            if (LlmJson.GetObject(root, "message") is { } message)
+                            {
+                                responseId = LlmJson.GetString(message, "id");
+                                observedModel = ObservedModel.Read(message, "model", Transport, connection,
+                                    credential, response.RequestMessage, observedModel, secrets);
+                                if (message.TryGetProperty("container", out _)) containerId = ReadContainer(message, connection.Transport);
+                                inputTokens = ReadToken(message, "usage", "input_tokens") ?? inputTokens;
+                                outputTokens = ReadToken(message, "usage", "output_tokens") ?? outputTokens;
+                                cachedTokens = ReadToken(message, "usage", "cache_read_input_tokens") ?? cachedTokens;
+                                cacheWriteTokens = ReadToken(message, "usage", "cache_creation_input_tokens") ?? cacheWriteTokens;
+                            }
+
+                            if (usageDeltas.Next(paused.Usage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens)) is { } initialUsage)
+                            {
+                                yield return consumption.Publish<LlmStreamEvent>(initialUsage);
+                            }
+
+                            break;
+                        case "content_block_delta":
+                            streamedContent.ObserveDelta(root);
+                            if (LlmJson.GetObject(root, "delta") is { } delta
+                                && LlmJson.GetString(delta, "type") == "text_delta")
+                            {
+                                string value = LlmJson.GetString(delta, "text") ?? string.Empty;
+                                if (value.Length > 0)
+                                {
+                                    text.Append(value);
+                                    yield return consumption.Publish<LlmStreamEvent>(new LlmTextDeltaEvent(value));
+                                }
+                            }
+                            else if (LlmJson.GetObject(root, "delta") is { } thinkingDelta
+                                && LlmJson.GetString(thinkingDelta, "type") == "thinking_delta"
+                                && LlmJson.GetString(thinkingDelta, "thinking") is { Length: > 0 } thinking)
+                            {
+                                if (reasoningText) { yield return consumption.Publish<LlmStreamEvent>(new LlmReasoningDeltaEvent(thinking, true)); }
+                            }
+                            else if (LlmJson.GetObject(root, "delta") is { } citationDelta
+                                && LlmJson.GetString(citationDelta, "type") == "citations_delta"
+                                && LlmJson.GetObject(citationDelta, "citation") is { } citation
+                                && webSearch.Cite(citation) is { } cited)
+                            {
+                                yield return consumption.Publish<LlmStreamEvent>(cited);
+                            }
+                            else if (LlmJson.GetObject(root, "delta") is { } toolDelta
+                                && LlmJson.GetString(toolDelta, "type") == "input_json_delta")
+                            {
+                                int? index = LlmJson.GetInt(root, "index");
+                                string partialJson = LlmJson.GetString(toolDelta, "partial_json")
+                                    ?? string.Empty;
+                                if (index is not null
+                                    && partialJson.Length > 0
+                                    && toolCalls.TryGetValue(index.Value, out AnthropicToolCallBuilder? builder))
+                                {
+                                    builder.Arguments.Append(partialJson);
+                                    yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallArgumentsDeltaEvent(builder.Id, partialJson));
+                                }
+                            }
+
+                            break;
+                        case "content_block_start":
+                            streamedContent.ObserveStart(root);
+                            if (LlmJson.GetObject(root, "content_block") is { } initialBlock
+                                && LlmJson.GetString(initialBlock, "type") == "text"
+                                && LlmJson.GetString(initialBlock, "text") is { Length: > 0 } initialText)
+                            {
+                                text.Append(initialText);
+                                yield return consumption.Publish<LlmStreamEvent>(new LlmTextDeltaEvent(initialText));
+                            }
+                            if (LlmJson.GetObject(root, "content_block") is { } hostedBlock)
+                            {
+                                if (webSearch.Start(hostedBlock) is { } searching)
+                                    yield return consumption.Publish<LlmStreamEvent>(searching);
+                                if (webSearch.Complete(hostedBlock) is { } searched)
+                                    yield return consumption.Publish<LlmStreamEvent>(searched);
+                                if (LlmJson.GetString(hostedBlock, "type") == "text"
+                                    && hostedBlock.TryGetProperty("citations", out JsonElement initialCitations)
+                                    && initialCitations.ValueKind == JsonValueKind.Array)
+                                {
+                                    foreach (JsonElement initialCitation in initialCitations.EnumerateArray())
+                                        if (webSearch.Cite(initialCitation) is { } initiallyCited)
+                                            yield return consumption.Publish<LlmStreamEvent>(initiallyCited);
+                                }
+                            }
+                            if (LlmJson.GetObject(root, "content_block") is { } contentBlock
+                                && LlmJson.GetString(contentBlock, "type") == "tool_use"
+                                && LlmJson.GetInt(root, "index") is int toolIndex
+                                && LlmJson.GetString(contentBlock, "id") is { Length: > 0 } toolId
+                                && LlmJson.GetString(contentBlock, "name") is { Length: > 0 } toolName)
+                            {
+                                var builder = new AnthropicToolCallBuilder(toolId, toolName);
+                                if (contentBlock.TryGetProperty("input", out JsonElement initialInput)
+                                    && initialInput.ValueKind == JsonValueKind.Object
+                                    && initialInput.GetRawText() != "{}")
+                                {
+                                    builder.InitialArguments = initialInput.GetRawText();
+                                }
+
+                                toolCalls[toolIndex] = builder;
+                                yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallStartedEvent(toolId, toolName, toolIndex));
+                            }
+
+                            break;
+                        case "content_block_stop":
+                            if (LlmJson.GetInt(root, "index") is int stoppedIndex
+                                && streamedContent.ServerToolAt(stoppedIndex) is { } serverCall)
+                                webSearch.Record(serverCall.Id, serverCall.Input);
+                            if (LlmJson.GetInt(root, "index") is int completedIndex
+                                && toolCalls.TryGetValue(completedIndex, out AnthropicToolCallBuilder? completedBuilder)
+                                && !completedBuilder.Completed)
+                            {
+                                completedBuilder.Completed = true;
+                                yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallCompletedEvent(completedBuilder.Build()));
+                            }
+
+                            break;
+                        case "message_delta":
+                            if (LlmJson.GetObject(root, "delta") is { } messageDelta)
+                            {
+                                stopReason = LlmJson.GetString(messageDelta, "stop_reason") ?? stopReason;
+                                if (messageDelta.TryGetProperty("container", out _)) containerId = ReadContainer(messageDelta, connection.Transport);
+                                ReadStopDetails(messageDelta, ref refusalCategory, ref refusalExplanation);
+                            }
+
+                            ReadStopDetails(root, ref refusalCategory, ref refusalExplanation);
+                            outputTokens = ReadToken(root, "usage", "output_tokens") ?? outputTokens;
+                            inputTokens = ReadToken(root, "usage", "input_tokens") ?? inputTokens;
+                            cachedTokens = ReadToken(root, "usage", "cache_read_input_tokens") ?? cachedTokens;
+                            cacheWriteTokens = ReadToken(root, "usage", "cache_creation_input_tokens") ?? cacheWriteTokens;
+                            if (usageDeltas.Next(paused.Usage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens)) is { } runningUsage)
+                            {
+                                yield return consumption.Publish<LlmStreamEvent>(runningUsage);
+                            }
+                            if (string.Equals(stopReason, "refusal", StringComparison.Ordinal)
+                                && refusalExplanation is { Length: > 0 } declined)
+                            {
+                                yield return consumption.Publish<LlmStreamEvent>(new LlmRefusalDeltaEvent(declined));
+                            }
+
+                            break;
+                        case "error":
+                            throw ProviderError(root, response, data, credential, secrets);
+                        case "message_stop":
+                            // A server-only pause continues; a pause that also holds client calls is refused below.
+                            if (string.Equals(stopReason, "pause_turn", StringComparison.Ordinal) && toolCalls.Count == 0)
+                            {
+                                paused.Continue(streamedContent.BuildContent(), null, [], inputTokens, outputTokens, cachedTokens,
+                                    cacheWriteTokens, containerId);
+                                continued = true;
+                                break;
+                            }
+
+                            LlmToolCall[] completedToolCalls = toolCalls
+                                .OrderBy(pair => pair.Key)
+                                .Select(pair => pair.Value.Build())
+                                .ToArray();
+                            foreach (AnthropicToolCallBuilder builder in toolCalls.Values.Where(value => !value.Completed))
+                            {
+                                builder.Completed = true;
+                                yield return consumption.Publish<LlmStreamEvent>(new LlmToolCallCompletedEvent(builder.Build()));
+                            }
+
+                            yield return consumption.Publish<LlmStreamEvent>(new LlmChatCompletionEvent(BuildResult(
+                                connection,
+                                request,
+                                enforcement,
+                                text.ToString(),
+                                stopReason,
+                                refusalCategory,
+                                refusalExplanation,
+                                completedToolCalls,
+                                paused.Usage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens),
+                                responseId,
+                                observedModel,
+                                () => paused.Content(streamedContent.BuildContent()),
+                                containerId ?? paused.ContainerId,
+                                response,
+                                lastEvent,
+                                credential,
+                                secrets) with { Citations = [.. webSearch.Citations] }));
+                            yield break;
+                    }
+                }
+
+                if (continued) break;
+            }
+
+            if (continued) continue;
+            throw ProtocolException(
+                "Anthropic Messages ended without a terminal event.",
+                response,
+                lastEvent ?? string.Empty,
+                credential, extraSecrets: secrets);
+        }
     }
 
     protected virtual LlmAccountUsageSnapshot? ObserveAccountUsage(HttpResponseMessage response) =>
         AnthropicRateLimitHeaders.Parse(response.Headers, DateTimeOffset.UtcNow);
 
-    /// <summary>Maps a response that arrived as one Message object.</summary>
-    private List<LlmStreamEvent> ReadCompleteResponse(
+    /// <summary>
+    /// Maps a response that arrived as one Message object. A valid server-only pause returns its observations and true; the
+    /// paused content is kept in <paramref name="paused"/> for the next request and the final result.
+    /// </summary>
+    private (List<LlmStreamEvent> Events, bool Paused) ReadCompleteResponse(
         string body,
         HttpResponseMessage response,
         LlmConnection connection,
@@ -465,7 +538,9 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         LlmStructuredOutputEnforcement? enforcement,
         LlmCredential? credential,
         IReadOnlyList<string> secrets,
-        bool reasoningText)
+        bool reasoningText,
+        AnthropicWebSearch webSearch,
+        PausedTurn paused)
     {
         JsonDocument document;
         try
@@ -498,6 +573,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 throw ProtocolException("Anthropic Messages returned a malformed response.", response, body, credential, extraSecrets: secrets);
             }
 
+            List<LlmStreamEvent> hosted = [.. webSearch.Observe(content)];
             var text = new StringBuilder();
             var reasoning = new List<LlmReasoningText>();
             var toolCalls = new List<LlmToolCall>();
@@ -530,33 +606,97 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 }
             }
 
+            int? inputTokens = ReadToken(root, "usage", "input_tokens");
+            int? outputTokens = ReadToken(root, "usage", "output_tokens");
+            int? cachedTokens = ReadToken(root, "usage", "cache_read_input_tokens");
+            int? cacheWriteTokens = ReadToken(root, "usage", "cache_creation_input_tokens");
+            string? stopReason = LlmJson.GetString(root, "stop_reason");
+            string? containerId = ReadContainer(root, connection.Transport);
+            // A server-only pause continues; a pause that also holds client calls is refused by BuildResult.
+            if (string.Equals(stopReason, "pause_turn", StringComparison.Ordinal) && toolCalls.Count == 0)
+            {
+                paused.Continue(content.GetArrayLength() == 0 ? null : JsonNode.Parse(content.GetRawText())!.AsArray(), text.ToString(),
+                    reasoning, inputTokens, outputTokens, cachedTokens, cacheWriteTokens, containerId);
+                return (hosted, true);
+            }
+
             string? refusalCategory = null;
             string? refusalExplanation = null;
             ReadStopDetails(root, ref refusalCategory, ref refusalExplanation);
+            JsonArray? finalContent = content.GetArrayLength() == 0 ? null : JsonNode.Parse(content.GetRawText())!.AsArray();
             LlmChatResult result = BuildResult(
                 connection,
                 request,
                 enforcement,
-                text.ToString(),
-                LlmJson.GetString(root, "stop_reason"),
+                paused.Text + text,
+                stopReason,
                 refusalCategory,
                 refusalExplanation,
                 [.. toolCalls],
-                AnthropicUsage.Create(
-                    ReadToken(root, "usage", "input_tokens"),
-                    ReadToken(root, "usage", "output_tokens"),
-                    ReadToken(root, "usage", "cache_read_input_tokens"),
-                    ReadToken(root, "usage", "cache_creation_input_tokens")),
+                paused.Usage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens),
                 LlmJson.GetString(root, "id"),
                 ObservedModel.Read(root, "model", Transport, connection, credential, response.RequestMessage, extraSecrets: secrets),
-                () => content.GetArrayLength() == 0 ? null : JsonNode.Parse(content.GetRawText())!.AsArray(),
-                ReadContainer(root, connection.Transport),
+                () => paused.Content(finalContent),
+                containerId ?? paused.ContainerId,
                 response,
                 body,
                 credential,
-                secrets);
-            return [.. CompleteResponseEvents.From(result, reasoning)];
+                secrets) with { Citations = [.. webSearch.Citations] };
+            return ([.. hosted, .. CompleteResponseEvents.From(result, [.. paused.Reasoning, .. reasoning])], false);
         }
+    }
+
+    /// <summary>
+    /// The paused part of one step: its native content, text, reasoning and usage so far, and the assistant message each
+    /// later request sends back unchanged. Anthropic continues a paused turn from the assistant content it is sent.
+    /// </summary>
+    private sealed class PausedTurn(JsonObject payload)
+    {
+        private readonly JsonArray content = [];
+        private readonly StringBuilder text = new();
+        private readonly List<LlmReasoningText> reasoning = [];
+        private JsonObject? message;
+        private int? input, output, cached, written;
+
+        internal string Text => this.text.ToString();
+
+        internal IReadOnlyList<LlmReasoningText> Reasoning => this.reasoning;
+
+        internal string? ContainerId { get; private set; }
+
+        /// <summary>Keeps one paused response and puts its content, with any earlier paused content, back in the request.</summary>
+        internal void Continue(JsonArray? paused, string? pausedText, IReadOnlyList<LlmReasoningText> pausedReasoning,
+            int? inputTokens, int? outputTokens, int? cachedTokens, int? writtenTokens, string? containerId)
+        {
+            if (paused is not null) foreach (JsonNode? block in paused) this.content.Add(block?.DeepClone());
+            this.text.Append(pausedText);
+            this.reasoning.AddRange(pausedReasoning);
+            (this.input, this.output, this.cached, this.written) =
+                (Sum(this.input, inputTokens), Sum(this.output, outputTokens), Sum(this.cached, cachedTokens), Sum(this.written, writtenTokens));
+            this.ContainerId = containerId ?? this.ContainerId;
+            if (this.message is null)
+            {
+                this.message = new JsonObject { ["role"] = "assistant" };
+                payload["messages"]!.AsArray().Add(this.message);
+            }
+            this.message["content"] = this.content.DeepClone();
+            if (this.ContainerId is not null) payload["container"] = this.ContainerId;
+        }
+
+        /// <summary>The step's usage: the paused responses' usage plus the current response's.</summary>
+        internal LlmUsage? Usage(int? inputTokens, int? outputTokens, int? cachedTokens, int? writtenTokens) => AnthropicUsage.Create(
+            Sum(this.input, inputTokens), Sum(this.output, outputTokens), Sum(this.cached, cachedTokens), Sum(this.written, writtenTokens));
+
+        /// <summary>The step's native content: every paused block, then the final response's, or null when there is none.</summary>
+        internal JsonArray? Content(JsonArray? final)
+        {
+            if (this.content.Count == 0) return final;
+            JsonArray all = (JsonArray)this.content.DeepClone();
+            if (final is not null) foreach (JsonNode? block in final) all.Add(block?.DeepClone());
+            return all;
+        }
+
+        private static int? Sum(int? first, int? second) => first is null && second is null ? null : (first ?? 0) + (second ?? 0);
     }
 
     private static LlmChatResult BuildResult(
@@ -579,11 +719,11 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         IReadOnlyList<string> secrets)
     {
         bool refused = string.Equals(stopReason, "refusal", StringComparison.Ordinal);
-        bool paused = string.Equals(stopReason, "pause_turn", StringComparison.Ordinal);
-        if (paused && toolCalls.Length > 0)
+        // A server-only pause continued in the same step before this result; one that also holds client calls is invalid.
+        if (string.Equals(stopReason, "pause_turn", StringComparison.Ordinal) && toolCalls.Length > 0)
             throw new LlmProviderException("Anthropic returned pause_turn with pending client tools; a mixed client/server-tool reply must end with tool_use.",
                 connection.Transport, response.StatusCode);
-        bool incomplete = paused || stopReason is "max_tokens" or "model_context_window_exceeded";
+        bool incomplete = stopReason is "max_tokens" or "model_context_window_exceeded";
         bool requiresAction = string.Equals(stopReason, "tool_use", StringComparison.Ordinal)
             || stopReason is "end_turn" or "stop_sequence" && toolCalls.Length > 0;
         LlmCompletionStatus completionStatus = refused
@@ -617,7 +757,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             Usage = usage,
             ProviderResponseId = responseId,
             ToolCalls = completionStatus is LlmCompletionStatus.RequiresAction or LlmCompletionStatus.Unknown ? toolCalls : [],
-            ContinuationState = (paused || completionStatus is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction)
+            ContinuationState = completionStatus is LlmCompletionStatus.Completed or LlmCompletionStatus.RequiresAction
                 && buildContent() is { } content
                     ? AnthropicContinuation.WithContainer(ProviderContinuationStateCodec.Encode(connection, request.ModelId, content), containerId) : null,
             StructuredOutput = validation,
@@ -902,6 +1042,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         if (request.StopSequences.Count > 0) { payload["stop_sequences"] = new JsonArray([.. request.StopSequences.Select(stop => JsonValue.Create(stop))]); }
 
         JsonArray tools = AnthropicTools.Resolve(connection, request).Build(ClientTools.Functions(request.Tools));
+        if (AnthropicWebSearch.Definition(request) is { } webSearch) tools.Add(webSearch);
         if (tools.Count > 0) payload["tools"] = tools;
 
         if (tools.Count > 0

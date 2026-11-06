@@ -72,33 +72,6 @@ internal static class ProviderDefinitions
         ]
     };
 
-    // Anthropic Messages uses this; Anthropic Messages is out of the build (Providers/AnthropicMessagesLlmClient.cs and
-    // ManagedAnthropicAgentClient.cs, under Compile Remove). It moves into that provider's own library when the provider
-    // returns to the build.
-    public static LlmProviderDefinition AnthropicApiKey { get; } = new()
-    {
-        Id = "anthropic-api-key",
-        DisplayName = "Anthropic API Key",
-        Description = "Connect directly to the Anthropic Messages API with usage billed to an Anthropic API account.",
-        Transport = LlmTransport.AnthropicMessages,
-        DefaultEndpoint = "https://api.anthropic.com/v1",
-        DisplayOrder = 15,
-        SetupSteps =
-        [
-            new SetupStep
-            {
-                Id = "enter-api-key",
-                Title = "Enter an Anthropic API key",
-                Instructions = "Create or copy an Anthropic API key, then paste it here. API usage is separate from a Claude subscription.",
-                CompletionRequirement = "The API key must authenticate successfully and allow the model list to be loaded.",
-                Troubleshooting = "Confirm the key belongs to an active Anthropic API account with billing enabled. A Claude subscription is not an API key."
-            },
-            SelectModel
-        ]
-    };
-
-
-
     // The Gemini API uses this; the Gemini API is out of the build (Providers/GeminiApiLlmClient*.cs and Internal/Gemini/,
     // under Compile Remove). It moves into that provider's own library when the provider returns to the build.
     public static LlmProviderDefinition GeminiApi { get; } = new()

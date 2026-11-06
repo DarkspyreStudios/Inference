@@ -5,7 +5,8 @@
     <ItemGroup>
       <_ConnectDiscoveryAssembly Include="@(ReferenceCopyLocalPaths)"
           Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.dll' and
-            ('%(ReferenceCopyLocalPaths.Filename)' == 'Darkspyre.Inference.Connect.Codex' or
+            ('%(ReferenceCopyLocalPaths.Filename)' == 'Darkspyre.Inference.Connect.Anthropic' or
+             '%(ReferenceCopyLocalPaths.Filename)' == 'Darkspyre.Inference.Connect.Codex' or
              '%(ReferenceCopyLocalPaths.Filename)' == 'Darkspyre.Inference.Connect.Claude' or
              '%(ReferenceCopyLocalPaths.Filename)' == 'Darkspyre.Inference.Connect.Antigravity' or
              '%(ReferenceCopyLocalPaths.Filename)' == 'Darkspyre.Inference.Connect.Grok' or

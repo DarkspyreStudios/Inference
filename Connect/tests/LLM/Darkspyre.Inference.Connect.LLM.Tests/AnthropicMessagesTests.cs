@@ -1,0 +1,276 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Nodes;
+using Darkspyre.Inference.Common;
+using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Connect.LLM.Internal;
+using Darkspyre.Inference.Connect.LLM.Providers;
+using Microsoft.Extensions.DependencyInjection;
+using Handler = Darkspyre.Inference.Connect.LLM.Tests.DirectCodexTests.Handler;
+
+namespace Darkspyre.Inference.Connect.LLM.Tests;
+
+/// <summary>The Anthropic API-key library: registration, managed turns, hosted web search and key handling.</summary>
+public sealed class AnthropicMessagesTests
+{
+    private const string Key = "sk-ant-test-key-0123456789";
+    private const string Model = "claude-test";
+
+    /// <summary>
+    /// Discovery lists the Anthropic API-key provider, and its agent client is the shared managed one.
+    /// Defect: the provider is not discovered, or the old dedicated agent client is wired.
+    /// </summary>
+    [Fact]
+    public void RegistersSharedManagedClient()
+    {
+        ServiceCollection services = new();
+        services.AddLlmConnect();
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        Assert.Contains(provider.GetRequiredService<LlmProviderCatalog>().SupportedProviders,
+            definition => definition.Id == "anthropic-api-key");
+        ILlmAgentClient agents = Assert.Single(provider.GetServices<ILlmAgentClient>(),
+            client => client.Transport == LlmTransport.AnthropicMessages);
+        Assert.IsType<ManagedLlmAgentClient<AnthropicMessagesLlmClient>>(agents);
+    }
+
+    /// <summary>
+    /// A managed turn streams thinking, text and one host tool call through the shared opening, runs the tool, and sends
+    /// its result in the next request. Defect: the stream or the tool continuation broke in the move.
+    /// </summary>
+    [Fact]
+    public async Task ManagedTurnStreamsTextReasoningAndToolCall()
+    {
+        int posts = 0;
+        using var handler = new Handler(request => request.Method == HttpMethod.Get ? Models(webSearch: false)
+            : ++posts == 1
+                ? Sse(Start(), Block(0, new JsonObject { ["type"] = "thinking", ["thinking"] = "" }),
+                    Delta(0, new JsonObject { ["type"] = "thinking_delta", ["thinking"] = "Considering." }), Stop(0),
+                    Block(1, new JsonObject { ["type"] = "text", ["text"] = "" }),
+                    Delta(1, new JsonObject { ["type"] = "text_delta", ["text"] = "Reading it." }), Stop(1),
+                    Block(2, new JsonObject { ["type"] = "tool_use", ["id"] = "toolu_1", ["name"] = "read_fact", ["input"] = new JsonObject() }),
+                    Delta(2, new JsonObject { ["type"] = "input_json_delta", ["partial_json"] = "{\"name\":\"a\"}" }), Stop(2),
+                    End("tool_use"), Done())
+                : Sse(Start(), Block(0, new JsonObject { ["type"] = "text", ["text"] = "" }),
+                    Delta(0, new JsonObject { ["type"] = "text_delta", ["text"] = "It is a." }), Stop(0), End("end_turn"), Done()));
+        var client = new AnthropicMessagesLlmClient(new HttpClient(handler));
+        LlmConnection connection = Connection();
+        using var providers = new LlmProviderService(new Source(connection), [client], []);
+        var agents = new ManagedLlmAgentClient<AnthropicMessagesLlmClient>(client, providers, new());
+        string? toolInput = null;
+        await using ILlmAgentSession session = await agents.StartSessionAsync("anthropic", connection, new()
+        {
+            ModelId = Model,
+            Tools = [new LlmAgentToolDefinition { Name = "read_fact", InputSchema = JsonElement.Parse("{\"type\":\"object\"}") }],
+            ToolHandler = (call, _) =>
+            {
+                toolInput = call.ArgumentsJson;
+                return Task.FromResult(LlmToolOutput.FromText("fact a"));
+            }
+        });
+
+        List<LlmAgentEvent> events = await Run(session);
+
+        Assert.Contains(events.OfType<LlmAgentReasoningDeltaEvent>(), reasoning => reasoning.Delta == "Considering.");
+        Assert.Contains(events.OfType<LlmAgentTextDeltaEvent>(), text => text.Delta == "Reading it.");
+        Assert.Equal("{\"name\":\"a\"}", toolInput);
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        JsonArray messages = JsonNode.Parse(handler.Bodies[^1])!["messages"]!.AsArray();
+        JsonNode result = messages[^1]!["content"]!.AsArray().Single(block => (string?)block!["type"] == "tool_result")!;
+        Assert.Equal("toolu_1", (string?)result["tool_use_id"]);
+        Assert.Equal("fact a", (string?)result["content"]);
+    }
+
+    /// <summary>
+    /// On a model whose catalog reports web search, the hosted tool writes the basic entry; a search that pauses
+    /// continues in the same step, reports its start, its query and sources, and one citation, and sends the paused
+    /// blocks back unchanged; the result keeps every block for the next request. An error result reports its code and no
+    /// sources. Defect: wrong wire, the pause ends the turn, an observation or citation is lost, or replay is altered.
+    /// </summary>
+    [Fact]
+    public async Task WebSearchIsMappedObservedAndCited()
+    {
+        int posts = 0;
+        JsonObject call = new() { ["type"] = "server_tool_use", ["id"] = "srvtoolu_1", ["name"] = "web_search", ["input"] = new JsonObject() };
+        JsonObject results = new()
+        {
+            ["type"] = "web_search_tool_result",
+            ["tool_use_id"] = "srvtoolu_1",
+            ["content"] = new JsonArray(new JsonObject
+            {
+                ["type"] = "web_search_result", ["url"] = "https://docs.example/a", ["title"] = "A",
+                ["page_age"] = "1 day", ["encrypted_content"] = "opaque"
+            })
+        };
+        JsonObject citation = new()
+        {
+            ["type"] = "web_search_result_location", ["url"] = "https://docs.example/a", ["title"] = "A",
+            ["encrypted_index"] = "index", ["cited_text"] = "a"
+        };
+        using var handler = new Handler(_ => ++posts == 1
+            ? Sse(Start(), Block(0, call),
+                Delta(0, new JsonObject { ["type"] = "input_json_delta", ["partial_json"] = "{\"query\":\"what is a\"}" }), Stop(0),
+                End("pause_turn"), Done())
+            : Sse(Start(), Block(0, results), Stop(0), Block(1, new JsonObject { ["type"] = "text", ["text"] = "" }),
+                Delta(1, new JsonObject { ["type"] = "citations_delta", ["citation"] = citation }),
+                Delta(1, new JsonObject { ["type"] = "text_delta", ["text"] = "A is a." }), Stop(1), End("end_turn"), Done()));
+        var client = new AnthropicMessagesLlmClient(new HttpClient(handler));
+        LlmConnection connection = Connection() with { Catalog = [Listed(webSearch: true)] };
+
+        List<LlmStreamEvent> events = await Read(client.StreamAsync(connection, Request() with
+        { HostedTools = [new LlmWebSearchTool(AllowedDomains: ["docs.example"])] }));
+
+        JsonNode tool = Assert.Single(JsonNode.Parse(handler.Bodies[0])!["tools"]!.AsArray())!;
+        Assert.Equal("{\"type\":\"web_search_20250305\",\"name\":\"web_search\",\"allowed_domains\":[\"docs.example\"]}", tool.ToJsonString());
+        Assert.Equal("srvtoolu_1", Assert.Single(events.OfType<LlmHostedToolCallStartedEvent>()).CallId);
+        LlmHostedToolCall completed = Assert.Single(events.OfType<LlmHostedToolCallCompletedEvent>()).Call;
+        Assert.Equal(("srvtoolu_1", LlmHostedToolKind.WebSearch, (string?)null), (completed.CallId, completed.Kind, completed.Status));
+        Assert.Equal("what is a", completed.Input!.Value.GetProperty("query").GetString());
+        LlmHostedSearchSource source = Assert.Single(Assert.IsType<LlmHostedSearchOutput>(completed.Output).Sources!);
+        Assert.Equal(("https://docs.example/a", "A"), (source.Url, source.Title));
+        Assert.Equal(new LlmCitation("https://docs.example/a", "A"), Assert.Single(events.OfType<LlmCitationEvent>()).Citation);
+
+        // The paused content went back unchanged as the assistant message of the continued request.
+        Assert.Equal(2, handler.Bodies.Count);
+        JsonNode paused = JsonNode.Parse(handler.Bodies[1])!["messages"]!.AsArray()[^1]!;
+        Assert.Equal("assistant", (string?)paused["role"]);
+        Assert.Equal(new JsonArray(Final(call, "what is a")).ToJsonString(), paused["content"]!.ToJsonString());
+
+        LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal(LlmCompletionStatus.Completed, result.Status);
+        Assert.Equal("A is a.", result.Text);
+        Assert.Equal(new LlmCitation("https://docs.example/a", "A"), Assert.Single(result.Citations));
+        JsonArray kept = AnthropicContinuation.ReadPayload(result.ContinuationState!.Payload).Content;
+        Assert.Equal(["server_tool_use", "web_search_tool_result", "text"], kept.Select(block => (string?)block!["type"]));
+        Assert.Equal(results.ToJsonString(), kept[1]!.ToJsonString());
+        Assert.Equal(citation.ToJsonString(), kept[2]!["citations"]![0]!.ToJsonString());
+
+        // An error result reports the provider's own code and no sources.
+        using var failing = new Handler(_ => Sse(Start(), Block(0, call), Stop(0), Block(1, new JsonObject
+        {
+            ["type"] = "web_search_tool_result", ["tool_use_id"] = "srvtoolu_1",
+            ["content"] = new JsonObject { ["type"] = "web_search_tool_result_error", ["error_code"] = "max_uses_exceeded" }
+        }), Stop(1), End("end_turn"), Done()));
+        List<LlmStreamEvent> failed = await Read(new AnthropicMessagesLlmClient(new HttpClient(failing)).StreamAsync(connection,
+            Request() with { HostedTools = [new LlmWebSearchTool()] }));
+        LlmHostedToolCall error = Assert.Single(failed.OfType<LlmHostedToolCallCompletedEvent>()).Call;
+        Assert.Equal("max_uses_exceeded", error.Status);
+        Assert.Null(error.Output);
+    }
+
+    /// <summary>
+    /// The key is sent only as the x-api-key header, and an authentication failure's text does not hold it, even when the
+    /// response echoes it. Defect: the key leaks into a header, an exception or its text.
+    /// </summary>
+    [Fact]
+    public async Task ApiKeyIsSentOnlyAsHeader()
+    {
+        using var handler = new Handler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized)
+        {
+            Content = new StringContent("{\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key " + Key + "\"}}",
+                Encoding.UTF8, "application/json")
+        });
+        var client = new AnthropicMessagesLlmClient(new HttpClient(handler));
+
+        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => Read(client.StreamAsync(Connection(), Request())));
+
+        Assert.Equal(Key, handler.Headers["x-api-key"]);
+        Assert.False(handler.Headers.ContainsKey("Authorization"));
+        Assert.DoesNotContain(Key, handler.Body!, StringComparison.Ordinal);
+        Assert.DoesNotContain(Key, handler.Uri!.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(Key, failure.ToString(), StringComparison.Ordinal);
+        Assert.DoesNotContain(Key, failure.SanitizedResponseBody ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    internal static LlmConnection Connection() => new()
+    {
+        Version = "1",
+        Transport = LlmTransport.AnthropicMessages,
+        Endpoint = "https://api.anthropic.test/v1",
+        Credential = new LlmCredential { ApiKey = Key }.Serialize()
+    };
+
+    /// <summary>One model's catalog entry, reporting web search or not.</summary>
+    internal static LlmModel Listed(bool webSearch) => new(Model, "Claude")
+    {
+        CatalogEntry = JsonElement.Parse(Entry(webSearch).ToJsonString())
+    };
+
+    /// <summary>The Models API page listing the one model.</summary>
+    internal static HttpResponseMessage Models(bool webSearch) => new(HttpStatusCode.OK)
+    {
+        Content = new StringContent(new JsonObject { ["data"] = new JsonArray(Entry(webSearch)), ["has_more"] = false }.ToJsonString(),
+            Encoding.UTF8, "application/json")
+    };
+
+    private static JsonObject Entry(bool webSearch) => new()
+    {
+        ["id"] = Model,
+        ["display_name"] = "Claude",
+        ["capabilities"] = new JsonObject
+        { ["server_tools"] = new JsonObject { ["web_search"] = new JsonObject { ["supported"] = webSearch } } }
+    };
+
+    private static LlmChatRequest Request() => new() { ModelId = Model, Messages = [new("user", "hello")] };
+
+    // The server tool call block as it ends: its start with the assembled input.
+    private static JsonObject Final(JsonObject call, string query)
+    {
+        JsonObject final = call.DeepClone().AsObject();
+        final["input"] = new JsonObject { ["query"] = query };
+        return final;
+    }
+
+    internal static HttpResponseMessage Sse(params JsonObject[] events) =>
+        DirectCodexTests.Sse(string.Concat(events.Select(item => "event: " + (string?)item["type"] + "\ndata: " + item.ToJsonString() + "\n\n")));
+
+    internal static JsonObject Start() => new()
+    {
+        ["type"] = "message_start",
+        ["message"] = new JsonObject
+        {
+            ["id"] = "msg_1", ["type"] = "message", ["role"] = "assistant", ["model"] = Model, ["content"] = new JsonArray(),
+            ["usage"] = new JsonObject { ["input_tokens"] = 10, ["output_tokens"] = 1 }
+        }
+    };
+
+    internal static JsonObject Block(int index, JsonObject block) =>
+        new() { ["type"] = "content_block_start", ["index"] = index, ["content_block"] = block.DeepClone() };
+
+    internal static JsonObject Delta(int index, JsonObject delta) =>
+        new() { ["type"] = "content_block_delta", ["index"] = index, ["delta"] = delta.DeepClone() };
+
+    internal static JsonObject Stop(int index) => new() { ["type"] = "content_block_stop", ["index"] = index };
+
+    internal static JsonObject End(string reason) => new()
+    {
+        ["type"] = "message_delta",
+        ["delta"] = new JsonObject { ["stop_reason"] = reason },
+        ["usage"] = new JsonObject { ["output_tokens"] = 5 }
+    };
+
+    internal static JsonObject Done() => new() { ["type"] = "message_stop" };
+
+    private static async Task<List<LlmStreamEvent>> Read(IAsyncEnumerable<LlmStreamEvent> source)
+    {
+        var result = new List<LlmStreamEvent>();
+        await foreach (LlmStreamEvent item in source) result.Add(item);
+        return result;
+    }
+
+    private static async Task<List<LlmAgentEvent>> Run(ILlmAgentSession session)
+    {
+        var events = new List<LlmAgentEvent>();
+        await foreach (LlmAgentEvent item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hello")] })) events.Add(item);
+        return events;
+    }
+
+    internal sealed class Source(LlmConnection connection) : ILlmConnectionSource
+    {
+        public Task<LlmConnection?> GetConnectionAsync(string connectionId, CancellationToken cancellationToken = default) =>
+            Task.FromResult<LlmConnection?>(connection);
+        public Task SaveCredentialAsync(string connectionId, string credentialJson, string expectedVersion,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
+}

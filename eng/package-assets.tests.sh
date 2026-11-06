@@ -17,13 +17,13 @@ dotnet msbuild "$project" -t:DoNotRepackWhisperRuntime -getItem:None -nologo |
     jq -e '[.Items.None[] | select(.DefiningProjectName == "Whisper.net.Runtime")] |
         length > 0 and all(.[]; .Pack == "false")' >/dev/null
 # _GetPackageFiles collects archive inputs without packing or publishing.
-for project in ../Tensor/src/*/*/*.csproj ../Connect/src/{Common,Codex,Claude,Antigravity,Grok,OpenAiApi,SelfHost}/*/*.csproj; do
+for project in ../Tensor/src/*/*/*.csproj ../Connect/src/{Common,Codex,Claude,Antigravity,Grok,Anthropic,OpenAiApi,SelfHost}/*/*.csproj; do
     dotnet msbuild "$project" -t:_GetPackageFiles -getItem:_PackageFiles -p:Configuration=Release -nologo |
         jq -e '(.Items._PackageFiles | length > 0) and
             ([.Items._PackageFiles[] | select(.Identity | test("\\.(dll|metal|metallib|dylib|so|a)$"; "i"))] | length == 0)' >/dev/null
 done
 # A provider selected only through discovery retains its assembly attribute in trimmed builds.
-for provider in Codex Claude Antigravity Grok OpenAiApi SelfHost; do
+for provider in Codex Claude Antigravity Grok Anthropic OpenAiApi SelfHost; do
     project="src/$provider/Darkspyre.Inference.Connect.$provider/Darkspyre.Inference.Connect.$provider.csproj"
     dotnet msbuild "$project" -t:_GetPackageFiles -getItem:_PackageFiles -nologo |
         jq -e --arg target "Darkspyre.Inference.Connect.$provider.targets" \
@@ -32,7 +32,7 @@ done
 dotnet msbuild tests/LLM/Darkspyre.Inference.Connect.LLM.Tests/Darkspyre.Inference.Connect.LLM.Tests.csproj \
     -t:RootConnectDiscoveryProviders -getItem:TrimmerRootAssembly -nologo |
     jq -e '[.Items.TrimmerRootAssembly[].Identity] | sort ==
-        ["Darkspyre.Inference.Connect.Antigravity", "Darkspyre.Inference.Connect.Claude", "Darkspyre.Inference.Connect.Codex", "Darkspyre.Inference.Connect.Grok", "Darkspyre.Inference.Connect.OpenAiApi", "Darkspyre.Inference.Connect.SelfHost"]' >/dev/null
+        ["Darkspyre.Inference.Connect.Anthropic", "Darkspyre.Inference.Connect.Antigravity", "Darkspyre.Inference.Connect.Claude", "Darkspyre.Inference.Connect.Codex", "Darkspyre.Inference.Connect.Grok", "Darkspyre.Inference.Connect.OpenAiApi", "Darkspyre.Inference.Connect.SelfHost"]' >/dev/null
 # Each package's README.md is obj/<configuration>/<tfm>/package/README.md: its PACKAGE.md and eng/PackageFamily.md, each
 # with trailing white space removed, one blank line between them and one final line break.
 trim_end() {
@@ -52,7 +52,7 @@ while read -r package; do
     cmp -s "$readme" <(printf '%s\n\n%s\n' "$(trim_end "$(dirname "$project")/PACKAGE.md")" "$family")
     packages=$((packages + 1))
 done < <(sed -n 's/^    \(.*\.csproj\)$/\1/p' ../eng/pack.sh)
-[[ $packages == 22 ]]
+[[ $packages == 23 ]]
 # A page holding a ticket key fails composition with the work-note error.
 if result="$(dotnet msbuild ../eng/VerifyConsumer.Tests/PackagePageFixture.proj -t:ComposeFixturePage -nologo 2>&1)"; then
     printf 'Expected the work-note failure for a package page holding a ticket key\n' >&2; exit 1

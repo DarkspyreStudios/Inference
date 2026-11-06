@@ -44,14 +44,16 @@ internal static class HostedTools
         }
     }
 
-    /// <summary>The tools with every LlmImageGenerationTool removed when the model does not offer ImageGeneration.
-    /// A session that asks for images still runs on a model without them (DSA-942 B8).</summary>
-    internal static IReadOnlyList<LlmHostedTool> WithoutUnofferedImages(IReadOnlyList<LlmHostedTool> tools,
+    /// <summary>The tools without every LlmImageGenerationTool when the model does not offer ImageGeneration, and
+    /// without every LlmWebSearchTool when it does not offer WebSearch. A session that asks for images or web search
+    /// still runs on a model without them (DSA-942 B8, DSA-1378); every other unsupported kind is still refused.</summary>
+    internal static IReadOnlyList<LlmHostedTool> WithoutUnoffered(IReadOnlyList<LlmHostedTool> tools,
         IReadOnlySet<LlmHostedToolKind> supported)
     {
         ArgumentNullException.ThrowIfNull(tools);
-        return supported.Contains(LlmHostedToolKind.ImageGeneration)
-            ? tools : [.. tools.Where(tool => tool is not LlmImageGenerationTool)];
+        bool images = supported.Contains(LlmHostedToolKind.ImageGeneration), search = supported.Contains(LlmHostedToolKind.WebSearch);
+        return images && search ? tools
+            : [.. tools.Where(tool => (images || tool is not LlmImageGenerationTool) && (search || tool is not LlmWebSearchTool))];
     }
 
     internal static IReadOnlyList<LlmHostedTool> Snapshot(IReadOnlyList<LlmHostedTool> tools) =>
