@@ -19,10 +19,17 @@ internal static class AnthropicSchemas
     private static readonly HashSet<string> Formats = new(StringComparer.Ordinal)
     { "date-time", "time", "date", "duration", "email", "hostname", "uri", "ipv4", "ipv6", "uuid" };
 
+    /// <summary>Search always enables citations, which Anthropic cannot combine with native JSON output format.</summary>
+    internal static LlmProviderCapabilities ForRequest(LlmChatRequest request, LlmProviderCapabilities capabilities) =>
+        request.HostedTools.Any(tool => tool.Kind == LlmHostedToolKind.WebSearch)
+            ? capabilities with { SupportsJsonSchema = InferenceSupport.Unsupported, SupportsJsonObject = InferenceSupport.Unsupported }
+            : capabilities;
+
     internal static LlmStructuredOutputEnforcement? Enforcement(LlmChatRequest request,
         LlmProviderCapabilities capabilities)
     {
         if (request.StructuredOutput is not { } output) return null;
+        capabilities = ForRequest(request, capabilities);
         return StructuredOutput.ResolveEnforcement(output, capabilities with
         {
             SupportsJsonSchema = Analyze(output.Schema, out SchemaCost cost) && cost.Fits

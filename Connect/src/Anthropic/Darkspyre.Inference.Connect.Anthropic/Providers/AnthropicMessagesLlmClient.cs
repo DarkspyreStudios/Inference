@@ -116,7 +116,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         LlmConnection connection, LlmChatRequest request)
     {
         ArgumentNullException.ThrowIfNull(request);
-        LlmProviderCapabilities capabilities = GetCapabilities(connection, request.ModelId);
+        LlmProviderCapabilities capabilities = AnthropicSchemas.ForRequest(request, GetCapabilities(connection, request.ModelId));
         ValidateRequest(connection, request, capabilities);
         AnthropicModelProfile profile = AnthropicModelProfiles.Resolve(
             ReasoningModelId(request.ModelId), ILlmCatalogCapabilities.EntryFor(connection, request.ModelId))
@@ -278,6 +278,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             int? cachedTokens = null;
             int? cacheWriteTokens = null;
             int? outputTokens = null;
+            int? webSearchRequests = null;
             string? responseId = null;
             string? observedModel = null;
             string? stopReason = null;
@@ -323,9 +324,10 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                                 outputTokens = ReadToken(message, "usage", "output_tokens") ?? outputTokens;
                                 cachedTokens = ReadToken(message, "usage", "cache_read_input_tokens") ?? cachedTokens;
                                 cacheWriteTokens = ReadToken(message, "usage", "cache_creation_input_tokens") ?? cacheWriteTokens;
+                                webSearchRequests = ReadSearches(message) ?? webSearchRequests;
                             }
 
-                            if (usageDeltas.Next(paused.Usage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens)) is { } initialUsage)
+                            if (usageDeltas.Next(paused.Usage(ResponseUsage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens, webSearchRequests))) is { } initialUsage)
                             {
                                 yield return consumption.Publish<LlmStreamEvent>(initialUsage);
                             }
@@ -441,7 +443,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             inputTokens = ReadToken(root, "usage", "input_tokens") ?? inputTokens;
                             cachedTokens = ReadToken(root, "usage", "cache_read_input_tokens") ?? cachedTokens;
                             cacheWriteTokens = ReadToken(root, "usage", "cache_creation_input_tokens") ?? cacheWriteTokens;
-                            if (usageDeltas.Next(paused.Usage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens)) is { } runningUsage)
+                            webSearchRequests = ReadSearches(root) ?? webSearchRequests;
+                            if (usageDeltas.Next(paused.Usage(ResponseUsage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens, webSearchRequests))) is { } runningUsage)
                             {
                                 yield return consumption.Publish<LlmStreamEvent>(runningUsage);
                             }
@@ -458,8 +461,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                             // A server-only pause continues; a pause that also holds client calls is refused below.
                             if (string.Equals(stopReason, "pause_turn", StringComparison.Ordinal) && toolCalls.Count == 0)
                             {
-                                paused.Continue(streamedContent.BuildContent(), null, [], inputTokens, outputTokens, cachedTokens,
-                                    cacheWriteTokens, containerId);
+                                paused.Continue(streamedContent.BuildContent(), null, [],
+                                    ResponseUsage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens, webSearchRequests), containerId);
                                 continued = true;
                                 break;
                             }
@@ -483,7 +486,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                                 refusalCategory,
                                 refusalExplanation,
                                 completedToolCalls,
-                                paused.Usage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens),
+                                paused.Usage(ResponseUsage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens, webSearchRequests)),
                                 responseId,
                                 observedModel,
                                 () => paused.Content(streamedContent.BuildContent()),
@@ -595,13 +598,14 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             int? outputTokens = ReadToken(root, "usage", "output_tokens");
             int? cachedTokens = ReadToken(root, "usage", "cache_read_input_tokens");
             int? cacheWriteTokens = ReadToken(root, "usage", "cache_creation_input_tokens");
+            int? webSearchRequests = ReadSearches(root);
             string? stopReason = LlmJson.GetString(root, "stop_reason");
             string? containerId = ReadContainer(root, connection.Transport);
             // A server-only pause continues; a pause that also holds client calls is refused by BuildResult.
             if (string.Equals(stopReason, "pause_turn", StringComparison.Ordinal) && toolCalls.Count == 0)
             {
                 paused.Continue(content.GetArrayLength() == 0 ? null : JsonNode.Parse(content.GetRawText())!.AsArray(), text.ToString(),
-                    reasoning, inputTokens, outputTokens, cachedTokens, cacheWriteTokens, containerId);
+                    reasoning, ResponseUsage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens, webSearchRequests), containerId);
                 return (hosted, true);
             }
 
@@ -618,7 +622,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
                 refusalCategory,
                 refusalExplanation,
                 [.. toolCalls],
-                paused.Usage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens),
+                paused.Usage(ResponseUsage(inputTokens, outputTokens, cachedTokens, cacheWriteTokens, webSearchRequests)),
                 LlmJson.GetString(root, "id"),
                 ObservedModel.Read(root, "model", Transport, connection, credential, response.RequestMessage, extraSecrets: secrets),
                 () => paused.Content(finalContent),
@@ -641,7 +645,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         private readonly StringBuilder text = new();
         private readonly List<LlmReasoningText> reasoning = [];
         private JsonObject? message;
-        private int? input, output, cached, written;
+        private LlmUsage? usage;
 
         internal string Text => this.text.ToString();
 
@@ -651,13 +655,12 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
 
         /// <summary>Keeps one paused response and puts its content, with any earlier paused content, back in the request.</summary>
         internal void Continue(JsonArray? paused, string? pausedText, IReadOnlyList<LlmReasoningText> pausedReasoning,
-            int? inputTokens, int? outputTokens, int? cachedTokens, int? writtenTokens, string? containerId)
+            LlmUsage? responseUsage, string? containerId)
         {
             if (paused is not null) foreach (JsonNode? block in paused) this.content.Add(block?.DeepClone());
             this.text.Append(pausedText);
             this.reasoning.AddRange(pausedReasoning);
-            (this.input, this.output, this.cached, this.written) =
-                (Sum(this.input, inputTokens), Sum(this.output, outputTokens), Sum(this.cached, cachedTokens), Sum(this.written, writtenTokens));
+            this.usage = UsageTotals.Add(this.usage, responseUsage, first: this.message is null);
             this.ContainerId = containerId ?? this.ContainerId;
             if (this.message is null)
             {
@@ -669,8 +672,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         }
 
         /// <summary>The step's usage: the paused responses' usage plus the current response's.</summary>
-        internal LlmUsage? Usage(int? inputTokens, int? outputTokens, int? cachedTokens, int? writtenTokens) => AnthropicUsage.Create(
-            Sum(this.input, inputTokens), Sum(this.output, outputTokens), Sum(this.cached, cachedTokens), Sum(this.written, writtenTokens));
+        internal LlmUsage? Usage(LlmUsage? responseUsage) => UsageTotals.Add(this.usage, responseUsage, first: this.message is null);
 
         /// <summary>The step's native content: every paused block, then the final response's, or null when there is none.</summary>
         internal JsonArray? Content(JsonArray? final)
@@ -681,7 +683,6 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             return all;
         }
 
-        private static int? Sum(int? first, int? second) => first is null && second is null ? null : (first ?? 0) + (second ?? 0);
     }
 
     private static LlmChatResult BuildResult(
@@ -995,8 +996,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
         {
             payload["max_tokens"] = maxTokens;
         }
-        if (AnthropicSchemas.Enforcement(request, GetCapabilities(connection, request.ModelId))
-            == LlmStructuredOutputEnforcement.ProviderJsonSchema)
+        LlmStructuredOutputEnforcement? enforcement = AnthropicSchemas.Enforcement(request, GetCapabilities(connection, request.ModelId));
+        if (enforcement == LlmStructuredOutputEnforcement.ProviderJsonSchema)
         {
             JsonObject output = payload["output_config"]?.AsObject() ?? new JsonObject();
             output["format"] = new JsonObject
@@ -1006,6 +1007,8 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             };
             if (payload["output_config"] is null) payload["output_config"] = output;
         }
+        if (enforcement == LlmStructuredOutputEnforcement.LocalValidationOnly && request.StructuredOutput is { } local)
+            system.Add(new JsonObject { ["type"] = "text", ["text"] = StructuredOutput.Guidance(local.Schema) });
         if (system.Count > 0)
         {
             payload["system"] = system;
@@ -1115,6 +1118,17 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             explanation = LlmJson.GetString(details, "explanation") ?? explanation;
         }
     }
+
+    private static LlmUsage? ResponseUsage(int? input, int? output, int? cached, int? written, int? searches)
+    {
+        LlmUsage? usage = AnthropicUsage.Create(input, output, cached, written);
+        return searches is null ? usage : (usage ?? new LlmUsage(null, null, null)) with
+        { HostedToolCalls = new Dictionary<LlmHostedToolKind, int> { [LlmHostedToolKind.WebSearch] = searches.Value } };
+    }
+
+    private static int? ReadSearches(JsonElement root) =>
+        LlmJson.GetObject(root, "usage") is { } usage && LlmJson.GetObject(usage, "server_tool_use") is { } server
+            ? LlmJson.GetInt(server, "web_search_requests") : null;
 
     private static int? ReadToken(JsonElement root, string objectName, string propertyName) =>
         LlmJson.GetObject(root, objectName) is { } usage
