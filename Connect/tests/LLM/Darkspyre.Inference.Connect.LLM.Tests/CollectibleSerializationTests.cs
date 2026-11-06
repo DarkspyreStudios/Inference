@@ -117,7 +117,9 @@ public sealed class CollectibleSerializationTests
             Type clientType = assembly.GetType(typeof(ILlmClient).FullName!, throwOnError: true)!;
             var clients = (System.Collections.IEnumerable)container.GetRequiredService(typeof(IEnumerable<>).MakeGenericType(clientType));
             object[] resolved = clients.Cast<object>().ToArray();
-            Assert.Equal(6, resolved.Length);
+            // One chat client per deployed provider library, Anthropic Messages among them.
+            Assert.Equal(7, resolved.Length);
+            Assert.Contains(resolved, client => client.GetType().FullName == typeof(AnthropicMessagesLlmClient).FullName);
             Assert.All(resolved, client => Assert.Same(context, AssemblyLoadContext.GetLoadContext(client.GetType().Assembly)));
             object pool = container.GetRequiredService(assembly.GetType(
                 "Darkspyre.Inference.Connect.LLM.Internal.SdkHttpGenerationPool", throwOnError: true)!);
