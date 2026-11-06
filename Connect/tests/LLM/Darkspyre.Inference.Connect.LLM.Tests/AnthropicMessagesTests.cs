@@ -24,20 +24,20 @@ public sealed class AnthropicMessagesTests
     [Fact]
     public void RegistersSharedManagedClient()
     {
+        using TestDataFolder folder = new();
         ServiceCollection services = new();
-        // The host supplies its connections, as every application does.
+        // The host supplies what every discovered provider needs, as an application does.
         services.AddSingleton<ILlmConnectionSource>(new Source(Connection()));
+        services.AddSingleton<ILlmDataFolder>(folder);
+        services.AddSingleton<ILlmSelfHost>(new UnusedSelfHost());
         services.AddLlmConnect();
         using ServiceProvider provider = services.BuildServiceProvider();
 
         Assert.Contains(provider.GetRequiredService<LlmProviderCatalog>().SupportedProviders,
             definition => definition.Id == "anthropic-api-key");
-        // Only the agent client this library registers is built; the other providers need host services of their own.
-        ServiceDescriptor registered = Assert.Single(services, descriptor => descriptor.ServiceType == typeof(ILlmAgentClient)
-            && descriptor.ImplementationFactory?.Method.DeclaringType?.Assembly == typeof(AnthropicMessagesLlmClient).Assembly);
-        object agents = registered.ImplementationFactory!(provider);
+        ILlmAgentClient agents = Assert.Single(provider.GetServices<ILlmAgentClient>(),
+            client => client.Transport == LlmTransport.AnthropicMessages);
         Assert.IsType<ManagedLlmAgentClient<AnthropicMessagesLlmClient>>(agents);
-        Assert.Equal(LlmTransport.AnthropicMessages, ((ILlmAgentClient)agents).Transport);
     }
 
     /// <summary>
@@ -272,6 +272,17 @@ public sealed class AnthropicMessagesTests
         var events = new List<LlmAgentEvent>();
         await foreach (LlmAgentEvent item in session.RunTurnAsync(new() { Input = [new LlmAgentTextContent("hello")] })) events.Add(item);
         return events;
+    }
+
+    private sealed class UnusedSelfHost : ILlmSelfHost
+    {
+        public Task<IReadOnlyList<LlmSelfHostEngine>> ListEnginesAsync(CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<ILlmInference> GetInferenceAsync(string engineId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public Task<Common.Embedding.IEmbeddingInference> GetEmbeddingInferenceAsync(string engineId, CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException();
+        public LlmCapabilities? GetCapabilities(string engineId, string? modelId) => throw new NotSupportedException();
     }
 
     internal sealed class Source(LlmConnection connection) : ILlmConnectionSource
