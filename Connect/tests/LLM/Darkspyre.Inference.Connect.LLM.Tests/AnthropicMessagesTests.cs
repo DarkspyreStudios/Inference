@@ -116,13 +116,23 @@ public sealed class AnthropicMessagesTests
             ["type"] = "web_search_result_location", ["url"] = "https://docs.example/a", ["title"] = "A",
             ["encrypted_index"] = "index", ["cited_text"] = "a"
         };
+        JsonObject firstStart = Start();
+        JsonObject secondStart = Start();
+        foreach (JsonObject start in new[] { firstStart, secondStart })
+        {
+            start["message"]!["usage"]!["cache_read_input_tokens"] = 2;
+            start["message"]!["usage"]!["cache_creation_input_tokens"] = 3;
+            start["message"]!["usage"]!["server_tool_use"] = new JsonObject { ["web_search_requests"] = 1 };
+        }
+        JsonObject finish = End("end_turn");
+        finish["usage"]!["server_tool_use"] = new JsonObject { ["web_search_requests"] = 2 };
         using var handler = new Handler(_ => ++posts == 1
-            ? Sse(Start(), Block(0, call),
+            ? Sse(firstStart, Block(0, call),
                 Delta(0, new JsonObject { ["type"] = "input_json_delta", ["partial_json"] = "{\"query\":\"what is a\"}" }), Stop(0),
                 End("pause_turn"), Done())
-            : Sse(Start(), Block(0, results), Stop(0), Block(1, new JsonObject { ["type"] = "text", ["text"] = "" }),
+            : Sse(secondStart, Block(0, results), Stop(0), Block(1, new JsonObject { ["type"] = "text", ["text"] = "" }),
                 Delta(1, new JsonObject { ["type"] = "citations_delta", ["citation"] = citation }),
-                Delta(1, new JsonObject { ["type"] = "text_delta", ["text"] = "A is a." }), Stop(1), End("end_turn"), Done()));
+                Delta(1, new JsonObject { ["type"] = "text_delta", ["text"] = "A is a." }), Stop(1), finish, Done()));
         var client = new AnthropicMessagesLlmClient(new HttpClient(handler));
         LlmConnection connection = Connection() with { Catalog = [Listed(webSearch: true)] };
 
@@ -148,6 +158,11 @@ public sealed class AnthropicMessagesTests
         LlmChatResult result = Assert.Single(events.OfType<LlmChatCompletionEvent>()).Result;
         Assert.Equal(LlmCompletionStatus.Completed, result.Status);
         Assert.Equal("A is a.", result.Text);
+        Assert.Equal(30, result.Usage!.InputTokens); Assert.Equal(10, result.Usage.OutputTokens);
+        Assert.Equal(4, result.Usage.CachedInputTokens); Assert.Equal(6, result.Usage.CacheWriteInputTokens);
+        Assert.NotNull(result.Usage.HostedToolCalls);
+        Assert.Equal(3, result.Usage.HostedToolCalls[LlmHostedToolKind.WebSearch]);
+        Assert.Null(result.Usage.ProviderReportedCostUsd);
         Assert.Equal(new LlmCitation("https://docs.example/a", "A"), Assert.Single(result.Citations));
         JsonArray kept = AnthropicContinuation.ReadPayload(result.ContinuationState!.Payload).Content;
         Assert.Equal(["server_tool_use", "web_search_tool_result", "text"], kept.Select(block => (string?)block!["type"]));
@@ -165,6 +180,38 @@ public sealed class AnthropicMessagesTests
         LlmHostedToolCall error = Assert.Single(failed.OfType<LlmHostedToolCallCompletedEvent>()).Call;
         Assert.Equal("max_uses_exceeded", error.Status);
         Assert.Null(error.Output);
+    }
+
+    /// <summary>
+    /// Search citations cannot use native JSON format: the schema is guidance and the existing local validator checks it.
+    /// A request without search keeps native format. Defect: a search/schema request gets a provider400 or its answer is unchecked.
+    /// </summary>
+    [Fact]
+    public async Task WebSearchSchemaUsesLocalValidationAndKeepsNativeFormatWithoutSearch()
+    {
+        int posts = 0;
+        using var handler = new Handler(_ =>
+        {
+            string answer = ++posts == 1 ? "{\"answer\":7}" : "{\"answer\":\"yes\"}";
+            return Sse(Start(), Block(0, new JsonObject { ["type"] = "text", ["text"] = "" }),
+                Delta(0, new JsonObject { ["type"] = "text_delta", ["text"] = answer }), Stop(0), End("end_turn"), Done());
+        });
+        var client = new AnthropicMessagesLlmClient(new HttpClient(handler));
+        LlmConnection connection = Connection() with { Catalog = [Listed(webSearch: true)] };
+        JsonElement schema = JsonElement.Parse("{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}},\"required\":[\"answer\"],\"additionalProperties\":false}");
+        LlmChatRequest request = Request() with { StructuredOutput = new() { Name = "research_result", Schema = schema }, HostedTools = [new LlmWebSearchTool()] };
+        List<LlmStreamEvent> searched = await Read(client.StreamAsync(connection, request));
+        JsonNode payload = JsonNode.Parse(handler.Bodies[0])!;
+        Assert.Null(payload["output_config"]?["format"]);
+        Assert.Contains(schema.GetRawText(), string.Join("\n", payload["system"]!.AsArray().Select(block => (string?)block!["text"])), StringComparison.Ordinal);
+        LlmChatResult local = Assert.Single(searched.OfType<LlmChatCompletionEvent>()).Result;
+        Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, local.StructuredOutput!.Enforcement);
+        Assert.True(local.StructuredOutput.WasEvaluated); Assert.False(local.StructuredOutput.IsValid);
+        List<LlmStreamEvent> plain = await Read(client.StreamAsync(connection, request with { HostedTools = [] }));
+        JsonNode native = JsonNode.Parse(handler.Bodies[1])!;
+        Assert.Equal("json_schema", (string?)native["output_config"]!["format"]!["type"]);
+        Assert.Equal(schema.GetRawText(), native["output_config"]!["format"]!["schema"]!.ToJsonString());
+        Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, Assert.Single(plain.OfType<LlmChatCompletionEvent>()).Result.StructuredOutput!.Enforcement);
     }
 
     /// <summary>

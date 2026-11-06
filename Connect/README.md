@@ -402,7 +402,9 @@ After the shared validation, the adapter's `ValidateAdditionalRequest` refuses a
 list gives `LlmHostedSearchOutput` with each result's URL and title and no status, and an error gives the provider's
 `error_code` as the status and no output. Each `web_search_result_location` citation becomes an `LlmCitationEvent`
 with its URL and title and joins `result.Citations`. `page_age`, `encrypted_content` and the error object stay in the
-native continuation, and every block is sent back unchanged.
+native continuation, and every block is sent back unchanged. Reported `usage.server_tool_use.web_search_requests` maps to
+`LlmUsage.HostedToolCalls[WebSearch]`, including message-start and final message-delta snapshots; it is not inferred from
+observed blocks. An absent count stays unknown, and provider-reported USD stays null because this response reports no price.
 
 Codex uses the same web-search serializer and observer. `CodexReplay` retains `web_search_call` type, id, status and action,
 including search queries and any returned sources. Citations remain observed `result.Citations`. The existing shared codec
@@ -2406,7 +2408,8 @@ defaults described under Sampling Defaults. Those values do not represent contro
 
 Anthropic Messages and Vertex Claude continue a server-only `pause_turn` in the same step: the client sends the paused
 assistant content back unchanged as the next request, and the step's one result holds every paused block, its text and
-its summed usage. An intermediate pause emits no completion. A paused reply that also holds client tool calls is
+its summed usage. The one nullable UsageTotals helper combines complete usage objects across paused responses, including
+reported hosted-search counts; an unreported constituent does not become zero. An intermediate pause emits no completion. A paused reply that also holds client tool calls is
 refused as an invalid mixed reply. Ordered server-tool calls, their result blocks, caller metadata and
 citations remain replay data; they do not become host tool actions. Streaming retains partial
 server-tool argument deltas before constructing that state. Calls from native code execution retain
@@ -5241,16 +5244,21 @@ Direct API-key connections use the Models API's `structured_outputs` evidence fo
 strict tool support. A missing entry retains Unknown and permits an unchanged native schema attempt
 without advertising qualified support. A catalog rejection cannot be
 overridden. JSON-object-only enforcement is not advertised. Supported output schemas use
-`output_config.format` with `type: json_schema`; reasoning effort remains in the same output config.
+`output_config.format` with `type: json_schema`; reasoning effort remains in the same output config. A request declaring web
+search cannot use that format because search always enables citations. Its per-request JSON-schema and JSON-object support
+are Unsupported, so the existing enforcement selector chooses LocalValidationOnly. The payload carries the original schema
+through the shared StructuredOutput.Guidance system instruction and omits only the native format. The existing validator
+checks the returned answer; it does not retry, rewrite the schema or relax validation. A request without search retains its
+native format path.
 
 Anthropic Messages and Vertex Claude preflight the same schema subset. Objects must close
 `additionalProperties`; unsupported constraints, recursive/external references, complex enums,
 unsupported formats and unsupported pattern constructs do not reach native output enforcement.
 Unknown keywords and annotations remain unchanged and do not establish native support or inability.
 Schema analysis retains an unknown model's support state; passing local checks does not promote it
-to supported. Schemas are not rewritten. A request must explicitly permit `LocalValidation` to use a schema
-outside that subset or a model without native support. That path omits the native format and
-validates the response against the original schema, including its omitted constraints.
+to supported. Schemas are not rewritten. A schema outside that subset or a model without native support selects local
+validation. That path omits the native format, adds shared schema guidance to the system instructions and validates the
+response against the original schema, including its omitted constraints.
 Response validation retains the selected JSON Schema dialect and its keyword rules. Admission
 of an unfamiliar keyword does not establish that the local evaluator can evaluate it.
 When the schema evaluator throws `JsonSchemaException`, the result retains the provider's answer
