@@ -163,8 +163,13 @@ matches the logical call. A tool goes out as `{"type":"function","name","descrip
 
 An agent session's tool schema goes to the model without any `additionalProperties` keyword, at any depth
 (`ToolSchemas.Sent`): in managed-session requests, in the MCP tool list of the Claude CLI and of Antigravity's host
-tools, and through the MCP tool bridge. Nothing else in the schema changes. The arguments are still checked against
-the schema the caller gave, so the change alters no check.
+tools, and through the MCP tool bridge. Nothing else in the schema changes, except on Anthropic Messages, which refuses
+`oneOf`, `anyOf` and `allOf` at a schema's top level: `AnthropicToolSchemas` sends a root union as one flat object with
+every branch's properties, a property the branches declare differently as a nested `anyOf` of its forms (`allOf` for a
+root `allOf`), and as required the members every form requires. The tool's description then begins with the constraint
+the flat object loses, such as "Input constraint: provide the parameters of exactly one of: (operation, query) or
+(operation, reference)." Every other schema goes to Anthropic unchanged. The arguments are still checked against the
+schema the caller gave, so the change alters no check.
 
 Before a handler runs, the arguments are checked against the tool's schema without downloading anything. Members the
 schema does not declare are ignored at every depth: each `additionalProperties` or `unevaluatedProperties` of `false`

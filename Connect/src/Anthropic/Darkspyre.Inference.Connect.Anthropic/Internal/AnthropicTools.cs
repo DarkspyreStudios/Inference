@@ -94,12 +94,11 @@ internal sealed class AnthropicTools
         var tools = new JsonArray();
         foreach (LlmToolDefinition definition in definitions)
         {
-            var tool = new JsonObject
-            {
-                ["name"] = definition.Name,
-                ["input_schema"] = JsonNode.Parse(definition.InputSchema.GetRawText())
-            };
-            if (!string.IsNullOrWhiteSpace(definition.Description)) tool["description"] = definition.Description;
+            (JsonNode schema, string? constraint) = AnthropicToolSchemas.Sent(definition.InputSchema);
+            var tool = new JsonObject { ["name"] = definition.Name, ["input_schema"] = schema };
+            string? description = string.IsNullOrWhiteSpace(definition.Description) ? constraint
+                : constraint is null ? definition.Description : $"{constraint} {definition.Description}";
+            if (description is not null) tool["description"] = description;
             if (clientOptions.TryGetValue(definition.Name, out JsonElement options))
                 foreach (JsonProperty field in options.EnumerateObject()) tool[field.Name] = JsonNode.Parse(field.Value.GetRawText());
             tools.Add(item: tool);

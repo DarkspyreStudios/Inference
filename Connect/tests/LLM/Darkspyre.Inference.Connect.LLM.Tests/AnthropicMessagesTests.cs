@@ -91,6 +91,46 @@ public sealed class AnthropicMessagesTests
     }
 
     /// <summary>
+    /// DSA-1379: a host tool whose schema has a top-level <c>oneOf</c>, as Memory's file_search does, is sent as one flat
+    /// object, with the forms' constraint in its description. Defect: the schema goes out unchanged, and the Messages API
+    /// refuses the whole request (400, "input_schema does not support oneOf, allOf, or anyOf at the top level").
+    /// </summary>
+    [Fact]
+    public async Task ATopLevelOneOfToolSchemaIsSentAsOneObject()
+    {
+        using var handler = new Handler(request => request.Method == HttpMethod.Get ? Models(webSearch: false)
+            : Sse(Start(), Block(0, new JsonObject { ["type"] = "text", ["text"] = "" }),
+                Delta(0, new JsonObject { ["type"] = "text_delta", ["text"] = "Done." }), Stop(0), End("end_turn"), Done()));
+        var client = new AnthropicMessagesLlmClient(new HttpClient(handler));
+        LlmConnection connection = Connection();
+        using var providers = new LlmProviderService(new Source(connection), [client], []);
+        var agents = new ManagedLlmAgentClient<AnthropicMessagesLlmClient>(client, providers, new());
+        const string schema = """
+            {"type":"object","oneOf":[
+              {"type":"object","properties":{"operation":{"const":"search"},"query":{"type":"string"}},"required":["operation","query"]},
+              {"type":"object","properties":{"operation":{"const":"read"},"reference":{"type":"string"}},"required":["operation","reference"]}]}
+            """;
+        await using ILlmAgentSession session = await agents.StartSessionAsync("anthropic", connection, new()
+        {
+            ModelId = Model,
+            Tools = [new LlmAgentToolDefinition { Name = "file_search", Description = "Search files.", InputSchema = JsonElement.Parse(schema) }],
+            ToolHandler = (_, _) => Task.FromResult(LlmToolOutput.FromText("unused"))
+        });
+
+        Assert.Null(Assert.Single((await Run(session)).OfType<LlmAgentTurnCompletedEvent>()).Error);
+
+        JsonNode tool = JsonNode.Parse(handler.Bodies[^1])!["tools"]!.AsArray().Single(item => (string?)item!["name"] == "file_search")!;
+        JsonObject sent = tool["input_schema"]!.AsObject();
+        Assert.DoesNotContain(sent, field => field.Key is "oneOf" or "anyOf" or "allOf");
+        Assert.Equal("object", (string?)sent["type"]);
+        Assert.Equal(["operation", "query", "reference"], sent["properties"]!.AsObject().Select(field => field.Key));
+        Assert.Equal(2, sent["properties"]!["operation"]!["anyOf"]!.AsArray().Count);
+        Assert.Equal(["operation"], sent["required"]!.AsArray().Select(name => (string?)name));
+        Assert.Equal("Input constraint: provide the parameters of exactly one of: (operation, query) or (operation, reference). Search files.",
+            (string?)tool["description"]);
+    }
+
+    /// <summary>
     /// On a model whose catalog reports web search, the hosted tool writes the basic entry; a search that pauses
     /// continues in the same step, reports its start, its query and sources, and one citation, and sends the paused
     /// blocks back unchanged; the result keeps every block for the next request. An error result reports its code and no
