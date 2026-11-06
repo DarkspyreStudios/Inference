@@ -211,6 +211,16 @@ satisfies this JSON Schema, with no Markdown fence or other text.` The final ans
 is `LlmAgentTurnCompletedEvent.StructuredOutput`; the completion reason does not change. A refusal or truncation keeps
 its reason and reports `IsValid = false` with `The answer was not evaluated: {reason}.` No second request is sent.
 Claude appends the guidance to the turn input for every root and checks the turn's final result text the same way.
+`LlmStructuredOutputValidation.Failures` lists each failed keyword and its schema-declared `PropertyNames`, with identical
+keyword/name pairs listed once in first-seen order. Names come from the failed evaluation node: its schema location for
+`required` and `dependentRequired`, and its evaluation path's last `properties` name for other keywords. Required names
+under an embedded schema resource with another base URI are omitted. `additionalProperties`, `unevaluatedProperties`,
+`propertyNames`, `patternProperties`, `dependentSchemas`, `if`, `then`, `else`, `allOf`, `anyOf`, `oneOf` and `not` carry
+only the keyword; model-chosen names and branch names never enter the diagnostic. A failure under a valid ancestor is omitted by following that node's
+`Parent` chain; a valid sibling array item does not suppress a failed item. Aggregate keyword errors remain in the list.
+The list contains no answer values or location paths. `Errors`, validator options and the tolerance of undeclared members
+are unchanged. A valid, refused, not-evaluated or uncheckable answer has an empty failure list. Engines that do not list
+these facts leave the property at its empty default.
 
 **Continuing, forking and rewinding.** Codex continues, forks and rewinds a conversation by starting a new session
 with its history through `StartSessionAsync`; the Claude CLI forks and rewinds the same way. Continuation state the
@@ -3572,6 +3582,17 @@ for public diagnostics. They retain the actual AWS error kind and explanation in
 the explanation with a generic context-window message. Their observed status and overflow flag remain intact.
 xAI input overflow raises this failure instead of returning an incomplete completion; output-token
 truncation remains an incomplete completion.
+
+A managed `LlmAgentTurnCompletedEvent` whose reason is `ProviderFailure` carries optional `Failure` facts through
+`LlmAgentFailureDiagnostic`: a fixed `Kind`, nullable numeric `HttpStatus`, `ProviderCode` and `RequestId`. The kinds are
+`ProviderError`, `StreamInterrupted`, `StreamEndedWithoutAnswer`, `ToolRequestWithoutCalls`, `CompactionFailed` and `Other`.
+Provider facts come from the existing exception, including its recognized not-attempted resource wrapper; a compaction
+wrapper retains any inner provider facts. A failed response with no provider exception and a local failure carry no
+HTTP facts. `ManagedFailure.Label` is the one boundary for codes and request ids: 1 to 128 ASCII letters, digits, `_`,
+`-`, `.` or `:` pass unchanged, and every other value becomes null. This keeps provider prose, bodies and headers out of
+these fields. Schema failure names have their own schema-owned policy above. No provider or model message is added.
+The existing completion reason, `Error` text, warning and retry behavior are unchanged. Other completion reasons and
+non-managed sessions leave `Failure` null.
 
 An unclassified managed-run exception emits a `LlmAgentWarningEvent` with its runtime type and
 managed stack frames, then the failure completion. The warning omits exception messages,

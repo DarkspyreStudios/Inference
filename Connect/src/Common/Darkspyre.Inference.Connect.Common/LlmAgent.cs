@@ -525,6 +525,33 @@ public sealed record LlmAgentWarningEvent(
     public override string TurnId { get => base.TurnId!; init => base.TurnId = HostedEventFacts.Identity(value); }
 }
 
+/// <summary>A fixed, library-chosen name for why a managed turn failed. It holds no provider or model text.</summary>
+public enum LlmAgentFailureKind
+{
+    /// <summary>The provider answered with an error, or reported the response as failed.</summary>
+    ProviderError,
+    /// <summary>The response stream was interrupted and could not be recovered.</summary>
+    StreamInterrupted,
+    /// <summary>The model stream ended without a final response.</summary>
+    StreamEndedWithoutAnswer,
+    /// <summary>The model asked for tools without returning any calls.</summary>
+    ToolRequestWithoutCalls,
+    /// <summary>Compaction could not produce usable context.</summary>
+    CompactionFailed,
+    /// <summary>Any other failure.</summary>
+    Other
+}
+
+/// <summary>Identifying facts about a failed managed turn, safe to log and display.</summary>
+/// <param name="Kind">Why the turn failed.</param>
+/// <param name="HttpStatus">The HTTP status the provider answered with, when the failure came from an HTTP answer.</param>
+/// <param name="ProviderCode">The provider's error code, such as <c>rate_limit_error</c>, when it reported one.</param>
+/// <param name="RequestId">The request id the provider assigned, when it reported one.</param>
+/// <gotcha>The status, code and id may all be null. A null status, code and id with a kind other than ProviderError means the failure
+/// never reached a provider error answer.</gotcha>
+public sealed record LlmAgentFailureDiagnostic(LlmAgentFailureKind Kind, int? HttpStatus, string? ProviderCode,
+    string? RequestId);
+
 /// <summary>A turn ended.</summary>
 /// <param name="ThreadId">The conversation the event belongs to.</param>
 /// <param name="TurnId">The turn the event belongs to.</param>
@@ -546,6 +573,9 @@ public sealed record LlmAgentTurnCompletedEvent(
     /// conversation then holds input it cannot read again; a host can start a new conversation from its own history.
     /// </summary>
     public bool IsContextOverflow { get; init; }
+
+    /// <summary>The failure's identifying facts; null unless a managed turn ended with Reason ProviderFailure.</summary>
+    public LlmAgentFailureDiagnostic? Failure { get; init; }
 
     /// <summary>The final answer's check against the turn's OutputSchema; null when the turn requested none.</summary>
     public LlmStructuredOutputValidation? StructuredOutput { get; init; }

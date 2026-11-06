@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Darkspyre.Inference.Common.LLM;
 using Json.Schema;
+using Json.Pointer;
 
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
@@ -75,7 +76,9 @@ internal static class StructuredOutput
     /// <param name="Checked">False when the schema could not be built or evaluated.</param>
     /// <param name="Errors">One line per failed check; superfluous members are not errors.</param>
     /// <param name="Instance">The parsed value, unchanged; default when the text is not JSON.</param>
-    internal sealed record Evaluation(bool Checked, IReadOnlyList<string> Errors, JsonElement Instance);
+    /// <param name="Failures">Schema-owned identifying facts for the failed checks.</param>
+    internal sealed record Evaluation(bool Checked, IReadOnlyList<string> Errors, JsonElement Instance,
+        IReadOnlyList<LlmStructuredOutputFailure> Failures);
 
     /// <summary>
     /// Checks <paramref name="json"/> against <paramref name="schema"/>. Nothing is downloaded, and members the schema
@@ -92,13 +95,14 @@ internal static class StructuredOutput
         }
         catch (JsonException exception)
         {
-            return new(true, [$"not valid JSON: {exception.Message}"], default);
+            return new(true, [$"not valid JSON: {exception.Message}"], default, []);
         }
 
         JsonSchema built;
+        JsonNode? tolerant;
         try
         {
-            JsonNode? tolerant = JsonNode.Parse(schema.GetRawText());
+            tolerant = JsonNode.Parse(schema.GetRawText());
             RemoveKeywords(tolerant, RefusesUndeclaredMembers);
             built = JsonSchema.FromText(tolerant?.ToJsonString() ?? schema.GetRawText(), new BuildOptions
             {
@@ -114,30 +118,39 @@ internal static class StructuredOutput
         catch (Exception exception) when (exception is JsonException or JsonSchemaException or ArgumentException
             or InvalidOperationException or NotSupportedException)
         {
-            return new(false, [$"could not be checked: {exception.Message}"], instance);
+            return new(false, [$"could not be checked: {exception.Message}"], instance, []);
         }
 
         try
         {
             EvaluationResults results = built.Evaluate(instance, new EvaluationOptions { OutputFormat = OutputFormat.List });
             // The whole schema decides. A passing schema can still list errors from alternatives that did not match.
-            if (results.IsValid) return new(true, [], instance);
+            if (results.IsValid) return new(true, [], instance, []);
+            var rootBase = new Uri(results.SchemaLocation.GetLeftPart(UriPartial.Query));
             var errors = new List<string>();
+            var failures = new List<LlmStructuredOutputFailure>();
             foreach (EvaluationResults detail in (results.Details ?? []).Prepend(results))
             {
                 if (detail.Errors is null) continue;
-                foreach ((string _, string message) in detail.Errors)
+                bool report = !detail.IsValid;
+                for (EvaluationResults? parent = detail.Parent; report && parent is not null; parent = parent.Parent)
+                    report = !parent.IsValid;
+                foreach ((string keyword, string message) in detail.Errors)
                 {
                     string location = detail.InstanceLocation.ToString();
                     errors.Add($"{(location.Length == 0 ? "/" : location)}: {message}");
+                    if (!report) continue;
+                    IReadOnlyList<string> names = SchemaNames.Of(keyword, detail, tolerant!, rootBase, instance);
+                    if (!failures.Any(failure => failure.Keyword == keyword && failure.PropertyNames.SequenceEqual(names, StringComparer.Ordinal)))
+                        failures.Add(new(keyword, names));
                 }
             }
-            return new(true, errors, instance);
+            return new(true, errors, instance, failures);
         }
         catch (Exception exception) when (exception is JsonException or JsonSchemaException or ArgumentException
             or InvalidOperationException or NotSupportedException)
         {
-            return new(false, [$"could not be checked: {exception.Message}"], instance);
+            return new(false, [$"could not be checked: {exception.Message}"], instance, []);
         }
     }
 
@@ -147,6 +160,66 @@ internal static class StructuredOutput
         LlmStructuredOutputEnforcement enforcement)
     {
         Evaluation evaluation = Evaluate(request.Schema, text);
-        return new(enforcement, evaluation.Checked, evaluation.Checked && evaluation.Errors.Count == 0, evaluation.Errors);
+        return new(enforcement, evaluation.Checked, evaluation.Checked && evaluation.Errors.Count == 0, evaluation.Errors)
+        { Failures = evaluation.Failures };
     }
+}
+
+/// <summary>Reads failed property names only from the evaluated schema's own paths and declarations.</summary>
+internal static class SchemaNames
+{
+    /// <summary>The schema-owned names one failed keyword of this evaluation node involves.</summary>
+    internal static IReadOnlyList<string> Of(string keyword, EvaluationResults node, JsonNode built, Uri rootBase,
+        JsonElement instance)
+    {
+        if (keyword is "additionalProperties" or "unevaluatedProperties" or "propertyNames" or "patternProperties"
+            or "dependentSchemas" or "if" or "then" or "else" or "allOf" or "anyOf" or "oneOf" or "not") return [];
+        if (keyword is "required" or "dependentRequired")
+        {
+            // A fragment in an embedded $id resource does not address the root document that was built.
+            if (new Uri(node.SchemaLocation.GetLeftPart(UriPartial.Query)) != rootBase
+                || !JsonPointer.TryParse(node.SchemaLocation.Fragment, out JsonPointer pointer)
+                || !pointer.TryEvaluate(built, out JsonNode? schema) || schema is not JsonObject declaration) return [];
+            JsonElement? value = node.InstanceLocation.Evaluate(instance);
+            if (value is not { ValueKind: JsonValueKind.Object }) return [];
+            JsonElement current = value.Value;
+            if (keyword == "required")
+                return declaration["required"] is JsonArray required ? Missing(required, current) : [];
+            var missing = new List<string>();
+            if (declaration["dependentRequired"] is JsonObject dependencies)
+                foreach ((string trigger, JsonNode? names) in dependencies)
+                    if (current.TryGetProperty(trigger, out _) && names is JsonArray required)
+                        missing.AddRange(Missing(required, current));
+            return [.. missing.Distinct(StringComparer.Ordinal)];
+        }
+
+        JsonPointer path = node.EvaluationPath;
+        string? property = null;
+        for (int index = 0; index < path.SegmentCount; index++)
+        {
+            string segment = path[index].ToString();
+            switch (segment)
+            {
+                case "properties":
+                    if (++index >= path.SegmentCount) return [];
+                    property = path[index].ToString().Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal);
+                    break;
+                case "$defs" or "definitions" or "dependentSchemas" or "patternProperties":
+                    if (++index >= path.SegmentCount) return [];
+                    break;
+                case "allOf" or "anyOf" or "oneOf" or "prefixItems":
+                    if (++index >= path.SegmentCount || path[index].ToInt() is not >= 0) return [];
+                    break;
+                case "items" or "additionalProperties" or "unevaluatedProperties" or "if" or "then" or "else" or "not" or "contains" or "$ref":
+                    break;
+                default:
+                    if (index != path.SegmentCount - 1 || segment != keyword) return [];
+                    break;
+            }
+        }
+        return property is null ? [] : [property];
+    }
+
+    private static IReadOnlyList<string> Missing(JsonArray required, JsonElement current) =>
+        [.. required.Select(name => name!.GetValue<string>()).Where(name => !current.TryGetProperty(name, out _))];
 }

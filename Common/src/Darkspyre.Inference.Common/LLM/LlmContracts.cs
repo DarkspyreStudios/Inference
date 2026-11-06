@@ -293,6 +293,13 @@ public enum LlmCompletionStatus
     Unknown
 }
 
+/// <summary>One failed schema check: the keyword and the schema-declared property names involved.</summary>
+/// <param name="Keyword">The schema keyword that failed, such as <c>required</c>, <c>type</c>, <c>enum</c> or
+/// <c>maxLength</c>.</param>
+/// <param name="PropertyNames">The property names involved, each one the schema declares; empty when none can be named
+/// from the schema.</param>
+public sealed record LlmStructuredOutputFailure(string Keyword, IReadOnlyList<string> PropertyNames);
+
 /// <summary>The outcome of structured output enforcement and local validation.</summary>
 /// <param name="Enforcement">How the structured output was enforced.</param>
 /// <param name="WasEvaluated">Whether the output was validated against the schema.</param>
@@ -302,7 +309,12 @@ public sealed record LlmStructuredOutputValidation(
     LlmStructuredOutputEnforcement Enforcement,
     bool WasEvaluated,
     bool IsValid,
-    IReadOnlyList<string> Errors);
+    IReadOnlyList<string> Errors)
+{
+    /// <summary>The failed checks, deduplicated by keyword and schema-declared names; empty when valid, not evaluated, or reported by an
+    /// engine that does not list them.</summary>
+    public IReadOnlyList<LlmStructuredOutputFailure> Failures { get; init; } = [];
+}
 
 /// <summary>The provider-neutral result of one language-model completion.</summary>
 public sealed record LlmInferenceResult

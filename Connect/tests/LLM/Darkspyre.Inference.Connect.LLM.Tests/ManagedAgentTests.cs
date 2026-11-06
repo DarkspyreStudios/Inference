@@ -8,6 +8,7 @@ using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Resources;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Connect.LLM.Providers;
+using Json.Schema;
 using LlmReasoningLevel = Darkspyre.Inference.Common.LLM.LlmReasoningLevel;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
@@ -341,6 +342,102 @@ public sealed class ManagedAgentTests
         Assert.Single(harness.Requests);
         Assert.Empty(events.OfType<LlmAgentResponseRecoveryEvent>());
         Assert.Equal(LlmAgentCompletionReason.ProviderFailure, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+    }
+
+    /// <summary>Provider facts cross the failure boundary without changing the existing failure text.</summary>
+    [Fact]
+    public async Task ProviderFailureCarriesItsDiagnostic()
+    {
+        var failure = new LlmProviderException("The provider refused the request.", LlmTransport.OpenAiCodex,
+            HttpStatusCode.TooManyRequests, "rate_limit_error", "req_1");
+        var harness = new Harness { Failure = failure };
+        await using var session = harness.Create();
+        var events = await Read(session.RunTurnAsync(Turn("hello")));
+        var completed = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal(LlmAgentCompletionReason.ProviderFailure, completed.Reason);
+        Assert.Equal(failure.Message, completed.Error);
+        Assert.Equal(new LlmAgentFailureDiagnostic(LlmAgentFailureKind.ProviderError, 429, "rate_limit_error", "req_1"), completed.Failure);
+
+        harness.Failure = new LlmProviderException(failure.Message, LlmTransport.OpenAiCodex, HttpStatusCode.TooManyRequests,
+            "provider prose\nnot an identifier", "req_1");
+        var next = Assert.Single((await Read(session.RunTurnAsync(Turn("again")))).OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal(harness.Failure.Message, next.Error);
+        Assert.Null(next.Failure!.ProviderCode);
+        Assert.Equal("req_1", next.Failure.RequestId);
+    }
+
+    /// <summary>A local missing answer has its own kind, and a successful turn has no failure diagnostic.</summary>
+    [Fact]
+    public async Task LocalFailureNamesItsKind()
+    {
+        var empty = new Harness { EndWithoutCompletion = true };
+        await using var failed = empty.Create();
+        var completed = Assert.Single((await Read(failed.RunTurnAsync(Turn("hello")))).OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal(LlmAgentCompletionReason.ProviderFailure, completed.Reason);
+        Assert.Equal("InvalidOperationException: Model stream ended without completion.", completed.Error);
+        Assert.Equal(new LlmAgentFailureDiagnostic(LlmAgentFailureKind.StreamEndedWithoutAnswer, null, null, null), completed.Failure);
+
+        var answered = new Harness();
+        answered.Results.Enqueue(Done());
+        await using var successful = answered.Create();
+        var done = Assert.Single((await Read(successful.RunTurnAsync(Turn("hello")))).OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Equal(LlmAgentCompletionReason.Completed, done.Reason);
+        Assert.Null(done.Failure);
+    }
+
+    /// <summary>Rejected answers report schema names from the applicable branch and the actual failing item only.</summary>
+    [Fact]
+    public async Task RejectedAnswerNamesKeywordAndSchemaProperties()
+    {
+        JsonElement schema = JsonElement.Parse("""{"type":"object","properties":{"name":{"type":"string"},"price":{"type":"number"}},"required":["name"]}""");
+        LlmStructuredOutputValidation basic = await Check(schema, """{"price":"MODEL_PRIVATE_VALUE"}""");
+        Assert.Collection(basic.Failures,
+            failure => { Assert.Equal("properties", failure.Keyword); Assert.Empty(failure.PropertyNames); },
+            failure => { Assert.Equal("required", failure.Keyword); Assert.Equal(["name"], failure.PropertyNames); },
+            failure => { Assert.Equal("type", failure.Keyword); Assert.Equal(["price"], failure.PropertyNames); });
+        Assert.DoesNotContain("MODEL_PRIVATE_VALUE", JsonSerializer.Serialize(basic.Failures), StringComparison.Ordinal);
+
+        JsonElement conditional = JsonElement.Parse("""{"type":"object","if":{"properties":{"kind":{"const":"sale"}}},"then":{"properties":{"price":{"type":"number"}},"required":["price"]}}""");
+        LlmStructuredOutputValidation missing = await Check(conditional, """{"kind":"sale"}""");
+        Assert.Collection(missing.Failures,
+            failure => { Assert.Equal("then", failure.Keyword); Assert.Empty(failure.PropertyNames); },
+            failure => { Assert.Equal("required", failure.Keyword); Assert.Equal(["price"], failure.PropertyNames); });
+        LlmStructuredOutputValidation invalid = await Check(conditional, """{"kind":"sale","price":"ten"}""");
+        Assert.Collection(invalid.Failures,
+            failure => { Assert.Equal("then", failure.Keyword); Assert.Empty(failure.PropertyNames); },
+            failure => { Assert.Equal("properties", failure.Keyword); Assert.Empty(failure.PropertyNames); },
+            failure => { Assert.Equal("type", failure.Keyword); Assert.Equal(["price"], failure.PropertyNames); });
+        LlmStructuredOutputValidation gift = await Check(conditional, """{"kind":"gift"}""");
+        Assert.True(gift.IsValid);
+        Assert.Empty(gift.Failures);
+
+        JsonElement items = JsonElement.Parse("""{"type":"object","properties":{"fabrics":{"type":"array","items":{"type":"object","properties":{"price":{"type":"number"}}}}}}""");
+        LlmStructuredOutputValidation contrast = await Check(items, """{"fabrics":[{"price":1},{"price":"bad"}]}""");
+        Assert.Collection(contrast.Failures,
+            failure => { Assert.Equal("properties", failure.Keyword); Assert.Empty(failure.PropertyNames); },
+            failure => { Assert.Equal("items", failure.Keyword); Assert.Equal(["fabrics"], failure.PropertyNames); },
+            failure => { Assert.Equal("properties", failure.Keyword); Assert.Equal(["fabrics"], failure.PropertyNames); },
+            failure => { Assert.Equal("type", failure.Keyword); Assert.Equal(["price"], failure.PropertyNames); });
+
+        static async Task<LlmStructuredOutputValidation> Check(JsonElement schema, string answer)
+        {
+            // The baseline errors are the raw evaluator's messages, including failed alternatives, in their original order.
+            EvaluationResults original = JsonSchema.FromText(schema.GetRawText()).Evaluate(JsonElement.Parse(answer),
+                new EvaluationOptions { OutputFormat = OutputFormat.List });
+            string[] errors = original.IsValid ? [] : [.. (original.Details ?? []).Prepend(original)
+                .Where(detail => detail.Errors is not null).SelectMany(detail => detail.Errors!.Values.Select(message =>
+                    $"{(detail.InstanceLocation.ToString().Length == 0 ? "/" : detail.InstanceLocation.ToString())}: {message}"))];
+            var harness = new Harness { Window = 10_000 };
+            harness.Results.Enqueue(Done(answer));
+            await using var session = harness.Create();
+            var completed = Assert.Single((await Read(session.RunTurnAsync(Turn("answer") with { OutputSchema = schema })))
+                .OfType<LlmAgentTurnCompletedEvent>());
+            Assert.Equal(LlmAgentCompletionReason.Completed, completed.Reason);
+            Assert.Null(completed.Failure);
+            LlmStructuredOutputValidation validation = Assert.IsType<LlmStructuredOutputValidation>(completed.StructuredOutput);
+            Assert.Equal(errors, validation.Errors);
+            return validation;
+        }
     }
 
     /// <summary>Stop during the retry wait prevents a replacement request.</summary>
@@ -1085,6 +1182,8 @@ public sealed class ManagedAgentTests
         /// <summary>An optional scripted failure for each numbered model request.</summary>
         public Func<int, Exception?>? RequestFailure { get; init; }
         public bool ExposeBeforeFailure { get; init; }
+        /// <summary>Ends the scripted model stream without a completion for the local missing-answer path.</summary>
+        public bool EndWithoutCompletion { get; init; }
         /// <summary>The provider capabilities the session sees; null uses the default fixture.</summary>
         public LlmProviderCapabilities? Capabilities { get; init; }
         public static LlmConnection Connection { get; } =
@@ -1141,6 +1240,7 @@ public sealed class ManagedAgentTests
             {
                 foreach (var observation in usage) yield return new LlmUsageDeltaEvent(observation);
             }
+            if (EndWithoutCompletion) yield break;
             yield return new LlmChatCompletionEvent(Results.Dequeue());
         }
     }

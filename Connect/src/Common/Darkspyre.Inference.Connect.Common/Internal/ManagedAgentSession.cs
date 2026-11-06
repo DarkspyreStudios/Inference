@@ -711,7 +711,9 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                             }, token);
                             if (hostedTools)
                             {
-                                await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, HostedReplayMessage);
+                                await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, HostedReplayMessage,
+                                    failure: ManagedFailure.Of(resend.Retry.Kind == LlmStepRetryKind.StreamInterrupted
+                                        ? LlmAgentFailureKind.StreamInterrupted : LlmAgentFailureKind.ProviderError, resend.InnerException));
                                 return;
                             }
                             CountRetry(retries, resend.Retry);
@@ -731,7 +733,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                             }, token);
                             string message = hostedTools ? HostedReplayMessage
                                 : $"The model response stream was interrupted. Recovery failed after {retries.Values.Sum() + 1} attempts. Completed tool results are retained. Resume to continue.";
-                            await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, message);
+                            await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, message,
+                                failure: ManagedFailure.Of(LlmAgentFailureKind.StreamInterrupted, error));
                             return;
                         }
                     }
@@ -740,7 +743,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 {
                     if (preserve || run.OverflowResent)
                     {
-                        await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, error.Message);
+                        await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, error.Message,
+                            failure: ManagedFailure.Of(LlmAgentFailureKind.ProviderError, error));
                         return;
                     }
                     // The first too-long refusal teaches the model's size, compacts whatever the measure says and
@@ -751,7 +755,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                             error.ReportedContextLimit, Model(request.ModelId)?.MaxContextTokens, token).ConfigureAwait(false);
                     if (Limits(request.ModelId) is null)
                     {
-                        await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, error.Message);
+                        await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, error.Message,
+                            failure: ManagedFailure.Of(LlmAgentFailureKind.ProviderError, error));
                         return;
                     }
                     if (!await CompactRunAsync(run, writer, token).ConfigureAwait(false)) return;
@@ -770,7 +775,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                     try { FenceResourceCallback(token); }
                     catch (Exception error) { ExceptionDispatchInfo.Capture(LlmResourcePreparation.AsResourceFailure(error, token)).Throw(); throw; }
                 }
-                if (result is null) { throw new InvalidOperationException("Model stream ended without completion."); }
+                if (result is null)
+                {
+                    run.LocalFailure = LlmAgentFailureKind.StreamEndedWithoutAnswer;
+                    throw new InvalidOperationException("Model stream ended without completion.");
+                }
                 if (estimate is { IncludesProviderReport: false } observed && result.Usage?.InputTokens is int reported
                     && result.Usage.HostedToolCallCount is null or 0
                     && Limits(request.ModelId) is { } window)
@@ -795,7 +804,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                         LlmCompletionStatus.Incomplete => LlmAgentCompletionReason.Truncation,
                         _ => LlmAgentCompletionReason.ProviderFailure
                     };
-                    await CompleteAsync(run, writer, ended, token, structuredOutput: AnswerCheck(run, result, ended));
+                    await CompleteAsync(run, writer, ended, token, structuredOutput: AnswerCheck(run, result, ended),
+                        failure: ended == LlmAgentCompletionReason.ProviderFailure ? ManagedFailure.Of(LlmAgentFailureKind.ProviderError, null) : null);
                     return;
                 }
                 if (result.Status == LlmCompletionStatus.Unknown && result.ToolCalls.Count > 0)
@@ -826,6 +836,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 {
                     if (result.Status == LlmCompletionStatus.RequiresAction)
                     {
+                        run.LocalFailure = LlmAgentFailureKind.ToolRequestWithoutCalls;
                         throw new InvalidOperationException("Model requested tools without returning calls.");
                     }
                     lock (_sync)
@@ -860,7 +871,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 }
                 await writer.WriteAsync(new LlmAgentTurnCompletedEvent(ThreadId, run.Id, LlmAgentCompletionReason.ProviderFailure,
                     error is LlmProviderException provider ? provider.Message
-                        : $"{error.GetType().Name}: {SecretRedactor.Sanitize(error.Message, LlmCredential.Parse(_connection.Credential))}"), token);
+                        : $"{error.GetType().Name}: {SecretRedactor.Sanitize(error.Message, LlmCredential.Parse(_connection.Credential))}")
+                { Failure = ManagedFailure.OfUnclassified(error, run.LocalFailure) }, token);
             }
             catch (OperationCanceledException) when (token.IsCancellationRequested) { }
             if (executingMixedTools || LlmResourcePreparation.IsResourceFailure(error)) writer.TryComplete(error);
@@ -1093,13 +1105,15 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     }
 
     private async Task CompleteAsync(LiveRun run, ChannelWriter<LlmAgentEvent> writer, LlmAgentCompletionReason reason,
-        CancellationToken token, string? error = null, LlmStructuredOutputValidation? structuredOutput = null)
+        CancellationToken token, string? error = null, LlmStructuredOutputValidation? structuredOutput = null,
+        LlmAgentFailureDiagnostic? failure = null)
     {
         lock (_sync) { run.Terminal = true; }
         await writer.WriteAsync(new LlmAgentTurnCompletedEvent(ThreadId, run.Id, reason,
             reason is LlmAgentCompletionReason.Completed or LlmAgentCompletionReason.ToolRequests ? null : error ?? reason.ToString())
         {
-            StructuredOutput = structuredOutput
+            StructuredOutput = structuredOutput,
+            Failure = reason == LlmAgentCompletionReason.ProviderFailure ? failure : null
         }, token);
     }
 
@@ -1368,7 +1382,8 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
                 AddUsage(run, failedUsage);
                 await writer.WriteAsync(new LlmAgentUsageEvent(ThreadId, run.Id, NewId(), failedUsage, run.Usage), token);
             }
-            await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, error.Message);
+            await CompleteAsync(run, writer, LlmAgentCompletionReason.ProviderFailure, token, error.Message,
+                failure: ManagedFailure.Of(error is CompactionFailedException ? LlmAgentFailureKind.CompactionFailed : LlmAgentFailureKind.ProviderError, error));
             return false;
         }
         bool unchanged = !result.Changed;
@@ -1683,7 +1698,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     /// <summary>The provider's own error when resource preparation wrapped it before any resource effect: a
     /// Materialize/NotAttempted InferenceResourceOperationException whose InnerException is an LlmProviderException.
     /// Any other error is returned unchanged.</summary>
-    private static Exception Unwrapped(Exception error) => error is InferenceResourceOperationException
+    internal static Exception Unwrapped(Exception error) => error is InferenceResourceOperationException
     {
         Failure: { Phase: InferenceResourceOperationPhase.Materialize, CommitOutcome: InferenceResourceCommitOutcome.NotAttempted },
         InnerException: LlmProviderException provider
@@ -1714,6 +1729,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
         public Queue<string> Steering { get; } = new();
         public int Iterations { get; set; }
         public int UsageCalls { get; set; }
+        public LlmAgentFailureKind? LocalFailure { get; set; }
         /// <summary>The turn's first too-long refusal was compacted and the step sent again.</summary>
         public bool OverflowResent { get; set; }
         public LlmUsage? Usage { get; set; }
