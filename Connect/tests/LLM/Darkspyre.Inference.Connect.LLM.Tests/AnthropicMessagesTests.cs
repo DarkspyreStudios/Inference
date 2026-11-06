@@ -191,6 +191,90 @@ public sealed class AnthropicMessagesTests
         Assert.DoesNotContain(Key, failure.SanitizedResponseBody ?? string.Empty, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// (a) An idle session on a model without web search measures its context with one count request and reports the
+    /// provider's 1234 tokens with no margin and a Mixed source; a model step sends no count. (b) On a model with web
+    /// search the request carries it, so no count is sent and the reading is the local estimate of that request.
+    /// Defect: the count path is not wired, a partial count passes as the whole request, a server tool reaches the count
+    /// route, or every step adds a count.
+    /// </summary>
+    [Fact]
+    public async Task IdleContextStatusUsesProviderCount()
+    {
+        var counts = new List<string>();
+        using var handler = new Handler(request => request.Method == HttpMethod.Get ? Models(webSearch: false)
+            : request.RequestUri!.AbsolutePath.EndsWith("/count_tokens", StringComparison.Ordinal)
+                ? Count(counts, request)
+                : Sse(Start(), Block(0, new JsonObject { ["type"] = "text", ["text"] = "" }),
+                    Delta(0, new JsonObject { ["type"] = "text_delta", ["text"] = "done" }), Stop(0), End("end_turn"), Done()));
+        var client = new AnthropicMessagesLlmClient(new HttpClient(handler));
+        LlmConnection connection = Connection();
+        using var providers = new LlmProviderService(new Source(connection), [client], []);
+        var agents = new ManagedLlmAgentClient<AnthropicMessagesLlmClient>(client, providers, new());
+        await using (ILlmAgentSession session = await agents.StartSessionAsync("anthropic", connection, new()
+        { ModelId = Model, HostedTools = [new LlmWebSearchTool()] }))
+        {
+            LlmAgentContextStatus counted = await session.GetContextStatusAsync();
+
+            Assert.Equal(1234, counted.UsedContextTokens);
+            Assert.Equal(LlmContextMeasurementSource.Mixed, counted.Source);
+            string body = Assert.Single(counts);
+            Assert.DoesNotContain("web_search", body, StringComparison.Ordinal);
+            Assert.DoesNotContain("max_tokens", body, StringComparison.Ordinal);
+
+            List<LlmAgentEvent> events = await Run(session);
+            Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+            Assert.Single(counts);
+        }
+
+        // On a model that offers web search, the request carries the server tool, which the count route refuses.
+        using var searching = new Handler(request => request.RequestUri!.AbsolutePath.EndsWith("/count_tokens", StringComparison.Ordinal)
+            ? Count(counts, request) : throw new InvalidOperationException("Measuring must not generate a response."));
+        var searchClient = new AnthropicMessagesLlmClient(new HttpClient(searching));
+        LlmConnection listed = Connection() with { Catalog = [Listed(webSearch: true)] };
+        var recorder = new RecordingEstimator(searchClient);
+        await using ManagedAgentSession estimated = await ManagedAgentSession.CreateAsync("anthropic", listed,
+            new() { ModelId = Model, HostedTools = [new LlmWebSearchTool()] }, listed.Catalog!, recorder,
+            (_, _) => throw new InvalidOperationException("Measuring must not generate a response."),
+            model => searchClient.GetCapabilities(listed, model), new LearnedModelContext());
+
+        LlmAgentContextStatus local = await estimated.GetContextStatusAsync();
+
+        Assert.Single(counts);
+        Assert.Equal(0, searching.Calls);
+        Assert.Contains(recorder.LastRequest!.HostedTools, tool => tool is LlmWebSearchTool);
+        ContextEstimate estimate = Assert.NotNull(recorder.LastEstimate);
+        Assert.Equal(estimate.Tokens + ManagedAgentPolicy.EstimateMargin, local.UsedContextTokens);
+        Assert.NotEqual(LlmContextMeasurementSource.Mixed, local.Source);
+    }
+
+    // Records each count request's body and answers it with 1234 input tokens.
+    private static HttpResponseMessage Count(List<string> counts, HttpRequestMessage request)
+    {
+        counts.Add(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
+        return new(HttpStatusCode.OK) { Content = new StringContent("{\"input_tokens\":1234}", Encoding.UTF8, "application/json") };
+    }
+
+    /// <summary>The real client behind the session, recording the local estimate the session asked for.</summary>
+    private sealed class RecordingEstimator(AnthropicMessagesLlmClient client) : ILlmContextEstimator, ILlmInputTokenCounter
+    {
+        public LlmChatRequest? LastRequest { get; private set; }
+        public ContextEstimate? LastEstimate { get; private set; }
+        public string? EstimateDiagnostic => client.EstimateDiagnostic;
+
+        public async ValueTask<ContextEstimate?> EstimateAsync(LlmConnection connection, LlmChatRequest request,
+            IReadOnlyDictionary<Common.Resources.InferenceResourceReference, Common.Resources.InferenceResourceDescriptor?> resources,
+            CancellationToken cancellationToken)
+        {
+            LastRequest = request;
+            LastEstimate = await client.EstimateAsync(connection, request, resources, cancellationToken);
+            return LastEstimate;
+        }
+
+        public ValueTask<long?> CountInputTokensAsync(LlmConnection connection, LlmChatRequest request,
+            CancellationToken cancellationToken) => client.CountInputTokensAsync(connection, request, cancellationToken);
+    }
+
     internal static LlmConnection Connection() => new()
     {
         Version = "1",

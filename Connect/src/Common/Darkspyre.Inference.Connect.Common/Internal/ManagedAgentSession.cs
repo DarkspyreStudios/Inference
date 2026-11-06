@@ -242,7 +242,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             }
             request = Request(measured, measuredTurn);
         }
-        return Status(measured, measuredTurn, await EstimateAsync(request, resources, cancellationToken).ConfigureAwait(false));
+        return Status(measured, measuredTurn, await MeasureAsync(request, resources, cancellationToken).ConfigureAwait(false));
     }
 
     public async Task<LlmRequestAccounting> MeasureContextAsync(LlmAgentContext proposedContext,
@@ -263,7 +263,7 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             request = Request(proposal, turn);
             revision = _context.Revision;
         }
-        ContextEstimate? used = Corrected(await EstimateAsync(request, ResourceSizes.None, cancellationToken).ConfigureAwait(false),
+        ContextEstimate? used = Corrected(await MeasureAsync(request, ResourceSizes.None, cancellationToken).ConfigureAwait(false),
             turn.ModelId!);
         cancellationToken.ThrowIfCancellationRequested();
         return ManagedAgentPolicy.Account(turn.ModelId!, used,
@@ -1485,6 +1485,20 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
     {
         run.Usage = run.UsageUnknown ? null : UsageTotals.Add(run.Usage, usage, run.UsageCalls == 0);
         run.UsageCalls++;
+    }
+
+    /// <summary>
+    /// An idle measure of <paramref name="request"/>: the provider's count of the whole request when the client counts
+    /// input tokens and can count this request, so no margin is added; otherwise the adapter's estimate. A count failure
+    /// fails the measure. The per-step loop and the compactor keep the estimate, so a model step sends no count.
+    /// </summary>
+    private async ValueTask<ContextEstimate?> MeasureAsync(LlmChatRequest request,
+        IReadOnlyDictionary<InferenceResourceReference, InferenceResourceDescriptor?> resources, CancellationToken token)
+    {
+        if (_estimator is ILlmInputTokenCounter counter
+            && await counter.CountInputTokensAsync(_connection, request, token).ConfigureAwait(false) is long tokens)
+            return new ContextEstimate(tokens, IncludesProviderReport: true, EntirelyReported: true);
+        return await EstimateAsync(request, resources, token).ConfigureAwait(false);
     }
 
     /// <summary>The adapter's estimate of <paramref name="request"/>; it may ask the model service to count text.</summary>

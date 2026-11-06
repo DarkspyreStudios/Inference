@@ -4969,7 +4969,17 @@ The CLI process starts and ends as [Wrapped CLI processes](#wrapped-cli-processe
 `ManagedLlmAgentClient<AnthropicMessagesLlmClient>`, so its sessions open as every managed provider's do. Its sessions
 report token usage, including cache reads and writes, and no account usage; caching is `PromptCaching.Claude`. Its
 context estimate (`EstimateAsync`) counts the Messages projection locally and makes no network call: caller-owned
-resources count by their resolved descriptors, and a request whose projection is not plain text gets no estimate. It
+resources count by their resolved descriptors, and a request whose projection is not plain text gets no estimate.
+
+The client also implements the internal `ILlmInputTokenCounter`. `ManagedAgentSession` asks it only for an idle
+reading, `GetContextStatusAsync` and `MeasureContextAsync`. The step loop, the compactor and `EstimateTextAsync` keep
+the local estimate, so a model step sends no count. `AnthropicTokenCounting` posts the generation payload, without its
+generation-only fields, to `messages/count_tokens` with the key only in `x-api-key`. A returned `input_tokens` is the
+whole request: the reading adds no margin, and its `Source` is `Mixed`, which the status line shows as an estimate. The
+count route refuses server tools other than the advisor, and `url` or `file` sources. A request holding one of these, or
+caller resources, gets null without a request, and the local estimate of the original request stands; nothing is removed
+to make it countable. While a session asks for web search on a model that offers it, every idle reading is therefore the
+local estimate. A count failure fails the reading, with no fallback. No other provider implements the interface. It
 offers web search on the models whose Models API entry reports it (see "Hosted search"); the Claude CLI transport
 offers none. `AnthropicAttachments`, `AnthropicContinuation` and `AnthropicUsage` stay in Connect.Common, which both
 Claude libraries use.

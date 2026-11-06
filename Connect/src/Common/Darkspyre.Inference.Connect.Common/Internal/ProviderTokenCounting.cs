@@ -4,7 +4,7 @@ using System.Text.Json;
 namespace Darkspyre.Inference.Connect.LLM.Internal;
 
 // The Gemini API and Google Vertex AI use this; they are out of the build, and this file is under Compile Remove.
-// Darkspyre.Inference.Connect.Anthropic does not use it: it has no provider count route.
+// Darkspyre.Inference.Connect.Anthropic does not use it: it counts through ILlmInputTokenCounter and its own AnthropicTokenCounting.
 internal static class ProviderTokenCounting
 {
     internal static readonly TimeSpan ControlTimeout = TimeSpan.FromSeconds(100);

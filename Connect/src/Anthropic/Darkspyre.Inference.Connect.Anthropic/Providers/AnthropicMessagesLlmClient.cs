@@ -16,7 +16,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 /// It reads the first-party Models API catalog for per-model reasoning levels and web search. Vertex Claude, which
 /// derives from it, has no Models API; the service never attaches a catalog to a Vertex connection.
 /// </remarks>
-internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabilities, ILlmContextEstimator
+internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabilities, ILlmContextEstimator, ILlmInputTokenCounter
 {
     private const string AnthropicVersion = "2023-06-01";
     private const int DefaultMaxOutputTokens = 8192;
@@ -175,6 +175,31 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             || payload["system"] is { } system && !IsPlaintextContent(system)) return ValueTask.FromResult<ContextEstimate?>(null);
         foreach (string name in CountExcludedFields) payload.Remove(name);
         return ValueTask.FromResult<ContextEstimate?>(new ContextEstimate(checked(LocalTokenCount.Count(payload.ToJsonString()) + sized)));
+    }
+
+    /// <summary>
+    /// Anthropic's count of the whole request as generation would send it, or null, with no request sent, when the count
+    /// route cannot count it as sent: caller resources, a server tool other than the advisor, or a <c>url</c> or
+    /// <c>file</c> source. The key goes only in the <c>x-api-key</c> header.
+    /// </summary>
+    public async ValueTask<long?> CountInputTokensAsync(LlmConnection connection, LlmChatRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        _ = ValidateMessagesRequest(connection, request);
+        if (request.Resources is not null || request.Messages.Any(message =>
+                message.Attachments.Any(attachment => attachment is not LlmAttachment)
+                || message.ToolResults.Any(result => result is LlmToolResult function
+                    && function.Output.Parts.Any(part => part is LlmToolOutputSessionResource))))
+            return null;
+        JsonObject payload = BuildPayload(connection, request, output => ProjectToolOutput(connection, request.ModelId, output), false);
+        if (!AnthropicTokenCounting.Countable(payload)) return null;
+        // The count route takes the prompt-bearing fields only; generation-only controls are left out.
+        foreach (string name in CountExcludedFields) payload.Remove(name);
+        using var message = new HttpRequestMessage(HttpMethod.Post, BuildApiUri(connection, "messages/count_tokens"))
+        { Content = RequestJson.Content(payload) };
+        ApplyAnthropicHeaders(message, connection, LlmCredential.Parse(connection.Credential));
+        return await AnthropicTokenCounting.SendAsync(Http, message, Transport, cancellationToken).ConfigureAwait(false);
     }
 
     private static bool IsPlaintextContent(JsonNode? content)
