@@ -22,7 +22,7 @@ public sealed class AnthropicMessagesTests
     /// Defect: the provider is not discovered, or the old dedicated agent client is wired.
     /// </summary>
     [Fact]
-    public void RegistersSharedManagedClient()
+    public async Task RegistersSharedManagedClient()
     {
         using TestDataFolder folder = new();
         ServiceCollection services = new();
@@ -31,7 +31,7 @@ public sealed class AnthropicMessagesTests
         services.AddSingleton<ILlmDataFolder>(folder);
         services.AddSingleton<ILlmSelfHost>(new UnusedSelfHost());
         services.AddLlmConnect();
-        using ServiceProvider provider = services.BuildServiceProvider();
+        await using ServiceProvider provider = services.BuildServiceProvider();
 
         Assert.Contains(provider.GetRequiredService<LlmProviderCatalog>().SupportedProviders,
             definition => definition.Id == "anthropic-api-key");
