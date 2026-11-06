@@ -25,14 +25,19 @@ public sealed class AnthropicMessagesTests
     public void RegistersSharedManagedClient()
     {
         ServiceCollection services = new();
+        // The host supplies its connections, as every application does.
+        services.AddSingleton<ILlmConnectionSource>(new Source(Connection()));
         services.AddLlmConnect();
         using ServiceProvider provider = services.BuildServiceProvider();
 
         Assert.Contains(provider.GetRequiredService<LlmProviderCatalog>().SupportedProviders,
             definition => definition.Id == "anthropic-api-key");
-        ILlmAgentClient agents = Assert.Single(provider.GetServices<ILlmAgentClient>(),
-            client => client.Transport == LlmTransport.AnthropicMessages);
+        // Only the agent client this library registers is built; the other providers need host services of their own.
+        ServiceDescriptor registered = Assert.Single(services, descriptor => descriptor.ServiceType == typeof(ILlmAgentClient)
+            && descriptor.ImplementationFactory?.Method.DeclaringType?.Assembly == typeof(AnthropicMessagesLlmClient).Assembly);
+        object agents = registered.ImplementationFactory!(provider);
         Assert.IsType<ManagedLlmAgentClient<AnthropicMessagesLlmClient>>(agents);
+        Assert.Equal(LlmTransport.AnthropicMessages, ((ILlmAgentClient)agents).Transport);
     }
 
     /// <summary>
@@ -46,7 +51,8 @@ public sealed class AnthropicMessagesTests
         using var handler = new Handler(request => request.Method == HttpMethod.Get ? Models(webSearch: false)
             : ++posts == 1
                 ? Sse(Start(), Block(0, new JsonObject { ["type"] = "thinking", ["thinking"] = "" }),
-                    Delta(0, new JsonObject { ["type"] = "thinking_delta", ["thinking"] = "Considering." }), Stop(0),
+                    Delta(0, new JsonObject { ["type"] = "thinking_delta", ["thinking"] = "Considering." }),
+                    Delta(0, new JsonObject { ["type"] = "signature_delta", ["signature"] = "signed" }), Stop(0),
                     Block(1, new JsonObject { ["type"] = "text", ["text"] = "" }),
                     Delta(1, new JsonObject { ["type"] = "text_delta", ["text"] = "Reading it." }), Stop(1),
                     Block(2, new JsonObject { ["type"] = "tool_use", ["id"] = "toolu_1", ["name"] = "read_fact", ["input"] = new JsonObject() }),
@@ -72,10 +78,12 @@ public sealed class AnthropicMessagesTests
 
         List<LlmAgentEvent> events = await Run(session);
 
+        LlmAgentTurnCompletedEvent completed = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
+        Assert.Null(completed.Error);
         Assert.Contains(events.OfType<LlmAgentReasoningDeltaEvent>(), reasoning => reasoning.Delta == "Considering.");
         Assert.Contains(events.OfType<LlmAgentTextDeltaEvent>(), text => text.Delta == "Reading it.");
         Assert.Equal("{\"name\":\"a\"}", toolInput);
-        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Equal(LlmAgentCompletionReason.Completed, completed.Reason);
         JsonArray messages = JsonNode.Parse(handler.Bodies[^1])!["messages"]!.AsArray();
         JsonNode result = messages[^1]!["content"]!.AsArray().Single(block => (string?)block!["type"] == "tool_result")!;
         Assert.Equal("toolu_1", (string?)result["tool_use_id"]);
