@@ -106,6 +106,15 @@ internal sealed class LearnedModelContext(ILlmLearnedLimitStore? store = null, T
         }
     }
 
+    /// <summary>
+    /// The learned limit that bounds a model's window: null when the model lists a window or the connection sets a context
+    /// length for it, because the provider's window or the configured length is the limit (B6, DSA-1391); else
+    /// <see cref="Limit"/>. Every session's limit rule reads the learned limit through this.
+    /// </summary>
+    internal long? ApplicableLimit(string connectionId, LlmConnection connection, string modelId, long? listedWindow) =>
+        listedWindow is null && LlmCapabilityOverrideLookup.ContextLength(connection, modelId) is null
+            ? this.Limit(connectionId, connection, modelId) : null;
+
     /// <summary>The limit a refusal taught in this process, else the one the connection carries as saved, or null.</summary>
     internal long? Limit(string connectionId, LlmConnection connection, string modelId)
     {

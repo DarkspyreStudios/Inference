@@ -1121,6 +1121,24 @@ public sealed class ManagedAgentTests
         Assert.Equal(520 + 4 + ManagedAgentPolicy.EstimateMargin, pending.UsedContextTokens);
     }
 
+    /// <summary>
+    /// The saved conversation behind the Claude and Antigravity sessions takes the listed window over a saved learned limit,
+    /// under the same rule as the managed session (DSA-1391). Defect caught: those sessions compacting against a stale limit.
+    /// </summary>
+    [Fact]
+    public async Task SavedConversationListedWindowOutranksASavedLearnedLimit()
+    {
+        var harness = new Harness();
+        LlmConnection connection = Harness.Connection with { LearnedContextLimits = new Dictionary<string, long> { ["test"] = 65_536 } };
+        var saved = new SavedConversation(harness.ConnectionId, connection, harness, harness.Learned, new(),
+            framing: null, resources: null, _ => new LlmModel("test", "Test") { MaxContextTokens = 262_144, MaxOutputTokens = 100 },
+            History(("t1", "question", "answer")));
+
+        LlmAgentContextStatus status = await saved.StatusAsync("test", null, observe: false, CancellationToken.None);
+
+        Assert.Equal((262_144L, 262_144L), (status.MaxContextTokens, saved.Limits("test")!.Window));
+    }
+
     /// <summary>A context of whole turns, each a user message and the assistant's answer.</summary>
     private static LlmAgentContext History(params (string TurnId, string Question, string Answer)[] turns) => new()
     {

@@ -159,7 +159,7 @@ internal sealed class SavedConversation
         }
         LlmModel model = _model(modelId);
         LlmAgentContextPolicy policy = ManagedAgentPolicy.Normalize(_execution, model).ContextPolicy;
-        return ManagedAgentPolicy.Status(modelId, saved.Revision, estimate, policy, model, _learned.Limit(_connectionId, _connection, modelId));
+        return ManagedAgentPolicy.Status(modelId, saved.Revision, estimate, policy, model, _learned.ApplicableLimit(_connectionId, _connection, modelId, model.MaxContextTokens));
     }
 
     /// <summary>
@@ -189,7 +189,7 @@ internal sealed class SavedConversation
     internal CompactionLimits? Limits(string modelId)
     {
         LlmModel model = _model(modelId);
-        return CompactionLimits.For(model.MaxContextTokens, _learned.Limit(_connectionId, _connection, modelId),
+        return CompactionLimits.For(model.MaxContextTokens, _learned.ApplicableLimit(_connectionId, _connection, modelId, model.MaxContextTokens),
             model.MaxOutputTokens, ManagedAgentPolicy.Normalize(_execution, model).ContextPolicy);
     }
 
@@ -200,7 +200,7 @@ internal sealed class SavedConversation
     internal (long? Listed, long? Learned, long? Cap) WindowSources(string modelId)
     {
         LlmModel model = _model(modelId);
-        return (model.MaxContextTokens, _learned.Limit(_connectionId, _connection, modelId),
+        return (model.MaxContextTokens, _learned.ApplicableLimit(_connectionId, _connection, modelId, model.MaxContextTokens),
             ManagedAgentPolicy.Normalize(_execution, model).ContextPolicy.MaxContextTokens);
     }
 
