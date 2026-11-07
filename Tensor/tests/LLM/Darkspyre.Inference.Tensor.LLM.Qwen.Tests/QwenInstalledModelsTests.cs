@@ -1,7 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
 using Darkspyre.Inference.Tensor.Common;
-using Darkspyre.Inference.Tensor.Ggml;
 
 namespace Darkspyre.Inference.Tensor.LLM.Qwen.Tests;
 
@@ -51,30 +50,9 @@ public sealed class QwenInstalledModelsTests : IDisposable
             ExpectedSha256: Convert.ToHexStringLower(SHA256.HashData(bytes)));
     }
 
-    private async Task<TensorModelPackDefinition> InstallAsync(QwenEngineProvider provider, string name, byte[] bytes)
-    {
-        Directory.CreateDirectory(_root);
-        string source = Path.Combine(_root, name);
-        await File.WriteAllBytesAsync(source, bytes);
-        var definition = new TensorModelPackDefinition
-        {
-            Key = new("imported/" + name, "test"),
-            Capability = TensorCapability.Llm,
-            RuntimeArchitecture = TensorLlmModels.QwenRuntimeArchitecture,
-            License = "Apache-2.0",
-            SupportedBackends = TensorLlmModels.Backends,
-            Artifacts = [new() { Role = "model", RelativePath = name, Length = bytes.Length,
-                Sha256 = Convert.ToHexStringLower(SHA256.HashData(bytes)), Sources = [new(new Uri(source).AbsoluteUri)] }]
-        };
-        QwenModelCompatibility.Validate(definition);
-        using var packs = new TensorModelPackManager(new([definition]), Path.Combine(_root, provider.Definition.ModelStoreKey));
-        await packs.InstallAsync(definition.Key);
-        return definition;
-    }
-
     // The smallest GGUF v3 checkpoint the Qwen 3.5 schema accepts: one full-attention layer of hidden size 8, a two-token
     // BPE vocabulary, a chat template and four F32 tensors whose data follows the 32-byte aligned header.
-    private static byte[] Checkpoint(string architecture, uint tensorType = 0, bool draft = false)
+    private static byte[] Checkpoint(string architecture, bool draft = false)
     {
         (string Name, ulong[] Shape)[] tensors =
         [
@@ -120,7 +98,7 @@ public sealed class QwenInstalledModelsTests : IDisposable
                 Text(writer, name);
                 writer.Write((uint)shape.Length);
                 foreach (ulong dimension in shape) writer.Write(dimension);
-                writer.Write(name == "token_embd.weight" ? tensorType : 0u); // F32 unless the test supplies an unknown type.
+                writer.Write(0u); // F32.
                 writer.Write(offset);
                 offset += shape.Aggregate(4UL, (bytes, dimension) => bytes * dimension);
                 offset = (offset + 31) / 32 * 32;
