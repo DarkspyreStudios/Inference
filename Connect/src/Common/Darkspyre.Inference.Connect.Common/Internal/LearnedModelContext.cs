@@ -64,7 +64,8 @@ internal sealed class LearnedModelContext(ILlmLearnedLimitStore? store = null, T
                     facts.Pair = (estimated, reportedTokens.Value);
                     facts.PairAt = _time.GetUtcNow();
                 }
-                else if ((reportedLimit ?? knownLimit) is long limit and > 0
+                // A listed window means the refusal's limit says nothing about the estimate's size, so it teaches no rate.
+                else if (knownLimit is null && reportedLimit is long limit and > 0
                     && (double)limit / estimated > Rate(facts))
                 {
                     // The refused request was larger than the limit, so the rate is at least limit / estimate.

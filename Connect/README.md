@@ -504,6 +504,8 @@ the turn's latest assistant message or message start.
 
 **Context limits.** One rule sets every request's limits (`CompactionLimits.For`). The window is the smallest
 known value of the listed model window, a learned limit when one is known and `LlmAgentContextPolicy.MaxContextTokens`.
+A learned limit applies only to a model the listing gives no window: a window the provider lists is its current
+setting, so a limit a refusal taught while the server had a smaller window never shrinks it after the server grows.
 A context length set on the connection for a model (`ModelCapabilityOverrides[model].MaxContextTokens`) is that
 model's limit: the OpenAI API listing gives the model that window, and no learned limit applies to it.
 The reserve is `ReservedOutputTokens`, else the model's output limit, else 8,000. The usable window is the window
@@ -568,7 +570,8 @@ with the library's compaction above, for that compaction only. No chat client im
 A too-long refusal teaches the model's size, compacts whatever the measure says and sends the same step again once; on
 the OpenAI API the refusal is OpenAI's `context_length_exceeded` code, the llama.cpp server's
 `exceed_context_size_error` type, whose `n_prompt_tokens` and `n_ctx` are learned as the request's size and the
-limit, or a message naming the context length. A
+limit, or a message naming the context length. A refusal's reported request size teaches the rate; its limit
+teaches the rate only for a model the listing gives no window. A
 second refusal in the turn ends it with `ProviderFailure` and the provider's message. With
 `PreserveSuppliedContext` the session measures and reports but never compacts or resends. An opened history whose
 entry held only continuation state the import left out, such as a native compaction from another connection or model,

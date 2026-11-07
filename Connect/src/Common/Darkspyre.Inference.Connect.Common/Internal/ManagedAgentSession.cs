@@ -1273,10 +1273,11 @@ internal sealed class ManagedAgentSession : ILlmAgentSession
             model?.MaxOutputTokens, ManagedAgentPolicy.Normalize(_execution, model).ContextPolicy);
     }
 
-    /// <summary>The limit refusals taught, or null when the connection sets a context length for the model: the listed
-    /// model already carries that length, and it is the limit (B6).</summary>
+    /// <summary>The limit refusals taught, or null when the listed model carries a window or the connection sets a context
+    /// length for it: the provider's own window, or the configured length, is the limit (B6, DSA-1391).</summary>
     private long? LearnedLimit(string modelId) =>
-        LlmCapabilityOverrideLookup.ContextLength(_connection, modelId) is null ? _learned.Limit(_connectionId, _connection, modelId) : null;
+        Model(modelId)?.MaxContextTokens is null && LlmCapabilityOverrideLookup.ContextLength(_connection, modelId) is null
+            ? _learned.Limit(_connectionId, _connection, modelId) : null;
 
     /// <summary>
     /// Compacts the running turn's context, installs it as the next revision and reports it. Returns false when the turn

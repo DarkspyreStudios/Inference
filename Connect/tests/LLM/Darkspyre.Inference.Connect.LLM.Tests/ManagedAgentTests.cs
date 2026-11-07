@@ -895,29 +895,29 @@ public sealed class ManagedAgentTests
         }
     }
 
-    /// <summary>A context length set on the connection is the model's limit, above a learned one; without it the learned
-    /// limit applies (S6a).</summary>
-    [Theory]
-    [InlineData(true, 1000L)]
-    [InlineData(false, 300L)]
-    public async Task ConfiguredContextLengthIsTheLimit(bool configured, long expected)
+    /// <summary>
+    /// The window the provider lists is the limit, above a learned one: a limit a refusal saved when the server had a
+    /// smaller window never shrinks it after the server grows (DSA-1391). Defect caught: every turn compacting, and failing,
+    /// against a stale learned limit.
+    /// </summary>
+    [Fact]
+    public async Task ListedWindowOutranksASavedLearnedLimit()
     {
         LlmConnection connection = Harness.Connection with
         {
             Transport = LlmTransport.OpenAiResponses,
-            ModelCapabilityOverrides = configured
-                ? new Dictionary<string, LlmCapabilityOverrides> { ["test"] = new() { MaxContextTokens = 1000 } }
-                : new Dictionary<string, LlmCapabilityOverrides>()
+            LearnedContextLimits = new Dictionary<string, long> { ["test"] = 65_536 }
         };
-        var harness = new Harness { SessionConnection = connection };
-        await harness.Learned.ObserveRefusalAsync(harness.ConnectionId, "test", estimated: 0, reportedTokens: null, reportedLimit: 300,
-            knownLimit: 1000, CancellationToken.None);
+        var harness = new Harness { SessionConnection = connection, Window = 262_144 };
         harness.Results.Enqueue(new() { Diagnostics = new(200, null, null), Text = "answer", Status = LlmCompletionStatus.Completed });
         await using var session = harness.Create();
 
         List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("hello")));
 
-        Assert.Equal(expected, events.OfType<LlmAgentContextStatusEvent>().First().Status.MaxContextTokens);
+        LlmAgentContextStatus status = events.OfType<LlmAgentContextStatusEvent>().First().Status;
+        Assert.Equal((262_144L, (bool?)false), (status.MaxContextTokens, status.NeedsCompaction));
+        Assert.Empty(events.OfType<LlmAgentCompactedEvent>());
+        Assert.Empty(harness.Summaries);
     }
 
     /// <summary>Plugin tools run on the OpenAI API under their own names, and only the image tool is hosted (S2, B7).</summary>
