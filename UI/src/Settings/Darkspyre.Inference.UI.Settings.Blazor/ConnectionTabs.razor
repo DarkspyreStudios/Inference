@@ -16,10 +16,15 @@
                                  ShowActionEffects="false" MoreOptionsContent="MoreOptionsContent"
                                  CommitCompleted="OnCommittedAsync" StateChanged="StateChanged" />
     </CascadingValue>
+    @if (_index == ModelTab && ModelTabContent is not null)
+    {
+        @ModelTabContent
+    }
 </div>
 
 @code {
     private static readonly string[] Labels = ["Connection", "Model"];
+    private const int ModelTab = 1;
     private readonly ConnectionTabsContext _context = new();
     private string[] _labels = [Labels[0]];
     private int _index;
@@ -32,6 +37,8 @@
     [Parameter, EditorRequired] public IInferenceSettingsInteractionHost Host { get; set; } = default!;
     /// <summary>Passed to the Connection tab's editor as its MoreOptionsContent.</summary>
     [Parameter] public RenderFragment? MoreOptionsContent { get; set; }
+    /// <summary>Shown at the end of the Model tab, below its step, only while that tab is selected; null shows nothing.</summary>
+    [Parameter] public RenderFragment? ModelTabContent { get; set; }
     /// <summary>Raised after Save. A Committed result means the host closes its sheet.</summary>
     [Parameter] public EventCallback<SetupCommitResult> CommitCompleted { get; set; }
     /// <summary>Raised each time the editor's unsaved, pending, error or can-save state changes, as the editor's StateChanged.</summary>

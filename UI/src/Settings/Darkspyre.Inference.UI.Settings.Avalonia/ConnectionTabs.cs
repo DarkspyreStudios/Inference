@@ -12,6 +12,7 @@ namespace Darkspyre.Inference.UI.Settings.Avalonia;
 public sealed class ConnectionTabs : UserControl
 {
     private static readonly string[] Labels = ["Connection", "Model"];
+    private const int ModelTab = 1;
     private readonly InferenceSettings settings;
     private readonly IInferenceSettingsManager manager;
     private readonly IAvaloniaSettingsInteractionHost host;
@@ -35,6 +36,9 @@ public sealed class ConnectionTabs : UserControl
     /// <summary>Passed to the Connection tab's editor as its MoreOptionsContent.</summary>
     public Control? MoreOptionsContent { get; init; }
 
+    /// <summary>Shown at the end of the Model tab, below its step, only while that tab is selected; null shows nothing.</summary>
+    public Control? ModelTabContent { get; init; }
+
     /// <summary>Raised after Save. A Committed result means the host closes its sheet.</summary>
     public event EventHandler<SetupCommitResult>? CommitCompleted;
 
@@ -55,12 +59,19 @@ public sealed class ConnectionTabs : UserControl
         InferenceSettingsEditor shown = this.Editor();
         TabStrip tabs = new() { ItemsSource = Labels.Take(Math.Max(1, this.settings.Steps.Count)).ToArray(), SelectedIndex = 0 };
         tabs.Classes.Add("inference-connection-tab-strip");
-        tabs.SelectionChanged += (_, _) => shown.ShowStep(Math.Max(0, tabs.SelectedIndex));
+        Control? modelContent = this.ModelTabContent;
+        void ShowModelContent() { if (modelContent is not null) modelContent.IsVisible = tabs.SelectedIndex == ModelTab; }
+        tabs.SelectionChanged += (_, _) => { shown.ShowStep(Math.Max(0, tabs.SelectedIndex)); ShowModelContent(); };
         // A refused save shows the step with the problem; the tabs follow it.
         shown.CommitCompleted += (_, _) => tabs.SelectedIndex = shown.CurrentStepIndex;
         StackPanel layout = new() { Spacing = 16 };
         layout.Children.Add(tabs);
         layout.Children.Add(shown);
+        if (modelContent is not null)
+        {
+            layout.Children.Add(modelContent);
+            ShowModelContent();
+        }
         this.Content = layout;
     }
 

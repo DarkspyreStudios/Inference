@@ -43,7 +43,7 @@ as event callbacks:
 
 `ShowSaveButton`, `ShowHeading`, `ShowActionEffects` and `ShowStepList` are parameters; `IntroContent`,
 `SupplementaryContent` and `MoreOptionsContent` are render fragments. `ConnectionTabs` takes the same `Settings`,
-`Manager`, `Host` and `MoreOptionsContent` and draws its tabs with Lumeo's `Tabs`. The Blazor editor copies a device code
+`Manager`, `Host`, `MoreOptionsContent` and `ModelTabContent` and draws its tabs with Lumeo's `Tabs`. The Blazor editor copies a device code
 with the browser's `navigator.clipboard.writeText` and shows the result, `Sign-in code copied to clipboard.` or a
 request to select and copy the code, under the code. A browser can refuse the automatic copy that no click started;
 **Copy code** then copies it. `SetupNumberInput.razor` adapts Lumeo's NumberInput; `THIRD-PARTY-NOTICES.md` carries its
@@ -123,7 +123,9 @@ shows "Test reply received in 1.4 s", the result's `Message`, and a **Test again
 `ConnectionTabs` shows a connection's settings on two tabs, "Connection" and "Model", one per step;
 each step's own title is its heading, and no step list or Back and Next buttons show. One editor
 serves both tabs, so typed input and a sign-in in progress carry across them. Its
-`MoreOptionsContent` goes to the Connection tab. The host frames the tabs with the connection's name
+`MoreOptionsContent` goes to the Connection tab. `ModelTabContent` (an Avalonia `Control?` init property, a Blazor
+`RenderFragment?` parameter) is host content drawn at the end of the Model tab, below its step, and only while that
+tab is selected. The host frames the tabs with the connection's name
 and saves through `SaveAsync`; `CommitCompleted` reports the result. A refused save selects the tab
 with the problem. `State` and `StateChanged` report the editor's `SetupEditorState`, so the host
 enables its Save from `CanSave` and asks before discarding unsaved changes.
