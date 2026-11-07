@@ -42,9 +42,16 @@ public sealed class GemmaEmbeddingEngineProvider : ITensorEngineProvider
 
     private static bool Accepts(TensorModelPackDefinition model)
     {
-        if (model.Capability != TensorCapability.Embedding || model.RuntimeArchitecture != GemmaEmbeddingModels.Architecture) { return false; }
+        if (!GemmaEmbeddingModels.Claims(model)) { return false; }
         GemmaEmbeddingModels.Validate(model);
         return true;
+    }
+
+    /// <inheritdoc />
+    public Darkspyre.Inference.Common.Embedding.EmbeddingCapabilities? DescribeEmbedding(TensorModelPackDefinition pack)
+    {
+        ArgumentNullException.ThrowIfNull(pack);
+        return GemmaEmbeddingModels.Claims(pack) ? GemmaEmbeddingModels.Describe(pack) : null;
     }
 
     /// <inheritdoc />

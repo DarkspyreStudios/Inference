@@ -83,15 +83,7 @@ public sealed class GemmaEmbeddingInference : ITensorEmbeddingInference
             definition = (await _packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false)).FirstOrDefault(pack =>
                 pack.Key.ModelId == (modelId ?? GemmaEmbeddingModels.EmbeddingGemma2.Key.ModelId) && pack.Capability == TensorCapability.Embedding)
                 ?? throw new InferenceException(InferenceFailureCode.ModelUnavailable, "No embedding pack with that model ID is registered.");
-        GemmaEmbeddingModels.Validate(definition);
-        return new()
-        {
-            Modalities = GemmaEmbeddingModels.Modalities,
-            NativeDimensions = GemmaEmbeddingModels.Dimensions,
-            SupportedDimensions = Array.AsReadOnly([GemmaEmbeddingModels.Dimensions]),
-            MaximumInputTokens = GemmaEmbeddingModels.MaximumTokens,
-            ModelFingerprint = GemmaEmbeddingModels.Fingerprint(definition),
-        };
+        return GemmaEmbeddingModels.Describe(definition);
     }
 
     /// <inheritdoc />

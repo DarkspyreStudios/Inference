@@ -70,6 +70,13 @@ public interface ITensorEngineProvider
     IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; }
 
     /// <summary>
+    /// The embedding identity a pack of this family produces, or null when the family does not embed or does not recognise
+    /// the pack. Loads no native code.
+    /// </summary>
+    /// <gotcha>A pack the family recognises but whose artifacts do not match its format throws, as installing it would.</gotcha>
+    Darkspyre.Inference.Common.Embedding.EmbeddingCapabilities? DescribeEmbedding(TensorModelPackDefinition pack);
+
+    /// <summary>
     /// The models this family can load from <paramref name="packs"/>, and the installed packs it recognises but no longer
     /// loads: its built-ins matched by key and artifact hashes, and other packs through its own format check, with every
     /// file present at its recorded length. Loads no native code.

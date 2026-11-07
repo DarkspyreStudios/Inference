@@ -16,6 +16,7 @@ internal static class OpenAiApiDefinition
         Group = SetupProviderGroup.ApiKey,
         AcceptsApiKey = true,
         OffersContextLengths = true,
+        OffersEmbeddingOptions = true,
         ServiceTiers = new("api.openai.com",
             "Show the service-tier choice in the chat panel and send the chosen tier. OpenAI's own service offers tiers."),
         SetupSteps =

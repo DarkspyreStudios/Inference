@@ -13,6 +13,9 @@ public sealed class SupraEngineProvider : ITensorEngineProvider
     public IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; } = [TensorImageModels.Supra2Image];
 
     /// <inheritdoc />
+    public Darkspyre.Inference.Common.Embedding.EmbeddingCapabilities? DescribeEmbedding(TensorModelPackDefinition pack) => null;
+
+    /// <inheritdoc />
     public Task<TensorInstalledReport> GetInstalledModelsAsync(TensorModelPackManager packs,
         CancellationToken cancellationToken = default) =>
         TensorInstalledPacks.ReportAsync(packs, BuiltInModels, Accepts, new SupraModelResolver(), cancellationToken);

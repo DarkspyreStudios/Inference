@@ -122,6 +122,14 @@ public sealed class EmbeddingEngineProvider(GgmlRuntimeOwner runtimeOwner) : ITe
     }
 
     /// <inheritdoc />
+    public Darkspyre.Inference.Common.Embedding.EmbeddingCapabilities? DescribeEmbedding(TensorModelPackDefinition pack)
+    {
+        ArgumentNullException.ThrowIfNull(pack);
+        return pack.Capability == TensorCapability.Embedding && TensorEmbeddingModels.ArchitectureOf(pack) is not null
+            ? EmbeddingCompatibility.Validate(pack).Describe(pack) : null;
+    }
+
+    /// <inheritdoc />
     public ITensorModelInstance CreateInstance(ITensorModelPackManager packs, TensorBackendKind backend, string scratchDirectory) =>
         new TensorEmbeddingInference(packs, backend, runtimeOwner);
 

@@ -82,6 +82,8 @@ Library boundaries:
   `task: search result | query: {text}`; documents use `title: {title-or-none} | text: {text}`.
   PNG/JPEG inputs carry caller-owned bytes. The output is 768-dimensional and unit length. The
   fingerprint includes every artifact hash and the formatting/preprocessing/runtime recipe.
+  `GemmaEmbeddingModels.Describe(pack)` is the one identity of a compatible pack, its capabilities and fingerprint,
+  which the engine's `GetCapabilitiesAsync`, its provider and other hosts of the same pack report.
   The full batch is admitted before any graph runs. The 8,192-token limit includes formatting and
   BOS/EOS. Explicit truncation retains EOS and reports affected input indices. A request's inputs
   run shortest first in batches of at most 1,024 padded tokens; an input longer than that runs alone.
@@ -282,9 +284,9 @@ in use by native execution.
 ## Engine registry
 
 Each engine assembly publishes an `ITensorEngineProvider` (`Darkspyre.Inference.Tensor.Common`):
-`QwenEngineProvider`, `SupraEngineProvider`, `LayaEngineProvider`, `WhisperEngineProvider` and
-`EmbeddingEngineProvider`.
-A provider exposes four operations:
+`QwenEngineProvider`, `SupraEngineProvider`, `LayaEngineProvider`, `WhisperEngineProvider`,
+`EmbeddingEngineProvider` and `GemmaEmbeddingEngineProvider`.
+A provider exposes five operations:
 
 - `Definition` is a `TensorEngineDefinition`. Its `Setup` is the engine's existing setup definition
   (`QwenSetup.Definition` and so on), the only source of implementation ID, display name, tasks and
@@ -294,6 +296,10 @@ A provider exposes four operations:
 - `BuiltInModels` lists the engine's built-in packs. Whisper has its twelve published variants, Supra
   and EmbeddingGemma have one each, and Qwen, Embedding and Laya have none: their models arrive by
   import. Reading it touches no file.
+- `DescribeEmbedding(pack)` returns the `EmbeddingCapabilities`, fingerprint included, that a pack of the family
+  produces, or null when the family does not embed or does not claim the pack. EmbeddingGemma returns
+  `GemmaEmbeddingModels.Describe`, and Embedding its architecture's `TensorEmbeddingArchitecture.Describe`; every other
+  family returns null. A claimed pack that fails the family's validator throws. It loads no native code.
 - `GetInstalledModelsAsync(packs)` returns a `TensorInstalledReport` for the folder of the given
   `TensorModelPackManager`, which the host roots at `<model store>/<ModelStoreKey>`, through
   `TensorInstalledPacks.ReportAsync`. A pack is

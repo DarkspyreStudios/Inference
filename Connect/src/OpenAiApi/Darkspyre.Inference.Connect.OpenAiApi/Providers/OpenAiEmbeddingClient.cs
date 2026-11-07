@@ -25,8 +25,12 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
         ArgumentNullException.ThrowIfNull(request.Inputs);
         if (request.Inputs.Count == 0 || request.Inputs.OfType<TextEmbeddingInput>().Any(input => string.IsNullOrWhiteSpace(input.Text)))
             throw new ArgumentException("At least one non-empty embedding input is required.", nameof(request));
-        if (request.Inputs.Any(input => input is not TextEmbeddingInput))
-            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "This embedding provider accepts text inputs only.");
+        bool images = connection.Embedding?.AcceptsImages == true;
+        if (request.Inputs.Any(input => input is not TextEmbeddingInput
+            && !(images && input is MediaEmbeddingInput { Media.ContentType: { } type } && type.StartsWith("image/", StringComparison.OrdinalIgnoreCase))))
+            throw new InferenceException(InferenceFailureCode.UnsupportedFeature, images
+                ? "This embedding connection accepts text and images with an image media type only."
+                : "This embedding provider accepts text inputs only.");
         if (request.Dimensions is <= 0)
             throw new ArgumentOutOfRangeException(nameof(request), "Embedding dimensions must be positive.");
         ValidateOptions(connection.ProviderOptions);
@@ -42,11 +46,13 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
         connection = EmbeddingRequestData.Snapshot(connection);
         ValidateRequest(connection, request);
         cancellationToken.ThrowIfCancellationRequested();
+        bool inputType = connection.Embedding?.SendsInputType == true;
         var payload = new JsonObject
         {
             ["model"] = request.ModelId,
-            ["input"] = new JsonArray(request.Inputs.Select(value => (JsonNode?)JsonValue.Create(((TextEmbeddingInput)value).Text)).ToArray())
+            ["input"] = new JsonArray(request.Inputs.Select(value => InputItem(value, inputType && request.Kind == EmbeddingInputKind.Document)).ToArray())
         };
+        if (inputType) payload["input_type"] = request.Kind == EmbeddingInputKind.Query ? "query" : "document";
         if (request.Dimensions is { } dimensions) payload["dimensions"] = dimensions;
         ApplyOptions(payload, connection.ProviderOptions);
         ApplyOptions(payload, request.ProviderOptions);
@@ -85,6 +91,11 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
                 string? modelId = root.TryGetProperty("model", out JsonElement model) && model.ValueKind == JsonValueKind.String
                     ? model.GetString() : null;
                 if (modelId is not null && SecretRedactor.ContainsProtectedValue(modelId, credential, secrets))
+                    throw new JsonException("Embedding model metadata cannot be published safely.");
+                // An endpoint that serves a known model pack names the identity of its vectors.
+                string? fingerprint = root.TryGetProperty("fingerprint", out JsonElement reported) && reported.ValueKind == JsonValueKind.String
+                    ? reported.GetString() : null;
+                if (fingerprint is not null && SecretRedactor.ContainsProtectedValue(fingerprint, credential, secrets))
                     throw new JsonException("Embedding model metadata cannot be published safely.");
 
                 List<(int Index, float[] Vector)> indexed = [];
@@ -135,6 +146,7 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
                 result = new LlmEmbeddingResult
                 {
                     ModelId = modelId,
+                    ModelFingerprint = fingerprint,
                     Vectors = vectors,
                     Usage = new LlmEmbeddingUsage(inputTokens, totalTokens),
                     Diagnostics = new LlmProviderDiagnostics(
@@ -158,6 +170,26 @@ internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClie
         }
         return consumption.Publish(result);
     }
+
+    // A plain string, the standard form; a document's title, when sent, and an image travel as a content item.
+    private static JsonNode InputItem(EmbeddingInput input, bool sendsTitle) => input switch
+    {
+        TextEmbeddingInput { Title: { } title } text when sendsTitle && !string.IsNullOrWhiteSpace(title) => new JsonObject
+        {
+            ["content"] = new JsonArray(new JsonObject { ["type"] = "text", ["text"] = text.Text }),
+            ["title"] = title
+        },
+        TextEmbeddingInput text => JsonValue.Create(text.Text),
+        MediaEmbeddingInput { Media: var media } => new JsonObject
+        {
+            ["content"] = new JsonArray(new JsonObject
+            {
+                ["type"] = "image_url",
+                ["image_url"] = new JsonObject { ["url"] = $"data:{media.ContentType};base64,{Convert.ToBase64String(media.Data.Span)}" }
+            })
+        },
+        _ => throw new InferenceException(InferenceFailureCode.UnsupportedFeature, "This embedding input is not supported.")
+    };
 
     private static void ApplyOptions(JsonObject payload, IReadOnlyDictionary<string, JsonElement> options)
     {

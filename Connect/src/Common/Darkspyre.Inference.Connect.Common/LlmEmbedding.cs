@@ -53,7 +53,8 @@ public sealed record LlmEmbeddingResult
     public string? ModelId { get; init; }
 
     /// <summary>
-    /// Identifies the weights, architecture and query format behind the vectors, when a SelfHost engine reports it.
+    /// Identifies the weights, architecture and query format behind the vectors, when a SelfHost engine or the endpoint
+    /// reports it.
     /// Vectors with different fingerprints are not comparable.
     /// </summary>
     public string? ModelFingerprint { get; init; }

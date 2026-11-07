@@ -47,6 +47,29 @@ public static class GemmaEmbeddingModels
         Sources = Array.AsReadOnly<Uri>([new($"https://huggingface.co/{Repository}/resolve/{Revision}/{source}")])
     };
 
+    /// <summary>
+    /// The capabilities and fingerprint of a compatible EmbeddingGemma pack: the one identity local engines, the arbiter
+    /// backend and remote descriptions report. Loads no native code.
+    /// </summary>
+    /// <exception cref="InferenceException">The pack is not a compatible EmbeddingGemma ONNX pack.</exception>
+    public static EmbeddingCapabilities Describe(TensorModelPackDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+        Validate(definition);
+        return new()
+        {
+            Modalities = Modalities,
+            NativeDimensions = Dimensions,
+            SupportedDimensions = Array.AsReadOnly([Dimensions]),
+            MaximumInputTokens = MaximumTokens,
+            ModelFingerprint = Fingerprint(definition),
+        };
+    }
+
+    // True when the pack claims this family's runtime; Describe validates the rest.
+    internal static bool Claims(TensorModelPackDefinition definition) =>
+        definition.Capability == TensorCapability.Embedding && definition.RuntimeArchitecture == Architecture;
+
     internal static void Validate(TensorModelPackDefinition definition)
     {
         TensorModelDefinitionValidator.Validate(definition);

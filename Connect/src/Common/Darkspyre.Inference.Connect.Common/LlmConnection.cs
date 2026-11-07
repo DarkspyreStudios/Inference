@@ -80,6 +80,10 @@ public sealed record LlmConnection
     /// <summary>xAI settings, when the connection uses xAI.</summary>
     public XaiConnectionOptions? Xai { get; init; }
 
+    // Saved with each connection. It stays in Connect.Common because LlmConnection, which hosts store, holds it.
+    /// <summary>Embedding protocol options; null sends the standard embeddings request.</summary>
+    public LlmEmbeddingConfiguration? Embedding { get; init; }
+
     /// <summary>Non-standard headers such as OpenRouter attribution headers.</summary>
     public IReadOnlyDictionary<string, string> AdditionalHeaders { get; init; } =
         new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

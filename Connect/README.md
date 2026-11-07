@@ -13,7 +13,7 @@ The conversation libraries are independently consumable:
 | `Darkspyre.Inference.Connect.Grok` | Grok (xAI) Responses conversations on xAI's subscription proxy, with a Grok subscription's device sign-in, hosted search and account usage |
 | `Darkspyre.Inference.Connect.HostTools` | The host-tools local service, bundled under `hosttools/service`, and its client, with Darkspyre.Common's local-service libraries in its own `lib/` |
 | `Darkspyre.Inference.Connect.Anthropic` | Anthropic Messages conversations with an Anthropic API key, with Anthropic's hosted web search |
-| `Darkspyre.Inference.Connect.OpenAiApi` | OpenAI Responses conversations and text embeddings |
+| `Darkspyre.Inference.Connect.OpenAiApi` | OpenAI Responses conversations, and text embeddings with optional input types and images |
 | `Darkspyre.Inference.Connect.SelfHost` | Conversations and text/image embeddings through caller-owned engines |
 
 Each provider depends on the exact matching Connect.Common version. Common depends on
@@ -2197,7 +2197,14 @@ The engine formats inputs: `LlmEmbeddingRequest.Kind` states
 whether inputs are queries or documents, `Instruction` states a query's task, and `Truncate` decides
 whether an over-limit input is cut or fails the request with `EmbeddingInputTooLongException`. The
 result reports `ModelId`, `ModelFingerprint` and `TruncatedInputs`. Remote adapters send inputs as
-given; they ignore `Kind`, `Instruction` and `Truncate` and report no fingerprint.
+given and ignore `Instruction` and `Truncate`. The OpenAI API adapter reads an optional string `fingerprint` from the
+response into `ModelFingerprint`; the others report none. Its connection's `LlmEmbeddingConfiguration`, set by the
+"Embedding input type" and "Embedding images" switches (`LlmProviderDefinition.OffersEmbeddingOptions`), is off by
+default and then sends the standard request, ignores `Kind` and refuses media. `SendsInputType` adds a request-level
+`"input_type": "query"` or `"document"` from `Kind`, and sends a document input that has a title as
+`{"content":[{"type":"text","text":...}],"title":...}`; other text inputs stay plain strings. `AcceptsImages` sends a
+`MediaEmbeddingInput` with an `image/` media type as `{"content":[{"type":"image_url","image_url":{"url":"data:<type>;base64,<bytes>"}}]}`
+and refuses other media before HTTP.
 
 The internal xAI embedding adapter implements ordered text inputs, float vectors and typed dimensions.
 It accepts at most 128 non-empty inputs and preserves supplied `user` and boolean/null `preview`

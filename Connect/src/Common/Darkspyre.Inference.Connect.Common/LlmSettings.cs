@@ -216,7 +216,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
 
     /// <inheritdoc />
     protected override bool IsDraftDirty =>
-        _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || (UsesAzure ? _azure!.IsDirty : _draft.Azure != _baseline.Azure) || _draft.ChatCompletions != _baseline.ChatCompletions || _draft.Xai != _baseline.Xai || _model != _originalModel
+        _draft.Endpoint != _baseline.Endpoint || _draft.Vertex != _baseline.Vertex || (UsesAzure ? _azure!.IsDirty : _draft.Azure != _baseline.Azure) || _draft.ChatCompletions != _baseline.ChatCompletions || _draft.Xai != _baseline.Xai || _draft.Embedding != _baseline.Embedding || _model != _originalModel
             || (_draft.CapabilityOverrides ?? new()) != (_baseline.CapabilityOverrides ?? new()) || _callback.Length != 0
             || !SameModelOverrides(_draft.ModelCapabilityOverrides, _baseline.ModelCapabilityOverrides)
             || UsesVertex && (_cacheBucket != (_baseline.Vertex?.CacheStaging?.Bucket ?? string.Empty)
@@ -303,6 +303,18 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         }
         if (_definition.ServiceTiers is not null) fields.Add(ServiceTiersField());
         if (_definition.OffersContextLengths) fields.Add(ContextLengthsField());
+        if (_definition.OffersEmbeddingOptions)
+        {
+            LlmEmbeddingConfiguration embedding = _draft.Embedding ?? new();
+            fields.Add(new SetupBooleanField(new("embedding-input-type", "Embedding input type")
+            {
+                HelpText = "Sends whether each embedding is a query or a document, and each document's title, for an endpoint that formats them for its model."
+            }, embedding.SendsInputType, false, value => Edit(() => SetEmbedding(embedding with { SendsInputType = value }))));
+            fields.Add(new SetupBooleanField(new("embedding-images", "Embedding images")
+            {
+                HelpText = "Sends images to embed. Off refuses images before any request."
+            }, embedding.AcceptsImages, false, value => Edit(() => SetEmbedding(embedding with { AcceptsImages = value }))));
+        }
         // Google Vertex AI uses this; Google Vertex AI is out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Vertex,
         // outside the solution). It moves into that provider's own library when the provider returns to the build.
         if (UsesVertex)
@@ -620,6 +632,9 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     // OpenAI-compatible Chat and Azure OpenAI use this; they are out of the build (Providers/ChatCompletionsLlmClientBase.cs
     // and OpenAiCompatibleChatLlmClient.cs, under Compile Remove; Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Azure,
     // outside the solution). It moves into their own libraries when they return to the build.
+    private void SetEmbedding(LlmEmbeddingConfiguration configuration) =>
+        _draft = _draft with { Embedding = configuration == new LlmEmbeddingConfiguration() ? null : configuration };
+
     private void SetChatCompletions(LlmChatCompletionsConfiguration configuration) =>
         _draft = _draft with { ChatCompletions = configuration.OutputLimitField is null && configuration.UsePromptCacheKey is null ? null : configuration };
 
@@ -854,7 +869,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
         _original is not null && (_original.Endpoint != _draft.Endpoint || _original.Vertex != draft.Vertex || _original.Azure != draft.Azure)
             || UsesAzure && _azure!.HasCredentialEdits,
         _original is null || _original.Endpoint != _draft.Endpoint || _original.Vertex != draft.Vertex || _original.Azure != draft.Azure || _original.Xai != _draft.Xai || _originalModel != _model
-            || _original.ChatCompletions != _draft.ChatCompletions || _original.CapabilityOverrides != _draft.CapabilityOverrides
+            || _original.ChatCompletions != _draft.ChatCompletions || _original.Embedding != _draft.Embedding || _original.CapabilityOverrides != _draft.CapabilityOverrides
             || !SameModelOverrides(_original.ModelCapabilityOverrides, _draft.ModelCapabilityOverrides)
             || (UsesAzure ? _azure!.HasCredentialEdits : _credentialChange != SetupSecretEditKind.Keep));
     }

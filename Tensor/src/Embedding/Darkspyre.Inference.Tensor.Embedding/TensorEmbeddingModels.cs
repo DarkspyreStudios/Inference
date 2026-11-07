@@ -48,6 +48,19 @@ public sealed record TensorEmbeddingArchitecture(string Name, string GgufArchite
             QueryTemplate, DefaultInstruction ?? string.Empty, MaximumInputTokens.ToString(CultureInfo.InvariantCulture));
         return Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(identity)));
     }
+
+    /// <summary>What a pack of this architecture accepts and produces: text only, with its fingerprint.</summary>
+    public Darkspyre.Inference.Common.Embedding.EmbeddingCapabilities Describe(TensorModelPackDefinition pack) => new()
+    {
+        Modalities = TextOnly,
+        NativeDimensions = NativeDimensions,
+        SupportedDimensions = SupportedDimensions,
+        MaximumInputTokens = MaximumInputTokens,
+        ModelFingerprint = Fingerprint(pack),
+    };
+
+    private static readonly IReadOnlySet<Darkspyre.Inference.Common.Embedding.EmbeddingModality> TextOnly =
+        new[] { Darkspyre.Inference.Common.Embedding.EmbeddingModality.Text }.ToFrozenSet();
 }
 
 /// <summary>The embedding architectures and backends this package runs. Embedding packs arrive by import.</summary>

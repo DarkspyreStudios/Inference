@@ -15,6 +15,9 @@ public sealed class QwenEngineProvider(GgmlRuntimeOwner? runtimeOwner = null) : 
     public IReadOnlyList<TensorModelPackDefinition> BuiltInModels { get; } = [];
 
     /// <inheritdoc />
+    public Darkspyre.Inference.Common.Embedding.EmbeddingCapabilities? DescribeEmbedding(TensorModelPackDefinition pack) => null;
+
+    /// <inheritdoc />
     public Task<TensorInstalledReport> GetInstalledModelsAsync(TensorModelPackManager packs,
         CancellationToken cancellationToken = default) =>
         TensorInstalledPacks.ReportAsync(packs, BuiltInModels, Accepts,

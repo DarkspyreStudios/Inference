@@ -93,15 +93,7 @@ public sealed class TensorEmbeddingInference : ITensorEmbeddingInference
             definition = (await _packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false)).FirstOrDefault(pack =>
                 pack.Key.ModelId == modelId && pack.Capability == TensorCapability.Embedding)
                 ?? throw new InferenceException(InferenceFailureCode.ModelUnavailable, "No embedding pack with that model ID is registered.");
-        TensorEmbeddingArchitecture architecture = Architecture(definition);
-        return new()
-        {
-            Modalities = new[] { EmbeddingModality.Text }.ToFrozenSet(),
-            NativeDimensions = architecture.NativeDimensions,
-            SupportedDimensions = architecture.SupportedDimensions,
-            MaximumInputTokens = architecture.MaximumInputTokens,
-            ModelFingerprint = architecture.Fingerprint(definition),
-        };
+        return Architecture(definition).Describe(definition);
     }
 
     /// <inheritdoc />

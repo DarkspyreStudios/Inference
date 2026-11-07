@@ -69,6 +69,9 @@ public sealed record LlmProviderDefinition
     /// <summary>True when the settings show the Context lengths rows.</summary>
     public bool OffersContextLengths { get; init; }
 
+    /// <summary>True when the settings show the embedding Input type and Images switches.</summary>
+    public bool OffersEmbeddingOptions { get; init; }
+
     /// <summary>The provider as a text-generation setup definition for the inference catalog, with its icon and group.</summary>
     public InferenceSetupDefinition SetupDefinition => new(
         new(Id, DisplayName, InferenceImplementationKind.Connect, InferenceTask.TextGeneration),
