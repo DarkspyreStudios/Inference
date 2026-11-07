@@ -8,7 +8,7 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 internal sealed class OpenAiEmbeddingClient(HttpClient http) : ILlmEmbeddingClient
 {
-    private static readonly string[] ReservedFields = ["model", "input", "dimensions"];
+    private static readonly string[] ReservedFields = ["model", "input", "dimensions", "input_type"];
 
     public bool Supports(LlmTransport transport) => transport is
         LlmTransport.OpenAiResponses or LlmTransport.OpenAiCompatibleChat;

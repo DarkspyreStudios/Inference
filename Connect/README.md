@@ -2168,7 +2168,7 @@ retires the facade. Embeddings refresh OAuth through the same access implementat
 dispatch. Every `ILlmEmbeddingClient` supplies an effect-free `ValidateRequest`; the facade calls it
 before refresh, and the direct adapter validates before HTTP. `LlmEmbeddingRequest.Dimensions` is
 nullable and positive when supplied. Raw `dimensions`, `model` and `input` are reserved in both
-connection and request options. Unknown model-specific limits remain provider decisions. Requests
+connection and request options, and the OpenAI API adapter also reserves `input_type`. Unknown model-specific limits remain provider decisions. Requests
 snapshot typed `EmbeddingInput` lists and JSON options before asynchronous work; media bytes remain borrowed until completion; connections snapshot embedding options
 and headers before refresh. OpenAI-compatible responses require one unique in-range index per input,
 finite nonempty vectors and the requested dimensions. Results retain the reported model ID when
