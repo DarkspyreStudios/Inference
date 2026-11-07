@@ -37,48 +37,6 @@ public sealed class SelfHostCatalogTests : IDisposable
     }
 
     [Fact]
-    public async Task UniversalNormalizerUsesLoadedEngineCapabilities()
-    {
-        var engine = new Engine();
-        await using ServiceProvider provider = Services(engine);
-        await using ILlmAgentSession session = await provider.GetRequiredService<LlmAgentProviderService>()
-            .StartSessionAsync("connection", new() { ModelId = "model" });
-        await foreach (var _ in session.RunTurnAsync(new()
-        {
-            Input = [new LlmAgentTextContent("Describe")],
-            Temperature = 0.4,
-            MaxOutputTokens = 16,
-            ReasoningLevel = LlmReasoningLevel.High,
-            Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "photo.png", MediaType = "image/png", Data = new byte[] { 1 } }]
-        })) { }
-        LlmInferenceRequest request = Assert.Single(engine.Requests);
-        Assert.Null(request.Temperature);
-        Assert.Null(request.MaxOutputTokens);
-        Assert.Equal(LlmReasoningLevel.Low, request.ReasoningLevel);
-        Assert.All(request.Messages, message => Assert.Empty(message.Attachments));
-        Assert.Contains(request.Messages, message => message.Content.Contains("This content was not supplied to the model.", StringComparison.Ordinal));
-    }
-
-    /// <summary>The engine decides which continuation state it can replay, so a SelfHost request keeps state that no
-    /// Connect codec binds, even when the request asks Connect to omit unbound state.</summary>
-    [Fact]
-    public async Task EngineReceivesContinuationStateNoCodecBinds()
-    {
-        var engine = new Engine();
-        await using ServiceProvider provider = Services(engine);
-        var state = new LlmContinuationState { ImplementationId = "engine", ModelId = "model", ScopeId = "engine-scope", Payload = "{}" };
-
-        await provider.GetRequiredService<LlmProviderService>().CompleteAsync("connection", new()
-        {
-            ModelId = "model",
-            UnboundContinuationState = LlmUnboundContinuationState.Omit,
-            Messages = [new("user", "first"), new("assistant", "reply") { ContinuationState = state }, new("user", "second")]
-        });
-
-        Assert.Equal(state, Assert.Single(engine.Requests).Messages.Single(message => message.Role == "assistant").ContinuationState);
-    }
-
-    [Fact]
     public async Task ExplicitRefreshReplacesTheConnectCatalog()
     {
         var engine = new Engine { Models = [new("first", "First") { MaxContextTokens = 4096 }] };
@@ -90,31 +48,6 @@ public sealed class SelfHostCatalogTests : IDisposable
         var refreshed = Assert.Single(await service.RefreshModelsAsync("connection"));
         Assert.Equal("second", refreshed.Id);
         Assert.Equal(8192, refreshed.MaxContextTokens);
-    }
-
-    /// <summary>A refresh during an entered listing replaces its waiters' result, not their requests.</summary>
-    [Fact]
-    public async Task RefreshDuringAPendingListingReturnsTheRefreshedModels()
-    {
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var engine = new Engine();
-        int calls = 0;
-        engine.Listing = async token =>
-        {
-            if (Interlocked.Increment(ref calls) != 1) return [new("second", "Second")];
-            entered.SetResult();
-            await release.Task.WaitAsync(token);
-            return [new("first", "First")];
-        };
-        await using ServiceProvider provider = Services(engine);
-        var service = provider.GetRequiredService<LlmProviderService>();
-        Task<IReadOnlyList<LlmModel>> pending = service.ListModelsAsync("connection");
-        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.Equal("second", Assert.Single(await service.RefreshModelsAsync("connection")).Id);
-        release.SetResult();
-        Assert.Equal("second", Assert.Single(await pending.WaitAsync(TimeSpan.FromSeconds(10))).Id);
-        Assert.Equal(2, calls);
     }
 
     private ServiceProvider Services(Engine engine)

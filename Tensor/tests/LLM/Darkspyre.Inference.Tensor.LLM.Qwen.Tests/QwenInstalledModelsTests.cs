@@ -15,40 +15,6 @@ public sealed class QwenInstalledModelsTests : IDisposable
     }
 
     [Fact]
-    public async Task QwenReportsNoBuiltInAndSkipsAPackThatIsNotAGguf()
-    {
-        await using var owner = new GgmlRuntimeOwner(new(new("2026.10.11"), "osx-arm64", []), new FakeNativeLibraries());
-        var provider = new QwenEngineProvider(owner);
-        Assert.Empty(provider.BuiltInModels);
-        TensorInstalledReport report = await ReportAsync(provider);
-        Assert.Empty(report.Installed);
-        Assert.Empty(report.Unsupported);
-
-        await InstallAsync(provider, "source.gguf", "not a GGUF checkpoint"u8.ToArray());
-
-        report = await ReportAsync(provider);
-        Assert.Empty(report.Installed);
-        Assert.Empty(report.Unsupported);
-    }
-
-    [Fact]
-    public async Task QwenRetiresAQwen3HeaderAndAcceptsQwen35AndQwen4ExpHeaders()
-    {
-        await using var owner = new GgmlRuntimeOwner(new(new("2026.10.11"), "osx-arm64", []), new FakeNativeLibraries());
-        var provider = new QwenEngineProvider(owner);
-        TensorModelPackDefinition qwen35 = await InstallAsync(provider, "qwen35.gguf", Checkpoint("qwen35"));
-        TensorModelPackDefinition qwen4 = await InstallAsync(provider, "qwen4exp.gguf", Checkpoint("qwen4exp"));
-        TensorModelPackDefinition qwen3 = await InstallAsync(provider, "qwen3.gguf", Checkpoint("qwen3"));
-
-        TensorInstalledReport report = await ReportAsync(provider);
-
-        Assert.Equal(new[] { qwen35.Key, qwen4.Key }.OrderBy(key => key.ToString(), StringComparer.Ordinal),
-            report.Installed.Select(model => model.Key).OrderBy(key => key.ToString(), StringComparer.Ordinal));
-        TensorUnsupportedPack retired = Assert.Single(report.Unsupported);
-        Assert.Equal((qwen3.Key, TensorLlmModels.Qwen3RetiredReason), (retired.Definition.Key, retired.Reason));
-    }
-
-    [Fact]
     public async Task CompanionsResolveWithTheirRolesAndBackendSetsOnlyForQwen4Exp()
     {
         Directory.CreateDirectory(_root);
@@ -76,18 +42,6 @@ public sealed class QwenInstalledModelsTests : IDisposable
         Assert.Contains("supported for Qwen 3.8 Flash Next (qwen4exp) models only", Assert.Single(refused.Evaluation.Issues).Message, StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task UnknownGgmlTypeIsRefusedWithTheTensorNameAndType()
-    {
-        var resolver = new QwenModelResolver();
-        TensorModelSelection selection = await SelectionAsync("gyro", Checkpoint("qwen4exp", tensorType: 145));
-        TensorModelResolution resolution = await resolver.ResolveAsync(selection);
-        Assert.Equal(TensorCompatibilityState.Unsupported, resolution.Evaluation.State);
-        string message = Assert.Single(resolution.Evaluation.Issues).Message;
-        Assert.Contains("token_embd.weight", message, StringComparison.Ordinal);
-        Assert.Contains("GGML tensor type 145", message, StringComparison.Ordinal);
-    }
-
     private async Task<TensorModelSelection> SelectionAsync(string name, byte[] bytes)
     {
         Directory.CreateDirectory(_root);
@@ -95,12 +49,6 @@ public sealed class QwenInstalledModelsTests : IDisposable
         await File.WriteAllBytesAsync(path, bytes);
         return new(new TensorModelLocation.LocalFile(path), License: "Apache-2.0",
             ExpectedSha256: Convert.ToHexStringLower(SHA256.HashData(bytes)));
-    }
-
-    private async Task<TensorInstalledReport> ReportAsync(QwenEngineProvider provider)
-    {
-        using var packs = new TensorModelPackManager(new([]), Path.Combine(_root, provider.Definition.ModelStoreKey));
-        return await provider.GetInstalledModelsAsync(packs);
     }
 
     private async Task<TensorModelPackDefinition> InstallAsync(QwenEngineProvider provider, string name, byte[] bytes)

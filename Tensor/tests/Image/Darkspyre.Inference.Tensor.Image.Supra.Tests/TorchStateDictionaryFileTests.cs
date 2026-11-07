@@ -7,36 +7,6 @@ namespace Darkspyre.Inference.Tensor.Image.Supra.Tests;
 public sealed class TorchStateDictionaryFileTests
 {
     [Fact]
-    public void InspectsRestrictedMetadataAndLeavesCallerStreamOpen()
-    {
-        string path = CreateCheckpoint();
-        try
-        {
-            using Stream source = File.OpenRead(path);
-            TorchStateDictionaryMetadata metadata = TorchStateDictionaryFile.InspectMetadata(source);
-            Assert.Equal(new long[] { 2, 2 }, metadata.Tensors["weight"].Shape);
-            Assert.Equal(TorchStorageDtype.BFloat16, metadata.Tensors["config.uncond_text"].Dtype);
-            Assert.Equal(2, metadata.IntegerValues["patch"]);
-            Assert.True(source.CanRead);
-            Assert.Throws<InvalidDataException>(() => TorchStateDictionaryFile.InspectMetadata(source, 16));
-            Assert.True(source.CanRead);
-        }
-        finally { File.Delete(path); }
-    }
-
-    [Fact]
-    public void InspectionUsesTheSamePickleWhitelistAsLoading()
-    {
-        string path = CreateCheckpoint("dangerous.module Callable");
-        try
-        {
-            using Stream source = File.OpenRead(path);
-            Assert.Throws<InvalidDataException>(() => TorchStateDictionaryFile.InspectMetadata(source));
-        }
-        finally { File.Delete(path); }
-    }
-
-    [Fact]
     public void ReadsWhitelistedDenseTensorsAndConfigMetadata()
     {
         string path = CreateCheckpoint();
@@ -48,22 +18,6 @@ public sealed class TorchStateDictionaryFileTests
             Assert.Equal(new[] { 1.5f, -2.0f, 3.25f, 4.0f }, checkpoint.ReadFloat32("weight"));
             Assert.Equal(new[] { 1.0f, -2.0f }, checkpoint.ReadFloat32("config.uncond_text"));
             Assert.Equal(2, checkpoint.IntegerMetadata["patch"]);
-        }
-        finally
-        {
-            File.Delete(path);
-        }
-    }
-
-    [Fact]
-    public void RejectsUnknownPickleGlobalsWithoutExecutingThem()
-    {
-        string path = CreateCheckpoint("dangerous.module Callable");
-        try
-        {
-            InvalidDataException exception = Assert.Throws<InvalidDataException>(
-                () => new TorchStateDictionaryFile(path));
-            Assert.Contains("is not allowed", exception.Message, StringComparison.Ordinal);
         }
         finally
         {

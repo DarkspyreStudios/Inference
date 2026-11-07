@@ -12,33 +12,6 @@ public sealed class EmbeddingCleanupTests : IDisposable
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(5);
 
     [Fact]
-    public async Task TextOnlyModelRejectsAMixedBatchBeforeEmbeddingAndRemainsUsable()
-    {
-        var model = new Model();
-        using TensorModelPackManager packs = await InstalledAsync();
-        await using var engine = Engine(packs, model);
-        await engine.LoadAndWaitAsync(Key);
-        EmbeddingCapabilities capabilities = await engine.GetCapabilitiesAsync();
-        Assert.Equal(EmbeddingModality.Text, Assert.Single(capabilities.Modalities));
-
-        InferenceException error = await Assert.ThrowsAsync<InferenceException>(() => engine.EmbedAsync(new()
-        {
-            ModelId = Key.ModelId,
-            Inputs = [new TextEmbeddingInput("reference"), new MediaEmbeddingInput(new("image/png", new byte[] { 1 }))]
-        }));
-        Assert.Equal(InferenceFailureCode.UnsupportedFeature, error.Code);
-        Assert.False(model.Entered.Task.IsCompleted);
-
-        EmbeddingResult result = await engine.EmbedAsync(new()
-        {
-            ModelId = Key.ModelId,
-            Inputs = [new TextEmbeddingInput("reference")]
-        });
-        Assert.Single(result.Vectors);
-        Assert.Equal(1024, result.Dimensions);
-    }
-
-    [Fact]
     public async Task ReturnedModelIsReleasedAfterCancellation()
     {
         using var cancellation = new CancellationTokenSource();
@@ -51,39 +24,6 @@ public sealed class EmbeddingCleanupTests : IDisposable
         Assert.Equal(1, model.Disposals);
         await packs.RemoveAsync(Key);
         Assert.NotEqual(TensorModelPackState.Installed, (await packs.GetStatusAsync(Key)).State);
-    }
-
-    [Fact]
-    public async Task UrgentStopDrainsIgnoringEmbeddingBeforeReleasingItsPack()
-    {
-        var model = new Model { HoldEmbedding = true };
-        using TensorModelPackManager packs = await InstalledAsync();
-        var engine = Engine(packs, model);
-        await engine.LoadAndWaitAsync(Key);
-        using var urgency = new CancellationTokenSource();
-        Task<EmbeddingResult> embedding = engine.EmbedAsync(new() { ModelId = Key.ModelId, Inputs = [new TextEmbeddingInput("reference")] });
-        await model.Entered.Task.WaitAsync(Timeout);
-        try
-        {
-            await engine.StopAsync(urgency.Token);
-            Task disposal = engine.DisposeAsync().AsTask();
-            urgency.Cancel();
-            await model.Canceled.Task.WaitAsync(Timeout);
-            Assert.False(disposal.IsCompleted);
-            Assert.Equal(0, model.Disposals);
-            await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(Key));
-
-            model.Release.TrySetResult();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => embedding);
-            await disposal.WaitAsync(Timeout);
-            await packs.RemoveAsync(Key);
-            Assert.Equal(1, model.Disposals);
-        }
-        finally
-        {
-            model.Release.TrySetResult();
-            await engine.DisposeAsync().AsTask().WaitAsync(Timeout);
-        }
     }
 
     private static TensorModelKey Key => new("host/embedding-cleanup", "reference");

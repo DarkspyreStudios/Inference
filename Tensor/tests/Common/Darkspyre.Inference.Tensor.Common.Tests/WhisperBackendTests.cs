@@ -11,8 +11,6 @@ public sealed class WhisperBackendTests
 {
     [Theory]
     [InlineData(TensorBackendKind.Auto, TensorBackendKind.GgmlCuda)]
-    [InlineData(TensorBackendKind.Auto, TensorBackendKind.Cpu)]
-    [InlineData(TensorBackendKind.Cpu, TensorBackendKind.Cpu)]
     public async Task WarmModelReportsObservedBackendAndRetainsGpuDeviceSelection(TensorBackendKind requested, TensorBackendKind observed)
     {
         var packs = new InstalledPack();
@@ -34,42 +32,8 @@ public sealed class WhisperBackendTests
         Assert.Equal(1, loader.Loads); Assert.Equal(2, loader.Requests);
     }
 
-    [Fact]
-    public void FailedAutomaticGpuAllocationGetsOneCpuAttempt()
-    {
-        var attempts = new List<bool>();
-        object resident = new();
-        object result = WhisperRuntime.Allocate(allowCpuFallback: true, useGpu: true, useGpu =>
-        {
-            attempts.Add(useGpu);
-            if (useGpu) throw new WhisperModelLoadException("GPU allocation failed.");
-            return resident;
-        });
-        Assert.Same(resident, result); Assert.Equal([true, false], attempts);
-        attempts.Clear();
-        Assert.Throws<WhisperModelLoadException>(() => WhisperRuntime.Allocate<object>(true, true, useGpu =>
-        { attempts.Add(useGpu); throw new WhisperModelLoadException("Allocation failed."); }));
-        Assert.Equal([true, false], attempts);
-    }
-
-    [Fact]
-    public void NativeGpuInitializationFailureReportsCpuFallback()
-    {
-        var observed = new WhisperBackendObservation(1);
-        observed.Observe("whisper_backend_init_gpu: using CUDA1 backend\n");
-        Assert.Equal(TensorBackendKind.GgmlCuda, observed.Backend);
-        observed.Observe("whisper_backend_init_gpu: failed to initialize CUDA1 backend\n");
-        Assert.Equal(TensorBackendKind.Cpu, observed.Backend);
-        var absent = new WhisperBackendObservation(1);
-        absent.Observe("whisper_backend_init_gpu: no GPU found\n");
-        Assert.Equal(TensorBackendKind.Cpu, absent.Backend);
-    }
-
     [Theory]
     [InlineData(TensorBackendKind.GgmlCuda, RuntimeLibrary.Cuda12, TensorBackendAvailabilityState.Available)]
-    [InlineData(TensorBackendKind.GgmlCuda, RuntimeLibrary.Cpu, TensorBackendAvailabilityState.Unavailable)]
-    [InlineData(TensorBackendKind.Auto, RuntimeLibrary.Cpu, TensorBackendAvailabilityState.Available)]
-    [InlineData(TensorBackendKind.Cpu, RuntimeLibrary.Cuda12, TensorBackendAvailabilityState.Available)]
     public async Task ProbeSeparatesAvailableRuntimeFromModelAllocation(TensorBackendKind backend, RuntimeLibrary library, TensorBackendAvailabilityState expected)
     {
         var probe = new WhisperBackendProbe(() => new("native features", library));

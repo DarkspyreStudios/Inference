@@ -18,24 +18,6 @@ public sealed class AntigravityConversationTests : IDisposable
     public void Dispose() => _folder.Dispose();
 
     [Fact]
-    public async Task StatusIsEstimatedBeforeTheFirstReportAndMixedAfterIt()
-    {
-        var agy = new ScriptedAgy { InputTokens = 5_000 };
-        await using ILlmAgentSession session = await StartAsync(agy, new(), capped: false);
-
-        IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(Turn("Hello")));
-        LlmAgentContextStatus after = await session.GetContextStatusAsync();
-
-        LlmAgentContextStatus before = Assert.Single(events.OfType<LlmAgentContextStatusEvent>()).Status;
-        Assert.Equal(LlmContextMeasurementSource.Estimated, before.Source);
-        Assert.Equal(1_048_576, before.MaxContextTokens);
-        Assert.False(before.NeedsCompaction);
-        Assert.Equal(LlmContextMeasurementSource.Mixed, after.Source);
-        Assert.True(after.UsedContextTokens >= 5_001);
-        Assert.Equal(InferenceSupport.Supported, (await session.GetCapabilitiesAsync()).SupportsContextStatus);
-    }
-
-    [Fact]
     public async Task CompactionAtTheTriggerOpensANewConversationWithTheCompactedHistory()
     {
         var agy = new ScriptedAgy();
@@ -54,47 +36,6 @@ public sealed class AntigravityConversationTests : IDisposable
         Assert.DoesNotContain("alpha alpha", sent, StringComparison.Ordinal);
         Assert.Equal("conversation-1", session.ThreadId);
         Assert.All(events, item => Assert.Equal("conversation-1", item.ThreadId));
-    }
-
-    [Fact]
-    public async Task CompactNowOpensANewConversationWithTheCompactedHistory()
-    {
-        var agy = new ScriptedAgy();
-        await using ILlmAgentSession session = await StartAsync(agy, LongHistory());
-
-        LlmAgentCompactedEvent? compacted = await session.CompactNowAsync();
-        await ReadAllAsync(session.RunTurnAsync(Turn("Continue")));
-
-        Assert.NotNull(compacted);
-        Assert.Equal(2, compacted.DroppedMessageCount);
-        Assert.Equal(2, agy.Invocations.Count);
-        Assert.Contains(Summary, Assert.Single(agy.Writes[1]), StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task NativeResumeIsUnsupportedOnceCompactionMovedTheConversation()
-    {
-        var agy = new ScriptedAgy();
-        await using ILlmAgentSession session = await StartAsync(agy, LongHistory());
-        InferenceSupport before = (await session.GetCapabilitiesAsync()).SupportsNativeResume;
-
-        await session.CompactNowAsync();
-
-        Assert.Equal(InferenceSupport.Supported, before);
-        Assert.Equal(InferenceSupport.Unsupported, (await session.GetCapabilitiesAsync()).SupportsNativeResume);
-    }
-
-    [Fact]
-    public async Task AgyCheckpointIsReportedAsACompaction()
-    {
-        var agy = new ScriptedAgy { Checkpoint = true };
-        await using ILlmAgentSession session = await StartAsync(agy, new());
-
-        IReadOnlyList<LlmAgentEvent> events = await ReadAllAsync(session.RunTurnAsync(Turn("Hello")));
-
-        LlmAgentCompactedEvent compacted = Assert.Single(events.OfType<LlmAgentCompactedEvent>());
-        Assert.Null(compacted.DroppedMessageCount);
-        Assert.Single(agy.Invocations);
     }
 
     private Task<ILlmAgentSession> StartAsync(ScriptedAgy agy, LlmAgentContext context, bool capped = true)

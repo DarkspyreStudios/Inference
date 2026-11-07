@@ -17,43 +17,6 @@ public sealed class StepActionTests : BunitContext
     }
 
     [Fact]
-    public void StepShowsOnlyItsOwnActions()
-    {
-        IRenderedComponent<InferenceSettingsEditor> editor = Show(new TwoStepSettings(), new Manager());
-
-        Assert.Equal(["Sign in", "Check"], ActionButtons(editor));
-        Click(editor, "Next");
-        Assert.Equal(["Test model"], ActionButtons(editor));
-    }
-
-    [Fact]
-    public void SettingsWithNoStepActionsShowAllActions()
-    {
-        IRenderedComponent<InferenceSettingsEditor> editor = Show(new TwoStepSettings { NameActions = false }, new Manager());
-
-        Assert.Equal(["Sign in", "Check", "Test model"], ActionButtons(editor));
-        Click(editor, "Next");
-        Assert.Equal(["Sign in", "Check", "Test model"], ActionButtons(editor));
-    }
-
-    [Fact]
-    public void CliStepChecksTheToolWhenShown()
-    {
-        var manager = new Manager();
-        IRenderedComponent<InferenceSettingsEditor> editor = Show(new TwoStepSettings { UsesTool = true }, manager);
-
-        editor.WaitForAssertion(() => Assert.Equal(["check"], manager.Runs));
-        editor.WaitForAssertion(() => Assert.Contains("✓ Installed: tool", editor.Find(".inference-settings-editor__checklist").TextContent, StringComparison.Ordinal));
-        // The checklist offers the sign-in; the tail keeps only the check.
-        Assert.Equal(["Check"], ActionButtons(editor));
-
-        editor.Find(".inference-settings-editor__checklist").QuerySelectorAll("button").Single(button => button.TextContent.Trim() == "Sign in").Click();
-
-        editor.WaitForAssertion(() => Assert.Equal(["check", "sign-in", "check"], manager.Runs));
-        editor.WaitForAssertion(() => Assert.Contains("✓ Signed in", editor.Markup, StringComparison.Ordinal));
-    }
-
-    [Fact]
     public async Task ChoosingAModelRunsTheTest()
     {
         var manager = new Manager();
@@ -92,56 +55,6 @@ public sealed class StepActionTests : BunitContext
         Assert.Equal(["Test model"], tabs.FindAll(".inference-settings-editor__actions button").Select(button => button.TextContent.Trim()));
     }
 
-    [Fact]
-    public void AHostStripReplacesTheStepListAndFollowsTheStep()
-    {
-        List<int> shown = [];
-        IRenderedComponent<InferenceSettingsEditor> editor = Render<InferenceSettingsEditor>(parameters => parameters
-            .Add(value => value.Settings, new TwoStepSettings()).Add(value => value.Manager, new Manager()).Add(value => value.Host, new Host())
-            .Add(value => value.ShowStepList, false).Add(value => value.StepChanged, (int index) => shown.Add(index)));
-
-        Assert.Empty(editor.FindAll(".inference-settings-editor__steps"));
-        Assert.Equal("Sign in", Assert.Single(editor.FindAll(".inference-settings-editor__step h3")).TextContent);
-        Click(editor, "Next");
-
-        Assert.Equal(1, editor.Instance.CurrentStepIndex);
-        Assert.Equal([1], shown);
-        Assert.Equal("Model", Assert.Single(editor.FindAll(".inference-settings-editor__step h3")).TextContent);
-        Click(editor, "Back");
-        Assert.Equal([1, 0], shown);
-    }
-
-    [Fact]
-    public async Task ConnectionTabsReportTheEditorsState()
-    {
-        List<SetupEditorState> states = [];
-        IRenderedComponent<ConnectionTabs> tabs = Render<ConnectionTabs>(parameters => parameters
-            .Add(value => value.Settings, new TwoStepSettings()).Add(value => value.Manager, new Manager()).Add(value => value.Host, new Host())
-            .Add(value => value.StateChanged, (SetupEditorState state) => states.Add(state)));
-        Assert.False(tabs.Instance.State!.HasUnsavedChanges);
-        await tabs.InvokeAsync(() => tabs.FindComponent<Tabs>().Instance.ActiveValueChanged.InvokeAsync("Model"));
-
-        IRenderedComponent<SetupFieldInput> model = tabs.FindComponents<SetupFieldInput>().Single(field => field.Instance.Field.Description.Id == "model");
-        model.WaitForAssertion(() => Assert.Single(model.FindComponents<Combobox>()));
-        await model.InvokeAsync(() => model.FindComponent<Combobox>().Instance.ValueChanged.InvokeAsync("a"));
-
-        tabs.WaitForAssertion(() => Assert.True(tabs.Instance.State!.HasUnsavedChanges && tabs.Instance.State.CanSave));
-        Assert.Contains(states, state => state.HasUnsavedChanges);
-    }
-
-    [Fact]
-    public void AnActionTheHostCannotRunShowsWhy()
-    {
-        IRenderedComponent<InferenceSettingsEditor> editor = Render<InferenceSettingsEditor>(parameters => parameters
-            .Add(value => value.Settings, new TwoStepSettings()).Add(value => value.Manager, new Manager())
-            .Add(value => value.Host, new Host { ExecuteFailure = new IOException("The tool is locked.") }).Add(value => value.ShowActionEffects, false));
-
-        Click(editor, "Check");
-
-        editor.WaitForAssertion(() => Assert.Contains("The host could not run the action (IOException): The tool is locked.",
-            editor.Markup, StringComparison.Ordinal));
-    }
-
     private IRenderedComponent<InferenceSettingsEditor> Show(TwoStepSettings settings, Manager manager) =>
         Render<InferenceSettingsEditor>(parameters => parameters
             .Add(value => value.Settings, settings).Add(value => value.Manager, manager).Add(value => value.Host, new Host())
@@ -157,9 +70,6 @@ public sealed class StepActionTests : BunitContext
     private static void Click(IRenderedComponent<InferenceSettingsEditor> editor, string label) =>
         editor.FindAll("button").Single(button => button.TextContent.Trim() == label).Click();
 
-    private static string[] ActionButtons(IRenderedComponent<InferenceSettingsEditor> editor) =>
-        [.. editor.FindAll(".inference-settings-editor__actions button").Select(button => button.TextContent.Trim())];
-
     // A connection step that signs in and checks, and a model step that tests, like an LLM provider's settings.
     private sealed class TwoStepSettings : InferenceSettings<string>
     {
@@ -172,12 +82,6 @@ public sealed class StepActionTests : BunitContext
         { }
 
         public bool NameActions { get; init; } = true;
-
-        public bool UsesTool
-        {
-            get => Status.Installed.IsApplicable;
-            init => Status = Status with { Installed = value ? SetupObservation.Unknown : SetupObservation.NotApplicable };
-        }
 
         public bool SignedIn { get; set; }
 

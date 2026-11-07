@@ -16,8 +16,6 @@
   <ItemGroup>
     <Using Include="Xunit" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
-    <!-- Phase 1 leaves the xAI transport out of the build. Its tests stay in the repository. -->
-    <Compile Remove="XaiImagineImageTransportTests.cs" />
   </ItemGroup>
 
   <ItemGroup>

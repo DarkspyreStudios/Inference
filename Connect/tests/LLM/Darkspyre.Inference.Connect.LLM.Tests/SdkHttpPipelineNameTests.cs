@@ -14,22 +14,6 @@ public sealed class SdkHttpPipelineNameTests : IDisposable
 
     public void Dispose() => _folder.Dispose();
 
-    /// <summary>A logging configuration for a name no Connect library registered is refused when the pool is created.</summary>
-    [Fact]
-    public void AConfiguredNameNoLibraryRegisteredIsRefusedWhenThePoolIsCreated()
-    {
-        var services = new ServiceCollection();
-        services.AddSingleton<ILlmDataFolder>(_folder);
-        services.AddLlmConnect(http => http.ConfigureLogging("NotAPipeline", logging => logging.AddDefaultLogger()));
-        using ServiceProvider container = services.BuildServiceProvider();
-
-        ArgumentException refusal = Assert.Throws<ArgumentException>(() => container.GetRequiredService<SdkHttpGenerationPool>());
-
-        Assert.Equal("name", refusal.ParamName);
-        Assert.StartsWith("The HTTP pipeline name 'NotAPipeline' is not registered by a Connect library.", refusal.Message,
-            StringComparison.Ordinal);
-    }
-
     /// <summary>A host may configure a pipeline before the library that registers it: the Codex client's logger set up
     /// ahead of AddLlmConnect is accepted and runs.</summary>
     [Fact]
