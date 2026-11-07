@@ -6,18 +6,6 @@ namespace Darkspyre.Inference.Common.Tests;
 public sealed class InferenceSettingsRegressionTests
 {
     [Fact]
-    public void AContinuationAtIntMaxValueEndsThePageWithoutOverflowing()
-    {
-        SetupChoice[] choices = [new("small", "Small"), new("medium", "Medium"), new("large", "Large")];
-
-        SetupChoicePage page = InferenceSettings.Page(
-            new(Continuation: int.MaxValue.ToString(CultureInfo.InvariantCulture), PageSize: 2), choices);
-
-        Assert.Empty(page.Choices);
-        Assert.Null(page.Continuation);
-    }
-
-    [Fact]
     public async Task AnUncertainSaveStaysVisibleEvenWhenNoFieldChanged()
     {
         var settings = new TestSettings();

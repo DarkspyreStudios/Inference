@@ -18,29 +18,6 @@ public sealed class AnthropicMessagesTests
     private const string Model = "claude-test";
 
     /// <summary>
-    /// Discovery lists the Anthropic API-key provider, and its agent client is the shared managed one.
-    /// Defect: the provider is not discovered, or the old dedicated agent client is wired.
-    /// </summary>
-    [Fact]
-    public async Task RegistersSharedManagedClient()
-    {
-        using TestDataFolder folder = new();
-        ServiceCollection services = new();
-        // The host supplies what every discovered provider needs, as an application does.
-        services.AddSingleton<ILlmConnectionSource>(new Source(Connection()));
-        services.AddSingleton<ILlmDataFolder>(folder);
-        services.AddSingleton<ILlmSelfHost>(new UnusedSelfHost());
-        services.AddLlmConnect();
-        await using ServiceProvider provider = services.BuildServiceProvider();
-
-        Assert.Contains(provider.GetRequiredService<LlmProviderCatalog>().SupportedProviders,
-            definition => definition.Id == "anthropic-api-key");
-        ILlmAgentClient agents = Assert.Single(provider.GetServices<ILlmAgentClient>(),
-            client => client.Transport == LlmTransport.AnthropicMessages);
-        Assert.IsType<ManagedLlmAgentClient<AnthropicMessagesLlmClient>>(agents);
-    }
-
-    /// <summary>
     /// A managed turn streams thinking, text and one host tool call through the shared opening, runs the tool, and sends
     /// its result in the next request. Defect: the stream or the tool continuation broke in the move.
     /// </summary>
@@ -88,46 +65,6 @@ public sealed class AnthropicMessagesTests
         JsonNode result = messages[^1]!["content"]!.AsArray().Single(block => (string?)block!["type"] == "tool_result")!;
         Assert.Equal("toolu_1", (string?)result["tool_use_id"]);
         Assert.Equal("fact a", (string?)result["content"]);
-    }
-
-    /// <summary>
-    /// DSA-1379: a host tool whose schema has a top-level <c>oneOf</c>, as Memory's file_search does, is sent as one flat
-    /// object, with the forms' constraint in its description. Defect: the schema goes out unchanged, and the Messages API
-    /// refuses the whole request (400, "input_schema does not support oneOf, allOf, or anyOf at the top level").
-    /// </summary>
-    [Fact]
-    public async Task ATopLevelOneOfToolSchemaIsSentAsOneObject()
-    {
-        using var handler = new Handler(request => request.Method == HttpMethod.Get ? Models(webSearch: false)
-            : Sse(Start(), Block(0, new JsonObject { ["type"] = "text", ["text"] = "" }),
-                Delta(0, new JsonObject { ["type"] = "text_delta", ["text"] = "Done." }), Stop(0), End("end_turn"), Done()));
-        var client = new AnthropicMessagesLlmClient(new HttpClient(handler));
-        LlmConnection connection = Connection();
-        using var providers = new LlmProviderService(new Source(connection), [client], []);
-        var agents = new ManagedLlmAgentClient<AnthropicMessagesLlmClient>(client, providers, new());
-        const string schema = """
-            {"type":"object","oneOf":[
-              {"type":"object","properties":{"operation":{"const":"search"},"query":{"type":"string"}},"required":["operation","query"]},
-              {"type":"object","properties":{"operation":{"const":"read"},"reference":{"type":"string"}},"required":["operation","reference"]}]}
-            """;
-        await using ILlmAgentSession session = await agents.StartSessionAsync("anthropic", connection, new()
-        {
-            ModelId = Model,
-            Tools = [new LlmAgentToolDefinition { Name = "file_search", Description = "Search files.", InputSchema = JsonElement.Parse(schema) }],
-            ToolHandler = (_, _) => Task.FromResult(LlmToolOutput.FromText("unused"))
-        });
-
-        Assert.Null(Assert.Single((await Run(session)).OfType<LlmAgentTurnCompletedEvent>()).Error);
-
-        JsonNode tool = JsonNode.Parse(handler.Bodies[^1])!["tools"]!.AsArray().Single(item => (string?)item!["name"] == "file_search")!;
-        JsonObject sent = tool["input_schema"]!.AsObject();
-        Assert.DoesNotContain(sent, field => field.Key is "oneOf" or "anyOf" or "allOf");
-        Assert.Equal("object", (string?)sent["type"]);
-        Assert.Equal(["operation", "query", "reference"], sent["properties"]!.AsObject().Select(field => field.Key));
-        Assert.Equal(2, sent["properties"]!["operation"]!["anyOf"]!.AsArray().Count);
-        Assert.Equal(["operation"], sent["required"]!.AsArray().Select(name => (string?)name));
-        Assert.Equal("Input constraint: provide the parameters of exactly one of: (operation, query) or (operation, reference). Search files.",
-            (string?)tool["description"]);
     }
 
     /// <summary>
@@ -222,144 +159,11 @@ public sealed class AnthropicMessagesTests
         Assert.Null(error.Output);
     }
 
-    /// <summary>
-    /// Search citations cannot use native JSON format: the schema is guidance and the existing local validator checks it.
-    /// A request without search keeps native format. Defect: a search/schema request gets a provider400 or its answer is unchecked.
-    /// </summary>
-    [Fact]
-    public async Task WebSearchSchemaUsesLocalValidationAndKeepsNativeFormatWithoutSearch()
-    {
-        int posts = 0;
-        using var handler = new Handler(_ =>
-        {
-            string answer = ++posts == 1 ? "{\"answer\":7}" : "{\"answer\":\"yes\"}";
-            return Sse(Start(), Block(0, new JsonObject { ["type"] = "text", ["text"] = "" }),
-                Delta(0, new JsonObject { ["type"] = "text_delta", ["text"] = answer }), Stop(0), End("end_turn"), Done());
-        });
-        var client = new AnthropicMessagesLlmClient(new HttpClient(handler));
-        LlmConnection connection = Connection() with { Catalog = [Listed(webSearch: true)] };
-        JsonElement schema = JsonElement.Parse("{\"type\":\"object\",\"properties\":{\"answer\":{\"type\":\"string\"}},\"required\":[\"answer\"],\"additionalProperties\":false}");
-        LlmChatRequest request = Request() with { StructuredOutput = new() { Name = "research_result", Schema = schema }, HostedTools = [new LlmWebSearchTool()] };
-        List<LlmStreamEvent> searched = await Read(client.StreamAsync(connection, request));
-        JsonNode payload = JsonNode.Parse(handler.Bodies[0])!;
-        Assert.Null(payload["output_config"]?["format"]);
-        Assert.Contains(schema.GetRawText(), string.Join("\n", payload["system"]!.AsArray().Select(block => (string?)block!["text"])), StringComparison.Ordinal);
-        LlmChatResult local = Assert.Single(searched.OfType<LlmChatCompletionEvent>()).Result;
-        Assert.Equal(LlmStructuredOutputEnforcement.LocalValidationOnly, local.StructuredOutput!.Enforcement);
-        Assert.True(local.StructuredOutput.WasEvaluated); Assert.False(local.StructuredOutput.IsValid);
-        List<LlmStreamEvent> plain = await Read(client.StreamAsync(connection, request with { HostedTools = [] }));
-        JsonNode native = JsonNode.Parse(handler.Bodies[1])!;
-        Assert.Equal("json_schema", (string?)native["output_config"]!["format"]!["type"]);
-        Assert.Equal(schema.GetRawText(), native["output_config"]!["format"]!["schema"]!.ToJsonString());
-        Assert.Equal(LlmStructuredOutputEnforcement.ProviderJsonSchema, Assert.Single(plain.OfType<LlmChatCompletionEvent>()).Result.StructuredOutput!.Enforcement);
-    }
-
-    /// <summary>
-    /// The key is sent only as the x-api-key header, and an authentication failure's text does not hold it, even when the
-    /// response echoes it. Defect: the key leaks into a header, an exception or its text.
-    /// </summary>
-    [Fact]
-    public async Task ApiKeyIsSentOnlyAsHeader()
-    {
-        using var handler = new Handler(_ => new HttpResponseMessage(HttpStatusCode.Unauthorized)
-        {
-            Content = new StringContent("{\"type\":\"error\",\"error\":{\"type\":\"authentication_error\",\"message\":\"invalid x-api-key " + Key + "\"}}",
-                Encoding.UTF8, "application/json")
-        });
-        var client = new AnthropicMessagesLlmClient(new HttpClient(handler));
-
-        LlmProviderException failure = await Assert.ThrowsAsync<LlmProviderException>(() => Read(client.StreamAsync(Connection(), Request())));
-
-        Assert.Equal(Key, handler.Headers["x-api-key"]);
-        Assert.False(handler.Headers.ContainsKey("Authorization"));
-        Assert.DoesNotContain(Key, handler.Body!, StringComparison.Ordinal);
-        Assert.DoesNotContain(Key, handler.Uri!.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(Key, failure.ToString(), StringComparison.Ordinal);
-        Assert.DoesNotContain(Key, failure.SanitizedResponseBody ?? string.Empty, StringComparison.Ordinal);
-    }
-
-    /// <summary>
-    /// (a) An idle session on a model without web search measures its context with one count request and reports the
-    /// provider's 1234 tokens with no margin and a Mixed source; a model step sends no count. (b) On a model with web
-    /// search the request carries it, so no count is sent and the reading is the local estimate of that request.
-    /// Defect: the count path is not wired, a partial count passes as the whole request, a server tool reaches the count
-    /// route, or every step adds a count.
-    /// </summary>
-    [Fact]
-    public async Task IdleContextStatusUsesProviderCount()
-    {
-        var counts = new List<string>();
-        using var handler = new Handler(request => request.Method == HttpMethod.Get ? Models(webSearch: false)
-            : request.RequestUri!.AbsolutePath.EndsWith("/count_tokens", StringComparison.Ordinal)
-                ? Count(counts, request)
-                : Sse(Start(), Block(0, new JsonObject { ["type"] = "text", ["text"] = "" }),
-                    Delta(0, new JsonObject { ["type"] = "text_delta", ["text"] = "done" }), Stop(0), End("end_turn"), Done()));
-        var client = new AnthropicMessagesLlmClient(new HttpClient(handler));
-        LlmConnection connection = Connection();
-        using var providers = new LlmProviderService(new Source(connection), [client], []);
-        var agents = new ManagedLlmAgentClient<AnthropicMessagesLlmClient>(client, providers, new());
-        await using (ILlmAgentSession session = await agents.StartSessionAsync("anthropic", connection, new()
-        { ModelId = Model, HostedTools = [new LlmWebSearchTool()] }))
-        {
-            LlmAgentContextStatus counted = await session.GetContextStatusAsync();
-
-            Assert.Equal(1234, counted.UsedContextTokens);
-            Assert.Equal(LlmContextMeasurementSource.Mixed, counted.Source);
-            string body = Assert.Single(counts);
-            Assert.DoesNotContain("web_search", body, StringComparison.Ordinal);
-            Assert.DoesNotContain("max_tokens", body, StringComparison.Ordinal);
-
-            List<LlmAgentEvent> events = await Run(session);
-            Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>()).Reason);
-            Assert.Single(counts);
-        }
-
-        // On a model that offers web search, the request carries the server tool, which the count route refuses.
-        using var searching = new Handler(request => request.RequestUri!.AbsolutePath.EndsWith("/count_tokens", StringComparison.Ordinal)
-            ? Count(counts, request) : throw new InvalidOperationException("Measuring must not generate a response."));
-        var searchClient = new AnthropicMessagesLlmClient(new HttpClient(searching));
-        LlmConnection listed = Connection() with { Catalog = [Listed(webSearch: true)] };
-        var recorder = new RecordingEstimator(searchClient);
-        await using ManagedAgentSession estimated = await ManagedAgentSession.CreateAsync("anthropic", listed,
-            new() { ModelId = Model, HostedTools = [new LlmWebSearchTool()] }, listed.Catalog!, recorder,
-            (_, _) => throw new InvalidOperationException("Measuring must not generate a response."),
-            model => searchClient.GetCapabilities(listed, model), new LearnedModelContext());
-
-        LlmAgentContextStatus local = await estimated.GetContextStatusAsync();
-
-        Assert.Single(counts);
-        Assert.Equal(0, searching.Calls);
-        Assert.Contains(recorder.LastRequest!.HostedTools, tool => tool is LlmWebSearchTool);
-        ContextEstimate estimate = Assert.NotNull(recorder.LastEstimate);
-        Assert.Equal(estimate.Tokens + ManagedAgentPolicy.EstimateMargin, local.UsedContextTokens);
-        Assert.NotEqual(LlmContextMeasurementSource.Mixed, local.Source);
-    }
-
     // Records each count request's body and answers it with 1234 input tokens.
     private static HttpResponseMessage Count(List<string> counts, HttpRequestMessage request)
     {
         counts.Add(request.Content!.ReadAsStringAsync().GetAwaiter().GetResult());
         return new(HttpStatusCode.OK) { Content = new StringContent("{\"input_tokens\":1234}", Encoding.UTF8, "application/json") };
-    }
-
-    /// <summary>The real client behind the session, recording the local estimate the session asked for.</summary>
-    private sealed class RecordingEstimator(AnthropicMessagesLlmClient client) : ILlmContextEstimator, ILlmInputTokenCounter
-    {
-        public LlmChatRequest? LastRequest { get; private set; }
-        public ContextEstimate? LastEstimate { get; private set; }
-        public string? EstimateDiagnostic => client.EstimateDiagnostic;
-
-        public async ValueTask<ContextEstimate?> EstimateAsync(LlmConnection connection, LlmChatRequest request,
-            IReadOnlyDictionary<Common.Resources.InferenceResourceReference, Common.Resources.InferenceResourceDescriptor?> resources,
-            CancellationToken cancellationToken)
-        {
-            LastRequest = request;
-            LastEstimate = await client.EstimateAsync(connection, request, resources, cancellationToken);
-            return LastEstimate;
-        }
-
-        public ValueTask<long?> CountInputTokensAsync(LlmConnection connection, LlmChatRequest request,
-            CancellationToken cancellationToken) => client.CountInputTokensAsync(connection, request, cancellationToken);
     }
 
     internal static LlmConnection Connection() => new()

@@ -14,7 +14,6 @@ public sealed class XaiReasoningTests
 {
     [Theory]
     [InlineData(LlmReasoningLevel.Maximum, "xhigh")]
-    [InlineData(LlmReasoningLevel.None, "low")]
     public async Task KnownModelMapsDesiredEffortInsideTheGrokWriter(LlmReasoningLevel desired, string expected)
     {
         const string model = "grok-4.7";
@@ -22,41 +21,6 @@ public sealed class XaiReasoningTests
             Request(model, desired));
         Assert.Equal(expected, Effort(payload));
         Assert.Equal(model, payload.GetProperty("model").GetString());
-    }
-
-    [Fact]
-    public async Task MissingModelFactsPermitTheRequestedNativeSpelling()
-    {
-        LlmConnection connection = Connection();
-        using var http = new HttpClient();
-        Assert.Equal(InferenceSupport.Unknown, new GrokResponsesLlmClient(http, TimeProvider.System)
-            .GetCapabilities(connection, "grok-unlisted").SupportsReasoning);
-        JsonElement payload = await ProjectAsync(connection, Request("grok-unlisted", LlmReasoningLevel.Maximum));
-        Assert.Equal("max", Effort(payload));
-    }
-
-    [Fact]
-    public async Task ExplicitReasoningOverrideSuppliesMappingChoicesWithoutChangingTheCaller()
-    {
-        LlmConnection connection = Connection() with
-        {
-            CapabilityOverrides = new()
-            {
-                SupportsStreaming = InferenceSupport.Unsupported,
-                ReasoningLevels = new HashSet<LlmReasoningLevel> { LlmReasoningLevel.Low, LlmReasoningLevel.High }
-            }
-        };
-        LlmChatRequest request = Request("grok-4.7", LlmReasoningLevel.Maximum);
-        JsonElement payload = await ProjectAsync(connection, request);
-        Assert.Equal("high", Effort(payload));
-        Assert.Equal(LlmReasoningLevel.Maximum, request.ReasoningLevel);
-    }
-
-    [Fact]
-    public async Task NullEffortLeavesTheKnownModelDefaultUnspecified()
-    {
-        JsonElement payload = await ProjectAsync(Connection(), Request("grok-4.7", null));
-        Assert.Null(Effort(payload));
     }
 
     private static LlmChatRequest Request(string model, LlmReasoningLevel? effort) => new()

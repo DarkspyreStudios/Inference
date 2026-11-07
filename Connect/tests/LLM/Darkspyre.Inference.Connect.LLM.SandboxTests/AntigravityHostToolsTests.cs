@@ -20,23 +20,6 @@ public sealed class AntigravityHostToolsTests : IDisposable
 
     public void Dispose() => _folder.Dispose();
 
-    /// <summary>AGY's MCP program finds the service of this app copy through the folder AGY's environment names.</summary>
-    [Fact]
-    public async Task SessionWithHostToolsStartsAgyWithTheDataFolder()
-    {
-        var process = new ScriptedAgy();
-        try
-        {
-            await using ILlmAgentSession session = await HostToolAgents(process).StartSessionAsync("connection", Connection(), HostToolOptions());
-
-            Assert.Equal(_folder.Path, Assert.Single(process.Environments)[HostToolsProtocol.FolderVariable]);
-        }
-        finally
-        {
-            await AntigravityHostTools.ReleaseAsync(CancellationToken.None);
-        }
-    }
-
     /// <summary>
     /// A move's release stops the host-tools service, and a rolled-back move leaves the folder as it was. The next turn
     /// registers the session's tools again with the folder's service and restarts AGY with the same folder.

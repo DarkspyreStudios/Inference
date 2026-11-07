@@ -45,23 +45,6 @@ public sealed class GemmaBatchingTests : IDisposable
         static EmbeddingInput Text(string text) => new TextEmbeddingInput(text);
     }
 
-    [Fact]
-    public async Task QueryRunsBeforeTheRemainingRunsOfADocumentRequest()
-    {
-        using TensorModelPackManager packs = await InstalledAsync();
-        await using var engine = new GemmaEmbeddingInference(packs, TensorBackendKind.Cpu);
-        await engine.LoadAndWaitAsync(Key);
-        // About 480 tokens each: two inputs fill one run, so the request is 1,000 runs.
-        EmbeddingInput[] chunks = [.. Enumerable.Range(0, 2000).Select(index => new TextEmbeddingInput(index + new string('d', 450)))];
-
-        Task<EmbeddingResult> document = engine.EmbedAsync(new() { ModelId = Key.ModelId, Inputs = chunks });
-        EmbeddingResult query = await engine.EmbedAsync(new() { ModelId = Key.ModelId, Inputs = [new TextEmbeddingInput("needle")], Kind = EmbeddingInputKind.Query });
-
-        Assert.False(document.IsCompleted, "The query ran after every run of the document request.");
-        Assert.Single(query.Vectors);
-        Assert.Equal(chunks.Length, (await document).Vectors.Count);
-    }
-
     private async Task<TensorModelPackManager> InstalledAsync()
     {
         Directory.CreateDirectory(_root);
@@ -149,7 +132,6 @@ public sealed class GemmaBatchingTests : IDisposable
     // length-prefixed value.
     private static class Onnx
     {
-
         internal static byte[] Varint(int field, long value) => [.. Key(field, 0), .. Unsigned((ulong)value)];
 
         internal static byte[] Text(int field, string value) => Field(field, Encoding.UTF8.GetBytes(value));

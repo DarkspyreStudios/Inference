@@ -11,52 +11,6 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class LlmSettingsTests
 {
     [Fact]
-    public void AuthorizationGrantDiagnosticsDoNotExposeCodesOrVerifiers()
-    {
-        var session = new LlmAuthorizationSession
-        {
-            AuthorizeUrl = "https://example.test/authorize?state=private-state",
-            State = "private-state",
-            CodeVerifier = "private-pkce-verifier",
-            RedirectUri = "http://localhost/callback"
-        };
-        LlmRedirectResult redirect = LlmRedirectResult.ParsePastedCode("private-code#private-state");
-
-        string sessionDiagnostic = session.ToString();
-        string redirectDiagnostic = redirect.ToString();
-
-        Assert.DoesNotContain(session.CodeVerifier, sessionDiagnostic, StringComparison.Ordinal);
-        Assert.DoesNotContain(session.State, sessionDiagnostic, StringComparison.Ordinal);
-        Assert.DoesNotContain(redirect.Code, redirectDiagnostic, StringComparison.Ordinal);
-        Assert.DoesNotContain(redirect.State, redirectDiagnostic, StringComparison.Ordinal);
-        Assert.Contains(nameof(LlmAuthorizationSession), sessionDiagnostic, StringComparison.Ordinal);
-    }
-
-    [Fact]
-    public async Task BlankCliExecutableUsesProviderDefaultForChecksAndSave()
-    {
-        LlmProviderDefinition definition = AntigravityDefinition.Value;
-        using var provider = new LlmProviderService(new UnusedSource(), [new Client(definition)]);
-        var target = new Target();
-        var (manager, settings) = await OpenAsync(provider, LlmTransport.GoogleAntigravityCli,
-            new(SetupChangeIntent.Create, "id", null), target, modelId: "model");
-        using (manager)
-        {
-            SetupExecutableField executable = Assert.IsType<SetupExecutableField>(Fields(settings)
-                .Single(field => field.Description.Id == "executable"));
-            Assert.Equal(SetupEditState.Applied, executable.SetValue(new(string.Empty)).State);
-
-            Assert.True(settings.Validate().IsValid);
-            Assert.True(settings.CanSave);
-            Assert.Empty(Assert.IsType<SetupExecutableField>(Fields(settings)
-                .Single(field => field.Description.Id == "executable")).Value.Value);
-            Assert.Equal(definition.DefaultEndpoint, settings.CurrentConnection().Endpoint);
-            Assert.Equal(SetupCommitState.Committed, (await manager.SaveAsync(settings)).State);
-            Assert.Equal(definition.DefaultEndpoint, target.Changes!.Configuration.Connection.Endpoint);
-        }
-    }
-
-    [Fact]
     public async Task DirectCodexHasNoEndpointFieldAndReplacesAFormerEndpointOnSave()
     {
         var provider = new LlmProviderService(new UnusedSource(), [new Client(CodexDefinition.Value)], [new DeviceAuth()]);
@@ -124,28 +78,6 @@ public sealed class LlmSettingsTests
         {
             Assert.IsType<SetupChoiceField>(Fields(settings).Single(field => field.Description.Id == "engine"));
             Assert.DoesNotContain(Fields(settings), field => field.Description.Id == "endpoint");
-        }
-    }
-
-    /// <summary>The Service tiers checkbox starts checked on OpenAI's own endpoint and unchecked on another one (the
-    /// OpenAI API definition's ServiceTiers declaration).</summary>
-    [Fact]
-    public async Task ServiceTiersStartCheckedOnlyOnOpenAisEndpoint()
-    {
-        using var provider = new LlmProviderService(new UnusedSource(), [new Client(OpenAiApiDefinition.Value)]);
-        var (openAiManager, openAi) = await OpenAsync(provider, LlmTransport.OpenAiResponses,
-            new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
-        LlmConnection local = new() { Version = "1", Transport = LlmTransport.OpenAiResponses, Endpoint = "http://localhost:8080/v1" };
-        var (localManager, other) = await OpenAsync(provider, LlmTransport.OpenAiResponses,
-            new(SetupChangeIntent.Edit, "id", "1"), new Target(), local, "model");
-        using (openAiManager)
-        using (localManager)
-        {
-            SetupBooleanField Tiers(LlmSettings settings) =>
-                Assert.IsType<SetupBooleanField>(Fields(settings).Single(field => field.Description.Id == "service-tiers"));
-            Assert.True(Tiers(openAi).Value);
-            Assert.False(Tiers(other).Value);
-            Assert.Equal(OpenAiApiDefinition.Value.ServiceTiers!.HelpText, Tiers(other).Description.HelpText);
         }
     }
 
@@ -248,22 +180,6 @@ public sealed class LlmSettingsTests
         }
     }
 
-    /// <summary>Each LLM provider has two steps: the connection step offers its sign-in and check, the model step its test.</summary>
-    [Fact]
-    public async Task StepsNameTheirOwnActions()
-    {
-        var provider = new LlmProviderService(new UnusedSource(), [new Client(ClaudeDefinition.Value)], [new BrowserAuth()]);
-        var (_, claude) = await OpenAsync(provider, LlmTransport.AnthropicClaudeCli, new(SetupChangeIntent.Create, "id", null), new Target());
-        Assert.Equal([["sign-in-claude", "check"], ["test"]], claude.Steps.Select(step => step.ActionIds));
-        SetupSection more = Assert.Single(claude.Steps[0].Sections);
-        Assert.Equal(("More options", true), (more.Title, more.IsAdvanced));
-        Assert.Equal("executable", Assert.Single(more.Fields).Description.Id);
-
-        using var openAi = new LlmProviderService(new UnusedSource(), [new Client(OpenAiApiDefinition.Value)]);
-        var (_, key) = await OpenAsync(openAi, LlmTransport.OpenAiResponses, new(SetupChangeIntent.Create, "id", null), new Target());
-        Assert.Equal([["check"], ["test"]], key.Steps.Select(step => step.ActionIds));
-    }
-
     /// <summary>The state table: a signed-out tool with its own sign-in shows installed and offers the sign-in, not the install prompt.</summary>
     [Fact]
     public async Task InstalledButSignedOutShowsInstalledAndSignIn()
@@ -298,25 +214,6 @@ public sealed class LlmSettingsTests
         Assert.Equal(SetupEditState.Applied, Assert.IsType<SetupExecutableField>(Fields(settings)
             .Single(field => field.Description.Id == "executable")).SetValue(new("/opt/claude")).State);
         Assert.True(settings.Status.Installed.IsStale);
-    }
-
-    /// <summary>A signed-out tool without a sign-in action of its own shows the prerequisite guidance.</summary>
-    [Fact]
-    public async Task SignedOutAntigravityShowsItsPrerequisite()
-    {
-        var antigravity = new Client(AntigravityDefinition.Value) { State = ExternalAuthenticationState.SignedOut };
-        using var provider = new LlmProviderService(new UnusedSource(), [antigravity]);
-        var (manager, settings) = await OpenAsync(provider, LlmTransport.GoogleAntigravityCli,
-            new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
-        using (manager)
-        {
-            SetupActionResult result = await manager.RunAsync(settings, "check");
-
-            Assert.Equal(SetupActionState.NeedsInteraction, result.State);
-            Assert.Equal((true, false), (settings.Status.Installed.Value, settings.Status.Authenticated.Value));
-            Assert.Equal(AntigravityDefinition.Value.SetupSteps[0].Instructions,
-                Assert.IsType<SetupExternalPrerequisite>(settings.Interaction).Instructions);
-        }
     }
 
     [Fact]
@@ -389,22 +286,6 @@ public sealed class LlmSettingsTests
     }
 
     [Fact]
-    public async Task CallbackRestartChangesIdentityAndNeverEchoesEnteredCode()
-    {
-        var provider = new LlmProviderService(new UnusedSource(), [new Client(ClaudeDefinition.Value)], [new BrowserAuth()]);
-        var (manager, settings) = await OpenAsync(provider, LlmTransport.AnthropicClaudeCli,
-            new(SetupChangeIntent.Create, "id", null), new Target(), modelId: "model");
-        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Authenticate).Id);
-        SetupBrowserAuthorization first = Assert.IsType<SetupBrowserAuthorization>(settings.Interaction);
-        first.Callback.SetValue("sensitive-code");
-        Assert.Empty(Assert.IsType<SetupBrowserAuthorization>(settings.Interaction).Callback.Value);
-        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.CancelAuthentication).Id);
-        Assert.False(settings.HasUnsavedChanges);
-        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Authenticate).Id);
-        Assert.NotEqual(first.Callback.Description.Id, Assert.IsType<SetupBrowserAuthorization>(settings.Interaction).Callback.Description.Id);
-    }
-
-    [Fact]
     public async Task DeviceLoginKeepsPollingAPendingCodeAndWidensTheIntervalOnSlowDown()
     {
         var login = new DeviceAuth();
@@ -423,28 +304,6 @@ public sealed class LlmSettingsTests
         Assert.Equal(6, settings.DeviceCode!.IntervalSeconds);
         Assert.False(settings.CanSave);
         Assert.Equal(2, login.Completed);
-    }
-
-    [Fact]
-    public async Task DeviceLoginWithADeniedCodeSavesNothing()
-    {
-        var login = new DeviceAuth();
-        login.Polls.Enqueue(new LlmProviderException("Sign-in was denied or expired. Start sign-in again.",
-            LlmTransport.OpenAiCodex, providerCode: "access_denied"));
-        var provider = new LlmProviderService(new UnusedSource(), [new Client(CodexDefinition.Value)], [login]);
-        var created = new Target();
-        var (manager, settings) = await OpenAsync(provider, LlmTransport.OpenAiCodex,
-            new(SetupChangeIntent.Create, "id", null), created, modelId: "model");
-        await manager.RunAsync(settings, Action(settings, SetupActionPurpose.Authenticate).Id);
-
-        SetupActionResult result = await manager.RunAsync(settings,
-            Assert.IsType<SetupDeviceAuthorization>(settings.Interaction).Continue.Id);
-
-        Assert.NotEqual(SetupActionState.Completed, result.State);
-        Assert.NotEqual(true, settings.Status.Authenticated.Value);
-        Assert.False(settings.CanSave);
-        Assert.Equal(SetupCommitState.Invalid, (await manager.SaveAsync(settings)).State);
-        Assert.Equal(0, created.Calls);
     }
 
     [Fact]

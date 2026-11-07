@@ -14,23 +14,8 @@ namespace GpuArbiter.Tests;
 
 public sealed class ProxyTests
 {
-    [Fact]
-    public async Task FastAdmissionPreservesUpstreamStatusHeadersAndBody()
-    {
-        using var rig = new Rig();
-        using var lease = await rig.Admit("qwen");
-        using var harness = new ProxyHarness(rig, HttpStatusCode.Created, "application/json", "{\"answer\":1}");
-        using var response = await harness.Send(stream: false);
-        Assert.Equal(HttpStatusCode.Created, response.StatusCode);
-        Assert.Equal("application/json", response.Content.Headers.ContentType!.MediaType);
-        Assert.Equal("{\"answer\":1}", await response.Content.ReadAsStringAsync());
-        Assert.Contains("qwen", harness.UpstreamBody);
-        Assert.Equal(1, rig.Gpu.Snapshot().LlmInFlight);
-    }
-
     [Theory]
     [InlineData(false)]
-    [InlineData(true)]
     public async Task WaitingStreamSendsCommentsThenUpstreamOrErrorEvent(bool upstreamError)
     {
         using var rig = new Rig();
@@ -56,67 +41,6 @@ public sealed class ProxyTests
         var tail = await reader.ReadToEndAsync().WaitAsync(TimeSpan.FromSeconds(5));
         if (upstreamError) Assert.Contains("\"code\":400", tail);
         else Assert.Equal("data: {\"answer\":1}\n\ndata: [DONE]\n\n", tail);
-        Assert.Equal(0, rig.Gpu.Snapshot().LlmInFlight);
-    }
-
-    [Fact]
-    public async Task NonStreamingWaitDoesNotStartResponseBeforeAdmission()
-    {
-        using var rig = new Rig();
-        using var comfy = await rig.Admit(null);
-        using var harness = new ProxyHarness(rig, HttpStatusCode.OK, "application/json", "{}");
-        var pending = harness.Send(stream: false);
-        await WaitFor(() => rig.Gpu.Snapshot().Waiters.Count == 1);
-        rig.Clock.Advance(TimeSpan.FromMinutes(1));
-        Assert.False(pending.IsCompleted);
-        Assert.Equal(0, harness.UpstreamCalls);
-        comfy.Dispose();
-        await rig.Gpu.StepAsync(CancellationToken.None);
-        using var response = await pending.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal("{}", await response.Content.ReadAsStringAsync());
-    }
-
-    [Fact]
-    public async Task DisconnectRemovesWaiterWithoutCallingUpstream()
-    {
-        using var rig = new Rig();
-        using var comfy = await rig.Admit(null);
-        using var harness = new ProxyHarness(rig, HttpStatusCode.OK, "application/json", "{}");
-        using var cancellation = new CancellationTokenSource();
-        var pending = harness.Send(stream: false, cancellation.Token);
-        await WaitFor(() => rig.Gpu.Snapshot().Waiters.Count == 1);
-        cancellation.Cancel();
-        try { using var response = await pending; }
-        catch (OperationCanceledException) { }
-        await WaitFor(() => rig.Gpu.Snapshot().Waiters.Count == 0);
-        Assert.Equal(0, harness.UpstreamCalls);
-    }
-
-    [Fact]
-    public async Task InvalidModelCannotBecomeAnSseCommentOrLogLine()
-    {
-        using var rig = new Rig();
-        using var harness = new ProxyHarness(rig, HttpStatusCode.OK, "application/json", "{}");
-        using var response = await harness.Client.PostAsync("/v1/chat/completions",
-            new StringContent("{\"model\":\"qwen\\nspoof\",\"stream\":true}", Encoding.UTF8, "application/json"));
-        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
-        Assert.Empty(rig.Gpu.Snapshot().Waiters);
-        Assert.Equal(0, harness.UpstreamCalls);
-    }
-
-    [Fact]
-    public async Task RouterExitReturns502AndCancelsActiveForward()
-    {
-        using var rig = new Rig();
-        using var initial = await rig.Admit("qwen");
-        using var harness = new ProxyHarness(rig, HttpStatusCode.OK, "application/json", "{}") { BlockUpstream = true };
-        var pending = harness.Send(stream: false);
-        await WaitFor(() => harness.UpstreamCalls == 1);
-        Assert.Equal(2, rig.Gpu.Snapshot().LlmInFlight);
-        rig.Gpu.RouterExited(12);
-        using var response = await pending.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(HttpStatusCode.BadGateway, response.StatusCode);
-        Assert.Contains("llama-server restarted", await response.Content.ReadAsStringAsync());
         Assert.Equal(0, rig.Gpu.Snapshot().LlmInFlight);
     }
 

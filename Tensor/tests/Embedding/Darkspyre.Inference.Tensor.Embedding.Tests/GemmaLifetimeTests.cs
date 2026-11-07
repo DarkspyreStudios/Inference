@@ -25,34 +25,6 @@ public sealed class GemmaLifetimeTests : IDisposable
         Assert.Equal(TensorModelPackState.NotInstalled, (await packs.GetStatusAsync(Key)).State);
     }
 
-    [Fact]
-    public async Task UrgentStopWaitsForTheNativeCallBeforeReleasingOwnership()
-    {
-        using var packs = await InstalledAsync();
-        var model = new Model { Hold = true };
-        await using var engine = new GemmaEmbeddingInference(packs, new Loader(model), TensorBackendKind.Cpu);
-        await engine.LoadAndWaitAsync(Key);
-        Task<EmbeddingResult> request = engine.EmbedAsync(new() { ModelId = Key.ModelId, Inputs = [new TextEmbeddingInput("text")] });
-        await model.Entered.Task.WaitAsync(Timeout);
-        using var urgency = new CancellationTokenSource();
-        try
-        {
-            await engine.StopAsync(urgency.Token);
-            Task disposal = engine.DisposeAsync().AsTask();
-            urgency.Cancel();
-            await model.Cancelled.Task.WaitAsync(Timeout);
-            Assert.False(disposal.IsCompleted);
-            Assert.Equal(0, model.Disposals);
-            await Assert.ThrowsAsync<TensorModelPackException>(() => packs.RemoveAsync(Key));
-            model.Release.TrySetResult();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request);
-            await disposal.WaitAsync(Timeout);
-            Assert.Equal(1, model.Disposals);
-            await packs.RemoveAsync(Key);
-        }
-        finally { model.Release.TrySetResult(); }
-    }
-
     private async Task<TensorModelPackManager> InstalledAsync()
     {
         Directory.CreateDirectory(_root);

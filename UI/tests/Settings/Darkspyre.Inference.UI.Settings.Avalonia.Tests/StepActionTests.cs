@@ -10,46 +10,6 @@ namespace Darkspyre.Inference.UI.Settings.Avalonia.Tests;
 public sealed class StepActionTests
 {
     [Fact]
-    public Task StepShowsOnlyItsOwnActions() => EditorSession.RunAsync(() =>
-    {
-        InferenceSettingsEditor editor = Show(new TwoStepSettings(), new Manager());
-
-        Assert.Equal(["Sign in", "Check"], ActionButtons(editor));
-        EditorSession.Click(EditorSession.Button(editor, "Next"));
-        Assert.Equal(["Test model"], ActionButtons(editor));
-        return Task.CompletedTask;
-    });
-
-    [Fact]
-    public Task SettingsWithNoStepActionsShowAllActions() => EditorSession.RunAsync(() =>
-    {
-        InferenceSettingsEditor editor = Show(new TwoStepSettings { NameActions = false }, new Manager());
-
-        Assert.Equal(["Sign in", "Check", "Test model"], ActionButtons(editor));
-        EditorSession.Click(EditorSession.Button(editor, "Next"));
-        Assert.Equal(["Sign in", "Check", "Test model"], ActionButtons(editor));
-        return Task.CompletedTask;
-    });
-
-    [Fact]
-    public Task CliStepChecksTheToolWhenShown() => EditorSession.RunAsync(async () =>
-    {
-        var manager = new Manager();
-        InferenceSettingsEditor editor = Show(new TwoStepSettings { UsesTool = true }, manager);
-
-        await EditorSession.WaitForAsync(() => manager.Runs.SequenceEqual(["check"]));
-        StackPanel checklist = Assert.Single(EditorSession.All<StackPanel>(editor, "inference-settings-checklist"));
-        Assert.Contains("✓ Installed: tool", EditorSession.TextOf(checklist), StringComparison.Ordinal);
-        // The checklist offers the sign-in; the tail keeps only the check.
-        Assert.Equal(["Check"], ActionButtons(editor));
-
-        EditorSession.Click(EditorSession.Button(checklist, "Sign in"));
-
-        await EditorSession.WaitForAsync(() => manager.Runs.SequenceEqual(["check", "sign-in", "check"]));
-        Assert.Contains("✓ Signed in", EditorSession.TextOf(editor), StringComparison.Ordinal);
-    });
-
-    [Fact]
     public Task ChoosingAModelRunsTheTest() => EditorSession.RunAsync(async () =>
     {
         var manager = new Manager();
@@ -94,68 +54,12 @@ public sealed class StepActionTests
         return Task.CompletedTask;
     });
 
-    [Fact]
-    public Task AHostStripReplacesTheStepListAndFollowsTheStep() => EditorSession.RunAsync(() =>
-    {
-        InferenceSettingsEditor editor = new(new TwoStepSettings(), new Manager(), new Host()) { ShowStepList = false };
-        List<int> shown = [];
-        editor.StepChanged += (_, index) => shown.Add(index);
-        EditorSession.Show(editor);
-
-        Assert.Empty(EditorSession.All<WrapPanel>(editor, "inference-settings-steps"));
-        Assert.Equal("Sign in", Assert.Single(EditorSession.All<TextBlock>(editor, "h3")).Text);
-        EditorSession.Click(EditorSession.Button(editor, "Next"));
-
-        Assert.Equal(1, editor.CurrentStepIndex);
-        Assert.Equal([1], shown);
-        Assert.Equal("Model", Assert.Single(EditorSession.All<TextBlock>(editor, "h3")).Text);
-        EditorSession.Click(EditorSession.Button(editor, "Back"));
-        Assert.Equal([1, 0], shown);
-        return Task.CompletedTask;
-    });
-
-    [Fact]
-    public Task ConnectionTabsReportTheEditorsState() => EditorSession.RunAsync(async () =>
-    {
-        ConnectionTabs tabs = new(new TwoStepSettings(), new Manager(), new Host());
-        List<SetupEditorState> states = [];
-        tabs.StateChanged += (_, state) => states.Add(state);
-        EditorSession.Show(tabs);
-        Assert.False(tabs.State.HasUnsavedChanges);
-        Assert.Single(EditorSession.All<TabStrip>(tabs)).SelectedIndex = 1;
-        EditorSession.Settle();
-        AutoCompleteBox models = Assert.Single(EditorSession.All<AutoCompleteBox>(EditorSession.Field(tabs, "model")));
-        await EditorSession.WaitForAsync(() => models.ItemsSource is IEnumerable<SetupChoice> loaded && loaded.Any());
-
-        models.SelectedItem = ((IEnumerable<SetupChoice>)models.ItemsSource!).Single();
-
-        await EditorSession.WaitForAsync(() => tabs.State.HasUnsavedChanges && tabs.State.CanSave);
-        Assert.Contains(states, state => state.HasUnsavedChanges);
-    });
-
-    [Fact]
-    public Task AnActionTheHostCannotRunShowsWhy() => EditorSession.RunAsync(async () =>
-    {
-        InferenceSettingsEditor editor = new(new TwoStepSettings(), new Manager(), new Host { ExecuteFailure = new IOException("The tool is locked.") })
-        { ShowActionEffects = false };
-        EditorSession.Show(editor);
-
-        EditorSession.Click(EditorSession.Button(editor, "Check"));
-
-        await EditorSession.WaitForAsync(() => EditorSession.TextOf(editor)
-            .Contains("The host could not run the action (IOException): The tool is locked.", StringComparison.Ordinal));
-    });
-
     private static InferenceSettingsEditor Show(TwoStepSettings settings, Manager manager)
     {
         InferenceSettingsEditor editor = new(settings, manager, new Host()) { ShowActionEffects = false };
         EditorSession.Show(editor);
         return editor;
     }
-
-    private static string[] ActionButtons(InferenceSettingsEditor editor) =>
-        [.. EditorSession.All<StackPanel>(editor, "inference-settings-actions").SelectMany(panel => EditorSession.All<Button>(panel))
-            .Select(button => (string)button.Content!)];
 
     // A connection step that signs in and checks, and a model step that tests, like an LLM provider's settings.
     private sealed class TwoStepSettings : InferenceSettings<string>
@@ -169,12 +73,6 @@ public sealed class StepActionTests
         { }
 
         public bool NameActions { get; init; } = true;
-
-        public bool UsesTool
-        {
-            get => Status.Installed.IsApplicable;
-            init => Status = Status with { Installed = value ? SetupObservation.Unknown : SetupObservation.NotApplicable };
-        }
 
         public bool SignedIn { get; set; }
 

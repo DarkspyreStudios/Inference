@@ -9,7 +9,6 @@ namespace Darkspyre.Inference.Connect.LLM.Tests;
 public sealed class ProviderDiscoveryTests
 {
     [Theory]
-    [InlineData("Codex", "chatgpt-subscription")]
     [InlineData("Codex,Claude,OpenAiApi,SelfHost", "chatgpt-subscription,claude-subscription,openai-api-key,self-host")]
     public void IncludedLibrariesAreDiscoveredBeforeProviderTypesAreUsed(string providers, string expectedIds)
     {

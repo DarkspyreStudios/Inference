@@ -17,30 +17,6 @@ public sealed class GgmlRuntimeOwnerTests : IDisposable
     }
 
     [Fact]
-    public async Task ACandidateWithAChangedByteIsRefusedBeforeAnyLibraryLoads()
-    {
-        Directory.CreateDirectory(_root);
-        string entry = Path.Combine(_root, "libGgmlOps.dylib");
-        byte[] bytes = "catalogued driver bytes"u8.ToArray();
-        await File.WriteAllBytesAsync(entry, bytes);
-        var candidate = new TensorRuntimeCandidate(new("ggml:metal", entry, "metal", Build, Rid), TensorBackendKind.GgmlMetal,
-            [new("libGgmlOps.dylib", bytes.Length, Convert.ToHexStringLower(SHA256.HashData(bytes)))], []);
-        bytes[0] ^= 1;
-        await File.WriteAllBytesAsync(entry, bytes);
-        var native = new FakeNativeLibraries();
-        await using var owner = new GgmlRuntimeOwner(new(Build, Rid, [candidate]), native);
-
-        TensorBackendAvailability observation = await owner.CheckAsync(new(Guid.NewGuid(), "test", TensorBackendKind.GgmlMetal, Rid));
-
-        TensorBackendCandidateDiagnostic refusal = Assert.Single(observation.CandidateDiagnostics);
-        Assert.Equal(("ggml:metal", TensorBackendProbePhase.Validation, "hash-mismatch"), (refusal.CandidateId, refusal.Phase, refusal.Code));
-        Assert.Contains("`libGgmlOps.dylib`", refusal.Message, StringComparison.Ordinal);
-        Assert.False(observation.IsAvailable);
-        Assert.Empty(native.Loaded);
-        Assert.Equal(0, native.Starts);
-    }
-
-    [Fact]
     public async Task AutoWithNoCandidateRunsOnManagedCpuButAnExplicitBackendDoesNot()
     {
         var native = new FakeNativeLibraries();

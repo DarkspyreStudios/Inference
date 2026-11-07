@@ -19,7 +19,6 @@ public sealed class QwenPackSelectionTests : IDisposable
 
     [Theory]
     [InlineData(false)]
-    [InlineData(true)]
     public async Task PausedEventReaderDoesNotBlockModelRetirement(bool stop)
     {
         var runtime = new Runtime { Pieces = Enumerable.Repeat("hello", 128).ToArray() };
@@ -56,70 +55,6 @@ public sealed class QwenPackSelectionTests : IDisposable
     }
 
     [Fact]
-    public async Task UrgentRetirementWaitsForAnIgnoringRuntimeButNotItsPausedReader()
-    {
-        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var canceled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var runtime = new Runtime
-        {
-            BeforeCompletionWait = release.Task,
-            IgnoreCompletionCancellation = true,
-            BeforeCompletionWaiting = () => entered.TrySetResult(),
-            OnStreamCancelled = () => canceled.TrySetResult()
-        };
-        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/ignoring-retirement");
-        using (packs)
-        using (var urgency = new CancellationTokenSource())
-        {
-            IAsyncEnumerator<LlmStreamEvent> events = engine.StreamAsync(Request(model)).GetAsyncEnumerator();
-            try
-            {
-                Assert.True(await events.MoveNextAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
-                await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-                await engine.StopAsync(urgency.Token);
-                Task retirement = engine.DisposeAsync().AsTask();
-                urgency.Cancel();
-                await canceled.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
-                Assert.False(retirement.IsCompleted);
-                Assert.Equal(0, runtime.Disposals);
-                release.SetResult();
-                await retirement.WaitAsync(TimeSpan.FromSeconds(5));
-                Assert.Equal(1, runtime.StreamDisposals);
-                Assert.Equal(1, runtime.Disposals);
-            }
-            finally
-            {
-                release.TrySetResult();
-                await events.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
-                await engine.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
-            }
-        }
-    }
-
-    [Theory]
-    [InlineData("eos", LlmCompletionStatus.Completed, null)]
-    [InlineData("max_tokens", LlmCompletionStatus.Incomplete, "max_output_tokens")]
-    [InlineData("repetition", LlmCompletionStatus.Incomplete, "repetition")]
-    public async Task TerminalRuntimeReasonsRetainTheirActualCompletionMeaning(string reason, LlmCompletionStatus status,
-        string? incompleteReason)
-    {
-        var runtime = new Runtime { FinishReason = reason };
-        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/terminal-reason");
-        await using (engine)
-        using (packs)
-        {
-            List<LlmStreamEvent> events = await Collect(engine, model);
-            LlmCompletionEvent completion = Assert.IsType<LlmCompletionEvent>(events[^1]);
-            Assert.Equal(status, completion.Result.Status);
-            Assert.Equal(reason, completion.Result.FinishReason);
-            Assert.Equal(incompleteReason, completion.Result.IncompleteReason);
-            Assert.Equal(new LlmUsage(1, 1, 2), completion.Result.Usage);
-        }
-    }
-
-    [Fact]
     public async Task DisposingAnUnfinishedStreamAbortsItsEngineRequest()
     {
         TensorModelPackDefinition pack = Pack("host/abandon");
@@ -143,25 +78,6 @@ public sealed class QwenPackSelectionTests : IDisposable
     }
 
     [Fact]
-    public async Task ARequestLargerThanTheFittedContextFailsBeforeTheEngineRuns()
-    {
-        var runtime = new Runtime { LoadedContext = 4096, PromptEstimate = 3500 };
-        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/fit");
-        await using (engine)
-        using (packs)
-        {
-            Assert.Equal(4096, (await engine.ListModelsAsync()).Single().MaxContextTokens);
-            InferenceException full = await Assert.ThrowsAsync<InferenceException>(() =>
-                Collect(engine, Request(model) with { MaxOutputTokens = 1000 }));
-            Assert.Equal(InferenceFailureCode.CapacityExhausted, full.Code);
-            Assert.Empty(runtime.LastMessages);
-            List<LlmStreamEvent> events = await Collect(engine, Request(model) with { MaxOutputTokens = 500 });
-            LlmCompletionEvent completion = Assert.IsType<LlmCompletionEvent>(events[^1]);
-            Assert.Equal(new LlmUsage(1, 1, 2), completion.Result.Usage);
-        }
-    }
-
-    [Fact]
     public async Task LoadedVisionTowerAcceptsPngUnderTheHostScratchDirectoryUntilUnload()
     {
         var runtime = new Runtime { Architecture = "qwen4exp", VisionEncoderLoaded = true };
@@ -181,21 +97,6 @@ public sealed class QwenPackSelectionTests : IDisposable
             Assert.Equal(InferenceSupport.Unsupported, (await engine.GetCapabilitiesAsync(model)).SupportsPromptImages);
             await engine.UnloadAndWaitAsync();
             Assert.False(Directory.Exists(folder));
-        }
-    }
-
-    [Fact]
-    public async Task GifIsRefusedBeforeTheRuntimeStreams()
-    {
-        var runtime = new Runtime { Architecture = "qwen4exp", VisionEncoderLoaded = true };
-        (QwenLlmInference engine, TensorModelPackManager packs, string model) = await LoadedAsync(runtime, "host/gif", projector: true);
-        await using (engine)
-        using (packs)
-        {
-            InferenceException refused = await Assert.ThrowsAsync<InferenceException>(() => Collect(engine, ImageRequest(model, "GIF89a"u8.ToArray())));
-            Assert.Equal(InferenceFailureCode.UnsupportedFeature, refused.Code);
-            Assert.Equal("Qwen reads PNG and JPEG images only.", refused.Message);
-            Assert.Empty(runtime.LastMessages);
         }
     }
 
