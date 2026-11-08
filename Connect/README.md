@@ -544,8 +544,10 @@ steps are summarized, so the result lands near the target and the turn's next st
 never starts after the turn's first protected entry. The summary is built from the earlier summary and the entries it
 replaces, and the new summary replaces both. The summary input cuts tool output the same way. Summary requests run on
 the conversation's own connection and model, one part at a time, each within half the usable window. Each part asks for
-750 to 3,000 words in proportion to its size and sets `MaxOutputTokens` to the word budget divided by 0.75, rounded up
-(about 1,000 to 4,000 tokens). The route's existing capability normalization drops an unsupported cap. This budget applies
+750 to 3,000 words in proportion to its size and sets `MaxOutputTokens` to twice the word budget divided by 0.75, rounded
+up (about 2,000 to 8,000 tokens). The doubling leaves room for text that takes more tokens per word than English prose,
+such as paths, identifiers and hashes, and for reasoning tokens, which a Responses route counts against the same cap. The
+route's existing capability normalization drops an unsupported cap. This budget applies
 only to summary requests; an ordinary turn's output cap remains the caller's choice. An `Incomplete`, `Failed` or `Refused`
 summary stops compaction without replacing the original context, including when the output cap ends the answer. Its usage
 and earlier completed parts' usage are retained. A summary request that runs past 10 minutes ends the compaction with
