@@ -547,8 +547,10 @@ the conversation's own connection and model, one part at a time, each within hal
 750 to 3,000 words in proportion to its size and sets `MaxOutputTokens` to twice the word budget divided by 0.75, rounded
 up (about 2,000 to 8,000 tokens). The doubling leaves room for text that takes more tokens per word than English prose,
 such as paths, identifiers and hashes, and for reasoning tokens, which a Responses route counts against the same cap. The
-route's existing capability normalization drops an unsupported cap. This budget applies
-only to summary requests; an ordinary turn's output cap remains the caller's choice. An `Incomplete`, `Failed` or `Refused`
+route's existing capability normalization drops an unsupported cap. Each summary requests `ReasoningLevel.None`.
+A route that accepts `None` disables reasoning. A model that cannot disable reasoning uses its lowest offered level
+through the existing capability normalization. This budget applies only to summary requests; an ordinary turn's output cap
+remains the caller's choice. An `Incomplete`, `Failed` or `Refused`
 summary stops compaction without replacing the original context, including when the output cap ends the answer. Its usage
 and earlier completed parts' usage are retained. A summary request that runs past 10 minutes ends the compaction with
 `Compaction stopped: a summary request of about {tokens} tokens did not finish within 10 minutes. The context is unchanged.`
