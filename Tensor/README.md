@@ -1,6 +1,6 @@
 # Darkspyre.Inference.Tensor
 
-Source package version **11.16.0-rc.1** uses the shared typed reasoning-level contract; Qwen supports `None` and `High`.
+Source package version **11.19.4** uses the shared typed reasoning-level contract; Qwen supports `None` and `High`.
 It includes Laya's CPU/GPU-only Core ML update and retains the ONNX and user-selected
 model-location/import contracts introduced in 11.4.0-rc.1.
 
@@ -460,7 +460,7 @@ the configuration and reconstruct registrations when composing the manager after
 does not perform that unload. Stop remains terminal, and an
 already-cancelled teardown action token reaches the engine as urgency rather than skipping cleanup.
 See the [shared editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md).
-These setup contracts use the synchronized source package version 11.16.0-rc.1, including
+These setup contracts use the synchronized source package version 11.19.4, including
 provider-owned dirty state and explicit choice capabilities for the shared Settings editor.
 
 `TensorJson` exports assembly-owned `JsonTypeInfo<T>` for `SetupConfiguration`, `SetupChanges`,
@@ -972,7 +972,7 @@ the Audio / SpeechTranscription task without provider-name renderer branches.
 
 ## Package dependency boundary
 
-Tensor depends on **Darkspyre.Inference.Common [11.16.0-rc.1]** and the upstream **TensorSharp.***
+Tensor depends on **Darkspyre.Inference.Common [11.19.4]** and the upstream **TensorSharp.***
 packages from nuget.org at `TensorSharpVersion` (**2026.10.11**), plus StbImageSharp for Gemma's
 image decoding. None of their DLLs is embedded in Tensor. TensorSharp loads model files from paths.
 Bounded metadata inspection is Tensor's own: `GgufHeader` in Tensor.Common and `SafetensorsHeader`

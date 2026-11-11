@@ -131,7 +131,7 @@ editor does not own the connection list, dialogs, routing, or any engine behind 
 
 ## Install
 
-Every package and its dependencies restore from nuget.org; no credentials are needed. The projects currently use the .NET 11 RC SDK pinned in each product's `global.json`.
+Every package and its dependencies restore from nuget.org; no credentials are needed. The projects use SDK 11.0.100 GA pinned in each product's `global.json`, with prerelease SDKs disabled.
 
 Install only the products your application needs, keeping their versions synchronized:
 Workspace builds consume sibling source projects. Package installation uses the synchronized family version.
@@ -376,7 +376,7 @@ dependencies, and a fresh package-only consumer.
 
 All library versions come from [Directory.Build.props](Directory.Build.props):
 `<net>.<release>.<minor>` means .NET generation, breaking-contract release, and compatible tweak/fix.
-The current `-rc.1` suffix reflects .NET 11 RC dependencies. Releases are coordinated and immutable.
+The current source version has no prerelease suffix and uses .NET 11 GA dependencies. Releases are coordinated and immutable.
 
 ### Source references for consumers
 

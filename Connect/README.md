@@ -1030,7 +1030,7 @@ The package also includes `Darkspyre.Inference.Connect.TTS` for external
 PocketTTS HTTP synthesis and `Darkspyre.Inference.Connect.Audio` for external TangoFlux generation.
 They are included in the Connect product project, not separate NuGets. See
 [PocketTTS integration](#pockettts-speech) and
-[TangoFlux integration](#tangoflux-audio). The coordinated source package version is **11.16.0-rc.1**.
+[TangoFlux integration](#tangoflux-audio). The coordinated source package version is **11.19.4**.
 
 The packages target .NET 11. Credentials
 for direct API transports remain owned by the host through `ILlmConnectionSource`; the connector
@@ -1471,8 +1471,8 @@ The cases match the Vertex probe; both commands run `GoogleProbe`. Calls are met
 | `Darkspyre.Inference.UI.Settings.Avalonia`, `.Blazor`, `.Core` | Host-placed Avalonia and Blazor editors using only Common setup contracts, and the UI-neutral pieces they share |
 
 Connect, Tensor and the UI.Settings packages depend on the exact synchronized Common NuGet; none carries
-another product's DLLs. The UI.Settings packages do not depend on Connect or Tensor. The release-candidate
-suffix reflects the .NET 11 RC ASP.NET dependency, including on the private package feed.
+another product's DLLs. The UI.Settings packages do not depend on Connect or Tensor. The current source family
+uses ASP.NET Core 11.0.0 GA and carries no prerelease version suffix.
 
 There is no `Darkspyre.Inference.Connect.Common` package or assembly. Connector-only endpoint,
 authentication, provider-management, and job contracts remain in their capability assemblies. Only
@@ -4209,7 +4209,7 @@ uncertain outcome requires readback first. The
 [generic editor example](../Common/examples/Darkspyre.Inference.Setup.Examples/README.md) compiles the
 same renderer against both Connect and Tensor. No UI framework is shipped in these packages.
 
-These contracts use the synchronized source package version 11.16.0-rc.1. The old LLM setup-input/action description
+These contracts use the synchronized source package version 11.19.4. The old LLM setup-input/action description
 types were replaced by Common setup contracts in the 11.3.0-rc.1 breaking-contract release.
 Settings objects carry provider-owned unsaved-change state, the current authentication interaction and
 explicit choice capabilities for the shared Settings editor.
