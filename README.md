@@ -20,7 +20,7 @@ directly without an HTTP bridge. A web service can host the same libraries and t
 into their typed contracts. In either case, the application owns startup, configuration, credentials,
 persistence, user consent, and shutdown.
 
-Current source package version: **11.19.4-rc.3**, targeting **.NET 11**.
+Current source package version: **11.19.4**, targeting **.NET 11**. The product SDK pins select .NET 11.0.100 GA and exclude prerelease SDKs.
 The library family is published on [nuget.org](https://www.nuget.org/profiles/darkspyre).
 Unimplemented provider capabilities remain unavailable; publishing their contracts does not enable them.
 Tensor uses the upstream TensorSharp packages from nuget.org at the version `TensorSharpVersion` in
