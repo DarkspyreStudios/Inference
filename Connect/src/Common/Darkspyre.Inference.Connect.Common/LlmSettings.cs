@@ -1,5 +1,6 @@
 using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.LLM;
+using Darkspyre.Inference.Common.Embedding;
 using Darkspyre.Inference.Connect.LLM.Providers;
 using Darkspyre.Inference.Connect.LLM.Internal;
 using Darkspyre.Inference.Common.Setup;
@@ -93,8 +94,11 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
     private sealed record ContextLengthRow(string Id, string? ModelId, long? Length);
 
     internal LlmSettings(LlmProviderDefinition definition, LlmTransport transport, SetupConfigurationIdentity identity,
-        LlmConnection? existing, string? modelId, ILlmSetupEnvironment? environment)
-        : base(definition.SetupDefinition, identity)
+        LlmConnection? existing, string? modelId, ILlmSetupEnvironment? environment, InferenceTask task)
+        : base(definition.SetupDefinition with
+        {
+            Implementation = new(definition.Id, definition.DisplayName, InferenceImplementationKind.Connect, task)
+        }, identity)
     {
         if ((identity.Intent == SetupChangeIntent.Edit) != (existing is not null)
             || (existing is not null && (existing.Transport != transport || existing.Version != identity.ExpectedVersion)))
@@ -102,6 +106,7 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             throw new ArgumentException("An edit requires the exact saved connection and version.", nameof(existing));
         }
         _definition = definition;
+        SetupTask = task;
         _hasEnvironment = environment is not null;
         _validateEnvironment = environment is null ? null : environment.Validate;
         _original = existing;
@@ -135,6 +140,9 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             Installed = ChecksExternalTool ? SetupObservation.Unknown : SetupObservation.NotApplicable
         };
     }
+
+    /// <summary>The task this setup operation tests; it is not persisted on the connection.</summary>
+    public InferenceTask SetupTask { get; }
 
     internal LlmTransport Transport => _draft.Transport;
 
@@ -681,9 +689,11 @@ public sealed partial class LlmSettings : InferenceSettings<LlmSetupChanges>
             SetupActionPurpose.CheckPrerequisites,
             UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesEngine ? SetupSideEffect.LocalVerification : SetupSideEffect.Network | (ChecksExternalTool ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
             ConnectionValidation().IsValid));
-        actions.Add(new("test", "Test selected model", SetupActionPurpose.Test,
-            UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesEngine ? SetupSideEffect.LocalVerification
-                : SetupSideEffect.Network | SetupSideEffect.PotentialBilling | (ChecksExternalTool ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
+        actions.Add(new("test", SetupTask == InferenceTask.Embedding ? "Test selected embedding model" : "Test selected text model", SetupActionPurpose.Test,
+            SetupTask == InferenceTask.Embedding
+                ? UsesEngine ? SetupSideEffect.LocalVerification : SetupSideEffect.Network | SetupSideEffect.PotentialBilling
+                : UsesApple ? SetupSideEffect.LocalVerification | SetupSideEffect.ExternalCli : UsesEngine ? SetupSideEffect.LocalVerification
+                    : SetupSideEffect.Network | SetupSideEffect.PotentialBilling | (ChecksExternalTool ? SetupSideEffect.ExternalCli : SetupSideEffect.None),
             ValidateDraft().IsValid));
         return actions.AsReadOnly();
     }
@@ -883,6 +893,8 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
 {
     private IReadOnlyDictionary<LlmTransport, ILlmClient>? _clients;
     private IReadOnlyList<ILlmAuthenticator>? _authenticators;
+    private IReadOnlyList<ILlmEmbeddingClient>? _embeddingClients;
+    private readonly InferenceTask _task;
     // AWS Bedrock, Google Vertex AI and Azure OpenAI use this; they are out of the build (Connect/src/LLM/Darkspyre.Inference.Connect.LLM.Bedrock,
     // .LLM.Vertex and .LLM.Azure, outside the solution). It moves into their own libraries when they return to the build.
     private IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment>? _environments;
@@ -891,11 +903,15 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
 
     internal LlmSettingsManager(IReadOnlyDictionary<LlmTransport, ILlmClient> clients, IEnumerable<ILlmAuthenticator> authenticators,
         IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment> environments, ISetupCommitTarget<LlmSetupChanges> target,
-        LlmAgentProviderService? agents = null)
+        InferenceTask task, IEnumerable<ILlmEmbeddingClient> embeddingClients, LlmAgentProviderService? agents = null)
         : base(target)
     {
+        if (task is not (InferenceTask.TextGeneration or InferenceTask.Embedding))
+            throw new ArgumentOutOfRangeException(nameof(task), task, "Setup task must be TextGeneration or Embedding.");
+        _task = task;
         _clients = clients;
         _authenticators = [.. authenticators];
+        _embeddingClients = [.. embeddingClients];
         _environments = environments;
         _agents = agents;
     }
@@ -911,7 +927,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         LlmTransport actualTransport = client.Transport;
         Fence(operation.Token);
         var settings = new LlmSettings(definition, actualTransport, identity, existing, modelId,
-            _environments!.GetValueOrDefault(transport));
+            _environments!.GetValueOrDefault(transport), _task);
         Fence(operation.Token);
         return Task.FromResult(settings);
     }
@@ -947,6 +963,8 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
     {
         Fence(cancellationToken);
         RuntimeInputAdmission.Validate(settings.CurrentConnection());
+        if (action.Id == "test" && settings.SetupTask == InferenceTask.Embedding)
+            return await TestEmbeddingAsync(settings, cancellationToken).ConfigureAwait(false);
         await using LlmProviderService service = Service(settings, cancellationToken);
         Fence(cancellationToken);
         switch (action.Id)
@@ -1176,6 +1194,25 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         };
     }
 
+    private async Task<SetupActionResult> TestEmbeddingAsync(LlmSettings settings, CancellationToken token)
+    {
+        Fence(token);
+        settings.Status = settings.Status with { Ready = SetupObservation.Unknown };
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
+        await using var service = new LlmEmbeddingProviderService(new SettingsSource(settings, this), _embeddingClients!, _authenticators!);
+        await service.EmbedAsync(settings.Identity.Id, new()
+        {
+            ModelId = settings.ModelId,
+            Inputs = [new TextEmbeddingInput("Embedding setup test.")],
+            Kind = EmbeddingInputKind.Document
+        }, token).ConfigureAwait(false);
+        Fence(token);
+        TimeSpan elapsed = System.Diagnostics.Stopwatch.GetElapsedTime(started);
+        settings.Status = settings.Status with { Ready = SetupObservation.Known(true), Verified = SetupObservation.Known(true) };
+        string name = settings.ModelNames.GetValueOrDefault(settings.ModelId) ?? settings.ModelId;
+        return new(SetupActionState.Completed) { Message = $"Embedding test succeeded for {name}.", Elapsed = elapsed };
+    }
+
     private ILlmClient Client(LlmTransport transport) => _clients!.TryGetValue(transport, out ILlmClient? client)
         ? client
         : throw new NotSupportedException($"No LLM client is registered for transport {transport}.");
@@ -1228,7 +1265,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
     public ValueTask DisposeAsync() => new(Retire());
     private Task Retire() => _lifetime.RetireAsync(() =>
     {
-        _clients = null; _authenticators = null; _environments = null;
+        _clients = null; _authenticators = null; _environments = null; _embeddingClients = null;
         Interlocked.Exchange(ref _agents, null);
         DetachCommitTarget();
         return Task.CompletedTask;

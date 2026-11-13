@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.LLM;
 
@@ -50,7 +51,7 @@ internal static class ConsoleSetup
     private static async Task<(LlmSettingsManager Manager, LlmSettings Settings)> OpenAsync(
         LlmProviderService service, ConsoleInvocation invocation, CancellationToken token)
     {
-        var manager = service.CreateSettingsManager(new UnsavedTarget());
+        var manager = service.CreateSettingsManager(new UnsavedTarget(), InferenceTask.TextGeneration);
         var settings = await manager.OpenAsync(invocation.Provider.Transport,
             new(SetupChangeIntent.Create, invocation.Provider.ConnectionId, null), cancellationToken: token);
         if (invocation.EndpointOverride is { } endpoint)

@@ -1,4 +1,6 @@
 using Darkspyre.Inference.Common;
+using System.Net;
+using System.Text.Json.Nodes;
 using System.Runtime.CompilerServices;
 using Darkspyre.Inference.Common.LLM;
 using Darkspyre.Inference.Common.Setup;
@@ -258,13 +260,55 @@ public sealed class LlmSettingsTests
             Assert.Equal(SetupActionState.Completed, result.State);
             Assert.Equal("Model answered \"OK\"", result.Message);
             Assert.NotNull(result.Elapsed);
+            Assert.Equal(InferenceTask.TextGeneration, settings.SetupTask);
+            Assert.Equal("Test selected text model", Action(settings, SetupActionPurpose.Test).DisplayName);
         }
+
+        using var handler = new DirectCodexTests.Handler(_ => new(HttpStatusCode.OK)
+        {
+            Content = new StringContent("""{"model":"model","data":[{"index":0,"embedding":[0.1,0.2]}]}""")
+        });
+        using var http = new HttpClient(handler);
+        var target = new Target();
+        LlmConnection saved = new()
+        {
+            Version = "v1", Transport = LlmTransport.OpenAiResponses, Endpoint = "https://saved.example/v1",
+            Credential = new LlmCredential { ApiKey = "saved-setup-key" }.Serialize()
+        };
+        await using var embeddingManager = provider.CreateSettingsManager(target, InferenceTask.Embedding, [new OpenAiEmbeddingClient(http)]);
+        LlmSettings embedding = await embeddingManager.OpenAsync(LlmTransport.OpenAiResponses,
+            new(SetupChangeIntent.Edit, "id", "v1"), saved, "model");
+        Assert.IsType<SetupUriField>(Fields(embedding).Single(field => field.Description.Id == "endpoint"))
+            .SetValue(new Uri("https://draft.example/v1"));
+        Assert.IsType<SetupSecretField>(Fields(embedding).Single(field => field.Description.Id == "api-key"))
+            .SetValue(SetupSecretEdit.Replace("draft-setup-key"));
+        await embeddingManager.QueryChoicesAsync(embedding, "model", new());
+        Assert.Equal(0, handler.Calls);
+        Assert.Equal(InferenceTask.Embedding, embedding.SetupTask);
+        SetupActionDescriptor test = Action(embedding, SetupActionPurpose.Test);
+        Assert.Equal("Test selected embedding model", test.DisplayName);
+        Assert.Equal(SetupSideEffect.Network | SetupSideEffect.PotentialBilling, test.SideEffects);
+
+        SetupActionResult embedded = await embeddingManager.RunAsync(embedding, test.Id);
+
+        Assert.Equal(SetupActionState.Completed, embedded.State);
+        Assert.Equal("Embedding test succeeded for Model.", embedded.Message);
+        Assert.NotNull(embedded.Elapsed);
+        Assert.Equal(true, embedding.Status.Ready.Value);
+        Assert.Equal(true, embedding.Status.Verified.Value);
+        Assert.Equal(1, handler.Calls);
+        Assert.Equal(HttpMethod.Post, handler.Method);
+        Assert.Equal("https://draft.example/v1/embeddings", handler.Uri!.AbsoluteUri);
+        Assert.Equal("Bearer draft-setup-key", handler.Headers["Authorization"]);
+        Assert.True(JsonNode.DeepEquals(JsonNode.Parse("""{"model":"model","input":["Embedding setup test."]}"""), JsonNode.Parse(handler.Body!)));
+        Assert.Equal(0, target.Calls);
+        Assert.Equal("https://saved.example/v1", saved.Endpoint);
     }
 
     private static async Task<(LlmSettingsManager Manager, LlmSettings Settings)> OpenAsync(LlmProviderService provider, LlmTransport transport,
         SetupConfigurationIdentity identity, Target target, LlmConnection? existing = null, string? modelId = null)
     {
-        LlmSettingsManager manager = provider.CreateSettingsManager(target);
+        LlmSettingsManager manager = provider.CreateSettingsManager(target, InferenceTask.TextGeneration);
         return (manager, await manager.OpenAsync(transport, identity, existing, modelId));
     }
     private static IEnumerable<SetupField> Fields(LlmSettings settings) => settings.Steps.SelectMany(step => step.Sections).SelectMany(section => section.Fields);

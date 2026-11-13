@@ -1,3 +1,4 @@
+using Darkspyre.Inference.Common;
 using Darkspyre.Inference.Common.Setup;
 using Darkspyre.Inference.Connect.Image;
 using Darkspyre.Inference.Connect.LLM;
@@ -26,7 +27,7 @@ public static class SetupCompositionExample
         // No network requests, model loads or installs occur here. Nothing reaches the host until Save.
         IReadOnlyList<TensorModelPackDefinition> definitions = await packs.GetDefinitionsAsync(cancellationToken).ConfigureAwait(false);
         var drafts = new List<SetupDraft>();
-        LlmSettingsManager llmManager = llms.CreateSettingsManager(llmTarget);
+        LlmSettingsManager llmManager = llms.CreateSettingsManager(llmTarget, InferenceTask.TextGeneration);
         foreach (LlmProviderDefinition provider in llms.SupportedProviders)
         {
             drafts.Add(new(llmManager, await llmManager.OpenAsync(provider.Transport, NewEntry(), cancellationToken: cancellationToken)

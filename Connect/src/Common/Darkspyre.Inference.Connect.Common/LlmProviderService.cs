@@ -137,13 +137,19 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
     public IReadOnlyList<Common.Setup.InferenceSetupDefinition> SetupDefinitions =>
         SupportedProviders.Select(provider => provider.SetupDefinition).ToArray();
 
-    /// <summary>Creates the settings manager that opens, acts on and saves LLM settings through <paramref name="target"/>.</summary>
+    /// <summary>Creates connection setup for the explicitly requested text-generation or embedding task.</summary>
+    /// <param name="target">The host-owned save target.</param>
+    /// <param name="task">TextGeneration or Embedding; never inferred from provider or model names.</param>
+    /// <param name="embeddingClients">Borrowed adapters used only by embedding tests. Null supplies none.</param>
+    /// <param name="agents">The optional text-agent setup dependency, from the same connection source.</param>
+    /// <gotcha>Embedding setup must supply an adapter for the selected transport. Purpose affects the draft only,
+    /// not its saved connection shape. Disposing the manager does not dispose supplied clients.</gotcha>
     public LlmSettingsManager CreateSettingsManager(Common.Setup.ISetupCommitTarget<LlmSetupChanges> target,
-        LlmAgentProviderService? agents = null)
+        InferenceTask task, IEnumerable<ILlmEmbeddingClient>? embeddingClients = null, LlmAgentProviderService? agents = null)
     {
         using var operation = _lifetime.Enter(CancellationToken.None);
         agents?.ValidateSource(Connections);
-        return new(_clients, _authenticators.Values, _setupEnvironments, target, agents);
+        return new(_clients, _authenticators.Values, _setupEnvironments, target, task, embeddingClients ?? [], agents);
     }
 
     /// <summary>

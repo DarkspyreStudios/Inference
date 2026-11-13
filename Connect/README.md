@@ -1063,7 +1063,7 @@ includes both the GitHub token and the separate runtime connection token.
 
 `LlmAgentProviderService.BindRuntimeAuthentication` exposes saved-ID and explicit draft/identity
 overloads. Both reject runtime authentication as unavailable before resolving a connection or
-starting login. `CreateSettingsManager(target, agents)` optionally borrows the agent facade from
+starting login. `CreateSettingsManager(target, InferenceTask.TextGeneration, agents: agents)` optionally borrows the agent facade from
 the same connection source. The settings manager fences new actions, choices, opens and saves
 when retirement starts, drains admitted calls, then drops borrowed collaborators and its commit
 target. It never disposes them. A save that settles during retirement retains its actual commit
@@ -3762,7 +3762,7 @@ field reports `{definition id}-sign-in-required` until the sign-in completes. `L
 the same declarations: a device-code sign-in, or the command-line tool's check.
 
 ```csharp
-LlmSettingsManager manager = llms.CreateSettingsManager(hostCommitTarget);
+LlmSettingsManager manager = llms.CreateSettingsManager(hostCommitTarget, InferenceTask.TextGeneration);
 LlmSettings settings = await manager.OpenAsync(
     LlmTransport.OpenAiResponses,
     new SetupConfigurationIdentity(SetupChangeIntent.Create, connectionId, null),
@@ -3777,6 +3777,22 @@ if (settings.CanSave)
     // Handle Committed, Conflict, Invalid, or Uncertain; never blindly retry Uncertain.
 }
 ```
+
+`CreateSettingsManager` requires `InferenceTask.TextGeneration` or `InferenceTask.Embedding`. The caller supplies the
+purpose from the editor's context; the manager does not infer it from the provider or model name. `LlmSettings.SetupTask`
+and its setup definition retain that immutable purpose for the draft only. Saved connections and role assignments
+carry no purpose field. The provider catalog's `SetupDefinition` remains text-generation metadata.
+
+For embedding setup, pass the registered adapters as `embeddingClients` to the same factory. The manager snapshots and
+borrows that collection, then drops it after admitted operations drain; it never disposes the adapters. Test uses
+`LlmEmbeddingProviderService` over the same draft-local connection source as authentication, with the currently edited
+endpoint, credential and model. It sends one document input, `Embedding setup test.`, without dimensions or an
+instruction, and reports `Embedding test succeeded for {name}.` with elapsed time. No vectors are displayed or saved,
+and no failure falls back to generation. A missing transport adapter fails through the existing action error path.
+Remote embedding tests declare Network and PotentialBilling; engine tests declare LocalVerification. Text tests keep
+their existing provider-specific effects and short generated-reply operation. Both shared editors use the purpose-specific
+`Test selected text model` or `Test selected embedding model` label for automatic-on-selection and manual tests through
+the existing consent and cancellation path. Model discovery and prerequisite checks remain separate from Test.
 
 For editing, supply the exact saved `LlmConnection`, its model selection and an Edit identity whose
 expected version matches that connection. The host's `ISetupCommitTarget<LlmSetupChanges>` must
@@ -3800,7 +3816,7 @@ missing CLI, or a signed-out Antigravity CLI, shows the provider's prerequisite 
 interaction. A signed-out Claude CLI completes the check, so its sign-in action is offered. An edit
 marks `Status.Installed` stale. Model choices carry `SetupChoice.Tags`: the context size in
 thousands of tokens, "Images" and "Thinking", from the model's listed capabilities. The `test`
-action's result carries the reply as `Message` and the request time as `Elapsed`.
+action's result carries the generated reply or embedding success as `Message` and the request time as `Elapsed`.
 
 Claude and Antigravity executable fields accept blank values. Checks, discovery and Save resolve a
 blank executable to the provider's default through the same draft connection projection. The editor

@@ -56,8 +56,15 @@ embeddings.
 ## Settings
 
 `LlmProviderService.SetupDefinitions` lists the discovered providers with their names, icons and setup steps.
-`CreateSettingsManager(target)` returns the `LlmSettingsManager` that opens a provider's settings, runs its actions
-(check, sign in, test) and saves through the host's `ISetupCommitTarget<LlmSetupChanges>`. Each provider declares the
+`CreateSettingsManager(target, InferenceTask.TextGeneration)` returns the `LlmSettingsManager` that opens a provider's
+settings, runs its actions (check, sign in, test) and saves through the host's `ISetupCommitTarget<LlmSetupChanges>`.
+For an embedding editor, supply `InferenceTask.Embedding` and its registered `embeddingClients` to the same factory.
+The required task is explicit, not inferred from the provider or model. It remains on the draft's `SetupTask` and setup
+definition, not the saved connection. Embedding Test sends one short text through the existing embedding service using
+the draft's endpoint, credential and model; it reports embedding success and elapsed time without generation fallback.
+Text Test keeps its short generated reply. Discovery and prerequisite checks remain separate. Test labels and declared
+side effects identify the purpose before the host authorizes automatic or manual Test. The manager borrows adapters and
+its optional `agents` facade; retirement drains operations and drops references without disposing them. Each provider declares the
 fields its settings show: an endpoint address, a command-line tool, an engine choice, an API key, a sign-in action and
 the model choice. A field edit changes only the settings object; only Save reaches the host. The
 `Darkspyre.Inference.UI.Settings` editors render these settings.

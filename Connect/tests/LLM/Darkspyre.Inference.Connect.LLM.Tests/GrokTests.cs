@@ -33,7 +33,7 @@ public sealed class GrokTests
             _ => throw new InvalidOperationException(request.RequestUri.ToString())
         });
         using var service = Service(new Source(Connection() with { Credential = null }), handler);
-        LlmSettingsManager manager = service.CreateSettingsManager(new Target());
+        LlmSettingsManager manager = service.CreateSettingsManager(new Target(), InferenceTask.TextGeneration);
         LlmSettings settings = await manager.OpenAsync(LlmTransport.XaiResponses,
             new(SetupChangeIntent.Create, "grok", null), null, "grok-4.7");
 
