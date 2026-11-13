@@ -121,7 +121,10 @@ local version commit that has not been pushed.
 ## Offline verification
 
 ```bash
-bash -n deploy-major.sh deploy-minor.sh eng/deploy.sh eng/pack.sh
+bash -n deploy-major.sh &&
+bash -n deploy-minor.sh &&
+bash -n eng/deploy.sh &&
+bash -n eng/pack.sh
 bash eng/package-assets.tests.sh # Requires restored Tensor dependency assets; no archives created.
 ```
 
