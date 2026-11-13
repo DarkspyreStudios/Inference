@@ -2,5 +2,15 @@
   "defaultBuildProfile": "workspace",
   "buildProfiles": [
     { "name": "workspace", "testRunner": "vstest", "launcher": { "executable": "/bin/bash", "arguments": ["../agent-ds/scripts/workspace-env.sh", "$argv"] } }
+  ],
+  "buildActions": [
+    {
+      "name": "deploy major",
+      "os": ["macos", "linux"],
+      "description": "Prepare, verify and tag the major family release through the existing deployment script; no Publish dispatch",
+      "commands": [
+        { "command": "/bin/bash ../agent-ds/scripts/workspace-env.sh bash ./deploy-major.sh" }
+      ]
+    }
   ]
 }

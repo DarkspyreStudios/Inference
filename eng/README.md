@@ -5,6 +5,10 @@ workflow (`.github/workflows/publish.yml`) publishes the tag to nuget.org. Run e
 directory. Both invoke the same Bash implementation in `eng/deploy.sh`; the .NET generation is never changed by
 these commands.
 
+The workspace's `deploy major` Build Tool action invokes `bash ./deploy-major.sh` from the repository root through
+`../agent-ds/scripts/workspace-env.sh`. It runs the same producer and its qualification gates; it does not dispatch the
+Publish workflow. The action is available on macOS and Linux, where the existing Bash deployment runs.
+
 | Command | Example version change |
 |---|---|
 | `./deploy-major.sh` | `11.5.1-rc.1` → `11.6.0-rc.1` |
