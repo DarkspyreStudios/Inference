@@ -28,7 +28,7 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 main() {
     local mode="${1:-}" option="${2:-}" root current version source_commit family configuration
-    local release_token id code package artifact source_subject
+    local release_token id code package artifact source_subject projects project is_test
     local stage='preflight'
     local -a packages=(Common Connect Connect.Common Connect.Codex Connect.Claude Connect.HostTools Connect.Antigravity Connect.Grok Connect.Anthropic Connect.OpenAiApi Connect.SelfHost Tensor.Common Tensor.Decision.Laya Tensor.Embedding Tensor.Embedding.Gemma Tensor.Ggml Tensor.Image.Supra Tensor.LLM.Qwen Tensor.Registry Tensor.STT.Whisper UI.Settings.Core UI.Settings.Avalonia UI.Settings.Blazor)
     local -a version_files=(Directory.Build.props README.md Common/README.md Connect/README.md Tensor/README.md UI/README.md)
@@ -97,9 +97,20 @@ main() {
     for family in Connect Tensor UI; do
         cd "$root/$family"
         dotnet restore "Darkspyre.Inference.$family.slnx"
+        projects="$(dotnet sln "Darkspyre.Inference.$family.slnx" list)"
         for configuration in Debug Release; do
             dotnet build "Darkspyre.Inference.$family.slnx" -c "$configuration" --no-restore
-            bash "$root/../agent-ds/scripts/workspace-env.sh" dotnet test "Darkspyre.Inference.$family.slnx" -c "$configuration" --no-build --no-restore
+            while IFS= read -r project; do
+                case "$project" in
+                    *.SandboxTests.csproj) continue ;;
+                    *.csproj) ;;
+                    *) continue ;;
+                esac
+                is_test="$(dotnet msbuild "$project" -nologo -p:Configuration="$configuration" -getProperty:IsTestProject)"
+                if [[ "$is_test" == true ]]; then
+                    bash "$root/../agent-ds/scripts/workspace-env.sh" dotnet test "$project" -c "$configuration" --no-build --no-restore
+                fi
+            done <<< "$projects"
         done
         mkdir -p "$root/artifacts/deploy"
         dotnet list "Darkspyre.Inference.$family.slnx" package --vulnerable --include-transitive --no-restore --format json > "$root/artifacts/deploy/$family-audit.json"

@@ -53,8 +53,11 @@ TensorSharp's packages ship no GGML native library: the application supplies ver
 2. Update the shared `Directory.Build.props` version and matching references in the five product/root
    README files. Commit only those files, with the source HEAD's Task key in the release subject and
    `Authored By: Brandon Mathis` in a separate body paragraph. Historical design/release versions remain unchanged.
-3. Restore all three solutions; build and test Debug and Release; explicitly reject vulnerability
-   findings from the transitive JSON audits.
+3. Restore all three solutions and build every project in Debug and Release, including `.SandboxTests` projects.
+   Enumerate each actual solution's projects and evaluate `IsTestProject` for the current configuration. Run its ordinary
+   test projects through the workspace launcher; `.SandboxTests.csproj` projects are build-only in automated runs and
+   run only from a person's terminal. Shared Common tests remain included through each solution. Project-list or metadata
+   query errors stop the release. Explicitly reject vulnerability findings from the transitive JSON audits.
 4. `eng/pack.sh` packs Common, the media Connect package, every Connect provider/Common and Tensor library, and the
    UI.Settings Core, Avalonia and Blazor libraries. `eng/VerifyPackages` checks owned assembly boundaries, exact
    family dependencies and release-source identity.
