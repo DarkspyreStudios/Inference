@@ -28,7 +28,7 @@ fail() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
 main() {
     local mode="${1:-}" option="${2:-}" root current version source_commit family configuration
-    local release_token id code package artifact
+    local release_token id code package artifact source_subject
     local stage='preflight'
     local -a packages=(Common Connect Connect.Common Connect.Codex Connect.Claude Connect.HostTools Connect.Antigravity Connect.Grok Connect.Anthropic Connect.OpenAiApi Connect.SelfHost Tensor.Common Tensor.Decision.Laya Tensor.Embedding Tensor.Embedding.Gemma Tensor.Ggml Tensor.Image.Supra Tensor.LLM.Qwen Tensor.Registry Tensor.STT.Whisper UI.Settings.Core UI.Settings.Avalonia UI.Settings.Blazor)
     local -a version_files=(Directory.Build.props README.md Common/README.md Connect/README.md Tensor/README.md UI/README.md)
@@ -89,7 +89,8 @@ main() {
     done
     git add -- "${version_files[@]}"
     git diff --cached --check
-    git commit -m "Prepare coordinated $version release" -- "${version_files[@]}"
+    source_subject="$(git log -1 --format=%s)"
+    git commit -m "${source_subject%% *} Prepare coordinated $version release" -m "Authored By: Brandon Mathis" -- "${version_files[@]}"
     source_commit="$(git rev-parse HEAD)"
 
     stage='restore/build/test/audit'
@@ -98,7 +99,7 @@ main() {
         dotnet restore "Darkspyre.Inference.$family.slnx"
         for configuration in Debug Release; do
             dotnet build "Darkspyre.Inference.$family.slnx" -c "$configuration" --no-restore
-            dotnet test "Darkspyre.Inference.$family.slnx" -c "$configuration" --no-build --no-restore
+            bash "$root/../agent-ds/scripts/workspace-env.sh" dotnet test "Darkspyre.Inference.$family.slnx" -c "$configuration" --no-build --no-restore
         done
         mkdir -p "$root/artifacts/deploy"
         dotnet list "Darkspyre.Inference.$family.slnx" package --vulnerable --include-transitive --no-restore --format json > "$root/artifacts/deploy/$family-audit.json"

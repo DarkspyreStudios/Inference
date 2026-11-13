@@ -18,10 +18,14 @@ changing files, compiling or committing. `--help` lists usage.
 
 ## Prerequisites and side effects
 
-- A clean `master` checkout (including no untracked files), with all intended implementation work
-  already committed. The scripts never stage application changes or stash them.
+- A clean `master` worktree in the existing local workspace (including no untracked files), with all intended
+  implementation work already committed. Its HEAD subject starts with the active Task key. The scripts never stage
+  application changes or stash them.
 - A Darkspyre.Common checkout beside it, at `../Darkspyre.Common`. HostTools and Antigravity carry its
   LocalServices libraries.
+- The existing sibling `../agent-ds/scripts/workspace-env.sh` and its signed-test-host helper. Each nested
+  `dotnet test` runs through that launcher, which selects and verifies the stable signed test host on macOS.
+  This test-host signature does not establish the signatures of consumer or service programs they execute.
 - `origin` must be `DarkspyreStudios/Inference`. Local master must contain the fetched remote master. An existing
   target tag, or the target version of any library already on nuget.org, aborts.
 - Bash, Git, GitHub CLI, jq, curl, the pinned .NET SDK, and standard shell utilities must be installed.
@@ -43,7 +47,8 @@ TensorSharp's packages ship no GGML native library: the application supplies ver
 
 1. Check tooling, checkout, credentials, remote, the tag and every target library version on nuget.org.
 2. Update the shared `Directory.Build.props` version and matching references in the five product/root
-   README files. Commit only those files. Historical design/release versions remain unchanged.
+   README files. Commit only those files, with the source HEAD's Task key in the release subject and
+   `Authored By: Brandon Mathis` in a separate body paragraph. Historical design/release versions remain unchanged.
 3. Restore all three solutions; build and test Debug and Release; explicitly reject vulnerability
    findings from the transitive JSON audits.
 4. `eng/pack.sh` packs Common, the media Connect package, every Connect provider/Common and Tensor library, and the
@@ -53,7 +58,8 @@ TensorSharp's packages ship no GGML native library: the application supplies ver
    assets targeting the same copy-output path. Reject concurrent source changes.
 6. Tag the release-source commit and push master plus that one release tag to origin. The annotated
    `v<version>` tag is the release record. No other tag or branch is pushed.
-7. Run the Publish workflow on the tag, from the repository's Actions page. It checks out the tag and
+7. Explicitly dispatch the Publish workflow on the tag, from the repository's Actions page. Pushing the tag does not
+   start this workflow. It checks out the tag and
    Darkspyre.Common's `main` branch side by side, builds the three solutions in Release in Packages mode, runs
    `eng/pack.sh` against the tag's commit, signs in to nuget.org through Trusted Publishing (`NuGet/login`, user
    `darkspyre`) and pushes every library package without overwrite or skip-duplicate switches. It refuses a ref
@@ -122,7 +128,7 @@ bash eng/package-assets.tests.sh # Requires restored Tensor dependency assets; n
 The package-asset checks evaluate real Tensor pack inputs and synthetic copy-path fixtures.
 They verify that Whisper's shader remains a copy-to-output asset but is excluded from Tensor's own
 archive inputs. Duplicate None/None and None/Content destinations fail; unique paths and noncopied
-files pass. For each of the 22 projects `eng/pack.sh` lists, they check that `_GetPackageFiles` packs exactly one
+files pass. For each of the 23 projects `eng/pack.sh` lists, they check that `_GetPackageFiles` packs exactly one
 `README.md`, from `obj/.../package/README.md`, and that the file equals the composition of the project's `PACKAGE.md`
 and `eng/PackageFamily.md`. `eng/VerifyConsumer.Tests/PackagePageFixture.proj` composes a page holding a ticket key,
 and the checks expect the work-note error. The archive verifier also rejects versioned ELF libraries, `.metal` shader sources,
