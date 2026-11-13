@@ -343,12 +343,14 @@ public sealed class ManagedAgentTests
         Assert.Empty(harness.Summaries);
     }
 
-    /// <summary>Plugin tools run on the OpenAI API under their own names, and only the image tool is hosted (S2, B7).</summary>
+    /// <summary>Plugin tools keep their names, and prompt and tool-result images keep their Responses shape on replay.</summary>
     [Fact]
     public async Task PluginToolsRunOnTheOpenAiApi()
     {
         const string name = "mcp.server/look up";
         string alias = LlmToolNames.Alias(name);
+        byte[] png = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/a9sAAAAASUVORK5CYII=");
+        string imageUrl = "data:image/png;base64," + Convert.ToBase64String(png);
         int posts = 0;
         using var handler = new DirectCodexTests.Handler(_ => DirectCodexTests.Sse(++posts == 1 ? """
             data: {"type":"response.output_item.done","output_index":0,"item":{"type":"function_call","id":"fc","call_id":"call","name":"ALIAS","arguments":"{\"q\":1}"}}
@@ -363,14 +365,24 @@ public sealed class ManagedAgentTests
         {
             ModelId = "qwen3",
             Tools = [new LlmAgentToolDefinition { Name = name, InputSchema = JsonElement.Parse("""{"type":"object"}""") }],
-            ToolHandler = (call, _) => { calls.Add(call); return Task.FromResult(LlmToolOutput.FromText("found")); },
+            ToolHandler = (call, _) =>
+            {
+                calls.Add(call);
+                return Task.FromResult(new LlmToolOutput
+                {
+                    Parts = [new LlmToolOutputText("found"), new LlmToolOutputBinary(LlmBinaryKind.Image, "image/png", png, "found.png")]
+                });
+            },
             HostedTools = [new LlmImageGenerationTool()],
             CallerServices = new() { Resources = new ResourcePreparationTests.Resources(new("workspace", "session", 0, []), []) }
         }, [new("qwen3", "Qwen3") { MaxContextTokens = 131072 }], client,
             (request, token) => client.StreamAsync(connection, request, token),
             model => client.GetCapabilities(connection, model), new LearnedModelContext());
 
-        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("look it up")));
+        List<LlmAgentEvent> events = await Read(session.RunTurnAsync(Turn("look it up") with
+        {
+            Attachments = [new LlmAttachment { Kind = LlmBinaryKind.Image, FileName = "prompt.png", Data = png }]
+        }));
 
         LlmAgentTurnCompletedEvent done = Assert.Single(events.OfType<LlmAgentTurnCompletedEvent>());
         Assert.Equal((LlmAgentCompletionReason.Completed, (string?)null), (done.Reason, done.Error));
@@ -380,7 +392,32 @@ public sealed class ManagedAgentTests
         JsonNode first = JsonNode.Parse(handler.Bodies[0])!;
         Assert.Equal([("function", alias), ("image_generation", null)],
             first["tools"]!.AsArray().Select(tool => (tool!["type"]!.GetValue<string>(), tool["name"]?.GetValue<string>())));
-        Assert.Contains("\"function_call_output\"", handler.Bodies[1], StringComparison.Ordinal);
+        CheckImages(first, hasToolResult: false);
+        CheckImages(JsonNode.Parse(handler.Bodies[1])!, hasToolResult: true);
+
+        // The next turn sends the same prompt attachment and tool result from retained conversation history.
+        List<LlmAgentEvent> continued = await Read(session.RunTurnAsync(Turn("describe that again")));
+        Assert.Equal(LlmAgentCompletionReason.Completed, Assert.Single(continued.OfType<LlmAgentTurnCompletedEvent>()).Reason);
+        Assert.Equal(3, handler.Bodies.Count);
+        Assert.Single(calls);
+        CheckImages(JsonNode.Parse(handler.Bodies[2])!, hasToolResult: true);
+
+        void CheckImages(JsonNode payload, bool hasToolResult)
+        {
+            JsonObject expected = new() { ["type"] = "input_image", ["image_url"] = imageUrl, ["detail"] = "auto" };
+            JsonObject prompt = Assert.Single(payload["input"]!.AsArray().OfType<JsonObject>(),
+                item => item["type"]?.GetValue<string>() == "message" && item["role"]?.GetValue<string>() == "user"
+                    && item["content"] is JsonArray);
+            JsonObject attachment = Assert.Single(prompt["content"]!.AsArray().OfType<JsonObject>(),
+                part => part["type"]?.GetValue<string>() == "input_image");
+            Assert.True(JsonNode.DeepEquals(expected, attachment));
+            if (!hasToolResult) return;
+            JsonObject output = Assert.Single(payload["input"]!.AsArray().OfType<JsonObject>(),
+                item => item["type"]?.GetValue<string>() == "function_call_output");
+            JsonObject image = Assert.Single(output["output"]!.AsArray().OfType<JsonObject>(),
+                part => part["type"]?.GetValue<string>() == "input_image");
+            Assert.True(JsonNode.DeepEquals(expected, image));
+        }
     }
 
     [Fact]

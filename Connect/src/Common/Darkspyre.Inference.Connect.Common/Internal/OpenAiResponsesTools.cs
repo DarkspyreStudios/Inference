@@ -170,7 +170,8 @@ internal static class OpenAiResponsesTools
                 SentImage image => new JsonObject
                 {
                     ["type"] = "input_image",
-                    ["image_url"] = DataUrl(image.MediaType, image.Data)
+                    ["image_url"] = DataUrl(image.MediaType, image.Data),
+                    ["detail"] = "auto"
                 },
                 SentFile file => new JsonObject
                 {
@@ -192,7 +193,8 @@ internal static class OpenAiResponsesTools
         LlmBinaryKind.Image => new JsonObject
         {
             ["type"] = "input_image",
-            ["image_url"] = LlmAttachments.ToDataUrl(attachment)
+            ["image_url"] = LlmAttachments.ToDataUrl(attachment),
+            ["detail"] = "auto"
         },
         LlmBinaryKind.Document => new JsonObject
         {

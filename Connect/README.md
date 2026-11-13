@@ -3099,7 +3099,9 @@ path-bearing filename, or empty payload instead of silently turning it into text
 OpenAI Responses, direct Codex, Anthropic Messages, Claude CLI, and Bedrock use native
 image/document content blocks for prompt attachments. Direct Codex sends prompt attachments and
 tool-output binaries inline through Responses, with no CLI staging directory. The caller supplies kind,
-filename, and bytes; adapters own MIME detection, encoding, and wire representation.
+filename, and bytes; adapters own MIME detection, encoding, and wire representation. The shared Responses writer
+sets `detail: "auto"` on every `input_image`, for prompt attachments and image tool results, including replayed
+history. Explicit detail keeps the default image policy valid on services that require the field.
 
 ### Explicit cache contracts
 
