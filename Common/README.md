@@ -372,7 +372,7 @@ uses one field/action driver for real Connect and Tensor settings, including spe
 operation lifetime, user consent, storage and rendering. A field edit changes only the settings object.
 Nothing reaches the host until `SaveAsync`. Unknown observations are nullable, separate from false,
 stale and not applicable.
-The source package version is synchronized at **11.19.4**. Connect, Tensor and the
+The source package version is synchronized at **11.19.5**. Connect, Tensor and the
 UI.Settings packages declare exact Common NuGet dependencies; none embeds the Common DLL. The package family
 targets .NET 11 GA, and the Blazor editor uses the ASP.NET Core 11.0.0 release.
 
