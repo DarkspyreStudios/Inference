@@ -10,6 +10,8 @@ using Microsoft.Extensions.DependencyInjection;
 
 namespace Darkspyre.Inference.Connect.LLM.Tests;
 
+// Concurrent test collections interfere with this process-wide GC assertion.
+[Collection(nameof(CollectibleSerializationIsolation))]
 public sealed class CollectibleSerializationTests
 {
     private static readonly Type[] CommonConnectMetadataOwners = [typeof(InferenceJson), typeof(ConnectLlmJson)];
@@ -133,3 +135,7 @@ public sealed class CollectibleSerializationTests
         }
     }
 }
+
+/// <summary>Runs collectible-generation collection checks without concurrent test collections.</summary>
+[CollectionDefinition(nameof(CollectibleSerializationIsolation), DisableParallelization = true)]
+public sealed class CollectibleSerializationIsolation;
