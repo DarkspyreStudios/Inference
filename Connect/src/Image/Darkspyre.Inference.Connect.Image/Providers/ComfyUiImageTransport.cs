@@ -617,55 +617,67 @@ internal sealed partial class ComfyUiImageTransport(
         async Task<ImageTransportJobSnapshot> ReadJobAsync()
         {
             using HttpClient client = CreateClient(connection);
-            using HttpResponseMessage historyResponse = await client.GetAsync(
-                BuildUri(connection, $"history/{Uri.EscapeDataString(providerJobId)}"),
-                cancellationToken);
-            historyResponse.EnsureSuccessStatusCode();
-            string historyBody = await SdkHttpConsumption.ReadAsStringAsync(historyResponse.Content, cancellationToken);
-            using JsonDocument history = JsonDocument.Parse(historyBody);
-            if (history.RootElement.TryGetProperty(providerJobId, out JsonElement promptHistory))
+            // Completion can move the prompt from queue to history between the first two reads.
+            // Re-read history three times, immediately and after one and two seconds, before reporting it gone.
+            for (int attempt = 0; attempt < 4; attempt++)
             {
-                string error = FindExecutionError(promptHistory);
-                if (error.Length > 0)
+                if (attempt > 1)
+                    await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
+                using HttpResponseMessage historyResponse = await client.GetAsync(
+                    BuildUri(connection, $"history/{Uri.EscapeDataString(providerJobId)}"),
+                    cancellationToken);
+                historyResponse.EnsureSuccessStatusCode();
+                string historyBody = await SdkHttpConsumption.ReadAsStringAsync(historyResponse.Content, cancellationToken);
+                using JsonDocument history = JsonDocument.Parse(historyBody);
+                if (history.RootElement.TryGetProperty(providerJobId, out JsonElement promptHistory))
                 {
+                    string error = FindExecutionError(promptHistory);
+                    if (error.Length > 0)
+                    {
+                        return new ImageTransportJobSnapshot(
+                            ImageTransportJobState.Failed,
+                            Error: new InferenceResourceFailure(InferenceFailureCode.ExecutionFailed, null, error),
+                            Diagnostics: JsonSerializer.SerializeToElement(new ComfyHistoryDiagnostics("history", "failed"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
+                    }
+
+                    ReadOnlyCollection<ComfyOutputImage> outputs = FindOutputs(promptHistory, configuration.OutputNodeId);
+                    if (outputs.Count > 0)
+                    {
+                        return new ImageTransportJobSnapshot(
+                            ImageTransportJobState.Completed,
+                            Array.AsReadOnly(outputs.Select(output => new ImageTransportOutput(output.FileName, scope,
+                                JsonSerializer.SerializeToElement(output, ComfyOutputJsonContext.Default.ComfyOutputImage))).ToArray()),
+                            Diagnostics: JsonSerializer.SerializeToElement(new ComfyHistoryDiagnostics("history", "completed"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
+                    }
+
+                    if (promptHistory.TryGetProperty("status", out JsonElement status)
+                        && status.TryGetProperty("completed", out JsonElement completed) && completed.ValueKind == JsonValueKind.True)
+                        return new ImageTransportJobSnapshot(ImageTransportJobState.Completed, Array.Empty<ImageTransportOutput>());
+
                     return new ImageTransportJobSnapshot(
-                        ImageTransportJobState.Failed,
-                        Error: new InferenceResourceFailure(InferenceFailureCode.ExecutionFailed, null, error),
-                        Diagnostics: JsonSerializer.SerializeToElement(new ComfyHistoryDiagnostics("history", "failed"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
+                        ImageTransportJobState.Generating,
+                        Diagnostics: JsonSerializer.SerializeToElement(new ComfyHistoryDiagnostics("history", "generating"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
                 }
+                if (attempt != 0) continue;
 
-                ReadOnlyCollection<ComfyOutputImage> outputs = FindOutputs(promptHistory, configuration.OutputNodeId);
-                if (outputs.Count > 0)
-                {
+                using HttpResponseMessage queueResponse = await client.GetAsync(
+                    BuildUri(connection, "queue"),
+                    cancellationToken);
+                queueResponse.EnsureSuccessStatusCode();
+                string queueBody = await SdkHttpConsumption.ReadAsStringAsync(queueResponse.Content, cancellationToken);
+                using JsonDocument queue = JsonDocument.Parse(queueBody);
+                bool running = QueueContains(queue.RootElement, "queue_running", providerJobId);
+                bool pending = QueueContains(queue.RootElement, "queue_pending", providerJobId);
+                if (pending || running)
                     return new ImageTransportJobSnapshot(
-                        ImageTransportJobState.Completed,
-                        Array.AsReadOnly(outputs.Select(output => new ImageTransportOutput(output.FileName, scope,
-                            JsonSerializer.SerializeToElement(output, ComfyOutputJsonContext.Default.ComfyOutputImage))).ToArray()),
-                        Diagnostics: JsonSerializer.SerializeToElement(new ComfyHistoryDiagnostics("history", "completed"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
-                }
-
-                if (promptHistory.TryGetProperty("status", out JsonElement status)
-                    && status.TryGetProperty("completed", out JsonElement completed) && completed.ValueKind == JsonValueKind.True)
-                    return new ImageTransportJobSnapshot(ImageTransportJobState.Completed, Array.Empty<ImageTransportOutput>());
-
-                return new ImageTransportJobSnapshot(
-                    ImageTransportJobState.Generating,
-                    Diagnostics: JsonSerializer.SerializeToElement(new ComfyHistoryDiagnostics("history", "generating"), ComfyProtocolJsonContext.Default.ComfyHistoryDiagnostics));
+                        running ? ImageTransportJobState.Generating : ImageTransportJobState.Queued,
+                        Diagnostics: JsonSerializer.SerializeToElement(new ComfyQueueDiagnostics("queue", running, pending), ComfyProtocolJsonContext.Default.ComfyQueueDiagnostics));
             }
-
-            using HttpResponseMessage queueResponse = await client.GetAsync(
-                BuildUri(connection, "queue"),
-                cancellationToken);
-            queueResponse.EnsureSuccessStatusCode();
-            string queueBody = await SdkHttpConsumption.ReadAsStringAsync(queueResponse.Content, cancellationToken);
-            using JsonDocument queue = JsonDocument.Parse(queueBody);
-            bool running = QueueContains(queue.RootElement, "queue_running", providerJobId);
-            bool pending = QueueContains(queue.RootElement, "queue_pending", providerJobId);
             return new ImageTransportJobSnapshot(
-                running ? ImageTransportJobState.Generating : ImageTransportJobState.Queued,
-                Error: pending || running ? null : new InferenceResourceFailure(InferenceFailureCode.ExecutionFailed, null,
+                ImageTransportJobState.Queued,
+                Error: new InferenceResourceFailure(InferenceFailureCode.ExecutionFailed, null,
                     "The prompt is not present in ComfyUI history or queue."),
-                Diagnostics: JsonSerializer.SerializeToElement(new ComfyQueueDiagnostics("queue", running, pending), ComfyProtocolJsonContext.Default.ComfyQueueDiagnostics));
+                Diagnostics: JsonSerializer.SerializeToElement(new ComfyQueueDiagnostics("queue", false, false), ComfyProtocolJsonContext.Default.ComfyQueueDiagnostics));
         }
     }
 

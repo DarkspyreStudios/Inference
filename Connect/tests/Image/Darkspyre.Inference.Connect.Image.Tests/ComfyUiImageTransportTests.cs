@@ -28,6 +28,7 @@ public sealed partial class ComfyUiImageTransportTests
 
         Assert.Equal(["Workflow", "ReferenceScopes"], Json(stored.ProviderRequest).EnumerateObject().Select(property => property.Name));
         string? uploadName = null, prompt = null;
+        bool completedBetweenReads = false;
         var handler = new StubHandler(async request =>
         {
             if (request.RequestUri!.AbsolutePath.EndsWith("/upload/image", StringComparison.Ordinal))
@@ -38,7 +39,14 @@ public sealed partial class ComfyUiImageTransportTests
                 return JsonResponse($"{{\"name\":\"{uploadName}\",\"subfolder\":\"\",\"type\":\"input\"}}");
             }
             if (request.RequestUri.AbsolutePath.EndsWith("/history/p-1", StringComparison.Ordinal))
-                return JsonResponse("""{"p-1":{"outputs":{"9":{"images":[{"filename":"alpha.png","subfolder":"","type":"output"}]}},"status":{"completed":true}}}""");
+                return JsonResponse(completedBetweenReads
+                    ? """{"p-1":{"outputs":{"9":{"images":[{"filename":"alpha.png","subfolder":"","type":"output"}]}},"status":{"status_str":"success","completed":true,"messages":[]}}}"""
+                    : "{}");
+            if (request.Method == HttpMethod.Get && request.RequestUri.AbsolutePath.EndsWith("/queue", StringComparison.Ordinal))
+            {
+                completedBetweenReads = true;
+                return JsonResponse("""{"queue_running":[],"queue_pending":[]}""");
+            }
             if (request.RequestUri.AbsolutePath.EndsWith("/view", StringComparison.Ordinal))
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent([7, 8, 9]) };
             prompt = await request.Content!.ReadAsStringAsync();

@@ -2818,6 +2818,11 @@ ComfyUI reference uploads borrow the input stream. Upload reads from its current
 rewinding, flushing, or disposing it, including cancellation and failed uploads. The caller owns
 the stream's eventual disposal.
 
+File-workflow status reads history before the queue. If neither read contains the prompt, the transport rechecks
+history immediately and after one and two seconds before returning the existing missing-prompt error. This closes
+the completion race between those separate reads. Cancellation stops the rechecks; ordinary history and queue
+results keep their existing interpretation.
+
 ComfyUI accepts static protected headers. Its newly optional dynamic `Authorization` and xAI binding
 members remain unqualified and refuse before callbacks or HTTP. Image generation accepts one binary
 reference or one logical resource resolved through caller-owned access. URL, native-file, multiple
