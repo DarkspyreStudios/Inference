@@ -240,7 +240,8 @@ public sealed class LlmSettingsTests
         {
             SetupChoicePage page = await manager.QueryChoicesAsync(settings, "model", new());
 
-            Assert.Equal([("plain", []), ("rich", ["200K context", "Images", "Thinking"]), ("unknown", [])],
+            // Owned feature metadata preserves the model's explicit limit without claiming Images or Thinking.
+            Assert.Equal([("plain", []), ("rich", ["200K context", "Images", "Thinking"]), ("unknown", ["8K context"])],
                 page.Choices.Select(choice => (choice.Value, (IReadOnlyList<string>)choice.Tags)));
         }
     }

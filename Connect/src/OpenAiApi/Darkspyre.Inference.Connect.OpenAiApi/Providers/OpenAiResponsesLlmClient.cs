@@ -116,6 +116,7 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
     public override async Task<LlmModelListing> ListModelsAsync(LlmConnection connection,
         CancellationToken cancellationToken = default)
     {
+        ArbiterModelReservations.ValidateConfiguredHeaders(Http, connection);
         LlmModelListing listing = await base.ListModelsAsync(connection, cancellationToken).ConfigureAwait(false);
         bool openAi = OpenAiApiDefinition.Value.ServiceTiers!.IsDefaultOn(connection.Endpoint);
         return listing with { Models = [.. listing.Models.Select(model =>
@@ -136,7 +137,7 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
     protected override void ApplyRequestHeaders(HttpRequestMessage message, LlmConnection connection, LlmChatRequest request)
     {
         base.ApplyRequestHeaders(message, connection, request);
-        ArbiterModelReservations.ApplyClaim(message, connection);
+        ArbiterModelReservations.ApplyClaim(Http, message, connection);
     }
 
     /// <inheritdoc />
@@ -156,6 +157,7 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
         ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
         ArgumentNullException.ThrowIfNull(text);
         EnsureTransport(connection);
+        ArbiterModelReservations.ValidateConfiguredHeaders(Http, connection);
         Uri endpoint = connection.LlamaCppTokenizationEndpoint
             ?? throw new NotSupportedException("This route does not implement plain-text tokenization.");
         if (!endpoint.IsAbsoluteUri || (endpoint.Scheme != Uri.UriSchemeHttp && endpoint.Scheme != Uri.UriSchemeHttps))

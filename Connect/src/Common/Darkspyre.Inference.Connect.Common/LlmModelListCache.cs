@@ -173,11 +173,12 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
                 }
                 LlmModelListing listing = await producer.Client!.ListModelsAsync(producer.Snapshot!, operation.Token).ConfigureAwait(false);
                 CheckEpoch(key, entry, epoch, operation.Token);
-                listing = Freeze(listing);
+                var (complete, diagnostic) = CompleteCapabilities(producer.Client!, producer.Snapshot!, listing, operation.Token);
+                listing = Freeze(complete);
                 lock (_gate)
                 {
                     CheckEpochLocked(key, entry, epoch, operation.Token);
-                    epoch.Published = new(epoch.Scope.Version, true, listing, null);
+                    epoch.Published = new(epoch.Scope.Version, true, listing, diagnostic);
                     completion.TrySetResult(listing);
                 }
                 notify = true;
@@ -192,8 +193,7 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
                         && ReferenceEquals(current.Current, epoch))
                     {
                         LlmConnection snapshot = producer.Snapshot!;
-                        string diagnostic = SecretRedactor.Sanitize(error.Message, LlmCredential.Parse(snapshot.Credential),
-                            snapshot.AdditionalHeaders.Values.Concat(snapshot.ModelOwner is { } owner ? [owner.Proof] : []));
+                        string diagnostic = Diagnostic(error.Message, snapshot);
                         epoch.Published = new(epoch.Scope.Version, true, null, diagnostic);
                         published = true;
                     }
@@ -209,6 +209,30 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
             if (notify && key.View == "committed") Changed?.Invoke(key.Connection);
         }
     }
+
+    private static (LlmModelListing Listing, string? Diagnostic) CompleteCapabilities(ILlmClient client,
+        LlmConnection snapshot, LlmModelListing listing, CancellationToken token)
+    {
+        LlmConnection catalog = snapshot with { Catalog = listing.Models };
+        string? problem = null;
+        LlmModel[] models = listing.Models.Select(model =>
+        {
+            token.ThrowIfCancellationRequested();
+            if (model.Capabilities is not null) return model;
+            try { return model with { Capabilities = client.GetCapabilities(catalog, model.Id) }; }
+            catch (Exception error) when (!token.IsCancellationRequested)
+            {
+                // Capability metadata is independent per model. A bad row does not discard the other fetched facts.
+                problem ??= Diagnostic($"Capabilities unavailable for '{model.Id}': {error.Message}", snapshot);
+                return model;
+            }
+        }).ToArray();
+        return (listing with { Models = models }, problem);
+    }
+
+    private static string Diagnostic(string message, LlmConnection snapshot) =>
+        SecretRedactor.Sanitize(message, LlmCredential.Parse(snapshot.Credential),
+            snapshot.AdditionalHeaders.Values.Concat(snapshot.ModelOwner is { } owner ? [owner.Proof] : []));
 
     private static LlmModelListing Freeze(LlmModelListing listing) => listing with
     {

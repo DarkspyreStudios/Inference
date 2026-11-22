@@ -1925,6 +1925,13 @@ register or enable unfinished media adapters. Voice listing remains an uncached 
 The optional same-access LLM facade on `XaiFamilyBinding` now supplies this internal cached family
 path using its explicit selection ID and already acquired snapshot. It does not resolve or refresh
 again, and its caller fence belongs only to the waiter, never to shared catalog production.
+The same listing producer fills only missing model capabilities through its already-selected synchronous
+`GetCapabilities` over the already-fetched catalogue. Supplied capabilities remain authoritative. Explicit model
+limits remain independent facts: Settings and composer present those same limits even when feature support is unknown.
+A failed model
+capability lookup leaves only that model's capabilities unknown and adds a safe owner diagnostic; no extra provider
+read or projection cache fills that gap.
+
 Publication copies the ordered list, catalog JSON, mutable capability sets and all reservation/holder arrays.
 Adapter-owned lists, sets and JSON documents do not remain authoritative after publication. Every caller reads
 the same immutable facts until replacement.
@@ -1935,6 +1942,9 @@ metadata. Available choices remain separate from held models whose supporting de
 arguments, connection exports or continuation/account equivalence. The service admits it only after the current
 listing explicitly supports reservations; ordinary endpoints receive no arbiter claim. The adapter encodes the
 actual coordination name in its private request header and includes the proof in existing error redaction.
+The selected adapter rejects ownership-claim names in configured public/credential headers and HTTP defaults
+before sending discovery, inference, tokenization or release. Private authority comes only from the scoped owner,
+never a header supplied by a model, connection export or shared client default.
 `ReleaseModelAsync` addresses only that caller's hold through the same configured HTTP client at the listener's
 `/models/release` root route. It never unloads a model or changes pins; failures retain the safe named-holder
 message. Successful release invalidates the same committed publication for its next owned read.

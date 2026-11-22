@@ -31,8 +31,20 @@ internal static class ArbiterModelReservations
         return new(available, true, reservations);
     }
 
-    internal static void ApplyClaim(HttpRequestMessage request, LlmConnection connection)
+    internal static void ValidateConfiguredHeaders(HttpClient http, LlmConnection connection)
     {
+        // Configured/public headers cannot supply private actor authority, including defaults merged by HttpClient.
+        IEnumerable<string> names = connection.AdditionalHeaders.Keys
+            .Concat(LlmCredential.Parse(connection.Credential)?.SecretHeaders.Keys ?? [])
+            .Concat(http.DefaultRequestHeaders.Select(header => header.Key));
+        if (names.Any(name => name.Equals(ProofHeader, StringComparison.OrdinalIgnoreCase)
+            || name.Equals(NameHeader, StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException("Model owner headers are private and cannot be configured.");
+    }
+
+    internal static void ApplyClaim(HttpClient http, HttpRequestMessage request, LlmConnection connection)
+    {
+        ValidateConfiguredHeaders(http, connection);
         // A public/custom header cannot substitute for the admitted scoped caller or survive an unsupported route.
         request.Headers.Remove(ProofHeader);
         request.Headers.Remove(NameHeader);
@@ -52,7 +64,7 @@ internal static class ArbiterModelReservations
             Content = new StringContent(new JsonObject { ["model"] = modelId }.ToJsonString(), Encoding.UTF8, "application/json")
         };
         ProviderHttp.ApplyHeaders(request, connection);
-        ApplyClaim(request, connection);
+        ApplyClaim(http, request, connection);
         using HttpResponseMessage response = await http.SendAsync(request, token).ConfigureAwait(false);
         string[] secrets = [.. request.Headers.SelectMany(header => header.Value), .. protectedValues];
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
