@@ -13,7 +13,14 @@ internal sealed class OpenAiApiConnectProviderAttribute : LlmConnectProviderAttr
     {
         services.AddSingleton(OpenAiApiDefinition.Value);
         services.AddInferenceHttpClient<OpenAiResponsesLlmClient>()
-            .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout);
+            .ConfigureHttpClient(client => client.Timeout = ProviderHttp.GenerationTimeout)
+            .ConfigurePrimaryHttpMessageHandler((handler, _) =>
+            {
+                if (handler is SocketsHttpHandler sockets)
+                    sockets.AllowAutoRedirect = false;
+                else if (handler is HttpClientHandler client)
+                    client.AllowAutoRedirect = false;
+            });
         services.AddTransient<ILlmClient>(provider => provider.GetRequiredService<OpenAiResponsesLlmClient>());
         services.AddTransient<ILlmAgentClient>(provider => new ManagedLlmAgentClient<OpenAiResponsesLlmClient>(
             provider.GetRequiredService<OpenAiResponsesLlmClient>(), provider.GetRequiredService<LlmProviderService>(),

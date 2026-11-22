@@ -284,6 +284,9 @@ feature is Unknown, the reasoning level set is empty, and the prompt cache repor
 OpenAI's endpoint also lists web search, code execution, document search and remote MCP (see "Hosted search").
 The listing is the service's own `/models`; on OpenAI's endpoint a model with no listed window takes its published
 window and output limit, and elsewhere the listed values are used as they are.
+The registered Responses client disables automatic redirects on its existing primary handler. A 3xx response
+fails through the existing redacted provider-error path without following or replaying the request. The SDK's
+handler ownership, pooled connection lifetime and generation timeout stay unchanged.
 
 **Grok.** A Grok connection (`LlmTransport.XaiResponses`, provider id `grok-subscription`, in the Subscription group)
 signs in with a Grok subscription through the xAI device code and only that way; it has no API key field. Setup's
