@@ -49,6 +49,17 @@ The application returns the connection from its `ILlmConnectionSource`. Conversa
 - **Context lengths** rows each set one model's context length.
 - **Check authentication and model access** loads the model list from the endpoint.
 
+## Named model reservations
+
+An arbiter endpoint can explicitly advertise reservation support in its model listing. The host binds the actual
+session's transient `LlmModelOwner` through its scoped connection source; the adapter sends the private proof and
+encoded coordination name only after the service admits that capability. The listing's public holders and actual
+residents remain separate from available model choices. Ordinary OpenAI endpoints receive no arbiter claim.
+`LlmProviderService.ReleaseModelAsync` uses the same registered client as inference to release only that caller's
+hold, without unloading or unpinning. Refusals retain the public holder names and redact the private proof.
+The registered Responses client disables automatic redirects on its existing primary handler; a 3xx response fails
+without following or replaying the request. The separate embeddings client is unchanged.
+
 ## Limits
 
 - An OpenAI API key comes from an OpenAI platform account and is billed separately from a ChatGPT subscription. A

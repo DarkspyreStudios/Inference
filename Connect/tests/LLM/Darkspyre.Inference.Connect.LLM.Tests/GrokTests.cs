@@ -63,7 +63,7 @@ public sealed class GrokTests
             """));
         var client = new GrokResponsesLlmClient(new HttpClient(handler), TimeProvider.System);
 
-        LlmModel model = Assert.Single(await client.ListModelsAsync(Connection()));
+        LlmModel model = Assert.Single((await client.ListModelsAsync(Connection())).Models);
 
         Assert.Equal("https://cli-chat-proxy.grok.com/v1/models", handler.Uri!.AbsoluteUri);
         Assert.Equal(("grok-4.7", "Grok 4.7", 256000L), (model.Id, model.DisplayName, model.MaxContextTokens));

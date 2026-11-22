@@ -31,19 +31,20 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
         LlmChatRequest request,
         CancellationToken cancellationToken = default);
 
-    public virtual async Task<IReadOnlyList<LlmModel>> ListModelsAsync(
+    public virtual async Task<LlmModelListing> ListModelsAsync(
         LlmConnection connection,
         CancellationToken cancellationToken = default)
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection);
         if ((capabilities.SupportsModelListing == InferenceSupport.Unsupported))
         {
-            return [];
+            return new([], false, []);
         }
 
         LlmCredential? credential = LlmCredential.Parse(connection.Credential);
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         IReadOnlyList<LlmModel> result;
+        LlmModelListing listing;
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, ProviderHttp.BuildUri(connection, "models"));
             ProviderHttp.ApplyHeaders(request, connection);
@@ -92,6 +93,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
                             ?? id;
                         results.Add(new LlmModel(id, displayName, LlmJson.GetString(model, "owned_by"))
                         {
+                            CatalogEntry = model.Clone(),
                             MaxContextTokens = PositiveLong(model, "context_length")
                                 ?? PositiveLong(LlmJson.GetObject(model, "top_provider"), "context_length")
                                 ?? PositiveLong(model, "max_model_len"),
@@ -101,6 +103,7 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
 
                     result = [.. results.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)];
                 }
+                listing = ReadListing(root, result);
             }
             catch (JsonException exception)
             {
@@ -112,8 +115,12 @@ internal abstract class LlmClientBase(HttpClient http) : ILlmClient, ILlmResourc
                     exception, secrets);
             }
         }
-        return consumption.Publish(result);
+        return consumption.Publish(listing);
     }
+
+    /// <summary>Reads adapter-owned listing metadata while the provider's JSON document is alive.</summary>
+    protected virtual LlmModelListing ReadListing(JsonElement root, IReadOnlyList<LlmModel> models) =>
+        new(models, false, []);
 
     private static long? PositiveLong(JsonElement? value, string field) =>
         value is { ValueKind: JsonValueKind.Object } item && item.TryGetProperty(field, out JsonElement number)

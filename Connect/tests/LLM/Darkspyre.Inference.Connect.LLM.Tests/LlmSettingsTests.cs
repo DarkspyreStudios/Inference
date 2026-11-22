@@ -387,8 +387,8 @@ public sealed class LlmSettingsTests
         public LlmTransport Transport => definition.Transport;
         public LlmProviderDefinition ProviderDefinition => definition;
         public LlmProviderCapabilities GetCapabilities(LlmConnection connection, string? modelId = null) => new() { SupportsModelListing = InferenceSupport.Supported };
-        public Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
-        { Calls++; return Task.FromResult(Models); }
+        public Task<LlmModelListing> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
+        { Calls++; return Task.FromResult(new LlmModelListing(Models, false, [])); }
         public async IAsyncEnumerable<LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,
             [EnumeratorCancellation] CancellationToken cancellationToken = default)
         {

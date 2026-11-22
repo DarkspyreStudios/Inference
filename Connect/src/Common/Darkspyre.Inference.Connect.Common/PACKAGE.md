@@ -53,6 +53,19 @@ models (`ListModelsAsync`), reports its capabilities and its account usage, and 
 `LlmEmbeddingProviderService.EmbedAsync` embeds text or image inputs through a connection whose provider offers
 embeddings.
 
+## Model facts and reservations
+
+`ListModelsAsync` reads cached model facts. `RefreshModelsAsync` performs a fresh provider read and is the same
+operation used by Settings model queries. The registered `LlmModelListCache` owns both; settings facades borrow it
+with isolated draft views. `ReadPublished` and `Changed` expose committed immutable listings without another cache.
+`LlmModelListing` separates available choices from public reservation state.
+
+For an endpoint that explicitly supports named reservations, the host can supply a transient `LlmModelOwner`
+through its scoped connection source. Its 32-byte private proof belongs in host-protected storage, never ordinary
+connection configuration or model input. `LlmConnection.ModelOwner` is ignored by JSON serialization.
+`ReleaseModelAsync` releases only that caller's hold; it does not unload, unpin or release another caller.
+Unsupported endpoints receive no claim and refuse reservation operations.
+
 ## Settings
 
 `LlmProviderService.SetupDefinitions` lists the discovered providers with their names, icons and setup steps.

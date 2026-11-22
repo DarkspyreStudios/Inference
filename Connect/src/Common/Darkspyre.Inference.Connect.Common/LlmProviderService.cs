@@ -24,6 +24,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
     private readonly Dictionary<LlmTransport, ILlmSetupEnvironment> _setupEnvironments;
     private readonly LlmModelListCache _modelLists;
     private readonly bool _ownsModelLists;
+    private readonly string _modelListViewId;
     private readonly LlmAccountUsageObservations _observations;
     private readonly bool _ownsObservations;
     private LlmConnectionAccess? _connectionAccess;
@@ -51,14 +52,15 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         IEnumerable<ILlmSetupEnvironment>? setupEnvironments = null,
         LlmModelListCache? modelLists = null,
         LlmAccountUsageObservations? observations = null,
-        LlmConnectionAccess? connectionAccess = null)
-        : this(connections, clients, authenticators, setupEnvironments, modelLists, observations, connectionAccess, null)
+        LlmConnectionAccess? connectionAccess = null, string modelListViewId = "committed")
+        : this(connections, clients, authenticators, setupEnvironments, modelLists, observations, connectionAccess, null, modelListViewId)
     {
     }
 
     internal LlmProviderService(ILlmConnectionSource connections, IEnumerable<ILlmClient> clients,
-        IEnumerable<ILlmAuthenticator> authenticators, Action admission)
-        : this(connections, clients, authenticators, null, null, null, null, admission)
+        IEnumerable<ILlmAuthenticator> authenticators, Action admission, LlmModelListCache? modelLists = null,
+        string modelListViewId = "committed")
+        : this(connections, clients, authenticators, null, modelLists, null, null, admission, modelListViewId)
     {
     }
 
@@ -68,7 +70,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         // moves into their own libraries when they return to the build.
         IEnumerable<ILlmAuthenticator> authenticators, IEnumerable<ILlmSetupEnvironment>? setupEnvironments,
         LlmModelListCache? modelLists, LlmAccountUsageObservations? observations,
-        LlmConnectionAccess? connectionAccess, Action? admission)
+        LlmConnectionAccess? connectionAccess, Action? admission, string modelListViewId)
     {
         ArgumentNullException.ThrowIfNull(connections);
         ArgumentNullException.ThrowIfNull(clients);
@@ -80,6 +82,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         // A service built without the application's shared cache keeps its own lists.
         _modelLists = modelLists ?? new LlmModelListCache();
         _ownsModelLists = modelLists is null;
+        _modelListViewId = modelListViewId;
         _observations = observations ?? new();
         _ownsObservations = observations is null;
         ILlmClient[] clientArray = [.. clients];
@@ -149,7 +152,7 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
     {
         using var operation = _lifetime.Enter(CancellationToken.None);
         agents?.ValidateSource(Connections);
-        return new(_clients, _authenticators.Values, _setupEnvironments, target, task, embeddingClients ?? [], agents);
+        return new(_clients, _authenticators.Values, _setupEnvironments, target, task, embeddingClients ?? [], _modelLists, agents);
     }
 
     /// <summary>
@@ -633,13 +636,15 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         }
         ThrowIfOperationCanceled(cancellationToken);
-        IReadOnlyList<LlmModel> models = await _modelLists.GetAsync(connectionId, new(connection.Version, connection.ResolvedContinuationScope),
+        LlmModelListing listing = await _modelLists.GetAsync(connectionId, ModelListScopeFor(connection),
             client, connection, ModelCatalogFamily.Chat, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
-        return models;
+        return listing.Models;
     }
 
     /// <summary>Asks the provider for the connection's models again and keeps the new list.</summary>
+    /// <gotcha>Each demand dispatches its own read after prior production finishes. Cancellation stops the caller's
+    /// wait; a dispatched read remains owned by the shared cache through completion.</gotcha>
     public async Task<IReadOnlyList<LlmModel>> RefreshModelsAsync(
         string connectionId,
         CancellationToken cancellationToken = default)
@@ -657,10 +662,33 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
             connection = await preparation.PrepareAsync(connection, cancellationToken).ConfigureAwait(false);
         }
         ThrowIfOperationCanceled(cancellationToken);
-        IReadOnlyList<LlmModel> models = await _modelLists.RefreshAsync(connectionId, new(connection.Version, connection.ResolvedContinuationScope),
+        LlmModelListing listing = await _modelLists.RefreshAsync(connectionId, ModelListScopeFor(connection),
             client, connection, ModelCatalogFamily.Chat, cancellationToken);
         ThrowIfOperationCanceled(cancellationToken);
-        return models;
+        return listing.Models;
+    }
+
+    /// <summary>Releases this admitted caller's reservation through the selected adapter.</summary>
+    /// <gotcha>Requires an explicitly reservation-capable listing and a private caller bound by the host;
+    /// it never unloads the model, changes pins or releases another caller.</gotcha>
+    public async Task<LlmModelReleaseResult> ReleaseModelAsync(string connectionId, string modelId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(modelId);
+        using var operation = _lifetime.Enter(cancellationToken);
+        LlmConnection connection = await ResolveFreshConnectionAsync(connectionId, operation.Token).ConfigureAwait(false);
+        ILlmClient client = ClientFor(connection.Transport);
+        LlmModelListing listing = await _modelLists.GetAsync(connectionId, ModelListScopeFor(connection),
+            client, connection, ModelCatalogFamily.Chat, operation.Token).ConfigureAwait(false);
+        if (!listing.SupportsReservations || client is not ILlmModelReservationClient reservations)
+            throw new NotSupportedException("This connection does not support named model reservations.");
+        if (connection.ModelOwner is null)
+            throw new InvalidOperationException("Release requires the calling session's private owner claim.");
+        LlmModelReleaseResult result = await reservations.ReleaseModelAsync(
+            connection with { SupportsModelReservations = true }, modelId, operation.Token).ConfigureAwait(false);
+        ThrowIfOperationCanceled(operation.Token);
+        _modelLists.Invalidate(connectionId);
+        return result;
     }
 
     /// <summary>Reads passive quota evidence without a provider call, or null when none is observed for this identity.</summary>
@@ -799,16 +827,25 @@ public sealed partial class LlmProviderService : ILlmTextTokenizer, IDisposable,
         }
         try
         {
-            IReadOnlyList<LlmModel> models = await _modelLists.GetAsync(connectionId,
-                new(connection.Version, connection.ResolvedContinuationScope),
-                client, connection, ModelCatalogFamily.Chat, cancellationToken);
-            return connection with { Catalog = models };
+            LlmModelListing listing = await _modelLists.GetAsync(connectionId,
+                ModelListScopeFor(connection), client, connection, ModelCatalogFamily.Chat, cancellationToken);
+            return connection with
+            {
+                Catalog = listing.Models,
+                SupportsModelReservations = listing.SupportsReservations,
+                ModelOwner = listing.SupportsReservations ? connection.ModelOwner : null
+            };
         }
-        catch (Exception error) when (error is HttpRequestException or LlmProviderException or System.Text.Json.JsonException)
+        catch (Exception error) when (connection.ModelOwner is null
+            && error is HttpRequestException or LlmProviderException or System.Text.Json.JsonException)
         {
             return connection;
         }
     }
+
+    private ModelListScope ModelListScopeFor(LlmConnection connection) => new(connection.Version,
+        connection.ResolvedContinuationScope, _modelListViewId,
+        ProviderContinuationStateCodec.Scope(connection with { ResolvedContinuationScope = null, ModelOwner = null }));
 
     internal LlmOperationLifetime.Lease EnterManagedOpening(CancellationToken cancellationToken) =>
         _lifetime.Enter(cancellationToken);

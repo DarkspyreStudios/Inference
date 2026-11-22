@@ -1889,11 +1889,15 @@ OpenAI-style discovery preserves positive integer `context_length`, `top_provide
 `top_provider.max_completion_tokens` and `max_model_len` limits when reported. Missing or invalid
 values remain unknown. The adapter does not invent limits for OpenAI model-list entries.
 
-`LlmProviderService.ListModelsAsync` keeps each connection's model list in `LlmModelListCache`, which
-`AddLlmConnect` registers once for the registration owner's lifetime. A list stays until the exact
-tuple of connection `Version` and nullable resolved continuation scope changes, or until
-`RefreshModelsAsync` lists again and replaces it. Every connection or credential edit changes
-`Version`. The tuple compares both components separately and distinguishes null from empty scope.
+`LlmProviderService.ListModelsAsync` reads cached facts from the one `LlmModelListCache` registered by
+`AddLlmConnect`. `RefreshModelsAsync` is the fresh operation used by natural UI reads. Each fresh demand waits
+for the connection/view's production slot and dispatches its own provider read; it never substitutes a read
+already dispatched before that demand. Cached capability and generation readers share published facts or the
+current producer. The owner compares the exact connection `Version`, nullable resolved continuation scope,
+committed/draft view and the existing endpoint/transport/credential-equivalence scope. Private model-owner
+proof is absent from that equivalence. `ReadPublished` reads only committed facts at the exact version;
+`Changed` reports committed completion/invalidation with a safe connection ID. Failed attempts publish a
+diagnostic, not a successful empty list.
 For xAI, an epoch also compares an allowlisted immutable copy of the actual admitted credential,
 endpoint, region, service tier, agent count, headers, provider options and capability overrides.
 This catches a refreshed credential returned with its original source version; equality is local
@@ -1903,16 +1907,16 @@ The focused catalog regressions exercise an actual credential-access refresh and
 save through the chat facade. The refreshed original-version snapshot replaces the old catalog and
 uses the new token for both REST listings. The HTTP boundary is offline; this does not qualify xAI
 OAuth or account entitlement.
-Concurrent requests for one connection share a single listing, request accounting and managed sessions
-read the same list, and a failed listing is not kept. Common's `ILlmInference` carries the same pair:
-`ListModelsAsync` may answer from a kept list, and `RefreshModelsAsync` lists again. A service built by
-hand without the shared cache keeps its own.
+Request accounting and managed sessions read the same cached list. Common's `ILlmInference` retains the
+same cached/fresh pair. A standalone service with no supplied cache owns one cache. Settings managers borrow
+that same owner and give each settings object a private view; their short-lived facades do not create private
+caches. Choice queries and Check call `RefreshModelsAsync`. Unsaved edits never replace committed facts,
+acquire a reservation or seed saved switches. Manager disposal retires its draft entries, not the borrowed owner.
 
-A tuple change or explicit refresh fences publication from the replaced in-flight listing.
-Its waiting callers follow the replacing epoch to the newest listing and receive that listing's result or failure.
-Only their own cancellation or cache retirement cancels their wait. Replacement does not cancel the provider's
-entered call. An already-cancelled request
-does not start or replace a listing.
+A scope replacement or explicit invalidation fences old publication. A fresh read queues behind actual
+production rather than canceling or superseding it. Caller cancellation before fresh dispatch removes only that
+demand's queue position; after dispatch it stops only the caller's wait. The owner retains the production slot
+through actual completion. Retirement cancels and drains producers. An already-cancelled request starts no read.
 An xAI epoch shares one generic REST listing and lazily reads only requested chat, image, video or
 embedding family listings. Replacement fences each subsequent route and publication. Exact model
 IDs take precedence; ambiguous aliases do not enrich facts or choose a profile. Missing fields remain
@@ -1921,9 +1925,19 @@ register or enable unfinished media adapters. Voice listing remains an uncached 
 The optional same-access LLM facade on `XaiFamilyBinding` now supplies this internal cached family
 path using its explicit selection ID and already acquired snapshot. It does not resolve or refresh
 again, and its caller fence belongs only to the waiter, never to shared catalog production.
-Publication copies the ordered list, catalog JSON and mutable capability sets. Adapter-owned lists,
-sets and JSON documents do not remain authoritative after publication. Every caller reads the same
-read-only snapshot until replacement.
+Publication copies the ordered list, catalog JSON, mutable capability sets and all reservation/holder arrays.
+Adapter-owned lists, sets and JSON documents do not remain authoritative after publication. Every caller reads
+the same immutable facts until replacement.
+
+The active OpenAI API adapter alone reads explicit arbiter reservation capability and public holder/resident
+metadata. Available choices remain separate from held models whose supporting definition is absent.
+`LlmConnection.ModelOwner` is a transient, JSON-ignored host claim. Its proof never enters prompts, model
+arguments, connection exports or continuation/account equivalence. The service admits it only after the current
+listing explicitly supports reservations; ordinary endpoints receive no arbiter claim. The adapter encodes the
+actual coordination name in its private request header and includes the proof in existing error redaction.
+`ReleaseModelAsync` addresses only that caller's hold through the same configured HTTP client at the listener's
+`/models/release` root route. It never unloads a model or changes pins; failures retain the safe named-holder
+message. Successful release invalidates the same committed publication for its next owned read.
 
 `AddLlmConnect` also registers one disposable `LlmAccountUsageObservations` for its owning service
 provider. That provider owns one dependency generation, not an application-global store shared across

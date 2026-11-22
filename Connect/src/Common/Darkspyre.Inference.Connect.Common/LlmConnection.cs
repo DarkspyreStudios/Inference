@@ -25,6 +25,12 @@ public sealed record LlmConnection
     // The connection's model list from LlmModelListCache, published by the service for one operation.
     // Never serialized or supplied by a host.
     internal IReadOnlyList<LlmModel>? Catalog { get; init; }
+    // The admitted owner's explicit capability publication for this operation, never connection configuration.
+    internal bool SupportsModelReservations { get; init; }
+
+    /// <summary>Private model ownership for this admitted runtime scope, never saved connection configuration.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public LlmModelOwner? ModelOwner { get; init; }
 
     /// <summary>
     /// Opaque host concurrency token covering the connection and credential state. Every credential

@@ -93,16 +93,16 @@ internal sealed class AppleFoundationModelsClient(HttpClient http, IAppleProcess
         return hello;
     }
 
-    public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
+    public override async Task<LlmModelListing> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection, AppleProtocol.ModelId);
-        if ((capabilities.SupportsModelListing == InferenceSupport.Unsupported)) return [];
+        if ((capabilities.SupportsModelListing == InferenceSupport.Unsupported)) return new([], false, []);
         JsonElement hello = await ProbeAsync(connection, cancellationToken).ConfigureAwait(false);
-        if (AppleProtocol.RequiredString(hello, "availability") != "available") return [];
+        if (AppleProtocol.RequiredString(hello, "availability") != "available") return new([], false, []);
         if (!AppleProtocol.SupportsSampling(hello))
             capabilities = capabilities with { SupportsTopP = InferenceSupport.Unsupported, SupportsTopK = InferenceSupport.Unsupported, SupportsSeed = InferenceSupport.Unsupported };
-        return [new(AppleProtocol.ModelId, "Apple System Language Model", "Apple", capabilities)
-        { MaxContextTokens = AppleProtocol.RequiredInteger(hello, "contextSize"), CatalogEntry = hello.Clone() }];
+        return new([new(AppleProtocol.ModelId, "Apple System Language Model", "Apple", capabilities)
+        { MaxContextTokens = AppleProtocol.RequiredInteger(hello, "contextSize"), CatalogEntry = hello.Clone() }], false, []);
     }
 
     public ContextEstimate? EstimateInputTokens(LlmConnection connection, LlmChatRequest request)

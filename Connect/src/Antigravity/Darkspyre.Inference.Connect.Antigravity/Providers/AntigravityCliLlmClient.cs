@@ -348,14 +348,14 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner, ILlm
         };
     }
 
-    public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(
+    public async Task<LlmModelListing> ListModelsAsync(
         LlmConnection connection,
         CancellationToken cancellationToken = default)
     {
         LlmProviderCapabilities capabilities = GetCapabilities(connection);
         if ((capabilities.SupportsModelListing == InferenceSupport.Unsupported))
         {
-            return [];
+            return new([], false, []);
         }
 
         AntigravityCliProcessResult result = await InvokeAsync(
@@ -378,7 +378,7 @@ internal sealed class AntigravityCliLlmClient(IAntigravityCliRunner runner, ILlm
                 providerCode: "antigravity_cli_no_models");
         }
 
-        return [new LlmModel("auto", "Auto (Antigravity CLI)", "Google"), .. models];
+        return new([new LlmModel("auto", "Auto (Antigravity CLI)", "Google"), .. models], false, []);
     }
 
     public async Task<ExternalAuthenticationState> CheckAuthenticationAsync(

@@ -20,7 +20,15 @@ internal interface ILlmClient
         LlmChatRequest request,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<LlmModel>> ListModelsAsync(
+    Task<LlmModelListing> ListModelsAsync(
         LlmConnection connection,
         CancellationToken cancellationToken = default);
+}
+
+/// <summary>The selected adapter's own-reservation release capability.</summary>
+internal interface ILlmModelReservationClient
+{
+    /// <summary>Releases only the admitted caller's hold and reports the actual public model state.</summary>
+    Task<LlmModelReleaseResult> ReleaseModelAsync(LlmConnection connection, string modelId,
+        CancellationToken cancellationToken);
 }

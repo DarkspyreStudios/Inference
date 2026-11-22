@@ -231,10 +231,10 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
         }
     }
 
-    public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(
+    public override async Task<LlmModelListing> ListModelsAsync(
         LlmConnection connection, CancellationToken cancellationToken = default)
     {
-        if ((GetCapabilities(connection).SupportsModelListing == InferenceSupport.Unsupported)) { return []; }
+        if ((GetCapabilities(connection).SupportsModelListing == InferenceSupport.Unsupported)) { return new([], false, []); }
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         var result = new List<LlmModel>();
         {
@@ -287,7 +287,7 @@ internal sealed class OpenAiCodexLlmClient(HttpClient http)
                     body, credential, error, secrets);
             }
         }
-        return consumption.Publish<IReadOnlyList<LlmModel>>(result);
+        return consumption.Publish(new LlmModelListing(result, false, []));
     }
 
     public async Task<LlmAccountUsageSnapshot> GetAccountUsageAsync(

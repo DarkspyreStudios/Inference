@@ -169,13 +169,13 @@ internal sealed class BedrockAgentCoreLlmClient(IBedrockAgentCoreInvoker invoker
         });
     }
 
-    public Task<IReadOnlyList<LlmModel>> ListModelsAsync(
+    public Task<LlmModelListing> ListModelsAsync(
         LlmConnection connection,
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         ValidateConnection(connection);
-        return Task.FromResult<IReadOnlyList<LlmModel>>([]);
+        return Task.FromResult(new LlmModelListing([], false, []));
     }
 
     public Task<ILlmAgentSession> StartSessionAsync(

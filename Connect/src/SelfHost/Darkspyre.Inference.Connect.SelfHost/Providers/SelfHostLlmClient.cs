@@ -39,13 +39,13 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
             : ToConnect(engine);
     }
 
-    public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
+    public async Task<LlmModelListing> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
         RuntimeInputAdmission.Validate(connection);
         CommonLlm.ILlmInference engine = await host.GetInferenceAsync(connection.Endpoint, cancellationToken).ConfigureAwait(false);
         IReadOnlyList<CommonLlm.LlmModelInfo> models = await engine.RefreshModelsAsync(cancellationToken).ConfigureAwait(false);
-        return models.Select(model => new LlmModel(model.Id, model.DisplayName, model.OwnedBy,
+        return new(models.Select(model => new LlmModel(model.Id, model.DisplayName, model.OwnedBy,
             model.Capabilities is null ? null : ToConnect(model.Capabilities))
         {
             MaxContextTokens = model.MaxContextTokens,
@@ -53,7 +53,7 @@ internal sealed class SelfHostLlmClient(ILlmSelfHost host) : ILlmClient, ILlmCon
             AvailabilityCheckedAt = model.AvailabilityCheckedAt,
             AvailabilityReason = model.AvailabilityReason,
             MaxOutputTokens = model.MaxOutputTokens
-        }).ToArray();
+        }).ToArray(), false, []);
     }
 
     public async IAsyncEnumerable<CommonLlm.LlmStreamEvent> StreamAsync(LlmConnection connection, LlmChatRequest request,

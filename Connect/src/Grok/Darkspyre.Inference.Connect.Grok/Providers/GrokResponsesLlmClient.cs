@@ -128,7 +128,7 @@ internal sealed class GrokResponsesLlmClient(HttpClient http, TimeProvider time)
     }
 
     /// <summary>The account's models from the subscription proxy's model list (B4).</summary>
-    public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
+    public override async Task<LlmModelListing> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken);
         void Fence() { consumption.Token.ThrowIfCancellationRequested(); consumption.Fence(); }
@@ -136,8 +136,8 @@ internal sealed class GrokResponsesLlmClient(HttpClient http, TimeProvider time)
         Fence();
         IReadOnlyList<LlmModel> models = XaiCatalog.Project(rows);
         LlmConnection published = connection with { Catalog = models };
-        return consumption.Publish<IReadOnlyList<LlmModel>>(
-            Array.AsReadOnly(models.Select(model => model with { Capabilities = GetCapabilities(published, model.Id) }).ToArray()));
+        return consumption.Publish(new LlmModelListing(
+            Array.AsReadOnly(models.Select(model => model with { Capabilities = GetCapabilities(published, model.Id) }).ToArray()), false, []));
     }
 
     /// <summary>The account's credit usage from the subscription proxy's billing route, the read the Grok Build CLI makes for

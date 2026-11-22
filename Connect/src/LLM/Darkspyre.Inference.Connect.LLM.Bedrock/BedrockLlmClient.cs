@@ -727,7 +727,7 @@ internal sealed class BedrockLlmClient(
         return projection.ToJsonString();
     }
 
-    public async Task<IReadOnlyList<LlmModel>> ListModelsAsync(
+    public async Task<LlmModelListing> ListModelsAsync(
         LlmConnection connection,
         CancellationToken cancellationToken = default)
     {
@@ -743,7 +743,7 @@ internal sealed class BedrockLlmClient(
                 connection,
                 control.Token);
             control.ThrowIfCanceled();
-            return models;
+            return new(models, false, []);
         }
         catch (Exception error) when (error is Amazon.Runtime.AmazonServiceException or Amazon.Runtime.AmazonClientException or HttpRequestException)
         {

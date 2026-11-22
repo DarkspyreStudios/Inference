@@ -899,11 +899,15 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
     // .LLM.Vertex and .LLM.Azure, outside the solution). It moves into their own libraries when they return to the build.
     private IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment>? _environments;
     private LlmAgentProviderService? _agents;
+    private readonly LlmModelListCache _modelLists;
+    private readonly Lock _viewsGate = new();
+    private readonly Dictionary<LlmSettings, string> _modelListViews = new(ReferenceEqualityComparer.Instance);
     private readonly LlmOperationLifetime _lifetime = new();
 
     internal LlmSettingsManager(IReadOnlyDictionary<LlmTransport, ILlmClient> clients, IEnumerable<ILlmAuthenticator> authenticators,
         IReadOnlyDictionary<LlmTransport, ILlmSetupEnvironment> environments, ISetupCommitTarget<LlmSetupChanges> target,
-        InferenceTask task, IEnumerable<ILlmEmbeddingClient> embeddingClients, LlmAgentProviderService? agents = null)
+        InferenceTask task, IEnumerable<ILlmEmbeddingClient> embeddingClients, LlmModelListCache modelLists,
+        LlmAgentProviderService? agents = null)
         : base(target)
     {
         if (task is not (InferenceTask.TextGeneration or InferenceTask.Embedding))
@@ -914,6 +918,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         _embeddingClients = [.. embeddingClients];
         _environments = environments;
         _agents = agents;
+        _modelLists = modelLists;
     }
 
     /// <summary>Returns settings for <paramref name="transport"/>, blank or from the saved connection.</summary>
@@ -1033,7 +1038,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
                         return new([], State: SetupChoiceState.Unavailable,
                             Issues: [new("manual-model", "This connection requires manual model entry.", "model", Severity: SetupIssueSeverity.Warning)]);
                     }
-                    IReadOnlyList<LlmModel> models = await service.ListModelsAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
+                    IReadOnlyList<LlmModel> models = await service.RefreshModelsAsync(settings.Identity.Id, cancellationToken).ConfigureAwait(false);
                     Fence(cancellationToken);
                     if (fieldId == "model")
                     {
@@ -1104,7 +1109,7 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
         {
             return new(SetupActionState.Unavailable, [new("explicit-test-required", "This provider requires an explicit inference test to confirm remote access.")]);
         }
-        await service.ListModelsAsync(settings.Identity.Id, token).ConfigureAwait(false);
+        await service.RefreshModelsAsync(settings.Identity.Id, token).ConfigureAwait(false);
         Fence(token);
         settings.Status = settings.Status with
         {
@@ -1221,8 +1226,14 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
     private LlmProviderService Service(LlmSettings settings, CancellationToken token)
     {
         Fence(token);
+        string view;
+        lock (_viewsGate)
+        {
+            if (!_modelListViews.TryGetValue(settings, out view!))
+                _modelListViews.Add(settings, view = Guid.NewGuid().ToString("N"));
+        }
         return new(new SettingsSource(settings, this), [Client(settings.Transport)], _authenticators!,
-            () => Fence(token));
+            () => Fence(token), _modelLists, view);
     }
 
     private sealed class SettingsSource(LlmSettings settings, LlmSettingsManager owner) : ILlmConnectionSource
@@ -1266,6 +1277,11 @@ public sealed class LlmSettingsManager : InferenceSettingsManager<LlmSettings, L
     private Task Retire() => _lifetime.RetireAsync(() =>
     {
         _clients = null; _authenticators = null; _environments = null; _embeddingClients = null;
+        lock (_viewsGate)
+        {
+            foreach (string view in _modelListViews.Values) _modelLists.RetireView(view);
+            _modelListViews.Clear();
+        }
         Interlocked.Exchange(ref _agents, null);
         DetachCommitTarget();
         return Task.CompletedTask;

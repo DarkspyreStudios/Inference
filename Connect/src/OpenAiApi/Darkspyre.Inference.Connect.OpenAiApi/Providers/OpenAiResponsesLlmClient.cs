@@ -10,7 +10,8 @@ namespace Darkspyre.Inference.Connect.LLM.Providers;
 
 /// <summary>OpenAI API transport, and any service at another endpoint that serves the same API.</summary>
 internal sealed class OpenAiResponsesLlmClient(HttpClient http)
-    : ResponsesLlmClientBase(http), ILlmCatalogCapabilities, IExternalLlmAuthenticationProbe, ILlmTextTokenizerClient
+    : ResponsesLlmClientBase(http), ILlmCatalogCapabilities, IExternalLlmAuthenticationProbe, ILlmTextTokenizerClient,
+        ILlmModelReservationClient
 {
     internal const string DefaultEndpoint = "https://api.openai.com/v1";
 
@@ -112,20 +113,40 @@ internal sealed class OpenAiResponsesLlmClient(HttpClient http)
     }
 
     /// <summary>The service's listing; on OpenAI's endpoint a model without a window takes its published limits (B6).</summary>
-    public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection,
+    public override async Task<LlmModelListing> ListModelsAsync(LlmConnection connection,
         CancellationToken cancellationToken = default)
     {
-        IReadOnlyList<LlmModel> listed = await base.ListModelsAsync(connection, cancellationToken).ConfigureAwait(false);
+        LlmModelListing listing = await base.ListModelsAsync(connection, cancellationToken).ConfigureAwait(false);
         bool openAi = OpenAiApiDefinition.Value.ServiceTiers!.IsDefaultOn(connection.Endpoint);
-        return [.. listed.Select(model =>
+        return listing with { Models = [.. listing.Models.Select(model =>
         {
             if (openAi && model.MaxContextTokens is null && OpenAiModelProfiles.Get(model.Id) is { ContextWindow: { } window } profile)
                 model = model with { MaxContextTokens = window, MaxOutputTokens = profile.MaxOutputTokens };
             // A context length set on the connection is the model's limit (5.11); this is the one place it is applied.
             return LlmCapabilityOverrideLookup.ContextLength(connection, model.Id) is { } length
                 ? model with { MaxContextTokens = length } : model;
-        })];
+        })] };
     }
+
+    /// <inheritdoc />
+    protected override LlmModelListing ReadListing(JsonElement root, IReadOnlyList<LlmModel> models) =>
+        ArbiterModelReservations.ReadListing(root, models);
+
+    /// <inheritdoc />
+    protected override void ApplyRequestHeaders(HttpRequestMessage message, LlmConnection connection, LlmChatRequest request)
+    {
+        base.ApplyRequestHeaders(message, connection, request);
+        ArbiterModelReservations.ApplyClaim(message, connection);
+    }
+
+    /// <inheritdoc />
+    protected override IEnumerable<string> AdditionalProtectedValues(LlmConnection connection) =>
+        connection.ModelOwner is { } owner ? [owner.Proof] : [];
+
+    /// <summary>Releases the admitted caller's reservation through this same configured HTTP client.</summary>
+    public Task<LlmModelReleaseResult> ReleaseModelAsync(LlmConnection connection, string modelId,
+        CancellationToken cancellationToken) =>
+        ArbiterModelReservations.ReleaseAsync(Http, connection, modelId, AdditionalProtectedValues(connection), cancellationToken);
 
     /// <summary>Tokenizes exact plain text through the explicitly configured native llama.cpp endpoint.</summary>
     public async Task<LlmTokenization> TokenizeAsync(LlmConnection connection, string modelId, string text,

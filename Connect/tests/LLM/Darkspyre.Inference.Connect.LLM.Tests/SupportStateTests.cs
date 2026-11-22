@@ -61,9 +61,9 @@ public sealed class SupportStateTests
         var client = new OpenAiResponsesLlmClient(new HttpClient(handler));
 
         Dictionary<string, LlmModel> openAi = (await client.ListModelsAsync(
-            DirectCodexTests.OpenAiConnection(OpenAiResponsesLlmClient.DefaultEndpoint))).ToDictionary(model => model.Id);
+            DirectCodexTests.OpenAiConnection(OpenAiResponsesLlmClient.DefaultEndpoint))).Models.ToDictionary(model => model.Id);
         Dictionary<string, LlmModel> local = (await client.ListModelsAsync(
-            DirectCodexTests.OpenAiConnection("http://local.test/v1"))).ToDictionary(model => model.Id);
+            DirectCodexTests.OpenAiConnection("http://local.test/v1"))).Models.ToDictionary(model => model.Id);
 
         Assert.Equal((128_000L, 16_384L), (openAi["gpt-4o"].MaxContextTokens, openAi["gpt-4o"].MaxOutputTokens));
         Assert.Equal(5000, openAi["gpt-5.5"].MaxContextTokens);

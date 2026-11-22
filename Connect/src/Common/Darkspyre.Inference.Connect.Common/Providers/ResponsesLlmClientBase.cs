@@ -275,7 +275,8 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
                 ApplyRequestHeaders(httpRequest, connection, request);
                 credential = LlmCredential.Parse(connection.Credential);
                 response = await Http.SendAsync(httpRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
-                secrets = [.. httpRequest.Headers.SelectMany(header => header.Value), .. payloadSecrets];
+                secrets = [.. httpRequest.Headers.SelectMany(header => header.Value), .. payloadSecrets,
+                    .. AdditionalProtectedValues(connection)];
                 observation = ObserveAccountUsage(response) is { } observed
                     ? consumption.Publish<LlmStreamEvent>(new AccountUsageObservedEvent(observed)) : null;
             }
@@ -867,6 +868,9 @@ internal abstract class ResponsesLlmClientBase(HttpClient http) : LlmClientBase(
         target["output"] = new JsonArray([.. completedOutput.Values.Select(item => JsonNode.Parse(item.GetRawText()))]);
         return JsonElement.Parse(node.ToJsonString());
     }
+
+    /// <summary>Transient adapter-owned authority redacted alongside ordinary credentials and request headers.</summary>
+    protected virtual IEnumerable<string> AdditionalProtectedValues(LlmConnection connection) => [];
 
     protected virtual void ApplyRequestHeaders(
         HttpRequestMessage message, LlmConnection connection, LlmChatRequest request) =>

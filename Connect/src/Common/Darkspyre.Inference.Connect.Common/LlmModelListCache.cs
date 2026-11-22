@@ -6,28 +6,71 @@ using Darkspyre.Inference.Connect.LLM.Internal;
 namespace Darkspyre.Inference.Connect.LLM;
 
 /// <summary>
-/// Owns immutable model facts and shared producers for a registration. Exact version/scope changes replace every
-/// family view. Caller cancellation stops only that caller's wait.
+/// Owns immutable model facts and serialized fresh productions for committed connections and isolated settings views.
+/// Caller cancellation stops that caller's wait, not a dispatched producer.
 /// </summary>
 public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
 {
     private readonly Lock _gate = new();
-    private readonly Dictionary<string, Epoch> _entries = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string View, string Connection), Entry> _entries = [];
+    private readonly List<Task> _retirements = [];
     private readonly LlmOperationLifetime _lifetime = new();
     private readonly LlmCleanupOutcomes _cleanupOutcomes = new();
     private bool _disposed;
 
-    internal readonly record struct Scope(string Version, string? ResolvedContinuationScope);
+    /// <summary>Reports completion or invalidation of one committed connection's owned model facts.</summary>
+    /// <gotcha>Callbacks run on the publishing thread. Read the publication and dispatch rendering;
+    /// do not start another refresh in response to each publication.</gotcha>
+    public event Action<string>? Changed;
 
-    internal Task<IReadOnlyList<LlmModel>> GetAsync(string connectionId, Scope scope, ILlmClient client,
+    /// <summary>Reads already-published committed facts at the exact connection version, without provider work.</summary>
+    public LlmPublishedModelList? ReadPublished(string connectionId, string version)
+    {
+        lock (_gate)
+            return _entries.TryGetValue(("committed", connectionId), out Entry? entry)
+                && entry.Current.Scope.Version == version ? entry.Current.Published : null;
+    }
+
+    /// <summary>Invalidates committed facts after a real model operation, without calling the provider.</summary>
+    public void Invalidate(string connectionId)
+    {
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_entries.TryGetValue(("committed", connectionId), out Entry? entry))
+                ReplaceEpoch(entry, entry.Current.Scope);
+        }
+        Changed?.Invoke(connectionId);
+    }
+
+    internal void RetireView(string viewId)
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            _retirements.RemoveAll(task => task.IsCompletedSuccessfully);
+            foreach (var key in _entries.Keys.Where(key => key.View == viewId).ToArray())
+            {
+                Entry entry = _entries[key];
+                _entries.Remove(key);
+                _retirements.Add(entry.Lifetime.RetireAsync(() =>
+                {
+                    entry.Dispatch.Dispose();
+                    return Task.CompletedTask;
+                }));
+            }
+        }
+    }
+
+    internal Task<LlmModelListing> GetAsync(string connectionId, ModelListScope scope, ILlmClient client,
         LlmConnection snapshot, ModelCatalogFamily family, CancellationToken cancellationToken) =>
         AcquireAsync(connectionId, scope, client, snapshot, family, false, cancellationToken);
 
-    internal Task<IReadOnlyList<LlmModel>> RefreshAsync(string connectionId, Scope scope, ILlmClient client,
+    internal Task<LlmModelListing> RefreshAsync(string connectionId, ModelListScope scope, ILlmClient client,
         LlmConnection snapshot, ModelCatalogFamily family, CancellationToken cancellationToken) =>
         AcquireAsync(connectionId, scope, client, snapshot, family, true, cancellationToken);
 
-    private async Task<IReadOnlyList<LlmModel>> AcquireAsync(string connectionId, Scope scope, ILlmClient client,
+    private async Task<LlmModelListing> AcquireAsync(string connectionId, ModelListScope scope, ILlmClient client,
         LlmConnection snapshot, ModelCatalogFamily family, bool refresh, CancellationToken cancellationToken)
     {
         using LlmOperationLifetime.Lease admission = _lifetime.Enter(cancellationToken);
@@ -37,88 +80,160 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
         ArgumentNullException.ThrowIfNull(snapshot);
         if (!Enum.IsDefined(family)) throw new ArgumentOutOfRangeException(nameof(family));
         if (snapshot.Version != scope.Version) throw new ArgumentException("The catalog scope must match the admitted connection.", nameof(scope));
-        ThrowIfCanceled(admission.Token);
-        Task<IReadOnlyList<LlmModel>> listing;
+        Entry entry;
         Epoch epoch;
+        Task<LlmModelListing> listing;
+        LlmOperationLifetime.Lease viewAdmission;
         lock (_gate)
         {
             ThrowIfCanceled(admission.Token);
             ObjectDisposedException.ThrowIf(_disposed, this);
-            _entries.TryGetValue(connectionId, out Epoch? previous);
-            if (refresh || previous is null || previous.Scope != scope)
-            {
-                epoch = new(scope);
-                if (previous is not null) previous.Next = epoch;
-                _entries[connectionId] = epoch;
-            }
-            else epoch = previous;
-            if (!epoch.Families.TryGetValue(family, out Task<IReadOnlyList<LlmModel>>? current)
+            var key = (scope.ViewId, connectionId);
+            if (!_entries.TryGetValue(key, out entry!)) _entries.Add(key, entry = new(scope));
+            else if (!refresh && entry.Current.Scope != scope) ReplaceEpoch(entry, scope);
+            epoch = entry.Current;
+            viewAdmission = entry.Lifetime.Enter(admission.Token);
+            if (refresh || !epoch.Families.TryGetValue(family, out Task<LlmModelListing>? current)
                 || current.IsCanceled || current.IsFaulted)
             {
-                var completion = new TaskCompletionSource<IReadOnlyList<LlmModel>>(TaskCreationOptions.RunContinuationsAsynchronously);
-                current = completion.Task;
-                epoch.Families[family] = current;
+                var completion = new TaskCompletionSource<LlmModelListing>(TaskCreationOptions.RunContinuationsAsynchronously);
+                listing = completion.Task;
+                // A fresh demand never replaces or joins an older production before obtaining its dispatch slot.
+                if (!refresh) epoch.Families[family] = listing;
                 var producer = new Producer(client, snapshot);
-                LlmOperationLifetime.Lease operation = _lifetime.Enter(CancellationToken.None);
-                _ = Task.Run(() => ProduceFamilyAsync(connectionId, epoch, producer, operation, completion), CancellationToken.None);
+                LlmOperationLifetime.Lease viewOperation = entry.Lifetime.Enter(CancellationToken.None);
+                LlmOperationLifetime.Lease operation = _lifetime.Enter(viewOperation.Token);
+                _ = Task.Run(() => ProduceAsync(key, entry, epoch, scope, family, producer, operation, viewOperation,
+                    completion, refresh, viewAdmission.Token), CancellationToken.None);
             }
-            listing = current;
+            else listing = current;
         }
-        // A facade's retirement/cancellation cannot retire the cache producer.
-        while (true)
+        using (viewAdmission)
         {
-            try
+            while (true)
             {
-                IReadOnlyList<LlmModel> published = await listing.WaitAsync(admission.Token).ConfigureAwait(false);
-                ThrowIfCanceled(admission.Token);
-                return published;
-            }
-            catch (OperationCanceledException) when (!admission.Token.IsCancellationRequested)
-            {
-                lock (_gate)
+                try
                 {
-                    if (_disposed || epoch.Next is null) throw;
-                    while (epoch.Next is { } next) epoch = next;
-                    listing = epoch.Families[family];
+                    LlmModelListing published = await listing.WaitAsync(viewAdmission.Token).ConfigureAwait(false);
+                    ThrowIfCanceled(viewAdmission.Token);
+                    return published;
+                }
+                catch (OperationCanceledException) when (!refresh && !viewAdmission.Token.IsCancellationRequested)
+                {
+                    lock (_gate)
+                    {
+                        if (_disposed || epoch.Next is null) throw;
+                        while (epoch.Next is { } next) epoch = next;
+                        if (!epoch.Families.TryGetValue(family, out listing!)) throw;
+                    }
                 }
             }
         }
     }
 
     [SuppressMessage("Design", "CA1031", Justification = "The shared completion preserves provider failures and observes abandoned faults.")]
-    private async Task ProduceFamilyAsync(string connectionId, Epoch epoch, Producer producer,
-        LlmOperationLifetime.Lease operation, TaskCompletionSource<IReadOnlyList<LlmModel>> completion)
+    private async Task ProduceAsync((string View, string Connection) key, Entry entry, Epoch epoch,
+        ModelListScope scope, ModelCatalogFamily family, Producer producer, LlmOperationLifetime.Lease operation,
+        LlmOperationLifetime.Lease viewOperation, TaskCompletionSource<LlmModelListing> completion,
+        bool refresh, CancellationToken dispatchCancellation)
     {
         using (operation)
+        using (viewOperation)
         {
+            bool dispatched = false;
+            bool notify = false;
             try
             {
-                void Fence() => CheckEpoch(connectionId, epoch, operation.Token);
-                Fence();
-                IReadOnlyList<LlmModel> models = await producer.Client!.ListModelsAsync(producer.Snapshot!, operation.Token).ConfigureAwait(false);
-                Fence();
-                models = Array.AsReadOnly(models.Select(model => model with
-                {
-                    CatalogEntry = model.CatalogEntry?.Clone(),
-                    Capabilities = model.Capabilities is not { } capabilities ? null : capabilities with
-                    {
-                        ReasoningLevels = capabilities.ReasoningLevels.ToFrozenSet(),
-                        PromptCache = capabilities.PromptCache with { Retentions = capabilities.PromptCache.Retentions.ToFrozenSet() },
-                        Tools = capabilities.Tools with { ChoiceModes = capabilities.Tools.ChoiceModes.ToFrozenSet() },
-                        Agent = capabilities.Agent with { SupportedRuntimePolicies = capabilities.Agent.SupportedRuntimePolicies.ToFrozenSet() }
-                    }
-                }).ToArray());
-                Fence();
-                producer.Clear();
+                // Before fresh dispatch only that demand can cancel its queue position. Once dispatched the owner
+                // retains both the slot and producer until actual completion, even when the caller stops waiting.
+                await entry.Dispatch.WaitAsync(refresh ? dispatchCancellation : operation.Token).ConfigureAwait(false);
+                dispatched = true;
+                if (refresh) dispatchCancellation.ThrowIfCancellationRequested();
                 lock (_gate)
                 {
-                    CheckEpochLocked(connectionId, epoch, operation.Token);
-                    completion.TrySetResult(models);
+                    ThrowIfCanceled(operation.Token);
+                    if (refresh)
+                    {
+                        if (_disposed || !_entries.TryGetValue(key, out Entry? current) || !ReferenceEquals(entry, current)
+                            || !ReferenceEquals(epoch, current.Current) && current.Current.Scope != scope)
+                            throw new OperationCanceledException("The catalog epoch was replaced.", operation.Token);
+                        // A canceled queued demand changes no facts or producer. A fresh scope becomes current
+                        // only at dispatch, after the preceding actual production has finished.
+                        if (current.Current.Scope != scope) ReplaceEpoch(current, scope);
+                        epoch = current.Current;
+                    }
+                    CheckEpochLocked(key, entry, epoch, operation.Token);
+                    if (!refresh && epoch.Families.TryGetValue(family, out Task<LlmModelListing>? newer)
+                        && !ReferenceEquals(newer, completion.Task) && newer.IsCompletedSuccessfully)
+                    {
+                        completion.TrySetResult(newer.Result);
+                        return;
+                    }
+                    epoch.Families[family] = completion.Task;
                 }
+                LlmModelListing listing = await producer.Client!.ListModelsAsync(producer.Snapshot!, operation.Token).ConfigureAwait(false);
+                CheckEpoch(key, entry, epoch, operation.Token);
+                listing = Freeze(listing);
+                lock (_gate)
+                {
+                    CheckEpochLocked(key, entry, epoch, operation.Token);
+                    epoch.Published = new(epoch.Scope.Version, true, listing, null);
+                    completion.TrySetResult(listing);
+                }
+                notify = true;
             }
-            catch (Exception error) { CompleteFailure(completion, error); }
-            finally { producer.Clear(); }
+            catch (Exception error)
+            {
+                bool published = false;
+                lock (_gate)
+                {
+                    if (dispatched && error is not OperationCanceledException && !_disposed
+                        && _entries.TryGetValue(key, out Entry? current) && ReferenceEquals(current, entry)
+                        && ReferenceEquals(current.Current, epoch))
+                    {
+                        LlmConnection snapshot = producer.Snapshot!;
+                        string diagnostic = SecretRedactor.Sanitize(error.Message, LlmCredential.Parse(snapshot.Credential),
+                            snapshot.AdditionalHeaders.Values.Concat(snapshot.ModelOwner is { } owner ? [owner.Proof] : []));
+                        epoch.Published = new(epoch.Scope.Version, true, null, diagnostic);
+                        published = true;
+                    }
+                }
+                CompleteFailure(completion, error);
+                notify = published;
+            }
+            finally
+            {
+                producer.Clear();
+                if (dispatched) entry.Dispatch.Release();
+            }
+            if (notify && key.View == "committed") Changed?.Invoke(key.Connection);
         }
+    }
+
+    private static LlmModelListing Freeze(LlmModelListing listing) => listing with
+    {
+        Models = Array.AsReadOnly(listing.Models.Select(model => model with
+        {
+            CatalogEntry = model.CatalogEntry?.Clone(),
+            Capabilities = model.Capabilities is not { } capabilities ? null : capabilities with
+            {
+                ReasoningLevels = capabilities.ReasoningLevels.ToFrozenSet(),
+                PromptCache = capabilities.PromptCache with { Retentions = capabilities.PromptCache.Retentions.ToFrozenSet() },
+                Tools = capabilities.Tools with { ChoiceModes = capabilities.Tools.ChoiceModes.ToFrozenSet() },
+                Agent = capabilities.Agent with { SupportedRuntimePolicies = capabilities.Agent.SupportedRuntimePolicies.ToFrozenSet() }
+            }
+        }).ToArray()),
+        ReservationModels = Array.AsReadOnly(listing.ReservationModels.Select(model => model with
+        {
+            Holders = Array.AsReadOnly(model.Holders.ToArray())
+        }).ToArray())
+    };
+
+    private static void ReplaceEpoch(Entry entry, ModelListScope scope)
+    {
+        var next = new Epoch(scope);
+        entry.Current.Next = next;
+        entry.Current = next;
     }
 
     private void CompleteFailure<T>(TaskCompletionSource<T> completion, Exception error)
@@ -135,35 +250,61 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
         catch (ObjectDisposedException error) { throw new OperationCanceledException("Catalog production was canceled by retirement.", error, token); }
     }
 
-    private void CheckEpoch(string connectionId, Epoch epoch, CancellationToken token)
+    private void CheckEpoch((string View, string Connection) key, Entry entry, Epoch epoch, CancellationToken token)
     {
         ThrowIfCanceled(token);
-        lock (_gate) CheckEpochLocked(connectionId, epoch, token);
+        lock (_gate) CheckEpochLocked(key, entry, epoch, token);
     }
 
-    private void CheckEpochLocked(string connectionId, Epoch epoch, CancellationToken token)
+    private void CheckEpochLocked((string View, string Connection) key, Entry entry, Epoch epoch, CancellationToken token)
     {
         ThrowIfCanceled(token);
-        if (_disposed || !_entries.TryGetValue(connectionId, out Epoch? current) || !ReferenceEquals(epoch, current))
+        if (_disposed || !_entries.TryGetValue(key, out Entry? current) || !ReferenceEquals(entry, current)
+            || !ReferenceEquals(epoch, current.Current))
             throw new OperationCanceledException("The catalog epoch was replaced.", token);
     }
 
     /// <summary>Fences, cancels and drains every producer, clears facts, and preserves refused owned cleanup.</summary>
     public ValueTask DisposeAsync()
     {
-        lock (_gate) { _disposed = true; _entries.Clear(); }
-        return new(_lifetime.RetireAsync(_cleanupOutcomes.ReleaseAsync));
+        Entry[] entries;
+        Task[] retirements;
+        lock (_gate)
+        {
+            _disposed = true;
+            entries = _entries.Values.ToArray();
+            retirements = _retirements.ToArray();
+            _entries.Clear();
+            _retirements.Clear();
+            Changed = null;
+        }
+        return new(_lifetime.RetireAsync(async () =>
+        {
+            await Task.WhenAll(retirements.Concat(entries.Select(entry => entry.Lifetime.RetireAsync(() =>
+            {
+                entry.Dispatch.Dispose();
+                return Task.CompletedTask;
+            })))).ConfigureAwait(false);
+            await _cleanupOutcomes.ReleaseAsync().ConfigureAwait(false);
+        }));
     }
 
     /// <summary>Synchronously retires this cache. Use asynchronous disposal while listings are active.</summary>
     public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 
-    private sealed class Epoch(Scope scope)
+    private sealed class Entry(ModelListScope scope)
     {
-        internal Scope Scope { get; } = scope;
-        /// <summary>The replacing epoch, set under the cache's gate.</summary>
+        internal Epoch Current { get; set; } = new(scope);
+        internal SemaphoreSlim Dispatch { get; } = new(1, 1);
+        internal LlmOperationLifetime Lifetime { get; } = new();
+    }
+
+    private sealed class Epoch(ModelListScope scope)
+    {
+        internal ModelListScope Scope { get; } = scope;
         internal Epoch? Next { get; set; }
-        internal Dictionary<ModelCatalogFamily, Task<IReadOnlyList<LlmModel>>> Families { get; } = [];
+        internal LlmPublishedModelList? Published { get; set; }
+        internal Dictionary<ModelCatalogFamily, Task<LlmModelListing>> Families { get; } = [];
     }
 
     private sealed class Producer(ILlmClient client, LlmConnection snapshot)
@@ -173,5 +314,8 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
         internal void Clear() { Client = null; Snapshot = null; }
     }
 }
+
+internal readonly record struct ModelListScope(string Version, string? ResolvedContinuationScope,
+    string ViewId, string DefinitionScope);
 
 internal enum ModelCatalogFamily { Chat }

@@ -182,7 +182,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
         }
     }
 
-    public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
+    public override async Task<LlmModelListing> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
         Validate(connection);
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
@@ -215,7 +215,7 @@ internal sealed partial class GeminiApiLlmClient(HttpClient http)
             catch (Exception error) when (error is JsonException or InvalidOperationException)
             { throw new LlmProviderException("Gemini API model discovery returned an invalid catalog page.", Transport); }
         } while (!string.IsNullOrEmpty(page));
-        return consumption.Publish<IReadOnlyList<LlmModel>>(models);
+        return consumption.Publish(new LlmModelListing(models, false, []));
     }
 
     public string? EstimateDiagnostic => "Local text estimate; opaque reasoning and media occupancy are unknown. This is not a provider admission check.";

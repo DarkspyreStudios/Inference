@@ -194,11 +194,11 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
         }
     }
 
-    public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
+    public override async Task<LlmModelListing> ListModelsAsync(LlmConnection connection, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         VertexEndpoints.Validate(connection);
-        if (connection.Vertex!.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey) return [];
+        if (connection.Vertex!.AuthenticationMode == LlmGoogleAuthenticationMode.ApiKey) return new([], false, []);
         using var consumption = SdkHttpConsumption.Enter(Http, cancellationToken); cancellationToken = consumption.Token;
         VertexAccess access = await ResolveAccessAsync(connection, cancellationToken).ConfigureAwait(false);
         if (connection.ResolvedContinuationScope is { } pinned && pinned != access.Scope)
@@ -259,7 +259,7 @@ internal sealed partial class VertexLlmClient(HttpClient http, IVertexAuthentica
                     : $"Publisher catalog entry ({safeStage}); invocation access has not been tested."
             });
         }
-        return consumption.Publish<IReadOnlyList<LlmModel>>(result);
+        return consumption.Publish(new LlmModelListing(result, false, []));
     }
 
     public string? EstimateDiagnostic => "Local text estimate; opaque reasoning and media occupancy are unknown. This is not a provider admission check.";

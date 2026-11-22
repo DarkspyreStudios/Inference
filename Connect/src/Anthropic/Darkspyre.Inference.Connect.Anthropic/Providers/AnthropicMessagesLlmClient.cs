@@ -782,7 +782,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             isContextOverflow: LlmContextOverflow.Anthropic(LlmJson.GetString(error, "type"), LlmJson.GetString(error, "message")));
     }
 
-    public override async Task<IReadOnlyList<LlmModel>> ListModelsAsync(
+    public override async Task<LlmModelListing> ListModelsAsync(
         LlmConnection connection,
         CancellationToken cancellationToken = default)
     {
@@ -865,7 +865,7 @@ internal class AnthropicMessagesLlmClient : LlmClientBase, ILlmCatalogCapabiliti
             }
         }
 
-        return consumption.Publish<IReadOnlyList<LlmModel>>([.. models.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)]);
+        return consumption.Publish(new LlmModelListing([.. models.OrderBy(model => model.DisplayName, StringComparer.OrdinalIgnoreCase)], false, []));
     }
 
     protected virtual HttpRequestMessage CreateHttpRequest(LlmConnection connection, LlmChatRequest request, JsonObject payload, bool stream)
