@@ -18,11 +18,11 @@ public sealed record LlmModelReservationState(string ModelId, bool Loaded, IRead
 public sealed record LlmModelListing(IReadOnlyList<LlmModel> Models, bool SupportsReservations,
     IReadOnlyList<LlmModelReservationState> ReservationModels);
 
-/// <summary>A published immutable listing, including a failed attempt's diagnostic.</summary>
+/// <summary>The owner's pending or completed immutable listing and safe diagnostic.</summary>
 /// <param name="Version">The exact admitted connection version.</param>
 /// <param name="Listed">Whether a listing attempt has completed.</param>
-/// <param name="Listing">Successful facts, or null when the attempt failed.</param>
-/// <param name="Diagnostic">The safe failure diagnostic, or null on success.</param>
+/// <param name="Listing">Successful facts, or null while pending or after a listing failure.</param>
+/// <param name="Diagnostic">A safe listing or per-model capability diagnostic when one exists.</param>
 public sealed record LlmPublishedModelList(string Version, bool Listed, LlmModelListing? Listing, string? Diagnostic);
 
 /// <summary>The outcome of releasing the caller's own reservation.</summary>

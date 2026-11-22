@@ -1898,6 +1898,13 @@ committed/draft view and the existing endpoint/transport/credential-equivalence 
 proof is absent from that equivalence. `ReadPublished` reads only committed facts at the exact version;
 `Changed` reports committed completion/invalidation with a safe connection ID. Failed attempts publish a
 diagnostic, not a successful empty list.
+
+`EnsureInitialRead` admits only the first read of an unlisted committed connection/version before source or vault
+resolution starts. Its owner-held pending publication reads as `Listed=false`, so repeated snapshot reads start no
+additional initial demand. The callback uses the same fresh runtime operation on the owner's thread-pool lifetime.
+Actual production replaces admission's empty definition scope with its admitted scope. Resolution failures complete
+with a safe diagnostic; rendering never retries them. Natural Dropdown and Settings fresh demands do not use that
+initial-admission shortcut and still dispatch independently. Existing version and retirement fences govern both.
 For xAI, an epoch also compares an allowlisted immutable copy of the actual admitted credential,
 endpoint, region, service tier, agent count, headers, provider options and capability overrides.
 This catches a refreshed credential returned with its original source version; equality is local

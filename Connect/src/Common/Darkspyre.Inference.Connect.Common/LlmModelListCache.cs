@@ -28,7 +28,61 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
     {
         lock (_gate)
             return _entries.TryGetValue(("committed", connectionId), out Entry? entry)
-                && entry.Current.Scope.Version == version ? entry.Current.Published : null;
+                && entry.Current.Scope.Version == version
+                    ? entry.Current.Published ?? (entry.Current.Families.Count > 0 ? new(version, false, null, null) : null)
+                    : null;
+    }
+
+    /// <summary>Admits one initial committed read for an unlisted version, including its source-resolution window.</summary>
+    /// <gotcha>The callback runs on the owner's lifetime and thread pool. It must call the same canonical fresh read.
+    /// Natural UI fresh demands do not use this one-time admission and are never coalesced here.</gotcha>
+    public void EnsureInitialRead(string connectionId, string version, Func<CancellationToken, Task> refresh)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(connectionId);
+        ArgumentNullException.ThrowIfNull(version);
+        ArgumentNullException.ThrowIfNull(refresh);
+        Entry entry;
+        Epoch epoch;
+        LlmOperationLifetime.Lease operation;
+        var key = (View: "committed", Connection: connectionId);
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_entries.TryGetValue(key, out Entry? current) && current.Current.Scope.Version == version
+                && (current.Current.Published is not null || current.Current.Families.Count > 0)) return;
+            operation = _lifetime.Enter(CancellationToken.None);
+            // Empty definition scope denotes admission only. The real producer replaces it with its admitted scope.
+            var scope = new ModelListScope(version, null, "committed", string.Empty);
+            if (current is null) _entries.Add(key, entry = new(scope));
+            else
+            {
+                entry = current;
+                if (entry.Current.Scope.Version != version) ReplaceEpoch(entry, scope);
+            }
+            epoch = entry.Current;
+            epoch.Published = new(version, false, null, null);
+        }
+        _ = Task.Run(async () =>
+        {
+            using (operation)
+            {
+                try { await refresh(operation.Token).ConfigureAwait(false); }
+                catch (Exception error) { _cleanupOutcomes.Record(error); }
+                bool notify = false;
+                lock (_gate)
+                {
+                    if (!_disposed && _entries.TryGetValue(key, out Entry? current) && ReferenceEquals(entry, current)
+                        && ReferenceEquals(epoch, current.Current) && epoch.Published is { Listed: false }
+                        && epoch.Families.Count == 0)
+                    {
+                        // Resolution can fail before a producer exists. Complete the attempt without a render retry.
+                        epoch.Published = new(version, true, null, "Couldn't list models.");
+                        notify = true;
+                    }
+                }
+                if (notify) Changed?.Invoke(connectionId);
+            }
+        });
     }
 
     /// <summary>Invalidates committed facts after a real model operation, without calling the provider.</summary>
@@ -188,9 +242,10 @@ public sealed class LlmModelListCache : IDisposable, IAsyncDisposable
                 bool published = false;
                 lock (_gate)
                 {
-                    if (dispatched && error is not OperationCanceledException && !_disposed
+                    if (dispatched && !operation.Token.IsCancellationRequested && !_disposed
                         && _entries.TryGetValue(key, out Entry? current) && ReferenceEquals(current, entry)
-                        && ReferenceEquals(current.Current, epoch))
+                        && ReferenceEquals(current.Current, epoch)
+                        && ReferenceEquals(epoch.Families.GetValueOrDefault(family), completion.Task))
                     {
                         LlmConnection snapshot = producer.Snapshot!;
                         string diagnostic = Diagnostic(error.Message, snapshot);
